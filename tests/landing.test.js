@@ -69,6 +69,21 @@ test('marca visível é "Gestão sem Caos" (sem "Notus" no texto nem o ícone da
   for (const arq of ['termos.html', 'privacidade.html']) assert.match(ler(arq), /revisar com advogado/i);
 });
 
+test('logo oficial da Gestão sem Caos em todas as páginas públicas (nunca a estrela da Notus)', () => {
+  for (const arq of ['descubra.html', 'termos.html', 'privacidade.html', 'index.html', 'meu-relatorio.html', 'relatorio.html', 'admin.html']) {
+    const html = ler(arq);
+    assert.ok(!html.includes('icone.svg'), `${arq}: logo da Notus`);
+    assert.match(html, /rel="icon" type="image\/svg\+xml" href="assets\/marca\/gsc-favicon\.svg"/, `${arq}: favicon`);
+  }
+  for (const arq of ['descubra.html', 'termos.html', 'privacidade.html', 'meu-relatorio.html', 'index.html', 'admin.html']) {
+    assert.match(ler(arq), /src="assets\/marca\/gsc-logo(-negativo|-preto)?\.svg" alt="Gestão sem Caos"/, `${arq}: logo`);
+  }
+  for (const f of ['gsc-logo.svg', 'gsc-logo-negativo.svg', 'gsc-logo-preto.svg', 'gsc-simbolo.svg', 'gsc-favicon.svg', 'gsc-favicon-32.png', 'gsc-apple-touch-icon.png']) {
+    assert.ok(fs.existsSync(path.join(raiz, 'assets/marca', f)), f);
+  }
+  for (const arq of ['js/app.js', 'js/relatorio-view.js', 'js/admin.js']) assert.ok(!ler(arq).includes('icone.svg'), `${arq}: logo da Notus`);
+});
+
 test('descubra.html tem as metas para anúncio e a imagem og existe (1200×630)', () => {
   const html = ler('descubra.html');
   for (const p of ['og:title', 'og:description', 'og:image', 'og:url', 'og:type']) assert.match(html, new RegExp(`property="${p}" content="[^"]+"`));

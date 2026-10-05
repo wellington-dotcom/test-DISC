@@ -1560,9 +1560,13 @@
     }
   }
 
-  function logo(classe) {
-    var tam = classe === 'logo--grande' ? 44 : 36;
-    return '<img class="logo' + (classe ? ' ' + classe : '') + '" src="assets/icone.svg" alt="" width="' + tam + '" height="' + tam + '">';
+  // Logo da Gestão sem Caos (assets/marca/). Na moldura laranja vai a versão preta (#141414, texto sobre o laranja);
+  // no fundo claro, a colorida; no azul-escuro, a negativa.
+  var LOGOS = { claro: 'gsc-logo.svg', laranja: 'gsc-logo-preto.svg', escuro: 'gsc-logo-negativo.svg' };
+  function logo(fundo, classe) {
+    var alt = classe === 'logo-gsc--grande' ? 36 : 28;
+    return '<img class="logo-gsc' + (classe ? ' ' + classe : '') + '" src="assets/marca/' + (LOGOS[fundo] || LOGOS.claro) +
+      '" alt="Gestão sem Caos" width="' + Math.round(alt * 7.1) + '" height="' + alt + '">';
   }
 
   // Passos do processo em mini-cartões numerados (1º azul-escuro, demais brancos), como no login do BI.
@@ -1582,7 +1586,7 @@
     return '' +
       '<section class="boasvindas surgir" aria-labelledby="titulo">' +
         '<div class="boasvindas-laranja moldura-laranja">' +
-          logo('logo--grande') +
+          logo('laranja', 'logo-gsc--grande') +
           '<div class="boasvindas-corpo">' +
             '<p class="boasvindas-sobre">' + escapar(t.contexto) + (empresa ? ' · ' + escapar(empresa) : '') + '</p>' +
             '<h1 id="titulo" class="boasvindas-titulo">Teste de Perfil Comportamental DISC</h1>' +

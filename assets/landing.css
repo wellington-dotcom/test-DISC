@@ -72,11 +72,9 @@ body.landing { background: var(--fundo); overflow-x: hidden; overflow-x: clip; }
 @media (min-width: 1024px) { .cabeca-secao { margin-bottom: 56px; } }
 
 /* ---------- Marca tipográfica (wordmark) ---------- */
-.marca-texto { display: inline-flex; align-items: center; gap: 10px; text-decoration: none; color: inherit; }
-.marca-texto__simbolo { width: 30px; height: 30px; flex: none; }
-.marca-texto__nome { font-family: var(--display); font-size: var(--t-corpo); font-weight: 600; letter-spacing: -0.02em; line-height: 1.05; }
-.marca-texto__nome b { font-weight: 700; color: var(--notus-forte); }
-.moldura-noite .marca-texto__nome b, .rodape .marca-texto__nome b { color: var(--ambar); }
+.marca-link { display: inline-flex; align-items: center; padding: 6px 0; border-radius: 8px; flex: none; }
+.marca-link .logo-gsc { height: 28px; }
+@media (max-width: 479px) { .topo-landing .marca-link .logo-gsc { height: 22px; } }
 
 /* ---------- Topo ---------- */
 .topo-landing { position: sticky; top: 0; z-index: 30; }
@@ -311,7 +309,6 @@ body.landing { background: var(--fundo); overflow-x: hidden; overflow-x: clip; }
 @media (min-width: 900px) { .rodape { padding-bottom: 48px; } }
 .rodape__grade { display: grid; gap: 24px; }
 @media (min-width: 900px) { .rodape__grade { grid-template-columns: 1fr auto; align-items: start; } }
-.rodape .marca-texto { color: var(--branco); }
 .rodape__links { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0; padding: 0; list-style: none; }
 .rodape__links a { color: var(--branco); text-decoration: none; }
 .rodape__links a:hover { text-decoration: underline; }

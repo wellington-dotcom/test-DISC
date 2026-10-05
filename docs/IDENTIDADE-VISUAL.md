@@ -3,7 +3,7 @@
 Padrão de todos os sistemas da Notus. Fonte da verdade: o BI da Clínica Isabella Eleutério
 (`theROCCO-data/bi-isabella-eleuterio`; cópia em `wellington-dotcom/bi-isabella-eleuterio`, branch `ajuste/reestruturacao-visual`),
 nos arquivos `frontend/src/index.css`, `lib/cores.ts`, `componentes/ui.tsx`, `componentes/caixas.tsx`, `componentes/Logo.tsx`, `paginas/Login.tsx` e no `CLAUDE.md`, seção Visual.
-Neste projeto, as peças prontas estão em `assets/notus.css` e o logo em `assets/icone.svg`. **Use essas peças em vez de criar estilos novos.**
+Neste projeto, as peças prontas estão em `assets/notus.css` e o logo da **Gestão sem Caos** (dona do produto) em `assets/marca/` (ver a seção Logo). **Use essas peças em vez de criar estilos novos.**
 
 > A identidade antiga (amarelo `#ffda00` + preto) foi **substituída**. Não use mais.
 
@@ -52,12 +52,31 @@ Tons funcionais permitidos:
    - o de perigo é branco com texto vermelho.
    Escreva os botões com só a primeira letra maiúscula ("Salvar alterações").
 10. **Vidro fosco:** em cabeçalhos e barras. Janelas que abrem por cima de dados ficam **quase opacas** (97%).
-11. **Logo:** a estrela com a seta (`assets/icone.svg`). Use sempre o desenho original, com as cores do próprio ícone; não recolorir nem distorcer.
+11. **Logo:** o da Gestão sem Caos, em `assets/marca/` (seção Logo abaixo). Use sempre o desenho original, com as cores do próprio arquivo; não recolorir nem distorcer. A estrela da Notus (`assets/icone.svg`) **não** aparece em tela pública.
 12. **Formatos aprovados:** cartões empilhados, anel com etiqueta de vidro e barras. **Bolhas ou círculos sobrepostos estão proibidos.**
 13. **Sem `<select>` nativo e sem `confirm`/`prompt` do navegador:** use o seletor em pílula e a confirmação dentro da página.
 14. **Respiro:** cards com padding de 24px no celular e 28px no computador, e cantos de 24px.
 15. **Nada pula de lugar:** ao interagir, os elementos não podem trocar de posição de repente nem empurrar os botões. Movimento só animado e quando a pessoa pede (por exemplo, ao arrastar).
 16. **Animação:** só a entrada `surgir` (0,45s) e as transições curtas. Sempre respeite `prefers-reduced-motion`.
+
+## Logo (Gestão sem Caos)
+
+Fonte: pasta do Drive "Gestão Sem Caos - Identidade Visual" (`LOGO/SVG/LOGO.svg`, folha com todas as versões). As versões abaixo foram recortadas dela, sem mudar desenho nem cores. Proporção da horizontal: 7,1 : 1.
+
+| Arquivo | Versão | Quando usar |
+|---|---|---|
+| `assets/marca/gsc-logo.svg` | horizontal colorida (símbolo laranja, texto azul-escuro `#122940`) | **principal**: fundo claro, cabeçalhos de vidro (teste, painel, landing, termos, privacidade, meu relatório), tela de carregamento do relatório |
+| `assets/marca/gsc-logo-negativo.svg` | horizontal, símbolo laranja e texto claro `#F2F2F2` | fundo azul-escuro: rodapé da landing, capa e rodapé do relatório, imagem de compartilhamento |
+| `assets/marca/gsc-logo-preto.svg` | horizontal monocromática `#141414` | moldura laranja (boas-vindas do teste e login do painel), seguindo a regra "texto sobre o laranja é #141414" |
+| `assets/marca/gsc-simbolo.svg` | só o símbolo (estrela com seta, laranja) | avatar, selo pequeno, onde não cabe a horizontal |
+| `assets/marca/gsc-favicon.svg` + `gsc-favicon-32.png` + `gsc-apple-touch-icon.png` (180, fundo branco) | símbolo em área quadrada | favicon de todas as páginas |
+
+- Em HTML: `<img class="logo-gsc" src="assets/marca/gsc-logo.svg" alt="Gestão sem Caos" width="199" height="28">` (classes em `assets/notus.css`: `.logo-gsc`, `--pequeno`, `--grande`). A altura manda; a largura acompanha.
+- **Tamanho mínimo:** 20px de altura na horizontal (abaixo disso "sem Caos" deixa de ler); 16px no símbolo.
+- **Respiro:** nada encosta no logo; deixe em volta, no mínimo, metade da altura dele. Ao lado de outro texto (ex.: "Teste DISC", "Painel DISC"), separe com um fio vertical.
+- Não recolorir, não esticar, não pôr sombra nem contorno; não usar a versão colorida sobre o laranja.
+- `alt="Gestão sem Caos"` sempre (ou `alt=""` se o mesmo nome já está escrito ao lado).
+- A imagem de compartilhamento `assets/og-mapa-disc.png` (1200×630) usa a versão negativa.
 
 ## Documentos (relatórios e manuais)
 
@@ -68,7 +87,7 @@ Variante **editorial** da identidade, só para documentos de leitura que vão pa
 - **Moldura pode ser cor cheia:** capa, divisores de seção ("01 Sumário executivo"), cartão da recomendação e encerramento são moldura do documento, não área de dado. Dentro das seções, o conteúdo segue minimalista (cartões brancos, barras com trilho liso, sem listras/hachuras).
 - **Fontes do documento** (locais em `assets/fonts`, licença OFL, só latin e latin-ext): **Bricolage Grotesque** nos títulos e números, **Instrument Sans** no texto, **Instrument Serif itálico** nos destaques (abertura de seção, encerramento), **JetBrains Mono** nos rótulos pequenos em caixa alta. Pesos 400, 500, 600 e 700.
 - **Escala do documento** (px, via tokens `--f-*`): 11 · 12 · 13 · 15 · 16 · 18 · 20 · 22 · 24 · 28 · 32 · 40 · 44 · 56 · 64 · 72 · 96 · 120 · 160. Os grandes ficam para capa, divisores e o score final; no celular os tokens encolhem.
-- **Estrutura:** capa (título, cliente, consultoria, período, números grandes, líder), índice, seções numeradas 01–06 com divisor, cabeçalho de página em mono ("01 · SUMÁRIO EXECUTIVO ——"), rodapé com o logo, o consultor e "Notus Agência".
+- **Estrutura:** capa (título, cliente, consultoria, período, números grandes, líder), índice, seções numeradas 01–06 com divisor, cabeçalho de página em mono ("01 · SUMÁRIO EXECUTIVO ——"), rodapé com o logo da Gestão sem Caos (versão negativa) e o consultor.
 - **Gráficos:** barras e colunas em SVG/CSS, feito em azul-escuro e trilho liso; DISC com as cores e letras de sempre (D azul-escuro, I âmbar, S azul acinzentado claro, C azul acinzentado).
 - **Celular primeiro (375px)** sem rolagem lateral (tabelas largas viram cartões) e **impressão A4** limpa: capa em página inteira, cada seção começa em página nova, cores preservadas, cartões não quebram no meio.
 - **Privacidade no documento:** nomes como "Primeiro nome + inicial"; nunca telefone, e-mail ou dados sensíveis. Idade só como faixa agregada do público, nunca por candidato nem como critério.

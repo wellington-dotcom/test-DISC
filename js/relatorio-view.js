@@ -223,8 +223,7 @@
     return '<section class="capa" id="capa" data-secao="capa" aria-label="Capa">' +
       '<div class="capa__grade" aria-hidden="true"></div>' +
       '<header class="capa__topo">' +
-        '<span class="marca-doc">' +
-        '<span class="marca-doc__nome">Gestão <em>sem Caos</em></span></span>' +
+        marcaDoc('capa') +
         '<span class="capa__meta"><span>Relatório do processo</span>' + (p.cidade ? '<span>' + esc(p.cidade) + '</span>' : '') + '</span>' +
       '</header>' +
       '<div class="capa__miolo">' +
@@ -570,10 +569,17 @@
       '<div class="pagina pagina--escura">' + cabecalhoPagina(s, p.empresa, true) + h + '</div></section>';
   }
 
+  // Logo da Gestão sem Caos (assets/marca/). Capa e rodapé são moldura azul-escura: versão negativa.
+  function marcaDoc(onde) {
+    var alt = onde === 'capa' ? 32 : 24;
+    return '<span class="marca-doc marca-doc--' + onde + '"><img class="marca-doc__logo" src="assets/marca/gsc-logo-negativo.svg" alt="Gestão sem Caos" width="' +
+      Math.round(alt * 7.1) + '" height="' + alt + '"></span>';
+  }
+
   function rodape(rel) {
     var p = rel.processo || {};
     return '<footer class="rodape-doc" data-secao="rodape">' +
-      '<span class="marca-doc"><span class="marca-doc__nome">Gestão <em>sem Caos</em></span></span>' +
+      marcaDoc('rodape') +
       '<span class="rodape-doc__meta">' + esc([p.consultor ? 'Consultor: ' + p.consultor : '', p.empresa, p.vaga].filter(Boolean).join(' · ')) +
       '<br>Documento confidencial, para uso do contratante. Sem dados de contato dos candidatos.</span></footer>';
   }
@@ -659,8 +665,7 @@
     return '<section class="capa capa--modelo" id="capa" data-secao="capa" aria-label="Capa">' +
       '<div class="capa__grade" aria-hidden="true"></div>' +
       '<header class="capa__topo">' +
-        '<span class="marca-doc">' +
-        '<span class="marca-doc__nome">Gestão <em>sem Caos</em></span></span>' +
+        marcaDoc('capa') +
         '<span class="capa__meta"><span>' + esc(c.meta) + '</span></span>' +
       '</header>' +
       '<div class="capa__miolo">' +
@@ -695,7 +700,7 @@
 
   function rodapeModelo(meta, nota) {
     return '<footer class="rodape-doc" data-secao="rodape">' +
-      '<span class="marca-doc"><span class="marca-doc__nome">Gestão <em>sem Caos</em></span></span>' +
+      marcaDoc('rodape') +
       '<span class="rodape-doc__meta">' + esc(meta.filter(Boolean).join(' · ')) + '<br>' + esc(nota) + '</span></footer>';
   }
 

@@ -150,11 +150,12 @@ em { font-family: var(--ff-serif); font-style: italic; font-weight: 400; letter-
 .doc-erro p { color: var(--mudo); }
 
 /* ---------- Marca ---------- */
-.marca-doc { display: inline-flex; align-items: center; gap: 10px; white-space: nowrap; }
-.marca-doc__logo { display: block; width: 32px; height: 32px; flex: none; }
-.doc-erro .marca-doc__logo, .doc-carregando .marca-doc__logo { width: 44px; height: 44px; }
-.marca-doc__nome { font-family: var(--ff-titulo); font-weight: 700; font-size: var(--f-h4); letter-spacing: -.01em; line-height: 1; }
-.marca-doc__nome em { color: var(--laranja); }
+.marca-doc { display: inline-flex; align-items: center; flex: none; }
+/* Logo da Gestão sem Caos: a altura manda (largura na proporção do desenho); nunca abaixo de 20px. */
+.marca-doc__logo { display: block; height: 32px; width: auto; max-width: 100%; flex: none; }
+.doc-erro .marca-doc__logo, .doc-carregando .marca-doc__logo { height: 36px; }
+.rodape-doc .marca-doc__logo { height: 24px; }
+@media (max-width: 479px) { .capa .marca-doc__logo { height: 26px; } }
 
 /* ---------- Capa (moldura azul-escura) ---------- */
 .capa {
@@ -545,7 +546,6 @@ em { font-family: var(--ff-serif); font-style: italic; font-weight: 400; letter-
 
 /* ---------- Rodapé ---------- */
 .rodape-doc { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px; padding: 24px var(--margem) 32px; background: var(--tinta); color: var(--branco-doc); border-top: 1px solid rgba(255,255,255,.12); }
-.rodape-doc .marca-doc__logo { width: 28px; height: 28px; }
 .rodape-doc__meta { font-family: var(--ff-mono); font-size: var(--f-eixo); letter-spacing: .04em; line-height: 1.6; color: rgba(255,255,255,.6); max-width: 560px; }
 @media (min-width: 640px), print { .rodape-doc__meta { text-align: right; } }
 

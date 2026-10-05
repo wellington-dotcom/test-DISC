@@ -63,7 +63,7 @@ test('montarHtml desenha todas as seções do relatório do motor', () => {
   for (const id of ['capa', 'indice', 'sumario', 'atracao', 'tecnica', 'disc', 'ranking', 'encerramento', 'rodape']) {
     assert.match(html, new RegExp('data-secao="' + id + '"'), 'seção ' + id);
   }
-  assert.match(html, /Gestão <em>sem Caos<\/em>/);
+  assert.match(html, /<img class="marca-doc__logo" src="assets\/marca\/gsc-logo-negativo\.svg" alt="Gestão sem Caos"/);
   assert.ok(!/assets\/icone\.svg/.test(html), 'sem o logo da Notus no documento');
   assert.ok(html.includes(V.esc(rel.processo.consultor)), 'consultor no documento');
   assert.ok(html.includes(V.esc(rel.sumario.recomendacao.nome)), 'líder no documento');

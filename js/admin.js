@@ -276,7 +276,7 @@
     return 'Olá' + (contratante ? ', ' + contratante : '') + '! O relatório do processo seletivo' +
       (vaga ? ' de ' + vaga : '') + (empresa ? ' (' + empresa + ')' : '') + ' está pronto:\n' + url +
       '\n\nAbre no celular ou no computador e dá para salvar em PDF. Qualquer dúvida, estou à disposição.' +
-      '\n' + (consultor ? consultor + ' · ' : '') + 'Notus Agência';
+      '\n' + (consultor ? consultor + ' · ' : '') + 'Gestão sem Caos';
   }
 
   /* ---------- Processo: config (perfil ideal, etapas, bônus, cortes) ---------- */
@@ -1076,7 +1076,7 @@
     var empresa = String(ctx.empresa || '').trim();
     var pessoa = primeiroNome(ctx.pessoa);
     var rodape = '\n\nAbre no celular ou no computador e dá para salvar em PDF. Qualquer dúvida, estou à disposição.\n' +
-      (ctx.consultor ? String(ctx.consultor).trim() + ' · ' : '') + 'Notus Agência';
+      (ctx.consultor ? String(ctx.consultor).trim() + ' · ' : '') + 'Gestão sem Caos';
     if (modelo === 'pessoa') {
       return 'Olá' + (pessoa ? ', ' + pessoa : '') + '! O seu relatório de perfil DISC, com sugestões para o seu desenvolvimento, está pronto:\n' + url + rodape;
     }
@@ -5436,7 +5436,7 @@
     if (papel() !== 'admin') return;
     if (SUPABASE) { renderizarUsuariosSupabase(box); return; }
     box.appendChild(cabecalhoVista('Acessos', 'Usuários',
-      'Só administradores entram no painel. Crie um acesso para cada pessoa da equipe Notus que conduz processos.',
+      'Só administradores entram no painel. Crie um acesso para cada pessoa da equipe da Gestão sem Caos que conduz processos.',
       [botao('botao--principal', 'Novo administrador', function () { janelaUsuario(null); }, { id: 'btn-novo-usuario' })]));
     var eu = estado.usuario || {};
     box.appendChild(el('ul', { classe: 'gestao-lista gestao-lista--linhas', id: 'lista-usuarios' }, estado.usuarios.map(function (u) {

@@ -27,7 +27,10 @@ h1:focus, h1:focus-visible { outline: none; }
   max-width: 720px; margin: 0 auto; padding: 12px 16px;
   display: flex; align-items: center; gap: 10px; min-width: 0;
 }
-.topo-nome { font-size: var(--t-corpo); font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; }
+.topo-logo { height: 24px; margin-right: 4px; }
+.topo-nome { font-size: var(--t-corpo); font-weight: 600; letter-spacing: -0.01em; white-space: nowrap; padding-left: 12px; border-left: 1px solid var(--linha); }
+/* Celular: com o nome da empresa no selo, o logo fica e o "Teste DISC" sai (não espreme o selo) */
+@media (max-width: 479px) { .topo-interno:has(.topo-empresa:not([hidden])) .topo-nome { display: none; } }
 .topo-empresa {
   margin-left: auto; min-width: 0; max-width: 50vw;
   overflow: hidden; text-overflow: ellipsis; display: inline-block;
@@ -71,6 +74,7 @@ body[data-etapa="boasvindas"] .conteudo { max-width: 1120px; }
   background: var(--tinta);
 }
 .boasvindas-laranja { padding: 24px; display: flex; flex-direction: column; }
+.boasvindas-laranja .logo-gsc { align-self: flex-start; }
 .boasvindas-corpo { margin-top: 32px; }
 .boasvindas-sobre {
   font-size: var(--t-nota); font-weight: 600; text-transform: uppercase; letter-spacing: .08em;
@@ -668,10 +672,10 @@ body[data-etapa="confirmacao"] .conteudo { padding-bottom: calc(132px + env(safe
   body[data-etapa="parte2"] .topo-interno,
   body[data-etapa="parte2-intro"] .topo-interno,
   body[data-etapa="confirmacao"] .topo-interno { padding-top: 6px; padding-bottom: 6px; }
-  body[data-etapa="teste"] .topo .logo,
-  body[data-etapa="parte2"] .topo .logo,
-  body[data-etapa="parte2-intro"] .topo .logo,
-  body[data-etapa="confirmacao"] .topo .logo { width: 28px; height: 28px; }
+  body[data-etapa="teste"] .topo .logo-gsc,
+  body[data-etapa="parte2"] .topo .logo-gsc,
+  body[data-etapa="parte2-intro"] .topo .logo-gsc,
+  body[data-etapa="confirmacao"] .topo .logo-gsc { height: 20px; }
   body[data-etapa="teste"] .conteudo,
   body[data-etapa="parte2"] .conteudo,
   body[data-etapa="parte2-intro"] .conteudo,
@@ -733,11 +737,10 @@ body[data-etapa="confirmacao"] .conteudo { padding-bottom: calc(132px + env(safe
 /* =====================================================================================
    Modo pessoal (venda B2C, Gestão sem Caos): identificação, resumo grátis, paywall,
    checkout (js/checkout.js), "O que está te travando", mapa ritmo × foco e meu-relatorio.html.
-   Marca em texto (sem o ícone da estrela) até o logo da Gestão sem Caos chegar.
+   No cabeçalho, só o logo da Gestão sem Caos (o nome em texto fica oculto: o alt do logo já diz).
    ===================================================================================== */
 html[data-modo="pessoal"] body:not([data-modo]) .topo-interno { visibility: hidden; }
-[data-modo="pessoal"] .topo .logo { display: none; }
-.marca-texto, body[data-modo="pessoal"] .topo-nome { font-size: var(--t-corpo); font-weight: 600; letter-spacing: -0.01em; }
+[data-modo="pessoal"] .topo .topo-nome { display: none; }
 body[data-modo="pessoal"] .topo-empresa { background: var(--branco); border: 1px solid var(--linha); color: var(--medio); }
 .titulo-secao { font-size: var(--t-titulo); font-weight: 600; line-height: 1.3; margin-top: 6px; }
 

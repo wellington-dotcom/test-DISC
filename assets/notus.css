@@ -221,11 +221,16 @@ textarea.entrada { resize: vertical; min-height: 96px; }
   .vidro-cabecalho { background: rgba(255,255,255,.96); }
 }
 
-/* ---------- Logo (estrela com seta) ----------
-   Use o arquivo assets/icone.svg (desenho original, não recolorir nem distorcer):
-   <img class="logo" src="assets/icone.svg" alt="" width="36" height="36"> */
-.logo { display: block; width: 36px; height: 36px; flex: none; }
-.logo--grande { width: 44px; height: 44px; }
+/* ---------- Logo da Gestão sem Caos (assets/marca/; docs/IDENTIDADE-VISUAL.md, seção Logo) ----------
+   Desenho original, sem recolorir nem distorcer. A altura manda; a largura acompanha (proporção 7,1:1).
+   Fundo claro: gsc-logo.svg · fundo azul-escuro: gsc-logo-negativo.svg · moldura laranja: gsc-logo-preto.svg.
+   <img class="logo-gsc" src="assets/marca/gsc-logo.svg" alt="Gestão sem Caos" width="199" height="28">
+   Respiro: o logo nunca encosta em outro elemento (no mínimo metade da altura dele em volta).
+   Tamanho mínimo: 20px de altura (horizontal) e 16px (só o símbolo). */
+.logo-gsc { display: block; height: 28px; width: auto; max-width: 100%; flex: none; }
+.logo-gsc--pequeno { height: 22px; }
+.logo-gsc--grande { height: 36px; }
+.logo-gsc-simbolo { display: block; width: 32px; height: 32px; flex: none; }
 
 @keyframes surgir { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .surgir { animation: surgir .45s var(--curva) both; }

@@ -21,8 +21,9 @@ async function semRolagemLateral(page) {
 async function fazerTestePessoal(page, dados, caminho) {
   await page.goto(caminho || '/index.html?modo=pessoal');
   await expect(page.locator('h1')).toHaveText('Antes de começar');
-  await expect(page.locator('.topo .logo')).toBeHidden();
-  await expect(page.locator('#marca')).toHaveText('Gestão sem Caos');
+  await expect(page.locator('.topo .logo-gsc')).toBeVisible();
+  await expect(page.locator('.topo .logo-gsc')).toHaveAttribute('alt', 'Gestão sem Caos');
+  await expect(page.locator('#marca')).toBeHidden();
   await page.fill('#nome', dados.nome);
   await page.fill('#email', dados.email);
   if (dados.telefone) await page.locator('#telefone').pressSequentially(dados.telefone);

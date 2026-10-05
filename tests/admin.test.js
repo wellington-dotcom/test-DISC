@@ -296,7 +296,7 @@ test('link e mensagem do relatório para o contratante', () => {
   const msg = AD.mensagemRelatorio({ contratante: 'Marina Souza', vaga: 'Escrevente', empresa: 'Cartório Exemplo', consultor: 'Paulo Lima' }, 'https://x/relatorio.html?r=T');
   assert.match(msg, /^Olá, Marina! O relatório do processo seletivo de Escrevente \(Cartório Exemplo\) está pronto:/);
   assert.match(msg, /https:\/\/x\/relatorio\.html\?r=T/);
-  assert.match(msg, /Paulo Lima · Notus Agência$/);
+  assert.match(msg, /Paulo Lima · Gestão sem Caos$/);
   assert.doesNotMatch(AD.mensagemRelatorio({}, 'u'), /undefined/);
 });
 
@@ -781,7 +781,7 @@ test('link e mensagem dos relatórios dos modelos (relatorio.html#r-TOKEN)', () 
   assert.equal(url, 'https://x.com/painel/relatorio.html#r-tk_123');
   const eq = AD.mensagemRelatorioModelo('equipe', { empresa: 'Loja Modelo', consultor: 'Wellington' }, url);
   assert.match(eq, /relatório da equipe da Loja Modelo/);
-  assert.match(eq, /Wellington · Notus Agência$/);
+  assert.match(eq, /Wellington · Gestão sem Caos$/);
   assert.ok(eq.includes(url));
   assert.match(AD.mensagemRelatorioModelo('lideranca', { pessoa: 'Bruno Lima', empresa: 'Loja' }, url), /como liderar Bruno \(Loja\)/);
   assert.match(AD.mensagemRelatorioModelo('pessoa', { pessoa: 'Carla Dias' }, url), /^Olá, Carla! O seu relatório/);
