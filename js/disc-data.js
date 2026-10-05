@@ -187,7 +187,7 @@
     "D": {
       "nome": "Dominância",
       "rotulo": "Dominante",
-      "cor": "#d64545",
+      "cor": "#131313",
       "positivos": [
         "Aventureiro",
         "Com iniciativa",
@@ -244,7 +244,7 @@
     "I": {
       "nome": "Influência",
       "rotulo": "Influente",
-      "cor": "#e0a100",
+      "cor": "#ffda00",
       "positivos": [
         "Atencioso",
         "Bom humor",
@@ -301,7 +301,7 @@
     "S": {
       "nome": "Estabilidade",
       "rotulo": "Estável",
-      "cor": "#2f9e6e",
+      "cor": "#cfcec8",
       "positivos": [
         "Amável",
         "Amigável",
@@ -358,7 +358,7 @@
     "C": {
       "nome": "Conformidade",
       "rotulo": "Cauteloso",
-      "cor": "#3b6fd6",
+      "cor": "#3d3d3d",
       "positivos": [
         "Acabador",
         "Alto padrão de qualidade",

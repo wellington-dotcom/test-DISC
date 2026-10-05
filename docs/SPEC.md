@@ -92,4 +92,4 @@ Colunas da aba `Respostas`: `id, recebidoEm, nome, telefone, vaga, inicio, fim, 
 
 ## Visual
 
-pt-BR, mobile-first, acessível (labels, foco visível, contraste AA, `prefers-color-scheme` dark), cores DISC: D `#d64545`, I `#e0a100`, S `#2f9e6e`, C `#3b6fd6`. Sem dependências externas (sem CDN) — funciona offline após carregar.
+pt-BR, mobile-first (375px), acessível (labels, foco visível, contraste AA). **Identidade visual Notus**: seguir `docs/IDENTIDADE-VISUAL.md` e usar `assets/notus.css` (tema claro, como o BI; sem modo escuro automático). Cores DISC: D preto `#131313`, I amarelo `#ffda00`, S cinza `#cfcec8`, C hachurado escuro (classes `.disc-D/I/S/C`). Sem dependências externas (sem CDN) — a fonte Plus Jakarta Sans fica em `assets/fonts`.

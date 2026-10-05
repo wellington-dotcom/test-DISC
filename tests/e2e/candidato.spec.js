@@ -109,7 +109,8 @@ test.describe('Candidato (celular, sem API)', () => {
     await expect(page.locator('textarea#codigo')).toHaveValue(codigo);
 
     // Novo teste neste aparelho
-    page.once('dialog', (d) => d.accept());
+    await page.locator('[data-acao="novo-teste"]').click();
+    await expect(page.locator('[data-acao="novo-teste"]')).toHaveText('Toque de novo para confirmar');
     await page.locator('[data-acao="novo-teste"]').click();
     await expect(page.locator('[data-acao="comecar"]')).toBeVisible();
 

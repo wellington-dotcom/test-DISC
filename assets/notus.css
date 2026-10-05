@@ -1,0 +1,200 @@
+/*
+ * Identidade visual Notus — base compartilhada (tokens + peças).
+ * Mesma linguagem do BI da Clínica Isabella Eleutério (frontend/src/index.css, ui.tsx, caixas.tsx).
+ * Regras completas em docs/IDENTIDADE-VISUAL.md. Não invente cores fora destes tokens.
+ */
+
+@font-face {
+  font-family: 'Plus Jakarta Sans Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url(fonts/plus-jakarta-sans-latin-ext-wght-normal.woff2) format('woff2-variations');
+  unicode-range: U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF;
+}
+@font-face {
+  font-family: 'Plus Jakarta Sans Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 200 800;
+  src: url(fonts/plus-jakarta-sans-latin-wght-normal.woff2) format('woff2-variations');
+  unicode-range: U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD;
+}
+
+:root {
+  /* Paleta Notus: branco dominante, amarelo e preto só em pontos de destaque */
+  --fundo: #f4f4f2;
+  --branco: #ffffff;
+  --tinta: #131313;
+  --notus: #ffda00;
+  --notus-escuro: #5c4a00;   /* texto sobre amarelo */
+  --linha: #e8e7e2;
+  --suave: #888780;
+  --medio: #5f5e5a;
+  --preto-2: #1c1c1c;        /* campos em área preta */
+  --erro: #dc2626;
+  --erro-fundo: #fef2f2;
+  --ok: #047857;
+  --ok-fundo: #ecfdf5;
+
+  --raio-caixa: 24px;
+  --raio-campo: 12px;
+  --raio-pilula: 999px;
+
+  --fonte: 'Plus Jakarta Sans Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --sombra-menu: 0 12px 40px rgba(0, 0, 0, .12);
+  --curva: cubic-bezier(.2, .7, .2, 1);
+
+  /* Cores DISC dentro da identidade (mesma lógica do anel do BI: preto, amarelo, cinza, hachura) */
+  --disc-D: var(--tinta);
+  --disc-I: var(--notus);
+  --disc-S: #cfcec8;
+  --disc-C: repeating-linear-gradient(135deg, #3d3d3d 0 5px, #1c1c1c 5px 10px);
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--fundo);
+  color: var(--tinta);
+  font-family: var(--fonte);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+/* Títulos: peso normal, letra apertada — o BI não usa negrito pesado */
+h1, h2, h3, h4 { font-weight: 500; letter-spacing: -0.02em; line-height: 1.15; margin: 0; }
+p { margin: 0; }
+a { color: inherit; text-underline-offset: 3px; }
+:focus-visible { outline: 2px solid var(--tinta); outline-offset: 2px; }
+.area-preta :focus-visible, .caixa--preta :focus-visible { outline-color: var(--notus); }
+
+/* ---------- Caixas ---------- */
+.caixa {
+  position: relative;
+  overflow: hidden;
+  background: var(--branco);
+  color: var(--tinta);
+  border-radius: var(--raio-caixa);
+  padding: 20px;
+}
+.caixa--compacta { padding: 14px; }
+.caixa--ampla { padding: 28px; }
+.caixa--preta { background: var(--tinta); color: #fff; }
+.caixa--amarela { background: var(--notus); color: var(--tinta); }
+/* Gradiente: brilho amarelo sobre preto — SÓ UM POR TELA */
+.caixa--gradiente { background: #0b0b0b; color: #fff; }
+.caixa--gradiente::before {
+  content: '';
+  position: absolute;
+  left: 50%; bottom: -160px;
+  width: 560px; height: 300px;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  filter: blur(48px);
+  background: radial-gradient(circle, rgba(255,218,0,.55) 0%, rgba(255,218,0,.18) 40%, rgba(11,11,11,0) 70%);
+  pointer-events: none;
+}
+.caixa--gradiente > * { position: relative; }
+.caixa__titulo { font-size: 15px; font-weight: 500; margin-bottom: 12px; }
+
+/* ---------- Botões (pílula) ---------- */
+.botao {
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 40px;
+  padding: 8px 18px;
+  border-radius: var(--raio-pilula);
+  border: 1px solid transparent;
+  font: inherit; font-size: 14px; font-weight: 500;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background-color .15s, border-color .15s, filter .15s, opacity .15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.botao:disabled { opacity: .5; cursor: not-allowed; }
+.botao--preto { background: var(--tinta); color: #fff; }
+.botao--preto:hover:not(:disabled) { background: #000; }
+.botao--amarelo { background: var(--notus); color: var(--tinta); }
+.botao--amarelo:hover:not(:disabled) { filter: brightness(.95); }
+.botao--claro { background: var(--branco); color: var(--tinta); border-color: var(--linha); }
+.botao--claro:hover:not(:disabled) { border-color: rgba(19,19,19,.3); }
+.botao--branco { background: #fff; color: var(--tinta); }          /* em área preta */
+.botao--perigo { background: var(--branco); color: var(--erro); border-color: #fecaca; }
+.botao--perigo:hover:not(:disabled) { background: var(--erro-fundo); }
+.botao--link { background: none; border: 0; color: var(--medio); padding: 8px 4px; min-height: 0; text-decoration: underline; }
+.botao--grande { min-height: 48px; padding: 12px 24px; font-size: 15px; }
+.botao--bloco { width: 100%; }
+.giro { width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: girar .7s linear infinite; }
+@keyframes girar { to { transform: rotate(360deg); } }
+
+/* ---------- Campos ---------- */
+.campo { display: block; }
+.campo__rotulo { display: block; font-size: 13px; margin-bottom: 6px; }
+.campo__ajuda { display: block; font-size: 12px; color: var(--suave); margin-top: 4px; }
+.campo__erro { display: block; font-size: 13px; color: var(--erro); margin-top: 6px; }
+.entrada {
+  width: 100%;
+  font: inherit;
+  font-size: 16px;              /* 16px no celular evita zoom do iPhone */
+  color: var(--tinta);
+  background: var(--branco);
+  border: 1px solid var(--linha);
+  border-radius: var(--raio-campo);
+  padding: 11px 14px;
+  outline: none;
+  transition: border-color .15s;
+}
+.entrada::placeholder { color: rgba(136,135,128,.7); }
+.entrada:focus { border-color: rgba(19,19,19,.4); }
+.entrada[aria-invalid="true"] { border-color: var(--erro); }
+textarea.entrada { resize: vertical; min-height: 96px; }
+@media (min-width: 640px) { .entrada { font-size: 14px; } }
+/* Campo em área preta (como o login do BI) */
+.area-preta .entrada, .caixa--preta .entrada { background: var(--preto-2); color: #fff; border-color: transparent; }
+.area-preta .entrada:focus, .caixa--preta .entrada:focus { border-color: rgba(255,255,255,.25); }
+.area-preta .entrada::placeholder, .caixa--preta .entrada::placeholder { color: rgba(255,255,255,.3); }
+
+/* Checkbox no padrão (quadrado arredondado preto) */
+.marcar { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; cursor: pointer; }
+.marcar input { appearance: none; -webkit-appearance: none; flex: none; width: 20px; height: 20px; margin: 1px 0 0; border: 1.5px solid var(--suave); border-radius: 6px; background: var(--branco); cursor: pointer; display: grid; place-content: center; }
+.marcar input:checked { background: var(--tinta); border-color: var(--tinta); }
+.marcar input:checked::after { content: ''; width: 10px; height: 6px; border: 2px solid var(--notus); border-top: 0; border-right: 0; transform: rotate(-45deg) translate(1px, -1px); }
+
+/* ---------- Selos, avisos ---------- */
+.selo { display: inline-flex; align-items: center; gap: 4px; border-radius: var(--raio-pilula); padding: 2px 10px; font-size: 12px; white-space: nowrap; background: var(--fundo); color: var(--medio); }
+.selo--amarelo { background: var(--notus); color: var(--tinta); }
+.selo--preto { background: var(--tinta); color: #fff; }
+.selo--verde { background: var(--ok-fundo); color: var(--ok); }
+.selo--vermelho { background: var(--erro-fundo); color: var(--erro); }
+.aviso { border-radius: 16px; padding: 12px 16px; font-size: 14px; background: var(--fundo); color: var(--medio); }
+.aviso--erro { background: var(--erro-fundo); color: #b91c1c; }
+.aviso--ok { background: var(--ok-fundo); color: #065f46; }
+
+/* ---------- Letras DISC ---------- */
+.disc-D { background: var(--disc-D); color: #fff; }
+.disc-I { background: var(--disc-I); color: var(--tinta); }
+.disc-S { background: var(--disc-S); color: var(--tinta); }
+.disc-C { background: var(--disc-C); color: #fff; }
+.letra-disc { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; font-size: 13px; font-weight: 600; flex: none; }
+
+/* Trilho de barra no padrão da barra de meta: o que falta hachurado */
+.hachura-clara { background: repeating-linear-gradient(135deg, #e3e2dc 0 5px, #f4f4f2 5px 10px); }
+.hachura-escura { background: repeating-linear-gradient(135deg, #3d3d3d 0 5px, #1c1c1c 5px 10px); }
+
+/* Vidro: segue o tom da caixa onde está (nunca brilho atrás) */
+.vidro-escuro { background: linear-gradient(145deg, rgba(60,60,60,.55), rgba(19,19,19,.7)); backdrop-filter: blur(6px) saturate(120%); -webkit-backdrop-filter: blur(6px) saturate(120%); border: 1px solid rgba(255,255,255,.14); }
+.vidro-claro { background: linear-gradient(145deg, rgba(255,255,255,.7), rgba(255,255,255,.35)); backdrop-filter: blur(6px) saturate(120%); -webkit-backdrop-filter: blur(6px) saturate(120%); border: 1px solid rgba(19,19,19,.08); }
+
+/* Marca: quadradinho (preto sobre amarelo / amarelo sobre preto), como o favicon e o login do BI */
+.marca { display: inline-block; width: 32px; height: 32px; border-radius: 10px; background: var(--notus); flex: none; }
+.marca--preta { background: var(--tinta); }
+
+/* Entrada suave */
+@keyframes surgir { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.surgir { animation: surgir .45s var(--curva) both; }
+@media (prefers-reduced-motion: reduce) { .surgir, .giro { animation: none; } * { transition: none !important; } }
+
+.texto-suave { color: var(--suave); }
+.texto-medio { color: var(--medio); }
+.visualmente-oculto { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }

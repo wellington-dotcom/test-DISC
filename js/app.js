@@ -354,6 +354,8 @@
       default: html = telaBoasVindas();
     }
     app.innerHTML = html;
+    // Largura da página depende da tela (boas-vindas é mais larga, como o login do BI).
+    try { document.body.setAttribute('data-etapa', estado.etapa || 'boasvindas'); } catch (e) { /* ignora */ }
     ligarEventos();
     if (focar) {
       var titulo = app.querySelector('h1');
@@ -365,64 +367,83 @@
     }
   }
 
+  // Passos do processo, em cartões numerados (1º preto, demais brancos), como no login do BI.
+  var PASSOS = ['Seus dados', 'Ordene 25 grupos de palavras', 'Pronto, ~10 minutos'];
+
   function telaBoasVindas() {
     var salvo = lerStorage(CHAVE_PROGRESSO);
     var continuar = temProgresso(salvo);
     var empresa = nomeEmpresa();
+    var passos = PASSOS.map(function (t, k) {
+      return '<li class="passo' + (k === 0 ? ' passo--preto' : '') + '"><span class="passo-num" aria-hidden="true">' + (k + 1) + '</span><span class="passo-texto">' + t + '</span></li>';
+    }).join('');
     return '' +
-      '<section class="cartao" aria-labelledby="titulo">' +
-        '<p class="sobretitulo">' + (empresa ? 'Processo seletivo · ' + escapar(empresa) : 'Processo seletivo') + '</p>' +
-        '<h1 id="titulo">Teste de Perfil Comportamental DISC</h1>' +
-        '<p class="destaque">Este teste ajuda a entender como você costuma agir, se comunicar e trabalhar em equipe.</p>' +
-        '<ul class="lista-info">' +
-          '<li><strong>Leva cerca de 10 minutos.</strong> Faça com calma, em um lugar tranquilo.</li>' +
-          '<li><strong>São 25 grupos de 4 palavras.</strong> Em cada grupo, toque primeiro na palavra que <em>mais</em> combina com você, depois na próxima, e assim por diante.</li>' +
-          '<li><strong>Não há respostas certas ou erradas.</strong> Responda pensando em como você realmente é, e não em como gostaria de ser.</li>' +
-          '<li>Seu progresso fica salvo neste aparelho por até 7 dias caso a página seja fechada, e é apagado ao concluir.</li>' +
-        '</ul>' +
-        (continuar
-          ? '<div class="acoes acoes-coluna">' +
-              '<button type="button" class="btn btn-primario" data-acao="continuar">Continuar de onde parei</button>' +
-              '<button type="button" class="btn btn-secundario" data-acao="recomecar">Começar do zero</button>' +
-            '</div>'
-          : '<div class="acoes"><button type="button" class="btn btn-primario btn-largo" data-acao="comecar">Começar</button></div>') +
+      '<section class="entrada-tela surgir" aria-labelledby="titulo">' +
+        '<div class="entrada-amarela">' +
+          '<span class="brilho brilho--claro" aria-hidden="true"></span>' +
+          '<span class="brilho brilho--escuro" aria-hidden="true"></span>' +
+          '<span class="marca marca--preta" aria-hidden="true"></span>' +
+          '<div class="entrada-corpo">' +
+            '<p class="sobretitulo">' + (empresa ? 'Processo seletivo · ' + escapar(empresa) : 'Processo seletivo') + '</p>' +
+            '<h1 id="titulo">Teste de Perfil Comportamental DISC</h1>' +
+            '<p class="frase-impacto">Conhecer seu jeito de trabalhar é o primeiro passo.</p>' +
+            '<ol class="passos" aria-label="Como funciona">' + passos + '</ol>' +
+          '</div>' +
+        '</div>' +
+        '<div class="entrada-preta area-preta">' +
+          '<p class="destaque">Este teste ajuda a entender como você costuma agir, se comunicar e trabalhar em equipe.</p>' +
+          '<ul class="lista-info">' +
+            '<li><strong>Leva cerca de 10 minutos.</strong> Faça com calma, em um lugar tranquilo.</li>' +
+            '<li><strong>São 25 grupos de 4 palavras.</strong> Em cada grupo, toque primeiro na palavra que <em>mais</em> combina com você, depois na próxima, e assim por diante.</li>' +
+            '<li><strong>Não há respostas certas ou erradas.</strong> Responda pensando em como você realmente é, e não em como gostaria de ser.</li>' +
+            '<li>Seu progresso fica salvo neste aparelho por até 7 dias caso a página seja fechada, e é apagado ao concluir.</li>' +
+          '</ul>' +
+          (continuar
+            ? '<div class="acoes acoes-coluna">' +
+                '<button type="button" class="botao botao--amarelo botao--grande" data-acao="continuar">Continuar de onde parei</button>' +
+                '<button type="button" class="botao botao--contorno botao--grande" data-acao="recomecar">Começar do zero</button>' +
+              '</div>'
+            : '<div class="acoes acoes-coluna"><button type="button" class="botao botao--amarelo botao--grande" data-acao="comecar">Começar</button></div>') +
+        '</div>' +
       '</section>';
   }
 
   function telaIdentificacao() {
     return '' +
-      '<section class="cartao" aria-labelledby="titulo">' +
-        '<p class="sobretitulo">Etapa 1 de 3</p>' +
-        '<h1 id="titulo">Sua identificação</h1>' +
-        '<p>Precisamos destes dados para vincular o resultado à sua candidatura.</p>' +
-        '<form id="form-identificacao" novalidate>' +
+      '<section class="caixa caixa--ampla surgir" aria-labelledby="titulo">' +
+        '<p class="selo etapa">Etapa 1 de 3</p>' +
+        '<h1 id="titulo" class="titulo-pagina">Sua identificação</h1>' +
+        '<p class="texto-medio subtitulo">Precisamos destes dados para vincular o resultado à sua candidatura.</p>' +
+        '<form id="form-identificacao" class="formulario" novalidate>' +
           '<div class="campo">' +
-            '<label for="nome">Nome completo <span class="obrigatorio" aria-hidden="true">*</span></label>' +
-            '<input id="nome" name="nome" type="text" autocomplete="name" autocapitalize="words" required maxlength="120" ' +
+            '<label class="campo__rotulo" for="nome">Nome completo <span class="obrigatorio" aria-hidden="true">*</span></label>' +
+            '<input class="entrada" id="nome" name="nome" type="text" autocomplete="name" autocapitalize="words" required maxlength="120" ' +
               'aria-describedby="erro-nome" value="' + escapar(estado.nome) + '">' +
-            '<p class="erro" id="erro-nome" role="alert"></p>' +
+            '<p class="campo__erro erro" id="erro-nome" role="alert"></p>' +
           '</div>' +
           '<div class="campo">' +
-            '<label for="telefone">Telefone (WhatsApp) com DDD <span class="obrigatorio" aria-hidden="true">*</span></label>' +
-            '<input id="telefone" name="telefone" type="tel" inputmode="numeric" autocomplete="tel-national" required maxlength="25" ' +
+            '<label class="campo__rotulo" for="telefone">Telefone (WhatsApp) com DDD <span class="obrigatorio" aria-hidden="true">*</span></label>' +
+            '<input class="entrada" id="telefone" name="telefone" type="tel" inputmode="numeric" autocomplete="tel-national" required maxlength="25" ' +
               'placeholder="(11) 99999-8888" aria-describedby="dica-telefone erro-telefone" value="' + escapar(formatarTelefone(estado.telefone)) + '">' +
-            '<p class="dica" id="dica-telefone">Somente números, com DDD.</p>' +
-            '<p class="erro" id="erro-telefone" role="alert"></p>' +
+            '<p class="campo__ajuda" id="dica-telefone">Somente números, com DDD.</p>' +
+            '<p class="campo__erro erro" id="erro-telefone" role="alert"></p>' +
           '</div>' +
           '<div class="campo">' +
-            '<label for="vaga">Vaga ou cargo <span class="opcional">(opcional)</span></label>' +
-            '<input id="vaga" name="vaga" type="text" autocomplete="organization-title" maxlength="80" value="' + escapar(estado.vaga) + '">' +
+            '<label class="campo__rotulo" for="vaga">Vaga ou cargo <span class="texto-suave">(opcional)</span></label>' +
+            '<input class="entrada" id="vaga" name="vaga" type="text" autocomplete="organization-title" maxlength="80" value="' + escapar(estado.vaga) + '">' +
           '</div>' +
-          '<div class="campo campo-check">' +
-            '<input id="consentimento" name="consentimento" type="checkbox" required aria-describedby="erro-consentimento"' + (estado.consentimento ? ' checked' : '') + '>' +
-            '<label for="consentimento">Autorizo o uso dos meus dados (nome, telefone e respostas) <strong>apenas neste processo seletivo</strong>' +
-              (nomeEmpresa() ? ' da ' + escapar(nomeEmpresa()) : '') +
-              '. Sei que eles serão <strong>excluídos ao final do processo</strong>, conforme a LGPD.</label>' +
+          '<div class="campo consentimento">' +
+            '<label class="marcar" for="consentimento">' +
+              '<input id="consentimento" name="consentimento" type="checkbox" required aria-describedby="erro-consentimento"' + (estado.consentimento ? ' checked' : '') + '>' +
+              '<span>Autorizo o uso dos meus dados (nome, telefone e respostas) <strong>apenas neste processo seletivo</strong>' +
+                (nomeEmpresa() ? ' da ' + escapar(nomeEmpresa()) : '') +
+                '. Sei que eles serão <strong>excluídos ao final do processo</strong>, conforme a LGPD.</span>' +
+            '</label>' +
+            '<p class="campo__erro erro" id="erro-consentimento" role="alert"></p>' +
           '</div>' +
-          '<p class="erro" id="erro-consentimento" role="alert"></p>' +
           '<div class="acoes">' +
-            '<button type="button" class="btn btn-secundario" data-acao="voltar-inicio">Voltar</button>' +
-            '<button type="submit" class="btn btn-primario">' + (estado.voltarParaRevisao ? 'Salvar e voltar à revisão' : 'Iniciar teste') + '</button>' +
+            '<button type="button" class="botao botao--claro botao--grande" data-acao="voltar-inicio">Voltar</button>' +
+            '<button type="submit" class="botao botao--preto botao--grande">' + (estado.voltarParaRevisao ? 'Salvar e voltar à revisão' : 'Iniciar teste') + '</button>' +
           '</div>' +
         '</form>' +
       '</section>';
@@ -437,47 +458,59 @@
     var sel = estado.selecoes[i] || [];
     var completo = sel.length === 4;
     var pct = Math.round(((i + (completo ? 1 : 0)) / TOTAL) * 100);
+    var visivel = Math.max(pct, 8);
     var proxima = 4 - sel.length;
     var instrucao = completo
       ? 'Pronto! Confira a ordem e avance.'
       : 'Toque na palavra que <strong>' + (sel.length === 0 ? 'mais' : 'mais, entre as restantes,') + '</strong> combina com você (' + proxima + ' · ' + textoRotulo(proxima) + ').';
 
-    var itens = ordem.map(function (letra) {
+    function botaoPalavra(letra) {
       var pos = sel.indexOf(letra);
       var nota = pos === -1 ? 0 : 4 - pos;
       var escolhida = nota > 0;
+      var texto = escapar(palavraDoGrupo(i, g, letra));
       return '' +
         '<li>' +
           '<button type="button" class="palavra' + (escolhida ? ' escolhida nota-' + nota : '') + '" data-letra="' + letra + '"' +
             ' aria-pressed="' + (escolhida ? 'true' : 'false') + '"' +
-            (escolhida ? ' aria-label="' + escapar(palavraDoGrupo(i, g, letra)) + ': ' + nota + ', ' + textoRotulo(nota) + '"' : '') +
+            (escolhida ? ' aria-label="' + texto + ': ' + nota + ', ' + textoRotulo(nota) + '"' : '') +
             (completo && !escolhida ? ' disabled' : '') + '>' +
-            '<span class="palavra-texto">' + escapar(palavraDoGrupo(i, g, letra)) + '</span>' +
+            '<span class="palavra-corpo">' +
+              '<span class="palavra-texto">' + texto + '</span>' +
+              (escolhida ? '<span class="selo-rotulo" aria-hidden="true">' + textoRotulo(nota) + '</span>' : '') +
+            '</span>' +
             (escolhida
-              ? '<span class="selo" aria-hidden="true"><span class="selo-num">' + nota + '</span><span class="selo-rotulo">' + textoRotulo(nota) + '</span></span>'
-              : '<span class="selo selo-vazio" aria-hidden="true"></span>') +
+              ? '<span class="selo-num" aria-hidden="true">' + nota + '</span>'
+              : '<span class="selo-vazio" aria-hidden="true"></span>') +
           '</button>' +
         '</li>';
-    }).join('');
+    }
+
+    // Escolhidas formam a pilha (4 → 1); as restantes ficam abaixo, na ordem embaralhada.
+    var pilha = sel.map(botaoPalavra).join('');
+    var restantes = ordem.filter(function (l) { return sel.indexOf(l) === -1; }).map(botaoPalavra).join('');
 
     var ultimo = i === TOTAL - 1;
     return '' +
-      '<section class="cartao" aria-labelledby="titulo">' +
+      '<section class="caixa caixa--ampla tela-grupo" aria-labelledby="titulo">' +
         '<div class="progresso">' +
-          '<div class="progresso-topo"><span>Grupo ' + (i + 1) + ' de ' + TOTAL + '</span><span>' + pct + '%</span></div>' +
+          '<div class="progresso-topo"><span>Grupo ' + (i + 1) + ' de ' + TOTAL + '</span><span class="texto-suave">' + pct + '%</span></div>' +
           '<div class="progresso-barra" role="progressbar" aria-label="Progresso do teste" aria-valuemin="0" aria-valuemax="' + TOTAL + '" aria-valuenow="' + (i + (completo ? 1 : 0)) + '" aria-valuetext="Grupo ' + (i + 1) + ' de ' + TOTAL + '">' +
-            '<span style="width:' + pct + '%"></span>' +
+            '<span class="progresso-trilho hachura-clara"></span>' +
+            '<span class="progresso-feito" style="width:' + visivel + '%"></span>' +
+            '<span class="progresso-ponto vidro-claro" style="left:' + (visivel - 0.5) + '%"><i></i><i></i><i></i></span>' +
           '</div>' +
         '</div>' +
         '<h1 id="titulo" class="titulo-grupo">' + escapar(perguntaDoGrupo(i, g)) + '</h1>' +
         '<p class="instrucao" id="instrucao">' + instrucao + '</p>' +
-        '<ul class="palavras" aria-describedby="instrucao">' + itens + '</ul>' +
+        (pilha ? '<ol class="pilha" aria-label="Sua ordem">' + pilha + '</ol>' : '') +
+        (restantes ? '<ul class="palavras" aria-describedby="instrucao">' + restantes + '</ul>' : '') +
         '<div class="acoes-grupo">' +
-          '<button type="button" class="btn btn-link" data-acao="refazer"' + (sel.length ? '' : ' disabled') + '>↺ Refazer grupo</button>' +
+          '<button type="button" class="botao botao--link" data-acao="refazer"' + (sel.length ? '' : ' disabled') + '>↺ Refazer grupo</button>' +
         '</div>' +
         '<div class="acoes">' +
-          '<button type="button" class="btn btn-secundario" data-acao="anterior">Voltar</button>' +
-          '<button type="button" class="btn btn-primario" data-acao="proximo"' + (completo ? '' : ' disabled') + '>' +
+          '<button type="button" class="botao botao--claro botao--grande" data-acao="anterior">Voltar</button>' +
+          '<button type="button" class="botao botao--preto botao--grande" data-acao="proximo"' + (completo ? '' : ' disabled') + '>' +
             (estado.voltarParaRevisao || ultimo ? 'Revisar respostas' : 'Avançar') +
           '</button>' +
         '</div>' +
@@ -498,31 +531,31 @@
           '<div class="revisao-cab">' +
             '<span class="revisao-num">' + (i + 1) + '.</span> ' +
             '<span class="revisao-titulo">' + escapar(perguntaDoGrupo(i, g)) + '</span>' +
-            '<button type="button" class="btn btn-link btn-pequeno" data-acao="editar-grupo" data-grupo="' + i + '" aria-label="Alterar grupo ' + (i + 1) + '">Alterar</button>' +
+            '<button type="button" class="botao botao--link botao--pequeno" data-acao="editar-grupo" data-grupo="' + i + '" aria-label="Alterar grupo ' + (i + 1) + '">Alterar</button>' +
           '</div>' +
           conteudo +
         '</li>';
     }).join('');
     var faltando = TOTAL - gruposRespondidos();
     return '' +
-      '<section class="cartao" aria-labelledby="titulo">' +
-        '<p class="sobretitulo">Etapa 3 de 3</p>' +
-        '<h1 id="titulo">Revise suas respostas</h1>' +
+      '<section class="caixa caixa--ampla surgir" aria-labelledby="titulo">' +
+        '<p class="selo etapa">Etapa 3 de 3</p>' +
+        '<h1 id="titulo" class="titulo-pagina">Revise suas respostas</h1>' +
         '<div class="resumo-dados">' +
           '<dl>' +
             '<div><dt>Nome</dt><dd>' + escapar(normalizarNome(estado.nome)) + '</dd></div>' +
             '<div><dt>Telefone</dt><dd>' + escapar(formatarTelefone(estado.telefone)) + '</dd></div>' +
             (estado.vaga ? '<div><dt>Vaga</dt><dd>' + escapar(estado.vaga) + '</dd></div>' : '') +
           '</dl>' +
-          '<button type="button" class="btn btn-link btn-pequeno" data-acao="editar-dados">Alterar dados</button>' +
+          '<button type="button" class="botao botao--link botao--pequeno" data-acao="editar-dados">Alterar dados</button>' +
         '</div>' +
-        '<p>Em cada grupo, a ordem vai do <strong>4 (mais me identifica)</strong> ao <strong>1 (menos me identifica)</strong>. Se quiser, altere algum grupo antes de enviar.</p>' +
+        '<p class="texto-medio">Em cada grupo, a ordem vai do <strong>4 (mais me identifica)</strong> ao <strong>1 (menos me identifica)</strong>. Se quiser, altere algum grupo antes de enviar.</p>' +
         '<ol class="revisao-lista">' + linhas + '</ol>' +
-        (envio.erro ? '<div class="alerta" role="alert">' + escapar(envio.erro) + '</div>' : '') +
-        (faltando ? '<p class="erro" role="alert">Faltam ' + faltando + ' grupo(s) para concluir.</p>' : '') +
+        (envio.erro ? '<div class="aviso aviso--erro alerta" role="alert">' + escapar(envio.erro) + '</div>' : '') +
+        (faltando ? '<p class="campo__erro erro" role="alert">Faltam ' + faltando + ' grupo(s) para concluir.</p>' : '') +
         '<div class="acoes">' +
-          '<button type="button" class="btn btn-secundario" data-acao="voltar-teste">Voltar</button>' +
-          '<button type="button" class="btn btn-primario" data-acao="enviar"' + (faltando ? ' disabled' : '') + '>Enviar respostas</button>' +
+          '<button type="button" class="botao botao--claro botao--grande" data-acao="voltar-teste">Voltar</button>' +
+          '<button type="button" class="botao botao--preto botao--grande" data-acao="enviar"' + (faltando ? ' disabled' : '') + '>Enviar respostas</button>' +
         '</div>' +
       '</section>';
   }
@@ -530,21 +563,21 @@
   function telaEnvio() {
     if (envio.carregando || !envio.erro) {
       return '' +
-        '<section class="cartao centro" aria-labelledby="titulo" aria-busy="true">' +
-          '<div class="spinner" aria-hidden="true"></div>' +
-          '<h1 id="titulo">Enviando suas respostas…</h1>' +
-          '<p>Isso leva só alguns segundos. Não feche esta página.</p>' +
+        '<section class="caixa caixa--ampla centro surgir" aria-labelledby="titulo" aria-busy="true">' +
+          '<div class="giro giro--grande" aria-hidden="true"></div>' +
+          '<h1 id="titulo" class="titulo-pagina">Enviando suas respostas…</h1>' +
+          '<p class="texto-medio">Isso leva só alguns segundos. Não feche esta página.</p>' +
         '</section>';
     }
     return '' +
-      '<section class="cartao" aria-labelledby="titulo">' +
-        '<h1 id="titulo">Não foi possível enviar</h1>' +
-        '<div class="alerta" role="alert">' + escapar(envio.erro) + '</div>' +
-        '<p>Suas respostas continuam salvas neste aparelho. Você pode tentar de novo ou gerar um código de resultado para enviar ao recrutador.</p>' +
+      '<section class="caixa caixa--ampla surgir" aria-labelledby="titulo">' +
+        '<h1 id="titulo" class="titulo-pagina">Não foi possível enviar</h1>' +
+        '<div class="aviso aviso--erro alerta" role="alert">' + escapar(envio.erro) + '</div>' +
+        '<p class="texto-medio">Suas respostas continuam salvas neste aparelho. Você pode tentar de novo ou gerar um código de resultado para enviar ao recrutador.</p>' +
         '<div class="acoes acoes-coluna">' +
-          '<button type="button" class="btn btn-primario" data-acao="retentar">Tentar novamente</button>' +
-          '<button type="button" class="btn btn-secundario" data-acao="usar-codigo">Gerar código de resultado</button>' +
-          '<button type="button" class="btn btn-link" data-acao="voltar-revisao">Voltar à revisão</button>' +
+          '<button type="button" class="botao botao--preto botao--grande" data-acao="retentar">Tentar novamente</button>' +
+          '<button type="button" class="botao botao--claro botao--grande" data-acao="usar-codigo">Gerar código de resultado</button>' +
+          '<button type="button" class="botao botao--link" data-acao="voltar-revisao">Voltar à revisão</button>' +
         '</div>' +
       '</section>';
   }
@@ -559,21 +592,21 @@
       var v = res.percentuais[l];
       return '' +
         '<li class="barra-linha">' +
-          '<span class="barra-letra" style="color:' + perfil.cor + '">' + l + '</span>' +
+          '<span class="letra-disc disc-' + l + ' barra-letra">' + l + '</span>' +
           '<span class="barra-nome">' + escapar(perfil.nome) + '</span>' +
-          '<span class="barra-trilho" aria-hidden="true"><span class="barra-valor" style="width:' + Math.min(100, (v / 40) * 100) + '%;background:' + perfil.cor + '"></span></span>' +
+          '<span class="barra-trilho hachura-clara" aria-hidden="true"><span class="barra-valor disc-' + l + '" style="width:' + Math.max(4, Math.min(100, (v / 40) * 100)) + '%"></span></span>' +
           '<span class="barra-pct">' + String(v).replace('.', ',') + '%</span>' +
         '</li>';
     }).join('');
-    var pontos = (p.positivos || []).slice(0, 6).map(function (t) { return '<li>' + escapar(t) + '</li>'; }).join('');
+    var pontos = (p.positivos || []).slice(0, 6).map(function (t) { return '<li class="selo">' + escapar(t) + '</li>'; }).join('');
     return '' +
-      '<div class="perfil">' +
-        '<h2>Seu perfil predominante</h2>' +
-        '<p class="perfil-titulo"><span class="badge" style="background:' + p.cor + '">' + res.primario + '</span> ' +
-          escapar(p.rotulo) + ' <span class="perfil-sub">(' + escapar(p.nome) + '), com traços de ' + escapar(s.rotulo) + '</span></p>' +
+      '<section class="caixa caixa--ampla perfil surgir" aria-labelledby="titulo-perfil">' +
+        '<h2 id="titulo-perfil" class="caixa__titulo">Seu perfil predominante</h2>' +
+        '<p class="perfil-titulo"><span class="letra-disc disc-' + res.primario + ' badge">' + res.primario + '</span> ' +
+          '<span>' + escapar(p.rotulo) + ' <span class="perfil-sub">(' + escapar(p.nome) + '), com traços de ' + escapar(s.rotulo) + '</span></span></p>' +
         '<ul class="barras">' + barras + '</ul>' +
-        (pontos ? '<h3>Pontos fortes</h3><ul class="tags">' + pontos + '</ul>' : '') +
-      '</div>';
+        (pontos ? '<h3 class="perfil-h3">Pontos fortes</h3><ul class="tags">' + pontos + '</ul>' : '') +
+      '</section>';
   }
 
   function linkWhatsApp(codigo, payload) {
@@ -592,45 +625,51 @@
     var primeiroNome = payload ? normalizarNome(payload.nome).split(' ')[0] : String(dados.primeiroNome || '');
     var titulo = primeiroNome ? 'Obrigado, ' + escapar(primeiroNome) + '!' : 'Obrigado!';
     var rodape = '' +
-      '<p class="rodape-nota">Seus dados serão usados apenas neste processo seletivo e excluídos ao final.</p>' +
-      '<div class="acoes"><button type="button" class="btn btn-link" data-acao="novo-teste">Iniciar um novo teste neste aparelho</button></div>';
+      '<div class="rodape">' +
+        '<p class="rodape-nota">Seus dados serão usados apenas neste processo seletivo e excluídos ao final.</p>' +
+        '<button type="button" class="botao botao--link" data-acao="novo-teste">Iniciar um novo teste neste aparelho</button>' +
+      '</div>';
+    function agradecimento(texto) {
+      return '' +
+        '<section class="caixa caixa--gradiente caixa--ampla agradecimento surgir" aria-labelledby="titulo">' +
+          '<div class="icone-ok" aria-hidden="true">✓</div>' +
+          '<h1 id="titulo" class="titulo-pagina">' + titulo + '</h1>' +
+          '<p class="destaque">' + texto + '</p>' +
+        '</section>';
+    }
 
     if (enviado) {
       // Enviado com sucesso: nenhum dado pessoal fica guardado nem é exibido (aparelho pode ser compartilhado).
       return '' +
-        '<section class="cartao" aria-labelledby="titulo">' +
-          '<div class="icone-ok" aria-hidden="true">✓</div>' +
-          '<h1 id="titulo">' + titulo + '</h1>' +
-          '<p class="destaque">Suas respostas foram enviadas com sucesso. O recrutador entrará em contato pelo telefone informado.</p>' +
+        '<div class="pilha-telas">' +
+          agradecimento('Suas respostas foram enviadas com sucesso. O recrutador entrará em contato pelo telefone informado.') +
           (CONFIG.MOSTRAR_RESULTADO_AO_CANDIDATO && payload ? blocoPerfil(payload) : '') +
           rodape +
-        '</section>';
+        '</div>';
     }
 
     var codigo = root.DISC_CODEC.encode(payload);
     var wa = linkWhatsApp(codigo, payload);
     var semContato = !wa;
     return '' +
-      '<section class="cartao" aria-labelledby="titulo">' +
-        '<div class="icone-ok" aria-hidden="true">✓</div>' +
-        '<h1 id="titulo">' + titulo + '</h1>' +
-        '<p class="destaque">Você concluiu o teste. Para finalizar, envie o código abaixo ao recrutador' +
-          (semContato ? ' pelo mesmo canal (WhatsApp ou e-mail) em que você recebeu o link deste teste.' : '.') + '</p>' +
+      '<div class="pilha-telas">' +
+        agradecimento('Você concluiu o teste. Para finalizar, envie o código abaixo ao recrutador' +
+          (semContato ? ' pelo mesmo canal (WhatsApp ou e-mail) em que você recebeu o link deste teste.' : '.')) +
         (CONFIG.MOSTRAR_RESULTADO_AO_CANDIDATO ? blocoPerfil(payload) : '') +
-        '<div class="codigo-bloco">' +
-          '<label for="codigo">Código de resultado</label>' +
-          '<p class="dica" id="dica-codigo">' +
+        '<section class="caixa caixa--ampla codigo-bloco surgir" aria-label="Código de resultado">' +
+          '<label class="caixa__titulo" for="codigo">Código de resultado</label>' +
+          '<p class="campo__ajuda dica" id="dica-codigo">' +
             'Copie o código e envie ao recrutador' + (wa ? ', ou use o botão do WhatsApp.' : '.') +
             ' Por segurança, ele deixa de aparecer quando esta aba for fechada.</p>' +
-          '<textarea id="codigo" class="codigo" readonly rows="4" aria-describedby="dica-codigo" spellcheck="false">' + escapar(codigo) + '</textarea>' +
+          '<textarea id="codigo" class="entrada codigo" readonly rows="4" aria-describedby="dica-codigo" spellcheck="false">' + escapar(codigo) + '</textarea>' +
           '<div class="acoes acoes-coluna">' +
-            '<button type="button" class="btn ' + (wa ? 'btn-secundario' : 'btn-primario') + '" data-acao="copiar">Copiar código</button>' +
-            (wa ? '<a class="btn btn-whatsapp" href="' + escapar(wa) + '" target="_blank" rel="noopener noreferrer">Enviar pelo WhatsApp</a>' : '') +
+            (wa ? '<a class="botao botao--amarelo botao--grande btn-whatsapp" href="' + escapar(wa) + '" target="_blank" rel="noopener noreferrer">Enviar pelo WhatsApp</a>' : '') +
+            '<button type="button" class="botao ' + (wa ? 'botao--claro' : 'botao--preto') + ' botao--grande" data-acao="copiar">Copiar código</button>' +
           '</div>' +
           '<p class="sucesso" id="copiado" role="status" aria-live="polite"></p>' +
-        '</div>' +
+        '</section>' +
         rodape +
-      '</section>';
+      '</div>';
   }
 
   /* -------------------------- Eventos ------------------------------ */
@@ -789,7 +828,12 @@
         copiarCodigo();
         break;
       case 'novo-teste':
-        if (root.confirm && !root.confirm('Iniciar um novo teste? Esta tela deixará de aparecer neste aparelho.')) return;
+        // Confirmação em dois toques (sem confirm() do navegador)
+        if (alvo.getAttribute('data-confirmar') !== 'sim') {
+          alvo.setAttribute('data-confirmar', 'sim');
+          alvo.textContent = 'Toque de novo para confirmar';
+          return;
+        }
         apagarSessao(CHAVE_CONCLUIDO);
         apagarStorage(CHAVE_CONCLUIDO);
         apagarStorage(CHAVE_PROGRESSO);
@@ -906,12 +950,12 @@
     aviso = document.getElementById('aviso');
     if (!app) return;
     if (!DATA || !root.DISC_SCORING || !root.DISC_CODEC) {
-      app.innerHTML = '<section class="cartao"><h1>Não foi possível carregar o teste</h1><p>Atualize a página. Se o problema continuar, avise o recrutador.</p></section>';
+      app.innerHTML = '<section class="caixa caixa--ampla"><h1 class="titulo-pagina">Não foi possível carregar o teste</h1><p class="texto-medio">Atualize a página. Se o problema continuar, avise o recrutador.</p></section>';
       return;
     }
     var empresa = nomeEmpresa();
-    var marca = document.getElementById('marca');
-    if (marca && empresa) marca.textContent = empresa;
+    var selo = document.getElementById('topo-empresa');
+    if (selo && empresa) { selo.textContent = empresa; selo.hidden = false; }
     if (empresa) document.title = 'Teste DISC · ' + empresa;
 
     estado = estadoInicial();

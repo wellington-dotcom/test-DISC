@@ -4,32 +4,54 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
-  <meta name="color-scheme" content="light dark">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#f4f4f2">
   <title>Painel DISC</title>
+  <link rel="stylesheet" href="assets/notus.css">
   <link rel="stylesheet" href="assets/admin.css">
 </head>
 <body>
   <a class="pular" href="#conteudo">Pular para o conteúdo</a>
 
   <header class="topo nao-imprimir">
-    <div class="topo-inner">
-      <h1 class="marca">Painel DISC <span class="marca-sub" id="nome-empresa"></span></h1>
-      <span class="modo" id="modo-indicador"></span>
-      <button type="button" class="btn btn-sec" id="btn-sair" hidden>Sair</button>
+    <div class="topo__dentro">
+      <span class="marca" aria-hidden="true"></span>
+      <h1 class="topo__titulo">Painel DISC <span class="topo__empresa" id="nome-empresa"></span></h1>
+      <span class="selo topo__modo" id="modo-indicador"></span>
+      <button type="button" class="botao botao--claro botao--pequeno" id="btn-sair" hidden>Sair</button>
     </div>
   </header>
 
   <main id="conteudo" class="conteudo" tabindex="-1">
-    <!-- Login (modo com API) -->
-    <section id="tela-login" class="cartao login" hidden aria-labelledby="titulo-login">
-      <h2 id="titulo-login">Acesso do recrutador</h2>
-      <p class="muted">Informe a chave de administrador configurada no Google Apps Script.</p>
-      <form id="form-login" novalidate>
-        <label for="campo-chave">Chave de acesso</label>
-        <input id="campo-chave" type="password" autocomplete="current-password" required>
-        <p class="erro" id="erro-login" role="alert" hidden></p>
-        <button type="submit" class="btn" id="btn-entrar">Entrar</button>
-      </form>
+    <!-- Login (modo com API): metade amarela com brilho, metade preta com o formulário -->
+    <section id="tela-login" class="login" hidden aria-labelledby="titulo-login">
+      <div class="login__amarela">
+        <span class="login__brilho login__brilho--1" aria-hidden="true"></span>
+        <span class="login__brilho login__brilho--2" aria-hidden="true"></span>
+        <span class="marca marca--preta login__marca" aria-hidden="true"></span>
+        <div class="login__chamada">
+          <div class="login__frase">
+            <p class="login__titulo">Seleção não é sorte, é leitura.</p>
+            <p class="login__apoio">O perfil de cada candidato calculado na hora, com um guia prático para quem vai liderar.</p>
+          </div>
+          <ol class="login__passos" aria-label="Como funciona">
+            <li class="login__passo login__passo--preto"><span class="login__num">1</span><span>O candidato faz o teste</span></li>
+            <li class="login__passo"><span class="login__num">2</span><span>O perfil DISC sai pronto</span></li>
+            <li class="login__passo"><span class="login__num">3</span><span>Você decide com o guia</span></li>
+          </ol>
+        </div>
+      </div>
+      <div class="login__preta area-preta">
+        <form id="form-login" class="login__form" novalidate>
+          <h2 id="titulo-login" class="login__h2">Acesso do recrutador</h2>
+          <p class="login__texto">Informe a chave de administrador configurada no Google Apps Script.</p>
+          <label class="login__rotulo" for="campo-chave">Chave de acesso</label>
+          <input id="campo-chave" class="entrada" type="password" autocomplete="current-password" placeholder="Sua chave" required>
+          <p class="login__erro" id="erro-login" role="alert" hidden></p>
+          <button type="submit" class="login__botao" id="btn-entrar">Entrar</button>
+          <p class="login__nota">Não tem a chave? Fale com quem configurou o sistema.</p>
+        </form>
+      </div>
     </section>
 
     <!-- Painel -->
@@ -40,44 +62,33 @@
         <button type="button" class="aba" data-aba="importar" id="aba-importar" hidden>Importar códigos</button>
       </nav>
 
-      <p class="aviso" id="aviso-geral" role="status" aria-live="polite" hidden></p>
+      <p class="aviso aviso-geral" id="aviso-geral" role="status" aria-live="polite" hidden></p>
 
       <!-- Lista -->
       <div id="vista-lista" class="vista nao-imprimir">
-        <div class="barra-acoes">
-          <button type="button" class="btn btn-sec" id="btn-atualizar">Atualizar</button>
-          <button type="button" class="btn btn-sec" id="btn-csv">Exportar CSV</button>
-          <button type="button" class="btn btn-perigo" id="btn-excluir-todos">Excluir todos</button>
+        <div class="cabecalho">
+          <div class="cabecalho__texto-area">
+            <h2 class="cabecalho__titulo">Candidatos</h2>
+            <p class="cabecalho__texto" id="contagem" aria-live="polite"></p>
+          </div>
+          <div class="cabecalho__acoes">
+            <button type="button" class="botao botao--claro" id="btn-atualizar">Atualizar</button>
+            <button type="button" class="botao botao--preto" id="btn-csv">Exportar CSV</button>
+            <button type="button" class="botao botao--perigo" id="btn-excluir-todos">Excluir todos</button>
+          </div>
         </div>
 
+        <div class="resumo" id="resumo-lista" aria-label="Resumo dos candidatos"></div>
+
         <form class="filtros" id="form-filtros" role="search" onsubmit="return false">
-          <div class="campo">
-            <label for="filtro-busca">Buscar</label>
-            <input id="filtro-busca" type="search" placeholder="Nome, telefone ou vaga">
-          </div>
-          <div class="campo">
-            <label for="filtro-perfil">Perfil primário</label>
-            <select id="filtro-perfil">
-              <option value="">Todos</option>
-              <option value="D">D — Dominância</option>
-              <option value="I">I — Influência</option>
-              <option value="S">S — Estabilidade</option>
-              <option value="C">C — Conformidade</option>
-            </select>
-          </div>
-          <div class="campo">
-            <label for="filtro-status">Status</label>
-            <select id="filtro-status">
-              <option value="">Todos</option>
-              <option value="em_analise">Em análise</option>
-              <option value="aprovado">Aprovado</option>
-              <option value="reprovado">Reprovado</option>
-              <option value="invalido">Inválido</option>
-            </select>
-          </div>
+          <label class="filtros__busca">
+            <span class="visualmente-oculto">Buscar</span>
+            <svg class="filtros__lupa" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+            <input id="filtro-busca" class="entrada" type="search" placeholder="Buscar por nome, telefone ou vaga">
+          </label>
+          <div class="filtros__escolhas" id="filtros-escolhas"></div>
         </form>
 
-        <p class="contagem muted" id="contagem" aria-live="polite"></p>
         <ul class="lista" id="lista-candidatos"></ul>
       </div>
 
@@ -89,15 +100,21 @@
 
       <!-- Importar códigos (plano B do candidato; funciona com e sem API) -->
       <div id="vista-importar" class="vista nao-imprimir" hidden>
-        <div class="cartao">
-          <h2>Importar códigos de resultado</h2>
-          <p class="muted">Cole aqui o código (ou a mensagem inteira do WhatsApp) que o candidato enviou. Pode colar vários de uma vez, um por linha. <span id="destino-importacao">Os dados ficam salvos somente neste navegador.</span></p>
-          <label for="campo-codigos">Códigos</label>
-          <textarea id="campo-codigos" rows="8" spellcheck="false" placeholder="DISC1.eyJ2Ijox..."></textarea>
-          <div class="barra-acoes">
-            <button type="button" class="btn" id="btn-importar">Importar</button>
+        <div class="cabecalho">
+          <div class="cabecalho__texto-area">
+            <h2 class="cabecalho__titulo">Importar códigos de resultado</h2>
+            <p class="cabecalho__texto">Cole aqui o código (ou a mensagem inteira do WhatsApp) que o candidato enviou. Pode colar vários de uma vez, um por linha. <span id="destino-importacao">Os dados ficam salvos somente neste navegador.</span></p>
           </div>
-          <div id="resultado-importacao" role="status" aria-live="polite"></div>
+        </div>
+        <div class="caixa caixa--ampla importar surgir">
+          <label class="campo">
+            <span class="campo__rotulo">Códigos</span>
+            <textarea id="campo-codigos" class="entrada importar__codigos" rows="8" spellcheck="false" placeholder="DISC1.eyJ2Ijox..."></textarea>
+          </label>
+          <div class="importar__rodape">
+            <button type="button" class="botao botao--preto botao--grande" id="btn-importar">Importar</button>
+            <div id="resultado-importacao" class="importar__resultado" role="status" aria-live="polite"></div>
+          </div>
         </div>
       </div>
     </section>

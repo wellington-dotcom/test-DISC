@@ -3,6 +3,13 @@ const { test, expect } = require('@playwright/test');
 const fs = require('node:fs');
 const { API_FALSA, coletarErros, configurar, simularApi, fazerTesteCompleto } = require('./util.js');
 
+// Escolhe uma opção no seletor em pílula (substitui o <select> nativo).
+async function escolher(page, seletor, valor) {
+  await page.click(seletor);
+  await page.locator(seletor + '-lista [role="option"][data-valor="' + valor + '"]').click();
+  await expect(page.locator(seletor)).toHaveAttribute('value', valor);
+}
+
 // Monta um código DISC1.* no próprio navegador (mesmo codec do candidato).
 async function gerarCodigo(page, payload) {
   return page.evaluate((p) => window.DISC_CODEC.encode(p), payload);
@@ -55,9 +62,9 @@ test.describe('Admin sem API (importar código)', () => {
     expect(await page.evaluate(() => window.__xss)).toBeUndefined();
 
     // Filtro por perfil primário
-    await page.selectOption('#filtro-perfil', 'C');
+    await escolher(page, '#filtro-perfil', 'C');
     await expect(page.locator('#lista-candidatos > li')).toHaveCount(1);
-    await page.selectOption('#filtro-perfil', '');
+    await escolher(page, '#filtro-perfil', '');
     await page.fill('#filtro-busca', 'carla');
     await expect(page.locator('#lista-candidatos > li')).toHaveCount(1);
     await page.fill('#filtro-busca', '');
@@ -86,11 +93,11 @@ test.describe('Admin sem API (importar código)', () => {
     await expect(guia).toContainText('Carla');
 
     // Marcar aprovado (local) e ver no comparativo
-    await page.selectOption('#det-status', 'aprovado');
+    await escolher(page, '#det-status', 'aprovado');
     await expect(page.locator('#aviso-geral')).toContainText('Aprovado');
     await page.locator('.aba[data-aba="comparativo"]').click();
     await expect(page.locator('#vista-comparativo')).toContainText('1 aprovado.');
-    await expect(page.locator('#vista-comparativo table')).toBeVisible();
+    await expect(page.locator('#vista-comparativo .empilhados')).toBeVisible();
 
     // Persistência local após recarregar
     await page.reload();
@@ -106,8 +113,13 @@ test.describe('Admin sem API (importar código)', () => {
     await page.keyboard.press('Escape');
 
     // Excluir todos com confirmação digitando EXCLUIR
-    page.once('dialog', (d) => d.accept('EXCLUIR'));
     await page.click('#btn-excluir-todos');
+    await expect(page.locator('#confirmar-ok')).toBeDisabled();
+    await page.fill('#confirmar-texto', 'excluir errado');
+    await expect(page.locator('#confirmar-ok')).toBeDisabled();
+    await page.fill('#confirmar-texto', 'EXCLUIR');
+    await page.click('#confirmar-ok');
+    await expect(page.locator('#confirmar')).toHaveCount(0);
     await expect(page.locator('#lista-candidatos > li')).toHaveCount(0);
     expect(await page.evaluate(() => JSON.parse(localStorage.getItem('disc_admin_registros') || '[]').length)).toBe(0);
 
@@ -176,15 +188,15 @@ test.describe('Admin com API simulada', () => {
     await expect(page.locator('#lista-candidatos > li', { hasText: 'Beatriz Santos' }).locator('.badge')).toHaveText('SC');
 
     // Filtro por status
-    await page.selectOption('#filtro-status', 'reprovado');
+    await escolher(page, '#filtro-status', 'reprovado');
     await expect(page.locator('#lista-candidatos > li')).toHaveCount(1);
-    await page.selectOption('#filtro-status', '');
+    await escolher(page, '#filtro-status', '');
 
     // Detalhe e aprovação
     await page.locator('#lista-candidatos > li', { hasText: 'Rafael' }).getByRole('button', { name: /Ver detalhes/ }).click();
     await expect(page.locator('#vista-detalhe h2')).toHaveText('Rafael Moreira Lima');
     await expect(page.locator('#vista-detalhe section.guia')).toContainText('Rafael');
-    await page.selectOption('#det-status', 'aprovado');
+    await escolher(page, '#det-status', 'aprovado');
     await expect(page.locator('#aviso-geral')).toContainText('Aprovado');
     await page.fill('#det-obs', 'Ótima comunicação.');
     await page.getByRole('button', { name: 'Salvar observações' }).click();
