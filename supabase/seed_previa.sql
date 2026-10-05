@@ -16,6 +16,8 @@
 -- Parte 2 (migração 20261008120000_parte2.sql): EQP1 com formulario.parte2 'ligada' e o perfil exigido de
 -- quem respondeu por ele (Carla e Renata com esforço de adaptação alto; Diego quase igual ao natural).
 -- Fotos (migração 20261009120000_fotos.sql): avatares fictícios (iniciais) para Ana, Carla, Diego, Marta e Renata.
+-- Rodada 4 (migração 20261010120000_mover_versao.sql): a Marta fica gravada no topo do organograma
+-- (empresas.organograma.topoIds).
 -- =============================================================================
 
 insert into public.processos (codigo, nome, tipo, empresa, vaga, mostrar_resultado, ativo, config)
@@ -174,3 +176,13 @@ with avatares (telefone, resposta, foto) as (
 )
 update public.respostas r set foto = a.foto
 from avatares a where r.id = a.resposta and r.foto is null;
+
+-- -----------------------------------------------------------------------------
+-- Topo do organograma (migração 20261010120000_mover_versao.sql): a Marta, que dirige a Clínica Exemplo.
+-- -----------------------------------------------------------------------------
+
+update public.empresas e
+set organograma = coalesce(e.organograma, '{}'::jsonb) || jsonb_build_object('topoIds', jsonb_build_array(p.id::text))
+from public.pessoas p
+where e.id = '5eed0000-0000-4000-8000-000000000001' and p.telefone = '5511900000006'
+  and not coalesce(e.organograma ? 'topoIds', false);

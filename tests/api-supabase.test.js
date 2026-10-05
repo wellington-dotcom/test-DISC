@@ -74,6 +74,7 @@ function libFalsa(opcoes) {
       neq(c, v) { q.filtros.push((l) => l[c] !== v); return b; },
       order(c) { q.ordem = c; return b; },
       range(a, z) { q.intervalo = [a, z]; return b; },
+      limit(n) { q.limite = n; return b; },
       maybeSingle() { q.unico = true; return b; },
       then(ok, nok) { return Promise.resolve().then(() => executar(q)).then(ok, nok); }
     };
@@ -85,6 +86,12 @@ function libFalsa(opcoes) {
     if (estado.falhaRede) throw new TypeError('Failed to fetch');
     if (!estado.sessao) return { data: q.op === 'select' ? [] : [], error: null }; // RLS: anon não vê nada
     if (opcoes.erroBanco && opcoes.erroBanco[q.tabela + '.' + q.op]) return { data: null, error: opcoes.erroBanco[q.tabela + '.' + q.op] };
+    // Banco antigo: tabela ou coluna que ainda não existe (opcoes.faltando = ['empresas', 'respostas.foto', ...]).
+    if (opcoes.faltando) {
+      if (opcoes.faltando.includes(q.tabela)) return { data: null, error: { code: 'PGRST205', message: 'Could not find the table' } };
+      const cols = String(q.colunas).split(',').map((c) => c.trim());
+      if (cols.some((c) => opcoes.faltando.includes(q.tabela + '.' + c))) return { data: null, error: { code: '42703', message: 'column does not exist' } };
+    }
     const linhas = estado.tabelas[q.tabela];
     const casa = (l) => q.filtros.every((f) => f(l));
     let res;
@@ -92,6 +99,7 @@ function libFalsa(opcoes) {
       res = linhas.filter(casa);
       if (q.ordem) res = res.slice().sort((a, b) => String(a[q.ordem]).localeCompare(String(b[q.ordem])));
       if (q.intervalo) res = res.slice(q.intervalo[0], q.intervalo[1] + 1);
+      if (q.limite !== undefined) res = res.slice(0, q.limite);
     } else if (q.op === 'insert') {
       const nova = Object.assign({ id: '33333333-3333-4333-8333-33333333333' + linhas.length, codigo: 'K7QZ', criado_em: '2026-10-05T12:00:00+00:00' },
         q.tabela === 'relatorios' ? { token: 'f'.repeat(63) + linhas.length } : {}, q.dados);
@@ -404,7 +412,7 @@ test('listar: itens no formato do Code.gs (resultado recalculado, processo embut
     pessoa: { id: PESSOA, nome: 'João da Silva', telefone: '5511999998888', idade: 30, funcao: 'Recepcionista', empresa: 'Loja Centro',
       email: 'joao@x.com', cidade: 'Campinas', foto: '', atualizadoEm: '2026-10-01T12:10:02.500Z' },
     email: 'joao@x.com', cidade: 'Campinas', extras: [{ id: 'p1', pergunta: 'Pretensão?', resposta: 'R$ 3.000' }],
-    exigido: '', resultadoExigido: null, foto: ''
+    exigido: '', resultadoExigido: null, foto: '', historicoProcessos: []
   });
   assert.equal(antigo.pessoaId, '');
   assert.equal(antigo.pessoa, null);
@@ -727,7 +735,7 @@ test('salvarColaborador, moverColaborador e salvarRelacoes chamam as funções d
   await assert.rejects(api.moverColaborador(T, { pessoaId: P1 }), /Escolha a empresa de destino\./);
 
   const rel = await api.salvarRelacoes(T, EMP, [{ de: P1, para: P2, tipo: 'lidera', extra: 'x' }]);
-  assert.deepEqual(rel, { ok: true, relacoes: [{ de: P1, para: P2, tipo: 'lidera' }] });
+  assert.deepEqual(rel, { ok: true, relacoes: [{ de: P1, para: P2, tipo: 'lidera' }], topoIds: [] });
   assert.deepEqual(e.chamadas.filter((c) => c.rpc === 'salvar_relacoes').pop().args, { p_empresa: EMP, p_relacoes: [{ de: P1, para: P2, tipo: 'lidera' }] });
   await assert.rejects(api.salvarRelacoes(T, EMP, 'x'), /Relações inválidas\./);
 
@@ -925,4 +933,104 @@ test('enviar: a foto vai no payload para enviar_resposta (o banco valida)', asyn
   const r = await api.enviar(p);
   assert.equal(r.ok, true);
   assert.equal(e.chamadas.find((c) => c.rpc === 'enviar_resposta').args.p_payload.foto, FOTO);
+});
+
+// ---------------------------------------------------------------------------
+// Rodada 4: mover resposta, contratar, topo do organograma e versão do banco
+// ---------------------------------------------------------------------------
+
+test('moverResposta chama mover_resposta (só uuid ou "" = sem processo) e devolve o histórico', async () => {
+  const H = [{ de: PID, para: '', deCodigo: 'SEL1', paraCodigo: '', em: '2026-10-05T12:00:00.000Z' }, 'lixo'];
+  const { api, T, e } = await logado({
+    processos: [processo()], respostas: [resposta()],
+    rpc: { mover_resposta: (a) => ({ data: a.p_resposta === 'lx1abc-teste01'
+      ? { ok: true, id: a.p_resposta, processoId: a.p_processo, avaliacao: a.p_processo ? 'sel1' : '', historicoProcessos: H, mudou: true }
+      : { ok: false, erro: 'Candidato não encontrado.' }, error: null }) }
+  });
+  const r = await api.moverResposta(T, 'lx1abc-teste01', '');
+  assert.deepEqual(r, { ok: true, id: 'lx1abc-teste01', processoId: '', avaliacao: '', historicoProcessos: [H[0]] });
+  assert.deepEqual(e.chamadas.filter((c) => c.rpc === 'mover_resposta').pop().args, { p_resposta: 'lx1abc-teste01', p_processo: '' });
+  const r2 = await api.moverResposta(T, 'lx1abc-teste01', ' ' + PID + ' ');
+  assert.deepEqual([r2.processoId, r2.avaliacao], [PID, 'SEL1']);
+  assert.equal((await api.moverResposta(T, 'lx1abc-teste01', null)).processoId, '');
+  await assert.rejects(api.moverResposta(T, 'lx1abc-teste01', 'SEL1'), /Processo não encontrado\./);
+  await assert.rejects(api.moverResposta(T, 'outra-123', PID), /Candidato não encontrado\./);
+  await assert.rejects(api.moverResposta(T, '', PID), /Candidato não informado\./);
+  await assert.rejects(api.moverResposta('', 'lx1abc-teste01', PID), (err) => err.sessaoExpirada === true);
+});
+
+test('contratarPessoa chama contratar_pessoa (respostaId ou pessoaId) e devolve o colaborador', async () => {
+  const colab = { vinculoId: V1, pessoaId: P1, empresaId: EMP, nome: 'Marta Diretora Souza', telefone: '5511900000001', cargo: 'Recepcionista',
+    area: 'Atendimento', status: 'ativo', inicio: '2026-10-05', fim: '' };
+  const { api, T, e } = await logado(Object.assign(equipeBase(), {
+    rpc: { contratar_pessoa: (a) => ({ data: { ok: true, colaborador: colab, movido: !!a.p_dados.respostaId, deEmpresaId: a.p_dados.respostaId ? EMP2 : '' }, error: null }) }
+  }));
+  const r = await api.contratarPessoa(T, { respostaId: ' r-nova ', pessoaId: P2, empresaId: EMP, cargo: ' Recepcionista ', area: 'Atendimento', extra: 1 });
+  assert.deepEqual(r, { ok: true, colaborador: colab, movido: true, deEmpresaId: EMP2 });
+  assert.deepEqual(e.chamadas.filter((c) => c.rpc === 'contratar_pessoa').pop().args,
+    { p_dados: { empresaId: EMP, cargo: 'Recepcionista', area: 'Atendimento', respostaId: 'r-nova' } });
+  const r2 = await api.contratarPessoa(T, { pessoaId: P2, empresaId: EMP });
+  assert.deepEqual([r2.movido, r2.deEmpresaId], [false, '']);
+  assert.deepEqual(e.chamadas.filter((c) => c.rpc === 'contratar_pessoa').pop().args, { p_dados: { empresaId: EMP, cargo: '', area: '', pessoaId: P2 } });
+  await assert.rejects(api.contratarPessoa(T, { respostaId: 'r-nova' }), /Empresa não informada\./);
+  await assert.rejects(api.contratarPessoa(T, { empresaId: EMP }), /Informe a pessoa\./);
+});
+
+test('topoIds: salvarRelacoes manda p_opcoes só quando vem topoIds; listarEquipe devolve só ativos', async () => {
+  const base = equipeBase();
+  base.empresas[0].organograma = { topoIds: [P2, 'lixo', P3, P2] };
+  const { api, T, e } = await logado(Object.assign(base, {
+    rpc: { salvar_relacoes: (a) => ({ data: { ok: true, relacoes: a.p_relacoes, topoIds: a.p_opcoes ? a.p_opcoes.topoIds : [P2] }, error: null }) }
+  }));
+  const eq = await api.listarEquipe(T, EMP);
+  assert.deepEqual(eq.topoIds, [P2], 'só colaboradores ativos, sem repetir');
+  assert.deepEqual((await api.listarEquipe(T, EMP2)).topoIds, []);
+
+  const r = await api.salvarRelacoes(T, EMP, [], { topoIds: [' ' + P2 + ' ', ''] });
+  assert.deepEqual(r, { ok: true, relacoes: [], topoIds: [P2] });
+  assert.deepEqual(e.chamadas.filter((c) => c.rpc === 'salvar_relacoes').pop().args, { p_empresa: EMP, p_relacoes: [], p_opcoes: { topoIds: [P2] } });
+  await api.salvarRelacoes(T, EMP, [], {});
+  assert.ok(!('p_opcoes' in e.chamadas.filter((c) => c.rpc === 'salvar_relacoes').pop().args), 'sem topoIds o topo salvo não muda');
+  await assert.rejects(api.salvarRelacoes(T, EMP, [], { topoIds: 'x' }), /Relações inválidas\./);
+});
+
+test('versaoBanco: com a função devolve versão e faltando; sem ela sonda tabelas/colunas (banco antigo)', async () => {
+  const atual = await logado({ rpc: { versao_banco: () => ({ data: { ok: true, versao: 20261010120000, migracoes: [], faltando: [] }, error: null }) } });
+  assert.deepEqual(await atual.api.versaoBanco(), { ok: true, versao: 20261010120000, faltando: [] });
+  assert.equal(SB.VERSAO_ATUAL, 20261010120000);
+  assert.deepEqual(SB.MIGRACOES.map((m) => m.nome.slice(0, 8)), ['20261005', '20261006', '20261007', '20261008', '20261009', '20261010']);
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'supabase', 'migrations', SB.MIGRACOES[5].nome + '.sql')));
+  SB.MIGRACOES.forEach((m) => assert.ok(fs.existsSync(path.join(__dirname, '..', 'supabase', 'migrations', m.nome + '.sql')), m.nome));
+
+  // Banco em produção sem a 20261008 e a 20261009 (e sem a 20261010): versao_banco não existe (PGRST202).
+  const velho = await logado({ faltando: ['respostas.exigido', 'respostas.foto', 'respostas.historico_processos'] });
+  const v = await velho.api.versaoBanco();
+  assert.deepEqual(v, { ok: true, versao: 20261007120000, semFuncao: true,
+    faltando: ['20261008120000_parte2', '20261009120000_fotos', '20261010120000_mover_versao'] });
+  const sondas = velho.e.chamadas.filter((c) => c.tabela && c.tabela !== 'admins' && c.op === 'select');
+  assert.deepEqual(sondas.map((c) => c.tabela + '.' + c.colunas),
+    ['pessoas.id', 'empresas.id', 'respostas.exigido', 'respostas.foto', 'respostas.historico_processos']);
+
+  // Muito antigo: sem pessoas/empresas.
+  const muito = await logado({ faltando: ['pessoas', 'empresas', 'respostas.exigido', 'respostas.foto', 'respostas.historico_processos'] });
+  assert.deepEqual((await muito.api.versaoBanco()).faltando, SB.MIGRACOES.slice(1).map((m) => m.nome));
+  // Com a 20261009 aplicada mas sem a 20261010: só ela falta.
+  const quase = await logado({ faltando: ['respostas.historico_processos'] });
+  assert.deepEqual(await quase.api.versaoBanco(), { ok: true, versao: 20261009120000, semFuncao: true, faltando: ['20261010120000_mover_versao'] });
+  // Sem rede: mensagem de conexão.
+  quase.e.falhaRede = true;
+  await assert.rejects(quase.api.versaoBanco(), /Não foi possível conectar/);
+});
+
+test('função do banco que não existe (migração faltando) vira "banco desatualizado"', async () => {
+  const { api, T } = await logado(equipeBase());
+  await assert.rejects(api.moverResposta(T, 'r-nova', ''), (err) => err.bancoDesatualizado === true &&
+    /O banco de dados está desatualizado/.test(err.message) && err.resposta.ok === false);
+});
+
+test('api.js (legado) e simulada: moverResposta, contratarPessoa e versaoBanco', async () => {
+  for (const m of ['moverResposta', 'contratarPessoa', 'versaoBanco', 'salvarMinhaFoto', 'removerFoto']) {
+    await assert.rejects(API[m]('token', {}), (err) => err.message === 'Disponível só com o servidor Supabase.', m);
+  }
+  assert.ok(API.METODOS.includes('versaoBanco') && SB.METODOS.includes('contratarPessoa'));
 });

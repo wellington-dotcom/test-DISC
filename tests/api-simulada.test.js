@@ -13,7 +13,8 @@ const RE_PROTOCOLO = /^[0-9]{2}[A-HJ-NP-Z]$/;
 // Novidades da simulada que o Code.gs (legado) não tem: config.formulario / avaliacao.formulario e, nos
 // itens de "listar", a pessoa (pessoaId, pessoa), os campos novos do formulário (email, cidade, extras) e a
 // Parte 2 (exigido, resultadoExigido) e a foto (item e usuário).
-const CAMPOS_NOVOS_ITEM = ['pessoaId', 'pessoa', 'email', 'cidade', 'extras', 'exigido', 'resultadoExigido', 'foto'];
+const CAMPOS_NOVOS_ITEM = ['pessoaId', 'pessoa', 'email', 'cidade', 'extras', 'exigido', 'resultadoExigido', 'foto',
+  'historicoProcessos', 'processoId'];
 // Empresas (rodada empresas/equipes): cidade, observações, ativo e contagem de colaboradores.
 const CAMPOS_NOVOS_EMPRESA = ['cidade', 'observacoes', 'ativo', 'atualizadoEm', 'colaboradores'];
 function semNovidades(dono, k) {
@@ -1047,4 +1048,89 @@ test('relatório por modelo: até 1 MB passa (as fotos vão no snapshot)', async
   const ok = await api.salvarRelatorioModelo(T, { modelo: 'equipe', empresaId: emp.id, dados: { titulo: 'Grande', t: 'x'.repeat(900000) } });
   assert.equal(ok.ok, true);
   await assert.rejects(api.salvarRelatorioModelo(T, { modelo: 'equipe', empresaId: emp.id, dados: { t: 'x'.repeat(1000001) } }), /grande demais/);
+});
+
+// Rodada 4 (como a migração 20261010120000_mover_versao.sql)
+test('moverResposta: troca processo/código/empresa, guarda o histórico; "" = sem processo; só admin', async () => {
+  const api = SIM.criar({ armazenamento: localStorageFalso(), scoring: S, latenciaMs: 0 });
+  const T = (await api.login('admin@previa.com', 'previa123')).token;
+  const procs = (await api.processosListar(T)).processos;
+  const sel = procs.find((p) => p.codigo === 'SEL1');
+  const atd = procs.find((p) => p.codigo === 'ATD1');
+  let bruno = (await api.listar(T)).itens.find((i) => i.id === 'previa-exemplo-02');
+  assert.deepEqual([bruno.avaliacao, bruno.processoId, bruno.historicoProcessos], ['SEL1', sel.id, []]);
+
+  const r = await api.moverResposta(T, 'previa-exemplo-02', atd.id);
+  assert.equal(r.ok, true);
+  assert.deepEqual([r.id, r.processoId, r.avaliacao, r.historicoProcessos.length], ['previa-exemplo-02', atd.id, 'ATD1', 1]);
+  assert.deepEqual(Object.assign({}, r.historicoProcessos[0], { em: '' }), { de: sel.id, para: atd.id, deCodigo: 'SEL1', paraCodigo: 'ATD1', em: '' });
+  bruno = (await api.listar(T)).itens.find((i) => i.id === 'previa-exemplo-02');
+  assert.deepEqual([bruno.avaliacao, bruno.processoId, bruno.avaliacaoNome, bruno.historicoProcessos.length], ['ATD1', atd.id, atd.nome, 1]);
+  assert.equal((await api.moverResposta(T, 'previa-exemplo-02', atd.id)).historicoProcessos.length, 1, 'mesmo processo: nada muda');
+
+  const sem = await api.moverResposta(T, 'previa-exemplo-02', '');
+  assert.deepEqual([sem.processoId, sem.avaliacao, sem.historicoProcessos.length], ['', '', 2]);
+  bruno = (await api.listar(T)).itens.find((i) => i.id === 'previa-exemplo-02');
+  assert.deepEqual([bruno.avaliacao, bruno.processoId, bruno.empresaId], ['', '', '']);
+
+  await assert.rejects(api.moverResposta(T, 'previa-exemplo-02', 'nao-existe'), /Processo não encontrado\./);
+  await assert.rejects(api.moverResposta(T, 'nao-existe-1', atd.id), /Candidato não encontrado\./);
+  await assert.rejects(api.moverResposta(T, '', atd.id), /Candidato não informado\./);
+  const TG = (await api.login('gestor@previa.com', 'previa123')).token;
+  await assert.rejects(api.moverResposta(TG, 'previa-exemplo-02', atd.id), /Sem permissão\./);
+});
+
+test('contratarPessoa: candidato vira colaborador (resposta aprovada); ativo em outra empresa = move', async () => {
+  const api = SIM.criar({ armazenamento: localStorageFalso(), scoring: S, latenciaMs: 0 });
+  const T = (await api.login('admin@previa.com', 'previa123')).token;
+  const clinica = (await api.listarEmpresas(T)).empresas.find((e) => e.nome === 'Clínica Exemplo');
+  const antes = (await api.listarEquipe(T, clinica.id)).colaboradores.length;
+
+  const r = await api.contratarPessoa(T, { respostaId: 'previa-exemplo-01', empresaId: clinica.id, area: 'Atendimento' });
+  assert.equal(r.ok, true);
+  assert.deepEqual([r.colaborador.nome, r.colaborador.cargo, r.colaborador.area, r.colaborador.status, r.movido],
+    ['Ana Exemplo Prévia', 'Recepcionista', 'Atendimento', 'ativo', false], 'cargo vazio usa a vaga da resposta');
+  const ana = (await api.listar(T)).itens.find((i) => i.id === 'previa-exemplo-01');
+  assert.equal(ana.status, 'aprovado');
+  assert.equal((await api.listarEquipe(T, clinica.id)).colaboradores.length, antes + 1);
+
+  // De novo na mesma empresa: só atualiza o cargo.
+  const r2 = await api.contratarPessoa(T, { pessoaId: ana.pessoaId, empresaId: clinica.id, cargo: 'Recepcionista líder' });
+  assert.deepEqual([r2.colaborador.cargo, r2.movido], ['Recepcionista líder', false]);
+
+  // Ativa em outra empresa: move (lá fica desligada, com fim).
+  const outra = (await api.salvarEmpresa(T, { nome: 'Padaria Nova' })).empresa;
+  const r3 = await api.contratarPessoa(T, { pessoaId: ana.pessoaId, empresaId: outra.id, cargo: 'Caixa' });
+  assert.deepEqual([r3.movido, r3.deEmpresaId, r3.colaborador.empresaId], [true, clinica.id, outra.id]);
+  const eqC = await api.listarEquipe(T, clinica.id);
+  assert.equal(eqC.colaboradores.length, antes);
+  assert.ok(eqC.historico.some((c) => c.pessoaId === ana.pessoaId && c.status === 'desligado' && c.fim));
+  assert.deepEqual((await api.listarEquipe(T, outra.id)).colaboradores.map((c) => c.nome), ['Ana Exemplo Prévia']);
+
+  await assert.rejects(api.contratarPessoa(T, { respostaId: 'previa-exemplo-01', empresaId: 'emp_nao' }), /Empresa não encontrada\./);
+  await assert.rejects(api.contratarPessoa(T, { empresaId: clinica.id }), /Informe a pessoa\./);
+  await assert.rejects(api.contratarPessoa(T, { respostaId: 'nao-existe-1', empresaId: clinica.id }), /Candidato não encontrado\./);
+  const TG = (await api.login('gestor@previa.com', 'previa123')).token;
+  await assert.rejects(api.contratarPessoa(TG, { respostaId: 'previa-exemplo-01', empresaId: clinica.id }), /Sem permissão\./);
+});
+
+test('topoIds do organograma: salvarRelacoes guarda na empresa; listarEquipe devolve só ativos; versaoBanco', async () => {
+  const api = SIM.criar({ armazenamento: localStorageFalso(), scoring: S, latenciaMs: 0 });
+  const T = (await api.login('admin@previa.com', 'previa123')).token;
+  const clinica = (await api.listarEmpresas(T)).empresas.find((e) => e.nome === 'Clínica Exemplo');
+  const eq = await api.listarEquipe(T, clinica.id);
+  assert.deepEqual(eq.topoIds, []);
+  const [a, b] = eq.colaboradores;
+  const desligado = eq.historico[0].pessoaId;
+  const r = await api.salvarRelacoes(T, clinica.id, eq.relacoes, { topoIds: [b.pessoaId, desligado, b.pessoaId, a.pessoaId] });
+  assert.deepEqual(r.topoIds, [b.pessoaId, a.pessoaId]);
+  assert.deepEqual((await api.listarEquipe(T, clinica.id)).topoIds, [b.pessoaId, a.pessoaId]);
+  // Sem o 4º argumento o topo continua.
+  assert.deepEqual((await api.salvarRelacoes(T, clinica.id, eq.relacoes)).topoIds, [b.pessoaId, a.pessoaId]);
+  // Quem é desligado sai do topo na leitura.
+  await api.desligarColaborador(T, b.vinculoId);
+  assert.deepEqual((await api.listarEquipe(T, clinica.id)).topoIds, [a.pessoaId]);
+  await assert.rejects(api.salvarRelacoes(T, clinica.id, [], { topoIds: 'x' }), /Relações inválidas\./);
+
+  assert.deepEqual(await api.versaoBanco(), { ok: true, versao: 20261010120000, faltando: [] });
 });

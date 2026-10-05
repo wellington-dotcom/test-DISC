@@ -195,7 +195,7 @@
   // Com API, só o administrador usa o painel (gestor desativado nesta versão).
   function abasDoPapel(papel, modoApi) {
     if (!modoApi) return ['lista', 'comparativo', 'importar'];
-    if (papel === 'admin') return ['lista', 'processos', 'empresas', 'usuarios', 'comparativo', 'importar'];
+    if (papel === 'admin') return ['lista', 'processos', 'empresas', 'relatorios', 'usuarios', 'comparativo', 'importar'];
     return [];
   }
 
@@ -623,50 +623,6 @@
       lideradosDe(rels, fila.shift()).forEach(function (x) { if (!vistos[x] && x !== String(id)) { vistos[x] = true; out.push(x); fila.push(x); } });
     }
     return out;
-  }
-
-  // Move uma pessoa no organograma. destino: {tipo:'lider', id} | {tipo:'topo'} | {tipo:'sem'}.
-  // Devolve {relacoes, erro}. 'lider': passa a ser liderada por id (troca o líder; tira direto/indireto entre os dois);
-  // 'topo': sem líder; 'sem': tira todas as 'lidera' dela (como líder e como liderada); 'direto'/'indireto' ficam.
-  function moverNoOrganograma(rels, id, destino, nomes) {
-    id = String(id);
-    var lista = (rels || []).map(function (r) { return { de: String(r.de), para: String(r.para), tipo: r.tipo }; });
-    var nome = function (x) { return (nomes && nomes[x]) || 'esta pessoa'; };
-    if (!destino || !destino.tipo) return { relacoes: lista, erro: 'Destino inválido.' };
-    if (destino.tipo === 'lider') {
-      var alvo = String(destino.id);
-      if (alvo === id) return { relacoes: lista, erro: '' };
-      if (descendentes(lista, id).indexOf(alvo) !== -1) {
-        return { relacoes: lista, erro: 'Não dá para colocar ' + nome(id) + ' abaixo de ' + nome(alvo) + ': ' + nome(alvo) + ' já está na equipe liderada por ' + nome(id) + '.' };
-      }
-      if (liderDe(lista, id) === alvo) return { relacoes: lista, erro: '' };
-      lista = lista.filter(function (r) {
-        if (r.tipo === 'lidera' && r.para === id) return false;
-        if (r.tipo !== 'lidera' && ((r.de === id && r.para === alvo) || (r.de === alvo && r.para === id))) return false;
-        return true;
-      });
-      lista.push({ de: alvo, para: id, tipo: 'lidera' });
-      return { relacoes: lista, erro: '' };
-    }
-    if (destino.tipo === 'topo') return { relacoes: lista.filter(function (r) { return !(r.tipo === 'lidera' && r.para === id); }), erro: '' };
-    if (destino.tipo === 'sem') return { relacoes: lista.filter(function (r) { return !(r.tipo === 'lidera' && (r.para === id || r.de === id)); }), erro: '' };
-    return { relacoes: lista, erro: 'Destino inválido.' };
-  }
-
-  // Posições: sem = sem líder e sem liderados (e fora do conjunto "topo"); raizes = sem líder com liderados (ou marcadas no topo).
-  function posicoesOrganograma(ids, rels, topo) {
-    var ativos = {};
-    ids.forEach(function (x) { ativos[String(x)] = true; });
-    var rs = (rels || []).filter(function (r) { return r.tipo === 'lidera' && ativos[String(r.de)] && ativos[String(r.para)]; });
-    var sem = [], raizes = [];
-    ids.forEach(function (x) {
-      x = String(x);
-      if (liderDe(rs, x)) return;
-      if (lideradosDe(rs, x).length || (topo && topo[x])) raizes.push(x); else sem.push(x);
-    });
-    var filhos = {};
-    ids.forEach(function (x) { filhos[String(x)] = lideradosDe(rs, x); });
-    return { sem: sem, raizes: raizes, filhos: filhos };
   }
 
   /* ---------- Pessoas: várias respostas da mesma pessoa (mesmo WhatsApp) ---------- */
@@ -1134,7 +1090,139 @@
       ' como colaboradores (quem ainda não está nela entra com o cargo informado). Antes de começar, o colaborador é avisado de que o resultado é compartilhado com a empresa.';
   }
 
+  /* ---------- Aba Relatórios: catálogo dos modelos, exemplos fictícios e lista dos gerados ---------- */
+
+  // Os 5 modelos, na ordem da tela. alvo: o que se escolhe no assistente (pessoa | colaborador | empresa | processo).
+  var MODELOS_CATALOGO = [
+    { chave: 'pessoa-completo', modelo: 'pessoa', variante: 'completo', titulo: 'Pessoa · completo', alvo: 'pessoa',
+      paraQuem: 'Para a própria pessoa (colaborador ou candidato aprovado).',
+      responde: 'Como é o meu jeito de trabalhar, meus pontos fortes, o que me desgasta e como posso me desenvolver.' },
+    { chave: 'pessoa-simples', modelo: 'pessoa', variante: 'simples', titulo: 'Pessoa · simples', alvo: 'pessoa',
+      paraQuem: 'Para a própria pessoa, em 2 páginas.',
+      responde: 'O resumo do perfil DISC e dicas práticas para o dia a dia, para ler em poucos minutos.' },
+    { chave: 'lideranca', modelo: 'lideranca', titulo: 'Como liderar', alvo: 'colaborador',
+      paraQuem: 'Para o líder direto de um colaborador.',
+      responde: 'Como se comunicar, delegar, dar feedback e motivar essa pessoa, e o que evitar.' },
+    { chave: 'equipe', modelo: 'equipe', titulo: 'Equipe', alvo: 'empresa',
+      paraQuem: 'Para o dono ou o gestor da empresa.',
+      responde: 'Como a equipe se organiza, onde combina e onde pode haver atrito, o que falta no time e como liderar cada um.' },
+    { chave: 'processo', modelo: 'processo', titulo: 'Processo seletivo', alvo: 'processo',
+      paraQuem: 'Para quem contratou a seleção.',
+      responde: 'Quem participou, como cada candidato pontuou nas etapas, a aderência ao perfil da vaga e a recomendação final.' }
+  ];
+  var NOMES_MODELO = { pessoa: 'Pessoa', lideranca: 'Como liderar', equipe: 'Equipe', processo: 'Processo seletivo' };
+
+  function modeloDoCatalogo(chave) {
+    return MODELOS_CATALOGO.filter(function (m) { return m.chave === chave; })[0] || null;
+  }
+
+  // Conjunto fictício fixo dos exemplos (nada de dado real).
+  var EXEMPLO_EMPRESA = { nome: 'Loja Exemplo', cidade: 'Boa Vista / RR' };
+  var EXEMPLO_PESSOAS = [
+    { pessoaId: 'ex-1', nome: 'Marina Costa', cargo: 'Gerente da loja', resultado: { percentuais: { D: 38, I: 30, S: 14, C: 18 }, codigo: 'DI' },
+      exigido: { percentuais: { D: 36, I: 24, S: 16, C: 24 }, codigo: 'DC' } },
+    { pessoaId: 'ex-2', nome: 'Rafael Souza', cargo: 'Vendedor', resultado: { percentuais: { D: 20, I: 38, S: 26, C: 16 }, codigo: 'IS' } },
+    { pessoaId: 'ex-3', nome: 'Paula Mendes', cargo: 'Caixa', resultado: { percentuais: { D: 12, I: 18, S: 36, C: 34 }, codigo: 'SC' } },
+    { pessoaId: 'ex-4', nome: 'Tiago Ramos', cargo: 'Estoquista', resultado: { percentuais: { D: 16, I: 14, S: 30, C: 40 }, codigo: 'CS' } },
+    { pessoaId: 'ex-5', nome: 'Lúcia Pereira', cargo: 'Vendedora', resultado: { percentuais: { D: 24, I: 34, S: 22, C: 20 }, codigo: 'ID' } }
+  ];
+  var EXEMPLO_RELACOES = [
+    { de: 'ex-1', para: 'ex-2', tipo: 'lidera' }, { de: 'ex-1', para: 'ex-3', tipo: 'lidera' }, { de: 'ex-1', para: 'ex-4', tipo: 'lidera' },
+    { de: 'ex-2', para: 'ex-5', tipo: 'lidera' }, { de: 'ex-3', para: 'ex-4', tipo: 'direto' }, { de: 'ex-2', para: 'ex-3', tipo: 'indireto' }
+  ];
+
+  function copiaJson(v) { return JSON.parse(JSON.stringify(v)); }
+
+  // Dados do exemplo de um modelo. deps: {modelos: DISC_RELATORIO_MODELOS, motor?: DISC_RELATORIO, fixture?: DISC_FIXTURE_PROCESSO}.
+  function exemploModelo(chave, deps) {
+    deps = deps || {};
+    var M = deps.modelos;
+    var consultor = 'Consultor Exemplo';
+    var p = EXEMPLO_PESSOAS;
+    if (chave === 'processo') {
+      if (!deps.motor || typeof deps.motor.montar !== 'function' || !deps.fixture) throw new Error('O exemplo do processo seletivo não carregou.');
+      var fx = copiaJson(deps.fixture);
+      (fx.candidatos || []).forEach(function (c) { delete c.antecedentes; delete c.foto; });
+      var rel = deps.motor.montar(fx, { geradoEm: '2026-10-02T12:00:00.000Z' });
+      if (rel && rel.processo) delete rel.processo.clickupListId;
+      return rel;
+    }
+    if (!M) throw new Error('Os modelos de relatório não foram carregados (relatorio-modelos.js).');
+    if (chave === 'pessoa-completo') return M.pessoa({ pessoa: copiaJson({ nome: p[0].nome, resultado: p[0].resultado, exigido: p[0].exigido }), consultor: consultor });
+    if (chave === 'pessoa-simples') return M.pessoaSimples({ pessoa: copiaJson({ nome: p[0].nome, resultado: p[0].resultado }), consultor: consultor });
+    if (chave === 'lideranca') {
+      return M.lideranca({ pessoa: copiaJson({ nome: p[1].nome, cargo: p[1].cargo, resultado: p[1].resultado }),
+        lider: copiaJson({ nome: p[0].nome, resultado: p[0].resultado }), empresa: { nome: EXEMPLO_EMPRESA.nome } });
+    }
+    if (chave === 'equipe') {
+      return M.equipe({ empresa: copiaJson(EXEMPLO_EMPRESA), consultor: consultor, relacoes: copiaJson(EXEMPLO_RELACOES),
+        colaboradores: p.map(function (x) { return copiaJson({ pessoaId: x.pessoaId, nome: x.nome, cargo: x.cargo, status: 'ativo', resultado: x.resultado }); }) });
+    }
+    throw new Error('Modelo desconhecido.');
+  }
+
+  // Junta os relatórios dos modelos e os dos processos numa lista só (mais recente primeiro).
+  // ctx: {empresas: {id: nome}, processos: {id: {nome, empresa}}, href}
+  function juntarGerados(modelosLista, processosLista, ctx) {
+    ctx = ctx || {};
+    var emp = ctx.empresas || {}, procs = ctx.processos || {};
+    var out = [];
+    (modelosLista || []).forEach(function (r) {
+      var pub = r.status === 'publicado';
+      out.push({ id: 'm:' + r.id, relId: r.id, tipo: 'modelo', modelo: r.modelo, token: r.token || '', titulo: r.titulo || MODELOS_REL[r.modelo] || 'Relatório',
+        empresa: r.empresaId ? String(emp[r.empresaId] || '') : '', empresaId: r.empresaId || '', pessoaId: r.pessoaId || '',
+        status: pub ? 'publicado' : 'rascunho', data: String(r.atualizadoEm || r.publicadoEm || r.criadoEm || ''),
+        url: pub ? (r.url ? urlAbsoluta(r.url, ctx.href) : linkRelatorioModelo(ctx.href, r.token)) : '' });
+    });
+    (processosLista || []).forEach(function (r) {
+      var pub = r.status === 'publicado';
+      var p = procs[r.processoId] || {};
+      out.push({ id: 'p:' + r.token, tipo: 'processo', modelo: 'processo', token: r.token, processoId: r.processoId || '',
+        titulo: p.nome ? 'Processo seletivo · ' + p.nome : 'Processo seletivo', empresa: String(p.empresa || ''),
+        status: pub ? 'publicado' : 'rascunho', data: String(r.publicadoEm || r.atualizadoEm || r.criadoEm || ''),
+        url: pub ? linkRelatorio(ctx.href, r.token) : '' });
+    });
+    return out.sort(function (a, b) { return b.data.localeCompare(a.data); });
+  }
+
+  // Filtro da lista dos gerados: modelo ('' = todos), empresa (nome, sem acento/maiúsculas), status.
+  function filtrarGerados(lista, filtro) {
+    filtro = filtro || {};
+    var emp = semAcento(filtro.empresa);
+    return (lista || []).filter(function (r) {
+      if (filtro.modelo && r.modelo !== filtro.modelo) return false;
+      if (filtro.status && r.status !== filtro.status) return false;
+      if (emp && semAcento(r.empresa) !== emp) return false;
+      return true;
+    });
+  }
+  function semAcento(s) { return String(s == null ? '' : s).normalize('NFD').replace(/[̀-ͯ]/g, '').trim().toLowerCase(); }
+
+  // Processos para onde uma resposta pode ir (menos o atual), mais "Sem processo".
+  function opcoesMoverProcesso(processos, codigoAtual) {
+    var ops = (processos || []).filter(function (p) { return p && p.codigo !== codigoAtual; }).map(function (p) {
+      return { valor: String(p.id), rotulo: p.nome + ' (' + p.codigo + ')', sub: [empresaDe(p), TIPOS[p.tipo] || '', p.ativa === false ? 'desativado' : ''].filter(Boolean).join(' · ') };
+    });
+    if (codigoAtual) ops.unshift({ valor: '', rotulo: 'Sem processo (link geral)', sub: 'A resposta fica fora de qualquer processo' });
+    return ops;
+  }
+
+  // Aviso de banco desatualizado a partir da resposta de versaoBanco() ('' = está em dia).
+  // Sem a função no banco (erro), o aviso é o mesmo, sem a lista.
+  function mensagemBanco(resp) {
+    if (resp && resp.ok === true && !resp.semFuncao && (!Array.isArray(resp.faltando) || !resp.faltando.length)) return '';
+    var faltam = resp && Array.isArray(resp.faltando) && resp.faltando.length ? resp.faltando.map(String).join(', ') : 'as migrações mais recentes';
+    return 'O banco de dados está desatualizado: faltam ' + faltam + '. Peça para aplicar as migrações (veja docs/SUPABASE.md).';
+  }
+
   var util = {
+    MODELOS_CATALOGO: MODELOS_CATALOGO,
+    modeloDoCatalogo: modeloDoCatalogo,
+    exemploModelo: exemploModelo,
+    juntarGerados: juntarGerados,
+    filtrarGerados: filtrarGerados,
+    opcoesMoverProcesso: opcoesMoverProcesso,
+    mensagemBanco: mensagemBanco,
     modoEmpresas: modoEmpresas,
     filtrarOpcoes: filtrarOpcoes,
     filtrarEmpresas: filtrarEmpresas,
@@ -1201,8 +1289,6 @@
     liderDe: liderDe,
     lideradosDe: lideradosDe,
     descendentes: descendentes,
-    moverNoOrganograma: moverNoOrganograma,
-    posicoesOrganograma: posicoesOrganograma,
     parte2Padrao: parte2Padrao,
     textoParte2: textoParte2,
     exigidoDoRegistro: exigidoDoRegistro,
@@ -1262,7 +1348,8 @@
     proc: { tela: 'lista', id: null },
     relatorios: {},   // processoId -> [{token, status, criadoEm, publicadoEm}]
     editor: null,     // {processoId, token, relatorio, avisos, status, url, sujo}
-    emp: null         // aba Empresas: ver novoEstadoEmpresas()
+    emp: null,        // aba Empresas: ver novoEstadoEmpresas()
+    rl: null          // aba Relatórios: ver novoEstadoRelatorios()
   };
 
   function $(id) { return document.getElementById(id); }
@@ -2309,10 +2396,13 @@
           el('span', { classe: 'det-protocolo__rotulo', texto: 'Código ' }),
           el('span', { classe: 'det-protocolo__valor t-indicador negrito tabular', texto: textoProtocolo(r.protocolo) })
         ]),
-        sub ? el('p', { classe: 'cabecalho__texto', texto: sub }) : null
+        sub ? el('p', { classe: 'cabecalho__texto', texto: sub }) : null,
+        linhaVinculoDetalhe(r)
       ]),
       el('div', { classe: 'cabecalho__acoes nao-imprimir' }, [
         el('button', { type: 'button', classe: 'botao botao--claro', texto: '← Voltar', onclick: fecharDetalhe }),
+        podeMoverResposta() ? botao('botao--claro', 'Mover para outro processo', function () { janelaMoverProcesso(r); }, { id: 'btn-mover-processo' }) : null,
+        podeContratar() ? botao('botao--contorno', 'Adicionar à empresa (contratar)', function () { janelaContratar(r, null); }, { id: 'btn-contratar' }) : null,
         guia ? el('button', { type: 'button', classe: 'botao botao--claro', texto: 'Copiar guia', onclick: function () {
           copiarTexto(guiaComoTexto(guia, r)).then(function () { avisar('Guia copiado para a área de transferência.', 'ok'); },
             function () { avisar('Não foi possível copiar automaticamente.', 'erro'); });
@@ -2497,6 +2587,93 @@
     } else {
       art.appendChild(el('p', { classe: 'aviso', texto: 'Guia para a Liderança indisponível (módulo lideranca.js não carregado).' }));
     }
+  }
+
+  /* ---------- Detalhe: mover a resposta de processo e contratar (levar para uma empresa) ---------- */
+
+  function podeMoverResposta() { return MODO_API && papel() === 'admin' && !!metodoApi('moverResposta'); }
+  function podeContratar() { return MODO_API && papel() === 'admin' && empresasOk() && !!metodoApi('contratarPessoa'); }
+
+  function janelaMoverProcesso(r) {
+    var ops = opcoesMoverProcesso(estado.processos, r.avaliacao || '');
+    var esc = criarSeletorBusca({ id: 'mover-processo', rotulo: 'Processo de destino', rotuloId: 'mover-processo-rotulo', vazio: 'Escolher o processo',
+      placeholder: 'Nome, código ou empresa…', opcoes: ops.map(function (o) { return { valor: o.valor === '' ? '-' : o.valor, rotulo: o.rotulo, sub: o.sub }; }) });
+    abrirJanela({
+      id: 'janela-mover-processo',
+      titulo: 'Mover ' + (r.nome || 'a resposta') + ' para outro processo',
+      texto: 'Hoje: ' + textoOrigem(r) + '. A resposta passa a aparecer no processo escolhido (e no relatório dele). O teste não muda.',
+      corpo: [campoEscolha('Processo de destino', esc, 'mover-processo-rotulo')],
+      botao: 'Mover resposta',
+      aoConfirmar: function () {
+        var v = esc.valor();
+        if (!v) throw new Error('Escolha o processo de destino.');
+        var destinoId = v === '-' ? '' : v;
+        var p = destinoId ? acharProcesso(destinoId) : null;
+        return api('moverResposta', r.id, destinoId).then(function () {
+          var antigo = r.avaliacao ? acharProcessoPorCodigo(r.avaliacao) : null;
+          if (antigo && Number(antigo.respostas)) antigo.respostas = Number(antigo.respostas) - 1;
+          if (p) p.respostas = (Number(p.respostas) || 0) + 1;
+          r.avaliacao = p ? p.codigo : '';
+          r.avaliacaoNome = p ? p.nome : '';
+          r.empresaNome = p ? empresaDe(p) : '';
+          r.avaliacaoTipo = p ? p.tipo : '';
+          estado.relatorios = {};
+          avisar(p ? 'Resposta movida para "' + p.nome + '".' : 'Resposta tirada do processo (link geral).', 'ok');
+          renderizarLista(); renderizarProcessos(); renderizarDetalhe();
+        });
+      }
+    });
+  }
+
+  function janelaContratar(r, vinculo) {
+    var empresas = (estado.emp.lista || []).filter(function (e) { return e.ativo !== false; });
+    var esc = criarSeletorBusca({ id: 'contratar-empresa', rotulo: 'Empresa', rotuloId: 'contratar-empresa-rotulo', vazio: 'Escolher a empresa',
+      opcoes: empresas.map(function (e) { return { valor: e.id, rotulo: e.nome, sub: e.cidade || '' }; }) });
+    var nome = r.nome || 'a pessoa';
+    abrirJanela({
+      id: 'janela-contratar',
+      titulo: 'Adicionar ' + nome + ' à empresa',
+      texto: (vinculo ? 'Hoje é colaborador(a) em ' + vinculo.empresa.nome + ': se escolher outra empresa, o vínculo atual vai para o histórico. ' : '') +
+        'A pessoa entra como colaboradora ativa, com o teste que já fez, e esta resposta fica como "Aprovado".',
+      corpo: [
+        campoEscolha('Empresa', esc, 'contratar-empresa-rotulo'),
+        el('div', { classe: 'form-grade' }, [
+          campoCom('contratar-cargo', 'Cargo', r.vaga || r.funcao || '', { maxlength: 120 }),
+          campoCom('contratar-area', 'Área', '', { maxlength: 120 })
+        ])
+      ],
+      botao: 'Adicionar à empresa',
+      aoConfirmar: function () {
+        var eid = esc.valor();
+        if (!eid) throw new Error('Escolha a empresa.');
+        var d = { respostaId: r.id, empresaId: eid, cargo: $('contratar-cargo').value.trim(), area: $('contratar-area').value.trim() };
+        return api('contratarPessoa', d).then(function () {
+          r.status = 'aprovado';
+          esquecerEquipes();
+          avisar(nome + ' agora é colaborador(a) em ' + nomeEmpresa(eid) + '.', 'ok');
+          renderizarLista();
+          return carregarEmpresas().then(function () { if (estado.abertoId === r.id) renderizarDetalhe(); });
+        });
+      }
+    });
+  }
+
+  // Linha "Colaborador(a) em <Empresa>" no topo do detalhe (com link para a empresa).
+  function linhaVinculoDetalhe(r) {
+    var p = el('p', { classe: 'det-vinculo-topo', id: 'det-empresa-vinculo', hidden: true });
+    if (!empresasOk() || !r.pessoaId || papel() !== 'admin') return p;
+    acharVinculo(r.pessoaId).then(function (v) {
+      if (!v || !document.body.contains(p)) return;
+      limpar(p);
+      p.appendChild(el('span', { classe: 'texto-suave', texto: 'Colaborador(a) em ' }));
+      p.appendChild(el('button', { type: 'button', classe: 'link-botao seminegrito', id: 'det-link-empresa', texto: v.empresa.nome,
+        onclick: function () { irParaEmpresas('pagina', v.empresa.id); } }));
+      if (v.colaborador.cargo) p.appendChild(el('span', { classe: 'texto-suave', texto: ' · ' + v.colaborador.cargo }));
+      p.hidden = false;
+      var btn = $('btn-contratar');
+      if (btn) btn.onclick = function () { janelaContratar(r, v); };
+    });
+    return p;
   }
 
   /* ---------- Comparativo ---------- */
@@ -3648,7 +3825,7 @@
 
   function empresasOk() { return modoEmpresas(MODO_API, SUPABASE, SIMULADA) === 'ok'; }
   function novoEstadoEmpresas() {
-    return { tela: 'lista', id: null, lista: null, erro: '', busca: '', equipes: {}, relatorios: {}, rel: null, indice: null };
+    return { tela: 'lista', id: null, subaba: 'colaboradores', lista: null, erro: '', busca: '', equipes: {}, relatorios: {}, rel: null, indice: null };
   }
   function acharEmpresa(id) {
     var l = estado.emp.lista || [];
@@ -3675,13 +3852,15 @@
   // Equipe de uma empresa (cache por empresa; mudou algo -> esquecer e carregar de novo).
   function carregarEquipe(id) {
     return api('listarEquipe', id).then(function (resp) {
-      estado.emp.equipes[id] = { empresa: resp.empresa || acharEmpresa(id) || {}, colaboradores: resp.colaboradores || [], relacoes: resp.relacoes || [], historico: resp.historico || [] };
+      estado.emp.equipes[id] = { empresa: resp.empresa || acharEmpresa(id) || {}, colaboradores: resp.colaboradores || [], relacoes: resp.relacoes || [], historico: resp.historico || [],
+        topoIds: Array.isArray(resp.topoIds) ? resp.topoIds.map(String) : [] };
       return estado.emp.equipes[id];
     });
   }
   function esquecerEquipes() { estado.emp.equipes = {}; estado.emp.indice = null; }
 
-  function irParaEmpresas(tela, id) {
+  function irParaEmpresas(tela, id, subaba) {
+    if (tela === 'pagina' && (String(id) !== String(estado.emp.id) || subaba)) estado.emp.subaba = subaba || 'colaboradores';
     estado.emp.tela = tela || 'lista';
     estado.emp.id = id || null;
     renderizarEmpresas();
@@ -3694,6 +3873,7 @@
   function renderizarEmpresas() {
     var box = $('vista-empresas');
     if (!box) return;
+    destruirOrganograma();
     limpar(box);
     if (papel() !== 'admin') return;
     if (!empresasOk()) {
@@ -3839,6 +4019,22 @@
     return a && b ? a + ' a ' + b : (a ? 'desde ' + a : (b ? 'até ' + b : ''));
   }
 
+  // Subabas da página da empresa (a escolhida fica guardada enquanto o painel está aberto).
+  var SUBABAS_EMPRESA = [
+    { id: 'colaboradores', rotulo: 'Colaboradores' },
+    { id: 'organograma', rotulo: 'Organograma' },
+    { id: 'compatibilidade', rotulo: 'Compatibilidade' },
+    { id: 'relatorios', rotulo: 'Relatórios' },
+    { id: 'historico', rotulo: 'Histórico' }
+  ];
+
+  function irParaSubaba(sub) {
+    estado.emp.subaba = sub;
+    renderizarEmpresas();
+    var b = $('emp-subaba-' + sub);
+    if (b) b.focus();
+  }
+
   function renderizarPaginaEmpresa(box, id) {
     var emp = acharEmpresa(id);
     var eq = estado.emp.equipes[id];
@@ -3854,6 +4050,8 @@
     var colabs = eq.colaboradores.filter(function (c) { return c.status !== 'desligado'; });
     var proc = processoEquipeDa(id);
     var linkTeste = proc ? linkDe(proc) : '';
+    var sub = estado.emp.subaba || 'colaboradores';
+    var historicoN = (eq.historico || []).length + eq.colaboradores.filter(function (c) { return c.status === 'desligado'; }).length;
 
     box.appendChild(cabecalhoVista('Empresa' + (emp.cidade ? ' · ' + emp.cidade : ''), emp.nome, emp.observacoes || null, [
       botao('botao--claro', '← Empresas', function () { irParaEmpresas('lista'); }, { id: 'btn-voltar-empresas' }),
@@ -3863,37 +4061,58 @@
     ]));
     if (emp.ativo === false) box.appendChild(el('p', { classe: 'aviso proc-aviso', texto: 'Empresa arquivada: continua no cadastro, mas fica no fim da lista.' }));
 
-    // Link do teste da equipe
-    box.appendChild(el('section', { classe: 'caixa emp-bloco', id: 'emp-link' }, proc ? [
-      el('h3', { classe: 'caixa__titulo', texto: 'Link do teste da equipe' }),
-      el('p', { classe: 'form-secao__texto emp-link__texto', texto: textoEquipeEmpresa(emp.nome) }),
-      el('p', { classe: 'av-link', id: 'emp-link-teste', texto: linkTeste }),
-      el('div', { classe: 'gestao-card__acoes' }, [
-        botao('botao--claro botao--pequeno', 'Copiar link', function () { copiar(linkTeste, 'Link do teste copiado.'); }, { id: 'btn-copiar-link-equipe' }),
-        botao('botao--claro botao--pequeno', 'Copiar mensagem', function () { copiar(mensagemConvite(proc, linkTeste), 'Mensagem copiada. Cole no WhatsApp.'); }, { id: 'btn-copiar-msg-equipe' }),
-        botao('botao--claro botao--pequeno', 'Abrir o processo', function () { irParaProcessos('pagina', proc.id); })
-      ])
-    ] : [
-      el('h3', { classe: 'caixa__titulo', texto: 'Link do teste da equipe' }),
-      el('p', { classe: 'form-secao__texto emp-link__texto', texto: 'Ainda não há um processo de avaliação de equipe ligado a esta empresa. Crie um: ' + textoEquipeEmpresa(emp.nome) }),
-      el('div', { classe: 'gestao-card__acoes' }, botao('botao--contorno botao--pequeno', 'Criar link do teste da equipe', function () {
-        estado.proc = { tela: 'form', id: null, preset: { tipo: 'equipe', empresaId: id, empresa: emp.nome } };
-        renderizarProcessos(); mostrarAba('processos'); root.scrollTo(0, 0);
-      }, { id: 'btn-criar-link-equipe' }))
-    ]));
+    var contagem = { colaboradores: colabs.length, historico: historicoN };
+    box.appendChild(el('nav', { classe: 'subabas', id: 'emp-subabas', 'aria-label': 'Seções da empresa' }, SUBABAS_EMPRESA.map(function (s) {
+      var n = contagem[s.id];
+      return el('button', { type: 'button', classe: 'subaba', id: 'emp-subaba-' + s.id, 'data-subaba': s.id, 'aria-current': s.id === sub ? 'page' : null,
+        onclick: function () { if (estado.emp.subaba !== s.id) irParaSubaba(s.id); } }, [
+        el('span', { texto: s.rotulo }),
+        n != null ? el('span', { classe: 'subaba__n tabular', texto: String(n) }) : null
+      ]);
+    })));
 
-    box.appendChild(blocoColaboradores(emp, eq, colabs, id, proc, linkTeste));
-
-    // Organograma (editável: arrastar ou "Mover para…") e compatibilidade
-    box.appendChild(blocoOrganogramaEditavel(emp, eq, colabs));
-    box.appendChild(blocoCompatibilidade(compatDe(emp, colabs, eq.relacoes), colabs));
-    box.appendChild(blocoMapaEquipe(colabs));
-
-    // Relatórios da empresa e histórico
-    box.appendChild(el('div', { classe: 'proc-grade emp-rodape' }, [
-      blocoRelatoriosModelo({ empresaId: id }, 'e:' + id, { empresa: emp.nome }),
-      blocoHistorico2(eq)
-    ]));
+    var painel = el('div', { classe: 'emp-painel', id: 'emp-painel-' + sub, 'data-subaba': sub });
+    box.appendChild(painel);
+    if (sub === 'organograma') {
+      var blocoOrg = blocoOrganograma(emp, eq, colabs);
+      painel.appendChild(blocoOrg);
+      if (blocoOrg.montar) blocoOrg.montar();
+    } else if (sub === 'compatibilidade') {
+      painel.appendChild(blocoCompatibilidade(compatDe(emp, colabs, eq.relacoes), colabs));
+      painel.appendChild(blocoMapaEquipe(colabs));
+    } else if (sub === 'relatorios') {
+      painel.appendChild(el('section', { classe: 'caixa emp-bloco', id: 'emp-rel-gerar' }, [
+        el('h3', { classe: 'caixa__titulo', texto: 'Gerar um relatório desta empresa' }),
+        el('p', { classe: 'texto-suave t-rotulo', texto: 'Relatório da equipe (organograma, perfis e compatibilidade) aqui. Como liderar e relatório da pessoa ficam em cada colaborador, ou na aba Relatórios do painel.' }),
+        el('div', { classe: 'gestao-card__acoes' }, [
+          botao('botao--principal botao--pequeno', 'Relatório da equipe', function () { janelaRelatorioEquipe(emp, eq); }, { id: 'btn-emp-rel-equipe', disabled: colabs.length ? null : true }),
+          botao('botao--claro botao--pequeno', 'Ver todos os modelos', function () { irParaRelatorios('modelos'); }, { id: 'btn-emp-ver-modelos' })
+        ])
+      ]));
+      painel.appendChild(blocoRelatoriosModelo({ empresaId: id }, 'e:' + id, { empresa: emp.nome }));
+    } else if (sub === 'historico') {
+      painel.appendChild(blocoHistorico2(eq));
+    } else {
+      // Link do teste da equipe + colaboradores
+      painel.appendChild(el('section', { classe: 'caixa emp-bloco', id: 'emp-link' }, proc ? [
+        el('h3', { classe: 'caixa__titulo', texto: 'Link do teste da equipe' }),
+        el('p', { classe: 'form-secao__texto emp-link__texto', texto: textoEquipeEmpresa(emp.nome) }),
+        el('p', { classe: 'av-link', id: 'emp-link-teste', texto: linkTeste }),
+        el('div', { classe: 'gestao-card__acoes' }, [
+          botao('botao--claro botao--pequeno', 'Copiar link', function () { copiar(linkTeste, 'Link do teste copiado.'); }, { id: 'btn-copiar-link-equipe' }),
+          botao('botao--claro botao--pequeno', 'Copiar mensagem', function () { copiar(mensagemConvite(proc, linkTeste), 'Mensagem copiada. Cole no WhatsApp.'); }, { id: 'btn-copiar-msg-equipe' }),
+          botao('botao--claro botao--pequeno', 'Abrir o processo', function () { irParaProcessos('pagina', proc.id); })
+        ])
+      ] : [
+        el('h3', { classe: 'caixa__titulo', texto: 'Link do teste da equipe' }),
+        el('p', { classe: 'form-secao__texto emp-link__texto', texto: 'Ainda não há um processo de avaliação de equipe ligado a esta empresa. Crie um: ' + textoEquipeEmpresa(emp.nome) }),
+        el('div', { classe: 'gestao-card__acoes' }, botao('botao--contorno botao--pequeno', 'Criar link do teste da equipe', function () {
+          estado.proc = { tela: 'form', id: null, preset: { tipo: 'equipe', empresaId: id, empresa: emp.nome } };
+          renderizarProcessos(); mostrarAba('processos'); root.scrollTo(0, 0);
+        }, { id: 'btn-criar-link-equipe' }))
+      ]));
+      painel.appendChild(blocoColaboradores(emp, eq, colabs, id, proc, linkTeste));
+    }
   }
 
   function blocoColaboradores(emp, eq, colabs, id, proc, linkTeste) {
@@ -3935,9 +4154,9 @@
           el('div', { classe: 'gestao-card__acoes' }, [
             botao('botao--claro botao--pequeno', 'Ligações', function () { janelaLigacoes(emp, eq, c); }, { 'data-acao': 'ligacoes' }),
             botao('botao--claro botao--pequeno', 'Editar', function () { janelaEditarColaborador(emp, c); }, { 'data-acao': 'editar' }),
-            botao('botao--claro botao--pequeno', 'Mover', function () { janelaMover(emp, c); }, { 'data-acao': 'mover' }),
+            botao('botao--claro botao--pequeno', 'Mover para outra empresa', function () { janelaMover(emp, c); }, { 'data-acao': 'mover' }),
             botao('botao--claro botao--pequeno', 'Como liderar', function () { gerarLideranca(emp, eq, c); }, { 'data-acao': 'como-liderar', disabled: res ? null : true, title: res ? null : 'Precisa do teste DISC' }),
-            botao('botao--claro botao--pequeno', 'Relatório da pessoa', function () { gerarPessoa(c.pessoaId, c.nome, res, { aba: 'empresas', tela: 'pagina', id: id }, id, c.exigido || null, c.foto); }, { 'data-acao': 'relatorio-pessoa', disabled: res ? null : true }),
+            botao('botao--claro botao--pequeno', 'Relatório da pessoa', function () { gerarPessoa(c.pessoaId, c.nome, res, { aba: 'empresas', tela: 'pagina', id: id, subaba: 'colaboradores' }, id, c.exigido || null, c.foto); }, { 'data-acao': 'relatorio-pessoa', disabled: res ? null : true }),
             botao('botao--perigo botao--pequeno', 'Desligar', function () { desligar(emp, c); }, { 'data-acao': 'desligar' })
           ])
         ]);
@@ -3997,271 +4216,111 @@
     ]);
   }
 
-  /* ----- Organograma de arrastar ----- */
-  // Soltar SOBRE um cartão = passa a ser liderado dele; na área "Topo" = sem líder; em "Sem posição" = tira as relações 'lidera'.
-  // Pointer events (mouse e toque pela alça), fantasma do cartão, realce do alvo, rolagem perto das bordas e "Mover para…"
-  // (lista com busca, por teclado). Salva com salvarRelacoes depois de ~600 ms sem mexer.
+  /* ----- Organograma (componente DISC_ORGANOGRAMA: árvore com linhas, arrastar da coluna "Sem posição") ----- */
+  // Cada mudança chega em aoMudar(relacoes, mudanca); salva com salvarRelacoes(token, empresaId, relacoes, {topoIds})
+  // depois de ~500 ms sem mexer e mostra "Salvando…" / "Salvo". O "Topo" fica no banco (empresas.organograma).
 
-  var org = { timer: null, arrasto: null, pendente: null };
+  var org = { inst: null, timer: null, pendente: null };
 
-  function chaveTopo(eid) { return 'disc_admin_org_topo:' + eid; }
-  function lerTopo(eid) {
-    try { var o = JSON.parse(ls('get', chaveTopo(eid)) || '{}'); return o && typeof o === 'object' ? o : {}; } catch (e) { return {}; }
+  function destruirOrganograma() {
+    if (org.inst && typeof org.inst.destruir === 'function') { try { org.inst.destruir(); } catch (e) { /* ignora */ } }
+    org.inst = null;
   }
-  function gravarTopo(eid, t) { ls('set', chaveTopo(eid), JSON.stringify(t)); }
 
-  function cartaoOrg(c, emp, eq, colabs) {
-    var res = c.resultado && c.resultado.percentuais ? c.resultado : null;
-    var primario = res && res.codigo ? String(res.codigo).charAt(0) : '';
-    var pid = String(c.pessoaId);
-    var cartao = el('div', { classe: 'orgd-cartao', 'data-pessoa': pid, 'data-org-alvo': 'pessoa', 'data-nome': c.nome }, [
-      el('span', { classe: 'orgd-alca', 'aria-hidden': 'true', title: 'Arraste para mudar a posição' }, icone('M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01', 'orgd-alca__icone')),
-      avatar(c.nome, c.foto, { letra: primario, classe: 'orgd-avatar' }),
-      el('span', { classe: 'orgd-texto' }, [
-        el('span', { classe: 'orgd-nome seminegrito', texto: c.nome }),
-        el('span', { classe: 'orgd-cargo', texto: [c.cargo, res ? res.codigo : 'sem teste'].filter(Boolean).join(' · ') })
+  function pessoasDoOrganograma(colabs) {
+    return colabs.map(function (c) {
+      var res = c.resultado && c.resultado.percentuais ? c.resultado : null;
+      var p = { id: String(c.pessoaId), nome: c.nome, cargo: c.cargo || '', semTeste: !res };
+      if (fotoValida(c.foto)) p.foto = c.foto;
+      if (res) { p.codigo = res.codigo; p.combinacao = nomeCombinacao(res.codigo) || ''; }
+      return p;
+    });
+  }
+
+  function blocoOrganograma(emp, eq, colabs) {
+    var status = el('span', { classe: 't-rotulo texto-suave org-status', id: 'emp-org-status', 'aria-live': 'polite' });
+    var aviso = el('p', { classe: 'aviso aviso--erro org-aviso', id: 'emp-org-aviso', role: 'alert', hidden: true });
+    var quadro = el('div', { classe: 'org-quadro', id: 'emp-org-quadro' });
+    var sec = el('section', { classe: 'caixa caixa--ampla emp-bloco emp-org', id: 'emp-organograma' }, [
+      el('div', { classe: 'org-cabeca' }, [
+        el('div', null, [
+          el('h3', { classe: 'caixa__titulo', texto: 'Organograma' }),
+          el('p', { classe: 'texto-suave t-rotulo org-dica', texto: 'Arraste uma pessoa da coluna "Sem posição" e solte sobre o líder dela. Solte na faixa "Topo" para quem não tem líder. Salva sozinho.' })
+        ]),
+        status
       ]),
-      el('button', { type: 'button', classe: 'orgd-mover', 'data-acao': 'mover-org', 'aria-label': 'Mover ' + c.nome + ' para…', title: 'Mover para…',
-        onclick: function () { janelaMoverOrg(emp, eq, colabs, pid); } }, [icone('M5 12h14M13 6l6 6-6 6', 'orgd-mover__icone'), el('span', { classe: 'orgd-mover__texto', texto: 'Mover para…' })])
+      aviso,
+      quadro
     ]);
-    cartao.addEventListener('pointerdown', function (e) { iniciarArrasto(e, cartao, emp, eq, colabs); });
-    return cartao;
-  }
-
-  function blocoOrganogramaEditavel(emp, eq, colabs) {
-    var sec = el('section', { classe: 'caixa caixa--ampla emp-bloco', id: 'emp-organograma' }, [
-      el('div', { classe: 'orgd-cabeca' }, [
-        el('h3', { classe: 'caixa__titulo', texto: 'Organograma' }),
-        el('span', { classe: 't-nota texto-suave orgd-status', id: 'emp-org-status', 'aria-live': 'polite' })
-      ])
-    ]);
-    if (!colabs.length) { sec.appendChild(el('p', { classe: 'texto-suave t-rotulo', texto: 'Adicione colaboradores para montar o organograma.' })); return sec; }
-    sec.appendChild(el('p', { classe: 'texto-suave t-rotulo emp-dica', texto: 'Arraste um cartão e solte sobre outro: ele passa a ser liderado por essa pessoa. Solte no Topo para ficar sem líder. No celular, arraste pela alça ⋮⋮ ou toque em "Mover para…".' }));
-    sec.appendChild(el('p', { classe: 'aviso aviso--erro orgd-aviso', id: 'emp-org-aviso', role: 'alert', hidden: true }));
-    sec.appendChild(el('div', { classe: 'orgd', id: 'emp-org-editor' }, desenhoOrg(emp, eq, colabs)));
+    var O = root.DISC_ORGANOGRAMA;
+    if (!O || typeof O.montar !== 'function') {
+      quadro.appendChild(el('p', { classe: 'texto-suave t-rotulo', id: 'emp-org-indisponivel', texto: 'Organograma indisponível (js/organograma.js não carregou). Use "Ligações" em cada colaborador.' }));
+      return sec;
+    }
+    if (!colabs.length) {
+      quadro.appendChild(el('p', { classe: 'texto-suave t-rotulo', texto: 'Adicione colaboradores para montar o organograma.' }));
+      return sec;
+    }
+    // Monta depois de entrar na página (o componente mede o quadro).
+    sec.montar = function () {
+      destruirOrganograma();
+      try {
+        org.inst = O.montar(quadro, {
+          pessoas: pessoasDoOrganograma(colabs),
+          relacoes: (eq.relacoes || []).slice(),
+          topoIds: (eq.topoIds || []).slice(),
+          semPosicaoIds: (eq.semPosicaoIds || []).slice(),
+          modo: 'editar',
+          aoMudar: function (relacoes, mudanca) { mudouOrganograma(emp, eq, relacoes, mudanca); },
+          aoAbrirPessoa: function (id) {
+            var c = colabs.filter(function (x) { return String(x.pessoaId) === String(id); })[0];
+            if (c) janelaLigacoes(emp, eq, c);
+          }
+        });
+        var inst = org.inst;
+        if (inst && typeof inst.ajustar === 'function' && root.requestAnimationFrame) {
+          root.requestAnimationFrame(function () { if (org.inst === inst && document.body.contains(quadro)) inst.ajustar(); });
+        }
+      } catch (e) {
+        limpar(quadro);
+        quadro.appendChild(el('p', { classe: 'aviso aviso--erro', texto: 'Não foi possível desenhar o organograma: ' + ((e && e.message) || 'erro') }));
+      }
+    };
     return sec;
   }
 
-  function desenhoOrg(emp, eq, colabs) {
-    var porId = {};
-    colabs.forEach(function (c) { porId[String(c.pessoaId)] = c; });
-    var pos = posicoesOrganograma(colabs.map(function (c) { return String(c.pessoaId); }), eq.relacoes, lerTopo(emp.id));
-    function no(pid, nivel) {
-      var filhos = pos.filhos[pid] || [];
-      return el('li', { classe: 'orgd-no', 'data-pessoa': pid }, [
-        cartaoOrg(porId[pid], emp, eq, colabs),
-        filhos.length && nivel < 30 ? el('ul', { classe: 'orgd-filhos' }, filhos.filter(function (f) { return porId[f]; }).map(function (f) { return no(f, nivel + 1); })) : null
-      ]);
+  function mudouOrganograma(emp, eq, relacoes, mudanca) {
+    var aviso = $('emp-org-aviso');
+    if (mudanca && mudanca.erro) {
+      if (aviso) { aviso.textContent = mudanca.erro; aviso.hidden = false; }
+      return;
     }
-    return [
-      el('div', { classe: 'orgd-sem', id: 'emp-org-sem', 'data-org-alvo': 'sem' }, [
-        el('p', { classe: 'orgd-zona__titulo' }, [el('span', { classe: 'seminegrito', texto: 'Sem posição' }), el('span', { classe: 'texto-suave tabular', id: 'emp-org-sem-n', texto: ' (' + pos.sem.length + ')' })]),
-        pos.sem.length ? el('ul', { classe: 'orgd-sem__lista' }, pos.sem.map(function (pid) { return el('li', { 'data-pessoa': pid }, cartaoOrg(porId[pid], emp, eq, colabs)); }))
-          : el('p', { classe: 't-nota texto-suave', texto: 'Todos já têm posição. Solte um cartão aqui para tirá-lo do organograma.' })
-      ]),
-      el('div', { classe: 'orgd-palco' }, [
-        el('div', { classe: 'orgd-topo', id: 'emp-org-topo', 'data-org-alvo': 'topo' }, [
-          el('span', { classe: 'seminegrito', texto: 'Topo' }), el('span', { classe: 't-nota texto-suave', texto: ' · solte aqui para ficar sem líder' })
-        ]),
-        pos.raizes.length ? el('ul', { classe: 'orgd-arvore', id: 'emp-org-arvore' }, pos.raizes.map(function (r) { return no(r, 0); }))
-          : el('p', { classe: 't-rotulo texto-suave orgd-vazio', texto: 'Ninguém posicionado ainda: arraste alguém para o Topo e depois os liderados sobre ele.' })
-      ])
-    ];
-  }
-
-  // Redesenha só o editor, com animação FLIP (cada cartão desliza da posição antiga para a nova).
-  function redesenharOrg(emp, eq, colabs) {
-    var box = $('emp-org-editor');
-    if (!box) return;
-    var antes = {};
-    Array.prototype.forEach.call(box.querySelectorAll('.orgd-cartao'), function (n) { antes[n.getAttribute('data-pessoa')] = n.getBoundingClientRect(); });
-    limpar(box);
-    adicionar(box, desenhoOrg(emp, eq, colabs));
-    var calmo = root.matchMedia && root.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (calmo) return;
-    Array.prototype.forEach.call(box.querySelectorAll('.orgd-cartao'), function (n) {
-      var a = antes[n.getAttribute('data-pessoa')];
-      if (!a) return;
-      var b = n.getBoundingClientRect();
-      var dx = a.left - b.left, dy = a.top - b.top;
-      if (!dx && !dy) return;
-      n.style.transition = 'none';
-      n.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
-      n.getBoundingClientRect();
-      n.style.transition = 'transform .32s var(--curva)';
-      n.style.transform = '';
-      var limpo = false;
-      var fim = function () { if (limpo) return; limpo = true; n.style.transition = ''; n.removeEventListener('transitionend', fim); };
-      n.addEventListener('transitionend', fim);
-      setTimeout(fim, 450);
-    });
-  }
-
-  function avisoOrg(msg) {
-    var a = $('emp-org-aviso');
-    if (a) { a.textContent = msg || ''; a.hidden = !msg; }
-  }
-
-  function moverOrg(emp, eq, colabs, pid, destino) {
-    var r = moverNoOrganograma(eq.relacoes, pid, destino, nomePorId(colabs));
-    if (r.erro) { avisoOrg(r.erro); return false; }
-    avisoOrg('');
-    var topo = lerTopo(emp.id);
-    var antigos = lideradosDe(eq.relacoes, pid);
-    if (destino.tipo === 'topo') topo[pid] = true;
-    else delete topo[pid];
-    // Quem perdeu o líder ao tirar alguém do organograma continua posicionado (vai para o Topo, nada some).
-    if (destino.tipo === 'sem') antigos.forEach(function (x) { topo[x] = true; });
-    gravarTopo(emp.id, topo);
-    eq.relacoes = r.relacoes;
-    redesenharOrg(emp, eq, colabs);
-    agendarSalvarOrg(emp, eq, colabs);
-    return true;
-  }
-
-  function agendarSalvarOrg(emp, eq, colabs) {
+    if (aviso) aviso.hidden = true;
+    eq.relacoes = (relacoes || []).map(function (r) { return { de: String(r.de), para: String(r.para), tipo: r.tipo }; });
+    if (mudanca && Array.isArray(mudanca.topoIds)) eq.topoIds = mudanca.topoIds.map(String);
+    if (mudanca && Array.isArray(mudanca.semPosicaoIds)) eq.semPosicaoIds = mudanca.semPosicaoIds.map(String);
+    estado.emp.indice = null;
     var st = $('emp-org-status');
     if (st) st.textContent = 'Salvando…';
+    org.pendente = { emp: emp, eq: eq };
     clearTimeout(org.timer);
-    org.timer = setTimeout(function () {
-      org.timer = null;
-      var rels = eq.relacoes.slice();
-      api('salvarRelacoes', emp.id, rels).then(function () {
-        var s2 = $('emp-org-status');
-        if (s2) s2.textContent = 'Salvo';
-        if (org.arrasto) { org.pendente = function () { atualizarDepoisOrg(emp, eq, colabs); }; return; }
-        atualizarDepoisOrg(emp, eq, colabs);
-      }).catch(function (e) {
-        var s3 = $('emp-org-status');
-        if (s3) s3.textContent = 'Não salvo';
-        falhou(e);
-      });
-    }, 600);
+    org.timer = setTimeout(salvarOrganograma, 500);
   }
 
-  // Depois de salvar: atualiza a compatibilidade e os cartões dos colaboradores (líder de cada um) sem redesenhar a página.
-  function atualizarDepoisOrg(emp, eq, colabs) {
-    if (estado.emp.tela !== 'pagina' || estado.emp.id !== emp.id) return;
-    var velhoC = $('emp-compat');
-    if (velhoC) velhoC.parentNode.replaceChild(blocoCompatibilidade(compatDe(emp, colabs, eq.relacoes), colabs), velhoC);
-    var velhoL = $('emp-colaboradores');
-    var proc = processoEquipeDa(emp.id);
-    if (velhoL) velhoL.parentNode.replaceChild(blocoColaboradores(emp, eq, colabs, emp.id, proc, proc ? linkDe(proc) : ''), velhoL);
-    estado.emp.indice = null;
-  }
-
-  function janelaMoverOrg(emp, eq, colabs, pid) {
-    var c = colabs.filter(function (x) { return String(x.pessoaId) === pid; })[0];
-    if (!c) return;
-    var proibidos = {};
-    proibidos[pid] = true;
-    descendentes(eq.relacoes, pid).forEach(function (x) { proibidos[x] = true; });
-    var lider = liderDe(eq.relacoes, pid);
-    var opcoes = [{ valor: '__topo', rotulo: 'Topo (sem líder)' }, { valor: '__sem', rotulo: 'Sem posição' }].concat(
-      colabs.filter(function (x) { return !proibidos[String(x.pessoaId)]; }).map(function (x) {
-        return { valor: String(x.pessoaId), rotulo: x.nome, sub: ['liderado(a) por ' + x.nome.split(/\s+/)[0], x.cargo].filter(Boolean).join(' · ') };
-      }));
-    var esc = criarSeletorBusca({ id: 'org-destino', rotulo: 'Para onde', rotuloId: 'org-destino-rotulo', vazio: 'Escolher', opcoes: opcoes, valor: '' });
-    abrirJanela({
-      id: 'janela-mover-org',
-      titulo: 'Mover ' + c.nome + ' para…',
-      texto: 'Escolha o novo líder (a pessoa passa a ser liderada por ele), o Topo (sem líder) ou "Sem posição". Hoje: ' +
-        (lider ? 'liderado(a) por ' + (nomePorId(colabs)[lider] || 'alguém') : 'sem líder') + '.',
-      corpo: [campoEscolha('Para onde', esc, 'org-destino-rotulo')],
-      botao: 'Mover',
-      aoConfirmar: function () {
-        var v = esc.valor();
-        if (!v) throw new Error('Escolha para onde mover.');
-        var destino = v === '__topo' ? { tipo: 'topo' } : v === '__sem' ? { tipo: 'sem' } : { tipo: 'lider', id: v };
-        var r = moverNoOrganograma(eq.relacoes, pid, destino, nomePorId(colabs));
-        if (r.erro) throw new Error(r.erro);
-        moverOrg(emp, eq, colabs, pid, destino);
-      }
+  function salvarOrganograma() {
+    var p = org.pendente;
+    org.pendente = null;
+    if (!p) return;
+    var rels = p.eq.relacoes.slice();
+    api('salvarRelacoes', p.emp.id, rels, { topoIds: (p.eq.topoIds || []).slice() }).then(function () {
+      if (org.pendente) return; // mudou de novo enquanto salvava: o próximo salvamento atualiza o status
+      var st = $('emp-org-status');
+      if (st) st.textContent = 'Salvo';
+    }).catch(function (e) {
+      var st = $('emp-org-status');
+      if (st) st.textContent = 'Não salvou';
+      falhou(e);
     });
-  }
-
-  function alvoOrgEm(x, y, origem) {
-    var n = document.elementFromPoint(x, y);
-    var alvo = n && n.closest ? n.closest('[data-org-alvo]') : null;
-    if (!alvo || !$('emp-org-editor') || !$('emp-org-editor').contains(alvo)) return null;
-    if (alvo === origem) return null;
-    return alvo;
-  }
-
-  function iniciarArrasto(e, cartao, emp, eq, colabs) {
-    if (e.button !== 0 && e.pointerType === 'mouse') return;
-    if (e.target.closest('button')) return;
-    var porToque = e.pointerType !== 'mouse';
-    if (porToque && !e.target.closest('.orgd-alca')) return;   // no toque, só pela alça: o resto do cartão rola a página
-    var pid = cartao.getAttribute('data-pessoa');
-    var r0 = cartao.getBoundingClientRect();
-    var a = { pid: pid, x0: e.clientX, y0: e.clientY, dx: e.clientX - r0.left, dy: e.clientY - r0.top, ativo: false, fantasma: null, alvo: null, x: e.clientX, y: e.clientY, raf: 0 };
-    var proibidos = {};
-    descendentes(eq.relacoes, pid).forEach(function (x) { proibidos[x] = true; });
-    if (porToque) e.preventDefault();
-
-    function marcar(alvo) {
-      if (a.alvo === alvo) return;
-      if (a.alvo) a.alvo.classList.remove('orgd-alvo--ativo', 'orgd-alvo--proibido');
-      a.alvo = alvo;
-      if (alvo) alvo.classList.add(alvo.getAttribute('data-org-alvo') === 'pessoa' && proibidos[alvo.getAttribute('data-pessoa')] ? 'orgd-alvo--proibido' : 'orgd-alvo--ativo');
-    }
-    function rolar() {
-      if (!a.ativo) return;
-      var m = 64, h = root.innerHeight, v = 0;
-      if (a.y < m) v = -Math.ceil((m - a.y) / 4); else if (a.y > h - m) v = Math.ceil((a.y - (h - m)) / 4);
-      if (v) { root.scrollBy(0, v); marcar(alvoOrgEm(a.x, a.y, cartao)); }
-      a.raf = root.requestAnimationFrame(rolar);
-    }
-    function mover(ev) {
-      if (ev.pointerId !== e.pointerId) return;
-      a.x = ev.clientX; a.y = ev.clientY;
-      if (!a.ativo) {
-        if (Math.abs(a.x - a.x0) + Math.abs(a.y - a.y0) < 6) return;
-        a.ativo = true;
-        org.arrasto = a;
-        a.fantasma = cartao.cloneNode(true);
-        a.fantasma.classList.add('orgd-fantasma');
-        a.fantasma.removeAttribute('data-org-alvo');
-        a.fantasma.style.width = r0.width + 'px';
-        document.body.appendChild(a.fantasma);
-        cartao.classList.add('orgd-cartao--origem');
-        document.body.classList.add('org-arrastando');
-        a.raf = root.requestAnimationFrame(rolar);
-      }
-      ev.preventDefault();
-      a.fantasma.style.transform = 'translate(' + (a.x - a.dx) + 'px,' + (a.y - a.dy) + 'px)';
-      marcar(alvoOrgEm(a.x, a.y, cartao));
-    }
-    function fim(ev, cancelado) {
-      if (ev.pointerId !== e.pointerId) return;
-      document.removeEventListener('pointermove', mover);
-      document.removeEventListener('pointerup', solta);
-      document.removeEventListener('pointercancel', cancela);
-      if (!a.ativo) {
-        // Toque/clique sem arrastar: abre "Mover para…"
-        if (!cancelado) janelaMoverOrg(emp, eq, colabs, pid);
-        return;
-      }
-      root.cancelAnimationFrame(a.raf);
-      var alvo = cancelado ? null : alvoOrgEm(ev.clientX, ev.clientY, cartao);
-      marcar(null);
-      if (a.fantasma) a.fantasma.remove();
-      cartao.classList.remove('orgd-cartao--origem');
-      document.body.classList.remove('org-arrastando');
-      org.arrasto = null;
-      if (alvo) {
-        var tipo = alvo.getAttribute('data-org-alvo');
-        var destino = tipo === 'pessoa' ? { tipo: 'lider', id: alvo.getAttribute('data-pessoa') } : { tipo: tipo };
-        moverOrg(emp, eq, colabs, pid, destino);
-      }
-      if (org.pendente) { var f = org.pendente; org.pendente = null; f(); }
-    }
-    function solta(ev) { fim(ev, false); }
-    function cancela(ev) { fim(ev, true); }
-    document.addEventListener('pointermove', mover, { passive: false });
-    document.addEventListener('pointerup', solta);
-    document.addEventListener('pointercancel', cancela);
   }
 
   var NIVEIS_PAR = { fluido: 'Fluido', atencao: 'Atenção', tensao: 'Tensão', indefinido: 'Sem teste' };
@@ -4446,11 +4505,19 @@
     return M;
   }
 
+  // O relatório aberto mora na aba de onde veio: Relatórios (assistente) ou Empresas (página da empresa / detalhe).
   function abrirRelatorioModelo(rel) {
     rel.id = null; rel.token = ''; rel.status = 'novo'; rel.url = '';
+    if (rel.volta && rel.volta.aba === 'relatorios') {
+      estado.rl.rel = rel;
+      irParaRelatorios('relatorio');
+      return;
+    }
     estado.emp.rel = rel;
     irParaEmpresas('relatorio', null);
   }
+  function relAtual() { return estado.aba === 'relatorios' ? estado.rl.rel : estado.emp.rel; }
+  function redesenharRel() { if (estado.aba === 'relatorios') renderizarRelatorios(); else renderizarEmpresas(); }
 
   function janelaRelatorioEquipe(emp, eq) {
     var colabs = eq.colaboradores.filter(function (c) { return c.status !== 'desligado'; });
@@ -4488,19 +4555,19 @@
         var dados = modelos().equipe({ empresa: { nome: emp.nome, cidade: emp.cidade || '' }, colaboradores: colabs, relacoes: eq.relacoes,
           consultor: consultorAtual(), foco: foco || undefined });
         abrirRelatorioModelo({ modelo: 'equipe', empresaId: emp.id, pessoaId: null, dados: dados, ctx: { empresa: emp.nome },
-          volta: { aba: 'empresas', tela: 'pagina', id: emp.id } });
+          volta: { aba: 'empresas', tela: 'pagina', id: emp.id, subaba: estado.emp.subaba } });
       }
     });
   }
 
-  function gerarLideranca(emp, eq, c) {
+  function gerarLideranca(emp, eq, c, volta) {
     try {
       var lig = ligacoesDe(eq.relacoes, c.pessoaId);
       var l = lig.lider ? eq.colaboradores.filter(function (x) { return String(x.pessoaId) === lig.lider; })[0] : null;
       var dados = modelos().lideranca({ pessoa: { nome: c.nome, cargo: c.cargo || '', resultado: c.resultado, exigido: c.exigido && pctValido(c.exigido.percentuais) ? c.exigido : undefined, foto: fotoValida(c.foto) ? c.foto : undefined },
         lider: l ? { nome: l.nome, resultado: l.resultado || null, foto: fotoValida(l.foto) ? l.foto : undefined } : null, empresa: { nome: emp.nome } });
       abrirRelatorioModelo({ modelo: 'lideranca', empresaId: emp.id, pessoaId: c.pessoaId, dados: dados, ctx: { empresa: emp.nome, pessoa: c.nome },
-        volta: { aba: 'empresas', tela: 'pagina', id: emp.id } });
+        volta: volta || { aba: 'empresas', tela: 'pagina', id: emp.id, subaba: estado.emp.subaba } });
     } catch (e) { falhou(e); }
   }
 
@@ -4528,8 +4595,11 @@
   function voltarDoRelatorio(rel) {
     var v = rel.volta || {};
     estado.emp.rel = null;
+    estado.rl.rel = null;
+    if (v.aba === 'relatorios') estado.rl.gerados = null;
     if (v.detalhe && acharRegistro(v.detalhe)) { estado.emp.tela = 'lista'; renderizarEmpresas(); mostrarAba('lista'); abrirDetalhe(v.detalhe); return; }
-    irParaEmpresas(v.tela || 'lista', v.id || null);
+    if (v.aba === 'relatorios') { irParaRelatorios(v.tela || 'gerados'); return; }
+    irParaEmpresas(v.tela || 'lista', v.id || null, v.subaba);
   }
 
   function salvarRelModelo(rel, publicar) {
@@ -4556,7 +4626,7 @@
       btnRasc.disabled = true;
       salvarRelModelo(rel, false).then(function () {
         avisar(publicado ? 'O relatório voltou a ser rascunho: o link não abre mais.' : 'Rascunho salvo.', 'ok');
-        renderizarEmpresas();
+        redesenharRel();
       }).catch(function (e) { falhou(e); btnRasc.disabled = false; });
     }, { id: 'btn-rel-rascunho' });
     acoes.push(btnRasc);
@@ -4565,7 +4635,7 @@
         btnPub.disabled = true;
         salvarRelModelo(rel, true).then(function () {
           avisar('Relatório publicado. Copie o link e envie.', 'ok');
-          renderizarEmpresas();
+          redesenharRel();
         }).catch(function (e) { falhou(e); btnPub.disabled = false; });
       }, { id: 'btn-rel-publicar' });
       acoes.push(btnPub);
@@ -4578,7 +4648,7 @@
       var variante = rel.variante === 'simples' ? 'simples' : 'completo';
       var trocar = function (v) {
         if (v === variante) return;
-        try { rel.dados = rel.gerar(v); rel.variante = v; renderizarEmpresas(); } catch (e) { falhou(e); }
+        try { rel.dados = rel.gerar(v); rel.variante = v; redesenharRel(); } catch (e) { falhou(e); }
       };
       box.appendChild(el('div', { classe: 'rel-variante', id: 'rel-variante' }, [
         el('span', { classe: 'campo__rotulo', id: 'rel-variante-rotulo', texto: 'Relatório da pessoa:' }),
@@ -4655,9 +4725,11 @@
               if (!ok) return;
               api('excluirRelatorioModelo', r.id).then(function () {
                 avisar('Relatório excluído.', 'ok');
-                if (estado.emp.rel && estado.emp.rel.id === r.id) { estado.emp.rel.id = null; estado.emp.rel.token = ''; estado.emp.rel.status = 'novo'; estado.emp.rel.url = ''; }
+                var atual = relAtual();
+                if (atual && atual.id === r.id) { atual.id = null; atual.token = ''; atual.status = 'novo'; atual.url = ''; }
+                estado.rl.gerados = null;
                 estado.emp.relatorios = {};
-                renderizarEmpresas();
+                redesenharRel();
               }).catch(falhou);
             });
           }, { 'data-acao': 'excluir' })
@@ -4710,6 +4782,370 @@
       nota,
       acoes
     ]);
+  }
+
+  /* ---------- Aba Relatórios: modelos (com exemplo), assistente e todos os gerados ---------- */
+
+  function novoEstadoRelatorios() {
+    return { tela: 'modelos', chave: '', exemplo: null, rel: null, gerados: null, erro: '', filtro: { modelo: '', empresa: '', status: '' }, alvo: {} };
+  }
+
+  function irParaRelatorios(tela, chave) {
+    if (tela === 'assistente') estado.rl.alvo = {};
+    estado.rl.tela = tela || 'modelos';
+    if (chave !== undefined) estado.rl.chave = chave;
+    renderizarRelatorios();
+    mostrarAba('relatorios');
+    root.scrollTo(0, 0);
+    var h = $('vista-relatorios').querySelector('h2');
+    if (h) { h.setAttribute('tabindex', '-1'); h.focus(); }
+  }
+
+  // Carrega um script do próprio site uma vez só (motor e exemplo do processo seletivo, só quando pedidos).
+  var scriptsCarregados = {};
+  function carregarScript(arquivo, global) {
+    if (root[global]) return Promise.resolve(root[global]);
+    if (!scriptsCarregados[arquivo]) {
+      scriptsCarregados[arquivo] = new Promise(function (resolve, reject) {
+        var s = document.createElement('script');
+        s.src = 'js/' + arquivo;
+        s.onload = function () { if (root[global]) resolve(root[global]); else reject(new Error('Não foi possível carregar ' + arquivo + '.')); };
+        s.onerror = function () { delete scriptsCarregados[arquivo]; reject(new Error('Não foi possível carregar ' + arquivo + '.')); };
+        document.head.appendChild(s);
+      });
+    }
+    return scriptsCarregados[arquivo];
+  }
+
+  function dadosDoExemplo(chave) {
+    if (chave !== 'processo') return Promise.resolve().then(function () { return exemploModelo(chave, { modelos: modelos() }); });
+    return Promise.all([carregarScript('relatorio-motor.js', 'DISC_RELATORIO'), carregarScript('fixture-processo-exemplo.js', 'DISC_FIXTURE_PROCESSO')])
+      .then(function (r) { return exemploModelo('processo', { motor: r[0], fixture: r[1] }); });
+  }
+
+  function verExemplo(chave) {
+    estado.rl.chave = chave;
+    estado.rl.exemplo = null;
+    irParaRelatorios('exemplo');
+    dadosDoExemplo(chave).then(function (dados) {
+      if (estado.rl.tela !== 'exemplo' || estado.rl.chave !== chave) return;
+      estado.rl.exemplo = dados;
+      renderizarRelatorios();
+    }).catch(function (e) {
+      estado.rl.exemplo = { erro: (e && e.message) || 'Não foi possível montar o exemplo.' };
+      renderizarRelatorios();
+    });
+  }
+
+  // O modelo precisa do Supabase (ou da prévia) para ser salvo; o do processo usa o editor do processo (qualquer servidor).
+  function modeloDisponivel(m) { return m.modelo === 'processo' ? !!MODO_API : empresasOk(); }
+
+  function subabasRelatorios(atual) {
+    var itens = [{ id: 'modelos', rotulo: 'Modelos' }, { id: 'gerados', rotulo: 'Gerados' }];
+    return el('nav', { classe: 'subabas', id: 'rel-subabas', 'aria-label': 'Seções de relatórios' }, itens.map(function (s) {
+      return el('button', { type: 'button', classe: 'subaba', id: 'rel-subaba-' + s.id, 'data-subaba': s.id, 'aria-current': s.id === atual ? 'page' : null,
+        texto: s.rotulo, onclick: function () { irParaRelatorios(s.id); } });
+    }));
+  }
+
+  function passosAssistente(n) {
+    var nomes = ['Modelo', 'Para quem', 'Prévia e envio'];
+    return el('ol', { classe: 'passos-assist', id: 'assist-passos', 'aria-label': 'Passos' }, nomes.map(function (t, i) {
+      return el('li', { classe: 'passos-assist__item' + (i + 1 < n ? ' passos-assist__item--feito' : ''), 'aria-current': i + 1 === n ? 'step' : null }, [
+        el('span', { classe: 'passos-assist__num tabular', texto: String(i + 1) }), el('span', { texto: t })
+      ]);
+    }));
+  }
+
+  function renderizarRelatorios() {
+    var box = $('vista-relatorios');
+    if (!box) return;
+    limpar(box);
+    if (papel() !== 'admin') return;
+    var t = estado.rl.tela;
+    if (t === 'relatorio' && estado.rl.rel) {
+      box.appendChild(passosAssistente(3));
+      return renderizarRelatorioModelo(box, estado.rl.rel);
+    }
+    if (t === 'exemplo' && estado.rl.chave) return renderizarExemplo(box);
+    if (t === 'assistente') return renderizarAssistente(box);
+    if (t === 'gerados') return renderizarGerados(box);
+    estado.rl.tela = 'modelos';
+    renderizarModelos(box);
+  }
+
+  function renderizarModelos(box) {
+    box.appendChild(cabecalhoVista('Relatórios', 'Modelos de relatório',
+      'Os cinco relatórios que o sistema gera. Veja um exemplo com dados fictícios ou gere um de verdade.',
+      [botao('botao--laranja', 'Gerar relatório', function () { irParaRelatorios('assistente', ''); }, { id: 'btn-rel-novo' })]));
+    box.appendChild(subabasRelatorios('modelos'));
+    box.appendChild(el('ul', { classe: 'modelos-grade', id: 'lista-modelos' }, MODELOS_CATALOGO.map(function (m) {
+      var ok = modeloDisponivel(m);
+      return el('li', { classe: 'caixa modelo-card', id: 'modelo-' + m.chave, 'data-chave': m.chave }, [
+        el('p', { classe: 'sobretitulo', texto: m.modelo === 'processo' ? 'Seleção' : (m.modelo === 'equipe' ? 'Empresa' : 'Pessoa') }),
+        el('h3', { classe: 'modelo-card__titulo seminegrito', texto: m.titulo }),
+        el('dl', { classe: 'modelo-card__dl' }, [
+          el('div', null, [el('dt', { texto: 'Para quem é' }), el('dd', { texto: m.paraQuem })]),
+          el('div', null, [el('dt', { texto: 'O que responde' }), el('dd', { texto: m.responde })])
+        ]),
+        ok ? null : el('p', { classe: 't-nota texto-suave', texto: 'Gerar: disponível com o servidor Supabase.' }),
+        el('div', { classe: 'gestao-card__acoes modelo-card__acoes' }, [
+          botao('botao--claro botao--pequeno', 'Ver exemplo', function () { verExemplo(m.chave); }, { 'data-acao': 'ver-exemplo' }),
+          botao('botao--principal botao--pequeno', 'Gerar', function () { irParaRelatorios('assistente', m.chave); }, { 'data-acao': 'gerar', disabled: ok ? null : true })
+        ])
+      ]);
+    })));
+  }
+
+  function renderizarExemplo(box) {
+    var m = modeloDoCatalogo(estado.rl.chave);
+    var ok = modeloDisponivel(m);
+    box.appendChild(cabecalhoVista('Exemplo com dados fictícios', m.titulo, m.responde, [
+      botao('botao--claro', '← Modelos', function () { irParaRelatorios('modelos'); }, { id: 'btn-exemplo-voltar' }),
+      botao('botao--principal', 'Gerar este modelo', function () { irParaRelatorios('assistente', m.chave); }, { id: 'btn-exemplo-gerar', disabled: ok ? null : true })
+    ]));
+    var ex = estado.rl.exemplo;
+    if (!ex) { box.appendChild(el('p', { classe: 'texto-suave t-corpo', id: 'rel-exemplo-carregando', texto: 'Montando o exemplo…' })); return; }
+    if (ex.erro) { box.appendChild(el('p', { classe: 'aviso aviso--erro', id: 'rel-exemplo-erro', texto: ex.erro })); return; }
+    box.appendChild(el('p', { classe: 'aviso proc-aviso', texto: 'Exemplo com pessoas e empresa fictícias. É assim que quem recebe o relatório vai ver.' }));
+    box.appendChild(quadroPrevia('rel-exemplo-previa', 'Exemplo do relatório ' + m.titulo, ex));
+  }
+
+  function quadroPrevia(id, titulo, dados) {
+    var frame = el('iframe', { classe: 'previa-doc', id: id, title: titulo, sandbox: 'allow-same-origin', loading: 'eager' });
+    frame.addEventListener('load', function () {
+      try { var d = frame.contentDocument; if (d && d.documentElement) frame.style.height = Math.max(600, d.documentElement.scrollHeight) + 'px'; } catch (e) { /* altura padrão */ }
+    });
+    frame.srcdoc = documentoPrevia(dados);
+    return el('div', { classe: 'caixa caixa--compacta previa-moldura' }, frame);
+  }
+
+  /* ----- Assistente: modelo -> para quem -> prévia (tela do relatório) ----- */
+
+  function renderizarAssistente(box) {
+    var chave = estado.rl.chave;
+    var m = modeloDoCatalogo(chave);
+    box.appendChild(cabecalhoVista('Relatórios', 'Gerar relatório', 'Escolha o modelo e para quem é. Depois confira a prévia, salve e publique.',
+      [botao('botao--claro', '← Modelos', function () { irParaRelatorios('modelos'); }, { id: 'btn-assist-voltar' })]));
+    box.appendChild(passosAssistente(m ? 2 : 1));
+    var passo1 = el('section', { classe: 'caixa assist-passo', id: 'assist-passo-modelo' }, [
+      el('h3', { classe: 'caixa__titulo', texto: '1. Modelo' }),
+      el('div', { classe: 'assist-modelos', role: 'group', 'aria-label': 'Modelo do relatório' }, MODELOS_CATALOGO.map(function (x) {
+        var ok = modeloDisponivel(x);
+        return el('button', { type: 'button', classe: 'assist-modelo', id: 'assist-modelo-' + x.chave, 'data-chave': x.chave,
+          'aria-pressed': x.chave === chave ? 'true' : 'false', disabled: ok ? null : true, title: ok ? null : 'Disponível com o servidor Supabase',
+          onclick: function () { estado.rl.chave = x.chave; estado.rl.alvo = {}; renderizarRelatorios(); var b = $('assist-modelo-' + x.chave); if (b) b.focus(); } }, [
+          el('span', { classe: 'seminegrito', texto: x.titulo }),
+          el('span', { classe: 't-nota texto-suave', texto: x.paraQuem })
+        ]);
+      }))
+    ]);
+    box.appendChild(passo1);
+    if (!m) return;
+    var passo2 = el('section', { classe: 'caixa assist-passo', id: 'assist-passo-alvo' }, [el('h3', { classe: 'caixa__titulo', texto: '2. Para quem' })]);
+    box.appendChild(passo2);
+    var erro = el('p', { classe: 'campo__erro', id: 'assist-erro', role: 'alert' });
+    var btn = botao('botao--laranja', m.modelo === 'processo' ? 'Gerar rascunho do relatório' : 'Gerar prévia', null, { id: 'btn-assist-gerar' });
+    var gerar = montarAlvoAssistente(m, passo2);
+    btn.addEventListener('click', function () {
+      erro.textContent = '';
+      Promise.resolve().then(function () { return gerar(btn); }).catch(function (e) {
+        if (e && e.tratado) return;
+        erro.textContent = (e && e.message) || 'Não foi possível gerar.';
+      });
+    });
+    passo2.addEventListener('change', function () { erro.textContent = ''; });
+    passo2.appendChild(erro);
+    passo2.appendChild(el('div', { classe: 'gestao-card__acoes' }, btn));
+  }
+
+  // Desenha a escolha do passo 2 e devolve a função que gera (ou leva ao editor, no processo seletivo).
+  function montarAlvoAssistente(m, sec) {
+    var volta = { aba: 'relatorios', tela: 'gerados' };
+    if (m.alvo === 'pessoa') {
+      var pessoas = pessoasDasRespostas(estado.registros).filter(function (p) { return p.resultado; });
+      var escP = criarSeletorBusca({ id: 'assist-pessoa', rotulo: 'Pessoa', rotuloId: 'assist-pessoa-rotulo', vazio: 'Escolher a pessoa',
+        opcoes: pessoas.map(function (p) { return { valor: p.pessoaId, rotulo: p.nome || '(sem nome)', sub: [p.resultado.codigo, formatarTelefone(p.telefone)].filter(Boolean).join(' · ') }; }) });
+      sec.appendChild(campoEscolha('Pessoa que fez o teste', escP, 'assist-pessoa-rotulo'));
+      if (!pessoas.length) sec.appendChild(el('p', { classe: 'texto-suave t-rotulo', texto: 'Ninguém com o teste respondido ainda.' }));
+      return function () {
+        var p = pessoas.filter(function (x) { return x.pessoaId === escP.valor(); })[0];
+        if (!p) throw new Error('Escolha a pessoa.');
+        var r = acharRegistro(p.registroId) || {};
+        var nome = p.nome, res = p.resultado, exi = exigidoDoRegistro(r), foto = fotoDe(r);
+        var dados = dadosPessoa(m.variante, nome, res, exi, foto);
+        abrirRelatorioModelo({ modelo: 'pessoa', empresaId: null, pessoaId: p.pessoaId, dados: dados, ctx: { pessoa: nome }, volta: volta,
+          variante: m.variante, gerar: function (v) { return dadosPessoa(v, nome, res, exi, foto); } });
+      };
+    }
+    if (m.alvo === 'processo') {
+      var procs = estado.processos.filter(function (p) { return p.tipo !== 'equipe'; });
+      var escProc = criarSeletorBusca({ id: 'assist-processo', rotulo: 'Processo seletivo', rotuloId: 'assist-processo-rotulo', vazio: 'Escolher o processo',
+        opcoes: procs.map(function (p) { return { valor: p.id, rotulo: p.nome, sub: [empresaDe(p), p.codigo].filter(Boolean).join(' · ') }; }) });
+      sec.appendChild(campoEscolha('Processo seletivo', escProc, 'assist-processo-rotulo'));
+      sec.appendChild(el('p', { classe: 'texto-suave t-rotulo', texto: 'O relatório do processo lê os candidatos do ClickUp e abre no editor do processo, onde você revisa os textos e publica.' }));
+      return function (btn) {
+        var p = acharProcesso(escProc.valor());
+        if (!p) throw new Error('Escolha o processo seletivo.');
+        gerarRascunho(p, btn);
+      };
+    }
+    // Empresa (equipe) e colaborador (como liderar)
+    var empresas = (estado.emp.lista || []).filter(function (e) { return e.ativo !== false; });
+    var alvo = estado.rl.alvo;
+    var escEmp = criarSeletorBusca({ id: 'assist-empresa', rotulo: 'Empresa', rotuloId: 'assist-empresa-rotulo', vazio: 'Escolher a empresa', valor: alvo.empresaId || '',
+      opcoes: empresas.map(function (e) { return { valor: e.id, rotulo: e.nome, sub: [e.cidade, (Number(e.colaboradores) || 0) + ' colaboradores'].filter(Boolean).join(' · ') }; }) });
+    sec.appendChild(campoEscolha('Empresa', escEmp, 'assist-empresa-rotulo'));
+    var areaColab = el('div', { id: 'assist-colab-area' });
+    sec.appendChild(areaColab);
+    var escColab = null;
+    function desenharColabs() {
+      limpar(areaColab);
+      escColab = null;
+      if (m.alvo !== 'colaborador' || !alvo.empresaId) return;
+      var eq = estado.emp.equipes[alvo.empresaId];
+      if (!eq) {
+        areaColab.appendChild(el('p', { classe: 'texto-suave t-rotulo', texto: 'Carregando os colaboradores…' }));
+        carregarEquipe(alvo.empresaId).then(function () { if (document.body.contains(areaColab)) desenharColabs(); }).catch(falhou);
+        return;
+      }
+      var colabs = eq.colaboradores.filter(function (c) { return c.status !== 'desligado' && c.resultado && c.resultado.percentuais; });
+      escColab = criarSeletorBusca({ id: 'assist-colab', rotulo: 'Colaborador', rotuloId: 'assist-colab-rotulo', vazio: 'Escolher o colaborador',
+        opcoes: colabs.map(function (c) { return { valor: String(c.pessoaId), rotulo: c.nome, sub: [c.cargo, c.resultado.codigo].filter(Boolean).join(' · ') }; }) });
+      areaColab.appendChild(campoEscolha('Colaborador (com o teste feito)', escColab, 'assist-colab-rotulo'));
+      if (!colabs.length) areaColab.appendChild(el('p', { classe: 'texto-suave t-rotulo', texto: 'Nenhum colaborador desta empresa fez o teste ainda.' }));
+    }
+    escEmp.aoMudar(function () { alvo.empresaId = escEmp.valor(); desenharColabs(); });
+    desenharColabs();
+    return function () {
+      var emp = acharEmpresa(escEmp.valor());
+      if (!emp) throw new Error('Escolha a empresa.');
+      var eqP = estado.emp.equipes[emp.id] ? Promise.resolve(estado.emp.equipes[emp.id]) : carregarEquipe(emp.id);
+      return eqP.then(function (eq) {
+        var colabs = eq.colaboradores.filter(function (c) { return c.status !== 'desligado'; });
+        if (m.alvo === 'colaborador') {
+          var c = escColab ? colabs.filter(function (x) { return String(x.pessoaId) === escColab.valor(); })[0] : null;
+          if (!c) throw new Error('Escolha o colaborador.');
+          gerarLideranca(emp, eq, c, volta);
+          return;
+        }
+        if (!colabs.length) throw new Error('Esta empresa ainda não tem colaboradores.');
+        var dados = modelos().equipe({ empresa: { nome: emp.nome, cidade: emp.cidade || '' }, colaboradores: colabs, relacoes: eq.relacoes, consultor: consultorAtual() });
+        abrirRelatorioModelo({ modelo: 'equipe', empresaId: emp.id, pessoaId: null, dados: dados, ctx: { empresa: emp.nome }, volta: volta });
+      });
+    };
+  }
+
+  /* ----- Gerados: todos os relatórios (modelos e processos) com filtro ----- */
+
+  function carregarGerados() {
+    var pedidos = [
+      empresasOk() ? api('listarRelatoriosModelo', {}).then(function (r) { return r.relatorios || []; }) : Promise.resolve([]),
+      api('relatoriosListar').then(function (r) { return r.relatorios || []; }),
+      empresasOk() && !estado.emp.lista ? carregarEmpresas() : Promise.resolve()
+    ];
+    return Promise.all(pedidos).then(function (rs) {
+      var empresas = {}, procs = {};
+      (estado.emp.lista || []).forEach(function (e) { empresas[e.id] = e.nome; });
+      estado.processos.forEach(function (p) { procs[p.id] = { nome: p.nome, empresa: empresaDe(p) }; });
+      estado.rl.gerados = juntarGerados(rs[0], rs[1], { empresas: empresas, processos: procs, href: root.location.href });
+      estado.rl.erro = '';
+    }).catch(function (e) {
+      if (e && e.tratado) return;
+      estado.rl.gerados = estado.rl.gerados || [];
+      estado.rl.erro = (e && e.message) || 'Não foi possível listar os relatórios.';
+    }).then(function () { if (estado.rl.tela === 'gerados') renderizarRelatorios(); });
+  }
+
+  function renderizarGerados(box) {
+    box.appendChild(cabecalhoVista('Relatórios', 'Relatórios gerados', 'Todos os relatórios: das pessoas, das equipes e dos processos seletivos.', [
+      botao('botao--claro', 'Atualizar', function () { estado.rl.gerados = null; renderizarRelatorios(); }, { id: 'btn-gerados-atualizar' }),
+      botao('botao--laranja', 'Gerar relatório', function () { irParaRelatorios('assistente', ''); }, { id: 'btn-rel-novo' })
+    ]));
+    box.appendChild(subabasRelatorios('gerados'));
+    if (estado.rl.erro) box.appendChild(el('p', { classe: 'aviso aviso--erro proc-aviso', id: 'gerados-erro', texto: estado.rl.erro }));
+    if (!estado.rl.gerados) {
+      box.appendChild(el('p', { classe: 'texto-suave t-corpo', texto: 'Carregando…' }));
+      carregarGerados();
+      return;
+    }
+    var f = estado.rl.filtro;
+    var todos = estado.rl.gerados;
+    var escModelo = criarEscolha({ id: 'filtro-rel-modelo', rotulo: 'Modelo', valor: f.modelo, prefixo: 'Modelo',
+      opcoes: [{ valor: '', rotulo: 'Todos' }].concat(['pessoa', 'lideranca', 'equipe', 'processo'].map(function (k) { return { valor: k, rotulo: NOMES_MODELO[k] }; })) });
+    var escStatus = criarEscolha({ id: 'filtro-rel-status', rotulo: 'Situação', valor: f.status, prefixo: 'Situação',
+      opcoes: [{ valor: '', rotulo: 'Todas' }, { valor: 'publicado', rotulo: 'Publicado' }, { valor: 'rascunho', rotulo: 'Rascunho' }] });
+    var nomesEmp = {};
+    todos.forEach(function (r) { if (r.empresa) nomesEmp[r.empresa] = true; });
+    (estado.emp.lista || []).forEach(function (e) { nomesEmp[e.nome] = true; });
+    var escEmp = criarSeletorBusca({ id: 'filtro-rel-empresa', rotulo: 'Empresa', vazio: 'Todas as empresas', valor: f.empresa,
+      opcoes: Object.keys(nomesEmp).sort(function (a, b) { return a.localeCompare(b, 'pt-BR'); }).map(function (n) { return { valor: n, rotulo: n }; }) });
+    box.appendChild(el('div', { classe: 'filtros__escolhas gerados-filtros', id: 'gerados-filtros' }, [escModelo.caixa, escStatus.caixa, escEmp.caixa]));
+    var contagem = el('p', { classe: 't-rotulo texto-suave', id: 'gerados-contagem', 'aria-live': 'polite' });
+    box.appendChild(contagem);
+    var ul = el('ul', { classe: 'gestao-lista gestao-lista--linhas gerados-lista', id: 'lista-gerados' });
+    box.appendChild(ul);
+    function desenhar() {
+      limpar(ul);
+      var itens = filtrarGerados(todos, f);
+      contagem.textContent = itens.length + ' de ' + todos.length + ' relatório' + (todos.length === 1 ? '' : 's');
+      if (!itens.length) {
+        ul.appendChild(el('li', { classe: 'caixa vazio' }, el('p', { classe: 'vazio__texto', texto: todos.length ? 'Nenhum relatório com esses filtros.' : 'Nenhum relatório gerado ainda. Use "Gerar relatório".' })));
+        return;
+      }
+      itens.forEach(function (r) { ul.appendChild(linhaGerado(r)); });
+    }
+    escModelo.botao.addEventListener('change', function () { f.modelo = escModelo.botao.value; desenhar(); });
+    escStatus.botao.addEventListener('change', function () { f.status = escStatus.botao.value; desenhar(); });
+    escEmp.aoMudar(function () { f.empresa = escEmp.valor(); desenhar(); });
+    desenhar();
+  }
+
+  function linhaGerado(r) {
+    var pub = r.status === 'publicado';
+    var msg = function () {
+      if (r.tipo === 'processo') { var p = acharProcesso(r.processoId); return mensagemRelatorio(p || {}, r.url); }
+      return mensagemRelatorioModelo(r.modelo, { empresa: r.empresa, consultor: consultorAtual() }, r.url);
+    };
+    return el('li', { classe: 'caixa gestao-card gerado', 'data-id': r.id, 'data-tipo': r.tipo, 'data-modelo': r.modelo, 'data-status': r.status, 'data-empresa': r.empresa }, [
+      el('div', { classe: 'gerado__texto' }, [
+        el('span', { classe: 'selo ' + (pub ? 'selo--verde' : ''), texto: pub ? 'Publicado' : 'Rascunho' }),
+        el('span', { classe: 'selo selo--noite', texto: NOMES_MODELO[r.modelo] || r.modelo }),
+        el('span', { classe: 'seminegrito gerado__titulo', texto: r.titulo }),
+        el('span', { classe: 'texto-suave t-rotulo', texto: [r.empresa, formatarData(r.data)].filter(function (x) { return x && x !== '—'; }).join(' · ') })
+      ]),
+      el('div', { classe: 'gestao-card__acoes' }, [
+        botao('botao--claro botao--pequeno', 'Abrir', function () { abrirGerado(r); }, { 'data-acao': 'abrir' }),
+        pub ? botao('botao--claro botao--pequeno', 'Copiar link', function () { copiar(r.url, 'Link do relatório copiado.'); }, { 'data-acao': 'copiar-link' }) : null,
+        pub ? botao('botao--claro botao--pequeno', 'Copiar mensagem', function () { copiar(msg(), 'Mensagem copiada. Cole no WhatsApp.'); }, { 'data-acao': 'copiar-mensagem' }) : null,
+        r.tipo === 'modelo' ? botao('botao--perigo botao--pequeno', 'Excluir', function () { excluirGerado(r); }, { 'data-acao': 'excluir' }) : null
+      ])
+    ]);
+  }
+
+  // Abrir: publicado abre o link; rascunho do processo vai para o editor; rascunho de modelo vai para onde ele nasceu.
+  function abrirGerado(r) {
+    if (r.tipo === 'processo') {
+      var p = acharProcesso(r.processoId);
+      if (p) { abrirRelatorio(p, { token: r.token, status: r.status }); return; }
+    }
+    if (r.status === 'publicado' && r.url) { root.open(r.url, '_blank', 'noopener'); return; }
+    if (r.empresaId) { irParaEmpresas('pagina', r.empresaId, 'relatorios'); return; }
+    var reg = estado.registros.filter(function (x) { return r.pessoaId && String(x.pessoaId) === String(r.pessoaId); })[0];
+    if (reg) { mostrarAba('lista'); abrirDetalhe(reg.id); return; }
+    avisar('Rascunho sem link: gere de novo e publique para abrir.', 'erro');
+  }
+
+  function excluirGerado(r) {
+    confirmar({ titulo: 'Excluir o relatório?', texto: '"' + r.titulo + '" sai da lista e o link deixa de abrir. Dá para gerar outro depois.', botao: 'Excluir relatório' }).then(function (ok) {
+      if (!ok) return;
+      api('excluirRelatorioModelo', r.relId).then(function () {
+        avisar('Relatório excluído.', 'ok');
+        estado.rl.gerados = (estado.rl.gerados || []).filter(function (x) { return x.id !== r.id; });
+        estado.emp.relatorios = {};
+        renderizarRelatorios();
+      }).catch(falhou);
+    });
   }
 
   /* ---------- Usuários (admin) ---------- */
@@ -4999,7 +5435,7 @@
   function renderizarTudo() {
     renderizarLista();
     renderizarComparativo();
-    if (MODO_API && papel() === 'admin') { renderizarProcessos(); renderizarEmpresas(); renderizarUsuarios(); }
+    if (MODO_API && papel() === 'admin') { renderizarProcessos(); renderizarEmpresas(); renderizarRelatorios(); renderizarUsuarios(); }
     if (estado.abertoId) renderizarDetalhe();
   }
 
@@ -5030,7 +5466,26 @@
     estado.listaMostrada = false;
     aplicarPapel();
     mostrarAba(MODO_API ? 'lista' : (lerLocais().length ? 'lista' : 'importar'));
+    verificarBanco();
     return carregar();
+  }
+
+  // Supabase: confere se todas as migrações foram aplicadas (versaoBanco). Faltando algo (ou sem a função no
+  // banco, que é sinal de banco antigo), mostra a faixa no topo do painel. A prévia simulada nunca mostra.
+  function verificarBanco() {
+    var faixa = $('faixa-banco');
+    if (!faixa) return;
+    faixa.hidden = true;
+    var fn = SUPABASE && !SIMULADA ? metodoApi('versaoBanco') : null;
+    if (!fn) return;
+    Promise.resolve().then(function () { return fn.call(root.DISC_API); })
+      .then(null, function (e) { return { ok: false, erro: (e && e.message) || '' }; })
+      .then(function (resp) {
+        var msg = mensagemBanco(resp);
+        if (!msg || !estado.token) return;
+        $('faixa-banco-texto').textContent = msg;
+        faixa.hidden = false;
+      });
   }
 
   function limparSessao() {
@@ -5046,9 +5501,12 @@
     estado.relatorios = {};
     estado.editor = null;
     estado.emp = novoEstadoEmpresas();
+    estado.rl = novoEstadoRelatorios();
     fecharMenuUsuario();
     clearTimeout(avisoTimer);
     $('aviso-geral').hidden = true;
+    if ($('faixa-banco')) $('faixa-banco').hidden = true;
+    destruirOrganograma();
     var j = $('janela'); if (j) j.remove();
     var c = $('confirmar'); if (c) c.remove();
   }
@@ -5151,6 +5609,7 @@
 
   function iniciar() {
     estado.emp = novoEstadoEmpresas();
+    estado.rl = novoEstadoRelatorios();
     if (CONFIG.EMPRESA) $('nome-empresa').textContent = '· ' + CONFIG.EMPRESA;
     $('modo-indicador').textContent = SIMULADA ? 'Prévia (dados de demonstração)'
       : (SUPABASE ? 'Conectado ao servidor' : (MODO_API ? 'Conectado à planilha' : 'Modo local (importar códigos)'));
@@ -5171,6 +5630,7 @@
         // A aba Processos sempre volta para a lista (o rascunho aberto continua guardado na memória).
         if (aba === 'processos' && estado.proc.tela !== 'lista') { estado.proc = { tela: 'lista', id: null }; renderizarProcessos(); }
         if (aba === 'empresas' && estado.emp.tela !== 'lista') { estado.emp.tela = 'lista'; estado.emp.id = null; renderizarEmpresas(); }
+        if (aba === 'relatorios' && estado.rl.tela !== 'modelos' && estado.rl.tela !== 'gerados') { estado.rl.tela = 'modelos'; estado.rl.rel = null; renderizarRelatorios(); }
         mostrarAba(aba);
       });
     });

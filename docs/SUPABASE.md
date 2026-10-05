@@ -68,13 +68,48 @@ São **dois valores públicos**: podem ficar no site sem problema, porque o banc
 5. Se aparecer o aviso **"Potential issue detected — Query has destructive operations"**, é normal: o arquivo recria gatilhos e regras (não apaga dados). Clique em **Run this query**.
 6. Embaixo, em **Results**, deve aparecer **"Success. No rows returned"**.
 
-7. Repita os passos 1 a 6 com o arquivo [`supabase/migrations/20261006120000_pessoas_formulario.sql`](../supabase/migrations/20261006120000_pessoas_formulario.sql) (formulário por processo e fichas de pessoas) e depois com [`supabase/migrations/20261007120000_empresas_equipes.sql`](../supabase/migrations/20261007120000_empresas_equipes.sql) (empresas, colaboradores, organograma e relatórios de equipe/liderança/pessoa) depois com [`supabase/migrations/20261008120000_parte2.sql`](../supabase/migrations/20261008120000_parte2.sql) (segunda parte do teste: perfil exigido pelo trabalho) e por último com [`supabase/migrations/20261009120000_fotos.sql`](../supabase/migrations/20261009120000_fotos.sql) (fotos do candidato, do colaborador e do usuário do painel). Sempre **nessa ordem**: `…_disc.sql`, `…_pessoas_formulario.sql`, `…_empresas_equipes.sql`, `…_parte2.sql`, `…_fotos.sql`.
+7. Repita os passos 1 a 6 com o arquivo [`supabase/migrations/20261006120000_pessoas_formulario.sql`](../supabase/migrations/20261006120000_pessoas_formulario.sql) (formulário por processo e fichas de pessoas) e depois com [`supabase/migrations/20261007120000_empresas_equipes.sql`](../supabase/migrations/20261007120000_empresas_equipes.sql) (empresas, colaboradores, organograma e relatórios de equipe/liderança/pessoa) depois com [`supabase/migrations/20261008120000_parte2.sql`](../supabase/migrations/20261008120000_parte2.sql) (segunda parte do teste: perfil exigido pelo trabalho) depois com [`supabase/migrations/20261009120000_fotos.sql`](../supabase/migrations/20261009120000_fotos.sql) (fotos do candidato, do colaborador e do usuário do painel) e por último com [`supabase/migrations/20261010120000_mover_versao.sql`](../supabase/migrations/20261010120000_mover_versao.sql) (mover candidato de processo, contratar candidato, topo do organograma e conferência da versão do banco). Sempre **nessa ordem**: `…_disc.sql`, `…_pessoas_formulario.sql`, `…_empresas_equipes.sql`, `…_parte2.sql`, `…_fotos.sql`, `…_mover_versao.sql`.
 
 Para conferir: menu **Table Editor** → devem existir as tabelas `admins`, `processos`, `pessoas`, `respostas`, `relatorios`, `configuracoes`, `empresas`, `vinculos` e `relacoes`, todas sem o selo vermelho **"RLS disabled"** / **"Unrestricted"**.
 
 > **Pode rodar de novo?** Sim. Cada arquivo só cria o que falta e atualiza as funções, **sem apagar** respostas nem processos. Se rodar um arquivo mais antigo de novo, rode os mais novos logo depois, na ordem (os antigos voltam algumas funções para a versão anterior).
 
 > **Migrações novas são automáticas.** Com a integração do GitHub do Supabase ligada, cada arquivo novo em `supabase/migrations/` é aplicado sozinho no push para a branch de produção (foi assim com `20261006120000_pessoas_formulario.sql`: ela cria `pessoas`, liga as respostas que já existem à pessoa do mesmo WhatsApp e não apaga nada). Se a integração estiver desligada ou falhar, rode à mão: abra o arquivo, **Copy raw file**, cole no **SQL Editor** e **Run** (como nos passos acima).
+
+### 3a. Conferir se o banco está atualizado
+
+O painel faz isso sozinho: ao entrar, se faltar alguma migração, aparece no topo a faixa **"O banco de dados está desatualizado: faltam …"** com o nome dos arquivos que faltam. Para conferir à mão:
+
+1. **SQL Editor** → **+** → cole e rode:
+   ```sql
+   select public.versao_banco();
+   ```
+2. Resposta esperada: `{"ok": true, "versao": 20261010120000, "migracoes": [...], "faltando": []}`.
+   - `faltando` com nomes (ex.: `["20261009120000_fotos"]`) = rode esses arquivos (passo 3b).
+   - Erro **`function public.versao_banco() does not exist`** = a `20261010120000_mover_versao.sql` ainda não foi aplicada (e talvez outras). Rode a consulta abaixo para ver quais existem e depois aplique as que faltam (passo 3b):
+   ```sql
+   select
+     to_regclass('public.pessoas')  is not null as "20261006 pessoas",
+     to_regclass('public.empresas') is not null as "20261007 empresas",
+     exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'respostas' and column_name = 'exigido') as "20261008 parte2",
+     exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'respostas' and column_name = 'foto') as "20261009 fotos",
+     exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'respostas' and column_name = 'historico_processos') as "20261010 mover/versão";
+   ```
+   Cada coluna `false` = essa migração falta.
+3. Também dá para ver o histórico da integração do GitHub em **Database → Migrations** (lista das migrações aplicadas por ela). Migração rodada à mão no SQL Editor **não** aparece nessa lista — por isso a conferência acima vale mais.
+
+### 3b. Aplicar migrações à mão no SQL Editor, na ordem
+
+Use quando a faixa do painel avisar, quando a integração do GitHub estiver desligada ou quando um push falhar ao aplicar.
+
+1. Veja quais faltam (passo 3a).
+2. Para **cada arquivo que falta, do mais antigo para o mais novo** (a ordem é a do número no começo do nome):
+   `20261006120000_pessoas_formulario.sql` → `20261007120000_empresas_equipes.sql` → `20261008120000_parte2.sql` → `20261009120000_fotos.sql` → `20261010120000_mover_versao.sql`:
+   1. Abra o arquivo em `supabase/migrations/` no GitHub → **Copy raw file**.
+   2. **SQL Editor** → **+** → cole tudo → **Run** (se aparecer "destructive operations", **Run this query**: são gatilhos e funções recriados, nenhum dado é apagado).
+   3. Confira **"Success. No rows returned"** antes de ir para o próximo.
+3. Na dúvida, pode rodar **todos** a partir do primeiro que falta: cada arquivo é idempotente (só cria o que falta e não apaga respostas, pessoas, empresas nem relatórios). O que **não** pode é rodar um antigo e parar: rode sempre até o último.
+4. Rode `select public.versao_banco();` de novo: `faltando` deve vir `[]`. Recarregue o painel (a faixa some).
 
 ## 4. Fechar o cadastro livre
 
@@ -299,6 +334,7 @@ curl -sS -X DELETE "https://api.clickup.com/api/v2/webhook/ID_DO_WEBHOOK" -H "Au
 
 | O que aparece | Causa provável | O que fazer |
 |---|---|---|
+| Painel: faixa "O banco de dados está desatualizado: faltam …" ou mensagem "O banco de dados está desatualizado. Peça para aplicar as migrações" | Alguma migração de `supabase/migrations/` não foi aplicada no projeto | Passos 3a e 3b: confira quais faltam e rode na ordem. |
 | SQL Editor: `ERROR: relation "auth.users" does not exist` | O SQL foi rodado fora do Supabase | Cole no SQL Editor do projeto Supabase (passo 3). |
 | SQL Editor: `ERROR: ... already exists` ou `permission denied` | Rodou só um pedaço do arquivo ou um arquivo antigo | Copie o arquivo **inteiro** de novo pelo **Copy raw file** e rode. Ele pode ser rodado várias vezes. Se continuar, copie a mensagem e mande para o Claude. |
 | Site do candidato: "Link inválido ou avaliação encerrada" | Código do processo errado ou processo desativado | No painel, aba Processos, confira se o processo está **Ativo** e copie o link de novo. |
@@ -336,7 +372,7 @@ curl -sS -X DELETE "https://api.clickup.com/api/v2/webhook/ID_DO_WEBHOOK" -H "Au
 
 ## Referência técnica (para quem for mexer no código)
 
-- Banco: `supabase/migrations/20261005120000_disc.sql` + `supabase/migrations/20261006120000_pessoas_formulario.sql` + `supabase/migrations/20261007120000_empresas_equipes.sql` + `supabase/migrations/20261008120000_parte2.sql` + `supabase/migrations/20261009120000_fotos.sql` (em ordem; `pessoas` + formulário por processo; empresas/vínculos/relações + relatórios por modelo, com `salvar_colaborador`, `mover_colaborador` e `salvar_relacoes` só para admin; `respostas.exigido` + `formulario.parte2` — com a Parte 2 ligada, `enviar_resposta` exige o perfil exigido de 40 dígitos; fotos em `pessoas.foto`, `respostas.foto` e `admins.foto` — data URL JPEG até 40 000 caracteres, sem Storage; `formulario.campos.foto` obrigatória/opcional/oculta; envio até 80 000 caracteres; `salvar_minha_foto` só grava a foto do próprio usuário (privilégio por coluna + gatilho com `auth.uid()`), `remover_foto` (LGPD, só admin); snapshot dos relatórios por modelo até 1 MB; idempotentes; RLS em todas as tabelas; anon só chama `avaliacao_publica`, `enviar_resposta`, `relatorio_publico` (nenhuma devolve foto: o relatório publicado mostra só o que está no snapshot); authenticated só com `public.e_admin()`; `garantir_primeiro_admin()`). Dados de exemplo para projeto de teste: `supabase/seed_previa.sql` (não rode no projeto real).
+- Banco: `supabase/migrations/20261005120000_disc.sql` + `supabase/migrations/20261006120000_pessoas_formulario.sql` + `supabase/migrations/20261007120000_empresas_equipes.sql` + `supabase/migrations/20261008120000_parte2.sql` + `supabase/migrations/20261009120000_fotos.sql` + `supabase/migrations/20261010120000_mover_versao.sql` (em ordem; `pessoas` + formulário por processo; empresas/vínculos/relações + relatórios por modelo, com `salvar_colaborador`, `mover_colaborador` e `salvar_relacoes` só para admin; `respostas.exigido` + `formulario.parte2` — com a Parte 2 ligada, `enviar_resposta` exige o perfil exigido de 40 dígitos; fotos em `pessoas.foto`, `respostas.foto` e `admins.foto` — data URL JPEG até 40 000 caracteres, sem Storage; `formulario.campos.foto` obrigatória/opcional/oculta; envio até 80 000 caracteres; `salvar_minha_foto` só grava a foto do próprio usuário (privilégio por coluna + gatilho com `auth.uid()`), `remover_foto` (LGPD, só admin); snapshot dos relatórios por modelo até 1 MB; `mover_resposta` (troca o processo da resposta, com `respostas.historico_processos`), `contratar_pessoa` (candidato vira colaborador ativo; ativo em outra empresa = move) e `salvar_relacoes(p_empresa, p_relacoes, p_opcoes)` com `{topoIds}` em `empresas.organograma`, só admin; `versao_banco()` pública, só leitura, para o painel avisar migração faltando; idempotentes; RLS em todas as tabelas; anon só chama `avaliacao_publica`, `enviar_resposta`, `relatorio_publico` e `versao_banco` (nenhuma devolve foto: o relatório publicado mostra só o que está no snapshot); authenticated só com `public.e_admin()`; `garantir_primeiro_admin()`). Dados de exemplo para projeto de teste: `supabase/seed_previa.sql` (não rode no projeto real).
 - Funções: fonte em `supabase/functions/<nome>/index.ts` + `supabase/funcoes-compartilhadas/*.js`; `npm run montar:funcoes` gera `dist/funcoes/<nome>/index.ts` (um arquivo por função, para colar no painel). `npm test` confere se os gerados estão atualizados.
 - Site: `js/config.js` (`BACKEND`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`), `js/api-supabase.js`, `assets/vendor/supabase.js`.
 - Despertador: `.github/workflows/manter-ativo.yml`. Migração: `scripts/migrar-planilha.mjs` (testes em `tests/migrar-planilha.test.js`).

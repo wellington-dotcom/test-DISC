@@ -9,6 +9,7 @@
   <title>Painel DISC</title>
   <link rel="icon" href="assets/icone.svg" type="image/svg+xml">
   <link rel="stylesheet" href="assets/notus.css">
+  <link rel="stylesheet" href="assets/organograma.css">
   <link rel="stylesheet" href="assets/admin.css">
 </head>
 <body>
@@ -122,10 +123,16 @@
 
     <!-- Painel -->
     <section id="tela-painel" hidden>
+      <!-- Supabase: banco sem as migrações mais novas (versaoBanco) -->
+      <div class="faixa-banco nao-imprimir" id="faixa-banco" role="alert" hidden>
+        <svg class="icone faixa-banco__icone" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
+        <p class="faixa-banco__texto" id="faixa-banco-texto"></p>
+      </div>
       <nav class="abas nao-imprimir" aria-label="Seções do painel">
         <button type="button" class="aba" data-aba="lista" aria-current="page">Participantes</button>
         <button type="button" class="aba" data-aba="processos" hidden>Processos</button>
         <button type="button" class="aba" data-aba="empresas" hidden>Empresas</button>
+        <button type="button" class="aba" data-aba="relatorios" hidden>Relatórios</button>
         <button type="button" class="aba" data-aba="usuarios" hidden>Usuários</button>
         <button type="button" class="aba" data-aba="comparativo">Comparativo</button>
         <button type="button" class="aba" data-aba="importar" id="aba-importar" hidden>Importar códigos</button>
@@ -170,6 +177,8 @@
       <div id="vista-processos" class="vista nao-imprimir" hidden></div>
       <!-- Empresas (colaboradores, ligações, organograma, compatibilidade e relatórios; só com o Supabase ou a prévia) -->
       <div id="vista-empresas" class="vista nao-imprimir" hidden></div>
+      <!-- Relatórios: os 5 modelos (com exemplo), assistente para gerar e todos os gerados -->
+      <div id="vista-relatorios" class="vista nao-imprimir" hidden></div>
       <div id="vista-usuarios" class="vista nao-imprimir" hidden></div>
 
       <!-- Comparativo -->
@@ -217,6 +226,7 @@
   <script src="js/relatorio-pessoa.js"></script>
   <script src="js/relatorio-modelos.js"></script>
   <script src="js/relatorio-view.js"></script>
+  <script src="js/organograma.js"></script>
   <script src="js/admin.js"></script>
 </body>
 </html>

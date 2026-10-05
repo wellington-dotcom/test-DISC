@@ -40,7 +40,19 @@
  *     exigido:{percentuais, codigo}|null (Parte 2 da resposta mais recente)}], relacoes:[{de, para, tipo}], historico:[…]}
  *   salvarColaborador(token, {empresaId, pessoaId? | nome + telefone, cargo, area}) -> {colaborador}
  *   moverColaborador(token, {pessoaId, empresaId, cargo, area}) -> {colaborador} · desligarColaborador(token, vinculoId) -> {id}
- *   salvarRelacoes(token, empresaId, [{de, para, tipo}]) -> {relacoes} (substitui o conjunto)
+ *   salvarRelacoes(token, empresaId, [{de, para, tipo}], {topoIds}?) -> {relacoes, topoIds} (substitui o conjunto;
+ *     topoIds = quem fica no topo do organograma mesmo sem liderados, guardado em empresas.organograma;
+ *     sem o 4º argumento o topo salvo não muda). listarEquipe devolve também topoIds (só de ativos).
+ * Rodada 4 (migração 20261010120000_mover_versao.sql):
+ *   moverResposta(token, respostaId, processoId | '') -> {id, processoId, avaliacao, historicoProcessos}
+ *     (só admin; '' = sem processo; registra em respostas.historico_processos [{de, para, deCodigo, paraCodigo, em}]).
+ *     listar: item.historicoProcessos.
+ *   contratarPessoa(token, {respostaId | pessoaId, empresaId, cargo, area}) -> {colaborador, movido, deEmpresaId}
+ *     (colaborador ativo na empresa; ativo em outra = move, lá fica desligado com fim = hoje; respostaId = 'aprovado').
+ *   versaoBanco() -> {versao, faltando:[nomes das migrações cujo efeito não está no banco], semFuncao?}. Sem a
+ *     função versao_banco (banco sem a 20261010) sonda tabelas/colunas com consultas "limit 0" (precisa de login de
+ *     admin) e devolve semFuncao: true. Função do banco que não existe (PGRST202) em qualquer chamada vira
+ *     "O banco de dados está desatualizado…" com erro.bancoDesatualizado = true.
  * Relatórios por modelo (equipe/lideranca/pessoa; snapshot "dados" montado no navegador, até 300 KB):
  *   salvarRelatorioModelo(token, {id?, modelo, empresaId?, pessoaId?, dados, publicar?}) -> {relatorio:{id, token,
  *     status, modelo, url?}} · listarRelatoriosModelo(token, {empresaId?, pessoaId?}) -> {relatorios:[…]}
@@ -71,6 +83,18 @@
   var MSG_LINK_INVALIDO = 'Link inválido ou avaliação encerrada. Fale com quem enviou o link.';
   var MSG_REL_NAO_ENCONTRADO = 'Relatório não encontrado ou fora do ar.';
   var MSG_LINK_EXPIRADO = 'O link expirou ou já foi usado. Peça outro em "Esqueci minha senha".';
+  var MSG_BANCO_DESATUALIZADO = 'O banco de dados está desatualizado. Peça para aplicar as migrações (veja docs/SUPABASE.md).';
+  // Migrações (supabase/migrations), na ordem, e como conferir cada uma sem a função versao_banco.
+  var MIGRACOES = [
+    { nome: '20261005120000_disc', descricao: 'base (processos, respostas, relatórios)' },
+    { nome: '20261006120000_pessoas_formulario', descricao: 'pessoas e formulário', tabela: 'pessoas', coluna: 'id' },
+    { nome: '20261007120000_empresas_equipes', descricao: 'empresas, colaboradores e organograma', tabela: 'empresas', coluna: 'id' },
+    { nome: '20261008120000_parte2', descricao: 'Parte 2 (perfil exigido)', tabela: 'respostas', coluna: 'exigido' },
+    { nome: '20261009120000_fotos', descricao: 'fotos', tabela: 'respostas', coluna: 'foto' },
+    { nome: '20261010120000_mover_versao', descricao: 'mover resposta, contratar, topo do organograma e versão do banco',
+      tabela: 'respostas', coluna: 'historico_processos' }
+  ];
+  var VERSAO_ATUAL = 20261010120000;
   var MSG_PRIMEIRO_ACESSO = 'Com o Supabase não há chave de primeiro acesso: crie o seu usuário no painel do Supabase ' +
     '(Authentication > Users > Add user) e entre com esse e-mail e senha. O primeiro login vira administrador.';
   var MSG_REDEFINIR = 'Com o Supabase cada pessoa cria a própria senha nova pelo "Esqueci minha senha", na tela de entrada.';
@@ -374,6 +398,11 @@
     if (ehFalhaDeRede(erro)) return new Error(MSG_CONEXAO);
     var codigo = String((erro && erro.code) || '');
     if (codigo === '42501') return recusa(MSG_SEM_PERMISSAO);
+    if (codigo === 'PGRST202' || codigo === '42883') {
+      var velho = recusa(MSG_BANCO_DESATUALIZADO, { bancoDesatualizado: true });
+      velho.bancoDesatualizado = true;
+      return velho;
+    }
     if (codigo === 'P0001' && erro.message) return recusa(String(erro.message));
     if (codigo === '23505') return recusa('Já existe um registro com estes dados.');
     if (codigo === '23514' || codigo === '22P02' || codigo === '22001' || codigo === '22007' || codigo === '22008') {
@@ -550,8 +579,27 @@
       pessoa: pessoaDaLinha(l.pessoas),
       email: l.email || '',
       cidade: l.cidade || '',
-      extras: extrasDaLinha(l.extras)
+      extras: extrasDaLinha(l.extras),
+      historicoProcessos: historicoDaLinha(l.historico_processos)
     };
+  }
+  /** respostas.historico_processos -> [{de, para, deCodigo, paraCodigo, em}] (lixo vira lista vazia). */
+  function historicoDaLinha(h) {
+    if (!Array.isArray(h)) return [];
+    return h.filter(function (e) { return e && typeof e === 'object' && !Array.isArray(e); }).map(function (e) {
+      return { de: String(e.de || ''), para: String(e.para || ''), deCodigo: String(e.deCodigo || ''),
+        paraCodigo: String(e.paraCodigo || ''), em: String(e.em || '') };
+    });
+  }
+  /** empresas.organograma.topoIds só com ids de colaboradores ativos (sem repetir). */
+  function topoDaLinha(organograma, ativos) {
+    var ids = organograma && typeof organograma === 'object' && Array.isArray(organograma.topoIds) ? organograma.topoIds : [];
+    var vistos = {};
+    return ids.map(function (x) { return String(x); }).filter(function (x) {
+      if (!ativos[x] || vistos[x]) return false;
+      vistos[x] = true;
+      return true;
+    });
   }
 
   /** Linha de public.empresas no formato do painel (colaboradores = vínculos ativos). */
@@ -910,8 +958,66 @@
         var relacoes = (Array.isArray(r[2]) ? r[2] : []).map(function (x) {
           return { de: String(x.de_pessoa), para: String(x.para_pessoa), tipo: x.tipo };
         }).filter(function (x) { return ids[x.de] && ids[x.para] && TIPOS_RELACAO.indexOf(x.tipo) >= 0; });
-        return { ok: true, empresa: empresaDaLinha(emp, ativos.length), colaboradores: ativos, relacoes: relacoes, historico: historico };
+        return { ok: true, empresa: empresaDaLinha(emp, ativos.length), colaboradores: ativos, relacoes: relacoes,
+          topoIds: topoDaLinha(emp.organograma, ids), historico: historico };
       });
+    }
+
+    // ---- versão do banco (aviso de migração faltando no painel) ----
+    function codigoDoErro(e) { return String((e && e.code) || ''); }
+    function funcaoNaoExiste(e) {
+      var c = codigoDoErro(e);
+      return c === 'PGRST202' || c === '42883' || (e && e.status === 404 && /function/i.test(String(e.message || '')));
+    }
+    function faltaNoBanco(e) {
+      var c = codigoDoErro(e);
+      return c === '42P01' || c === 'PGRST205' || c === '42703' || c === 'PGRST204' || c === 'PGRST200';
+    }
+    /** Consulta leve (limit 0): true = existe, false = tabela/coluna não existe, null = não deu para saber. */
+    function sondar(tabela, coluna) {
+      return comPrazo(Promise.resolve().then(function () { return cliente().from(tabela).select(coluna).limit(0); }), prazo)
+        .then(function (r) {
+          if (r && r.error) {
+            if (faltaNoBanco(r.error)) return false;
+            if (ehFalhaDeRede(r.error)) throw new Error(MSG_CONEXAO);
+            return null;
+          }
+          return true;
+        }, function (e) {
+          if (e && e.message === MSG_DEMORA) throw e;
+          throw ehFalhaDeRede(e) ? new Error(MSG_CONEXAO) : e;
+        });
+    }
+    function versaoPorSondagem() {
+      var sondadas = MIGRACOES.filter(function (m) { return m.tabela; });
+      return Promise.all(sondadas.map(function (m) { return sondar(m.tabela, m.coluna); })).then(function (res) {
+        var faltando = [];
+        var versao = Number(MIGRACOES[0].nome.slice(0, 14));
+        sondadas.forEach(function (m, i) {
+          if (res[i] === false) faltando.push(m.nome);
+          else if (res[i] === true) versao = Math.max(versao, Number(m.nome.slice(0, 14)));
+        });
+        var ultima = MIGRACOES[MIGRACOES.length - 1].nome;
+        if (faltando.indexOf(ultima) === -1) faltando.push(ultima); // sem a função versao_banco a 20261010 não está completa
+        return { ok: true, versao: versao, faltando: faltando, semFuncao: true };
+      });
+    }
+    function versaoBanco() {
+      return comPrazo(Promise.resolve().then(function () { return cliente().rpc('versao_banco', {}); }), prazo)
+        .then(function (r) {
+          if (r && r.error) {
+            if (funcaoNaoExiste(r.error)) return versaoPorSondagem();
+            throw erroDoBanco(r.error);
+          }
+          var j = r ? r.data : null;
+          if (typeof j === 'string') { try { j = JSON.parse(j); } catch (e) { j = null; } }
+          if (!j || j.ok !== true) throw erroDaResposta(j && typeof j === 'object' ? j : { ok: false, erro: MSG_RECUSA });
+          var faltando = (Array.isArray(j.faltando) ? j.faltando : []).map(function (x) { return String(x); });
+          return { ok: true, versao: numero(j.versao), faltando: faltando };
+        }, function (e) {
+          if (e && (e.message === MSG_DEMORA || e.sessaoExpirada || e.resposta)) throw e;
+          throw ehFalhaDeRede(e) ? new Error(MSG_CONEXAO) : e;
+        });
     }
 
     // ---- relatórios por modelo (tabela relatorios, direto com RLS) ----
@@ -1225,7 +1331,7 @@
           return { ok: true, id: id };
         });
       }),
-      salvarRelacoes: seguro(function (token, empresaId, relacoes) {
+      salvarRelacoes: seguro(function (token, empresaId, relacoes, opcoesOrg) {
         exigirToken(token);
         exigir(empresaId, 'Empresa não informada.');
         if (!Array.isArray(relacoes)) throw recusa('Relações inválidas.');
@@ -1233,13 +1339,47 @@
           r = r && typeof r === 'object' ? r : {};
           return { de: limparTexto(r.de, 40), para: limparTexto(r.para, 40), tipo: limparTexto(r.tipo, 20) };
         });
+        var args = { p_empresa: limparTexto(empresaId, 40), p_relacoes: lista };
+        if (opcoesOrg && typeof opcoesOrg === 'object' && opcoesOrg.topoIds !== undefined) {
+          if (!Array.isArray(opcoesOrg.topoIds)) throw recusa('Relações inválidas.');
+          args.p_opcoes = { topoIds: opcoesOrg.topoIds.map(function (x) { return limparTexto(x, 40); }).filter(Boolean) };
+        }
         return exigirSessao(token).then(function () {
-          return rpcOk('salvar_relacoes', { p_empresa: limparTexto(empresaId, 40), p_relacoes: lista });
+          return rpcOk('salvar_relacoes', args);
         }).then(function (r) {
           var saida = (Array.isArray(r.relacoes) ? r.relacoes : []).map(function (x) { return { de: String(x.de), para: String(x.para), tipo: x.tipo }; });
-          return { ok: true, relacoes: saida };
+          var topo = (Array.isArray(r.topoIds) ? r.topoIds : []).map(function (x) { return String(x); });
+          return { ok: true, relacoes: saida, topoIds: topo };
         });
       }),
+      moverResposta: seguro(function (token, respostaId, processoId) {
+        exigirToken(token);
+        exigir(respostaId, 'Candidato não informado.');
+        var id = limparTexto(respostaId, 80);
+        var proc = processoId === null || processoId === undefined ? '' : limparTexto(processoId, 40);
+        if (proc && !RE_UUID.test(proc)) throw recusa('Processo não encontrado.');
+        return exigirSessao(token).then(function () {
+          return rpcOk('mover_resposta', { p_resposta: id, p_processo: proc });
+        }).then(function (r) {
+          return { ok: true, id: String(r.id || id), processoId: String(r.processoId || ''),
+            avaliacao: normalizarCodigo(r.avaliacao), historicoProcessos: historicoDaLinha(r.historicoProcessos) };
+        });
+      }),
+      contratarPessoa: seguro(function (token, dados) {
+        exigirToken(token);
+        dados = dados && typeof dados === 'object' ? dados : {};
+        exigir(dados.empresaId, 'Empresa não informada.');
+        if (!dados.respostaId && !dados.pessoaId) throw recusa('Informe a pessoa.');
+        var p = { empresaId: limparTexto(dados.empresaId, 40), cargo: limparTexto(dados.cargo, 120), area: limparTexto(dados.area, 120) };
+        if (dados.respostaId) p.respostaId = limparTexto(dados.respostaId, 80);
+        else p.pessoaId = limparTexto(dados.pessoaId, 40);
+        return exigirSessao(token).then(function () { return rpcOk('contratar_pessoa', { p_dados: p }); })
+          .then(function (r) {
+            return { ok: true, colaborador: colaboradorDaRpc(r.colaborador), movido: r.movido === true,
+              deEmpresaId: String(r.deEmpresaId || '') };
+          });
+      }),
+      versaoBanco: seguro(function () { return versaoBanco(); }),
 
       // --- relatórios por modelo (equipe, liderança, pessoa) ---
       salvarRelatorioModelo: seguro(function (token, dados) {
@@ -1415,7 +1555,8 @@
     'relatorioRascunho', 'relatorioSalvar', 'relatorioPublicar', 'relatorioDespublicar', 'relatoriosListar',
     'relatorioMelhorarTextos', 'relatorioPublico',
     'listarEquipe', 'salvarColaborador', 'moverColaborador', 'desligarColaborador', 'salvarRelacoes',
-    'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo', 'salvarMinhaFoto', 'removerFoto'];
+    'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo', 'salvarMinhaFoto', 'removerFoto',
+    'moverResposta', 'contratarPessoa', 'versaoBanco'];
 
   var DISC_API_SUPABASE = {
     METODOS: METODOS,
@@ -1434,7 +1575,10 @@
     exigidoValido: exigidoValido,
     calcularExigido: calcularExigido,
     fotoValida: fotoValida,
-    FOTO_MAX: FOTO_MAX
+    FOTO_MAX: FOTO_MAX,
+    MIGRACOES: MIGRACOES,
+    VERSAO_ATUAL: VERSAO_ATUAL,
+    MSG_BANCO_DESATUALIZADO: MSG_BANCO_DESATUALIZADO
   };
 
   if (typeof module !== 'undefined' && module.exports) { module.exports = DISC_API_SUPABASE; return; }

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Organograma · página de teste</title>
+<link rel="stylesheet" href="/assets/notus.css">
+<link rel="stylesheet" href="/assets/organograma.css">
+<style>
+  .pagina-teste { max-width: 1440px; margin: 0 auto; padding: 24px; }
+  .pagina-teste h1 { font-size: var(--t-titulo); margin-bottom: 4px; }
+  .pagina-teste__sub { font-size: var(--t-nota); color: var(--suave); margin-bottom: 16px; }
+</style>
+</head>
+<body>
+<main class="pagina-teste">
+  <section class="caixa">
+    <h1>Organograma</h1>
+    <p class="pagina-teste__sub">Página de teste do componente DISC_ORGANOGRAMA (tests/e2e/organograma.spec.js).</p>
+    <div id="org"></div>
+  </section>
+</main>
+<script src="/js/disc-combinacoes.js"></script>
+<script src="/js/organograma.js"></script>
+<script>
+(function () {
+  var FOTO = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAAAAAAD/2wBDAAoHBwgHBgoICAgLCgoLDhgQDg0NDh0VFhEYIx8lJCIfIiEmKzcvJik0KSEiMEExNDk7Pj4+JS5ESUM8SDc9Pjv/2wBDAQoLCw4NDhwQEBw7KCIoOzs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozs7Ozv/wAARCABQAFADASIAAhEBAxEB/8QAGQAAAwEBAQAAAAAAAAAAAAAAAAQFAwIG/8QAHBAAAwEBAQEBAQAAAAAAAAAAAAEDAjFhESET/8QAFgEBAQEAAAAAAAAAAAAAAAAAAwUE/8QAHBEAAgMBAQEBAAAAAAAAAAAAAAMBAhETIRIi/9oADAMBAAIRAxEAPwDygAdZy9MpGI5SbNMybNpx8GMRAs2IFqvRNQD+BRUPAcPAu4vEmOTRm00UtRF6R8Fo2JCsuYFQOtZeWcjhAl9Y1GZjLP1j0cANtkCqrprKQ1OPgRwOykSmtwprWYZh4Dh4UMx/OBqP5wx9/TTx8JO4+CtZFesuiVsdNim6ZWLwkVn0Va+MpWx0Rrn4yqq2wTWVw6gijBE6DKMGE8VJQgihHJPgyhHRDfpXTg9KX1BSXxBKvxBSv1E39fRQ/PyI2z0n2XShbXSfZ9KSNJ7sJ910nWXSjd9J1n0uIJDjmWvjHo7JqfxjUaCtrsBKthXjsdlUkSqNTt6Smq0prYVs2/Ohq350n5v6Dv6Y+Hpp7eG9a9Erb6G7eitamxSsMrGaZW30Rrr6zatOirf1lVVcgmstoHWdPLOQHCGp19GMW9JqbRpmrQFlRItWYU1f0Hf0nK4f3C4C9hzVvRelfTF1bM22xaKiArMmTrWnpnIAOEf/2Q==';
+  var url = new URLSearchParams(location.search);
+  var pessoas = [
+    { id: 'p1', nome: 'Ana Ribeiro', cargo: 'Diretora geral', codigo: 'DI', foto: FOTO },
+    { id: 'p2', nome: 'Bruno Lima', cargo: 'Gerente comercial', codigo: 'ID' },
+    { id: 'p3', nome: 'Carla Souza', cargo: 'Gerente de operações', codigo: 'SC' },
+    { id: 'p4', nome: 'Diego Martins', cargo: 'Vendedor', codigo: 'I' },
+    { id: 'p5', nome: 'Eduarda Alves', cargo: 'Vendedora', codigo: 'DS' },
+    { id: 'p6', nome: 'Fábio Nunes', cargo: 'Analista de processos', codigo: 'C' },
+    { id: 'p7', nome: 'Gabriela Rocha Albuquerque de Vasconcelos', cargo: 'Assistente administrativa', semTeste: true },
+    { id: 'p8', nome: 'Heitor Campos', cargo: 'Estagiário', codigo: 'CS' },
+    { id: 'p9', nome: 'Isadora Freitas', cargo: 'Recepcionista', codigo: 'S' }
+  ];
+  var relacoes = [
+    { de: 'p1', para: 'p2', tipo: 'lidera' }, { de: 'p1', para: 'p3', tipo: 'lidera' },
+    { de: 'p2', para: 'p4', tipo: 'lidera' }, { de: 'p2', para: 'p5', tipo: 'lidera' },
+    { de: 'p3', para: 'p6', tipo: 'lidera' }, { de: 'p3', para: 'p7', tipo: 'lidera' },
+    { de: 'p2', para: 'p3', tipo: 'direto' }, { de: 'p5', para: 'p6', tipo: 'indireto' }
+  ];
+  if (url.get('muitos')) {
+    var cods = ['D', 'I', 'S', 'C', 'DI', 'SC', 'CS', 'ID'];
+    for (var i = 10; i < 40; i++) {
+      pessoas.push({ id: 'p' + i, nome: 'Pessoa ' + i, cargo: 'Cargo ' + i, codigo: cods[i % cods.length] });
+      relacoes.push({ de: i < 16 ? 'p4' : (i < 24 ? 'p6' : 'p' + (i - 8)), para: 'p' + i, tipo: 'lidera' });
+    }
+  }
+  if (url.get('vazio')) relacoes = [];
+  window.__mudancas = [];
+  window.__abertos = [];
+  window.__org = DISC_ORGANOGRAMA.montar(document.getElementById('org'), {
+    pessoas: pessoas,
+    relacoes: relacoes,
+    topoIds: [],
+    modo: url.get('modo') === 'ler' ? 'ler' : 'editar',
+    aoMudar: function (rels, mudanca) { window.__mudancas.push({ relacoes: rels, mudanca: mudanca }); },
+    aoAbrirPessoa: url.get('abrir') ? function (id) { window.__abertos.push(id); } : undefined
+  });
+})();
+</script>
+</body>
+</html>

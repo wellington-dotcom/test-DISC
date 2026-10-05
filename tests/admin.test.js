@@ -242,7 +242,7 @@ test('recalcular calcula a confiabilidade (objeto ou texto JSON) e o selo do car
 });
 
 test('abas e permissões: só o administrador usa o painel (gestor desativado nesta versão)', () => {
-  assert.deepEqual(AD.abasDoPapel('admin', true), ['lista', 'processos', 'empresas', 'usuarios', 'comparativo', 'importar']);
+  assert.deepEqual(AD.abasDoPapel('admin', true), ['lista', 'processos', 'empresas', 'relatorios', 'usuarios', 'comparativo', 'importar']);
   assert.deepEqual(AD.abasDoPapel('gestor', true), [], 'gestor não vê nada');
   assert.deepEqual(AD.abasDoPapel('', true), []);
   assert.deepEqual(AD.abasDoPapel('', false), ['lista', 'comparativo', 'importar'], 'modo local, sem login');
@@ -585,39 +585,35 @@ test('fotos: fotoValida (só data URL JPEG até 40000), iniciais e foto da respo
   assert.equal(AD.resumoFormulario(null).find((x) => x.rotulo === 'Foto').texto, 'Opcional');
 });
 
-test('organograma de arrastar: mover sob um líder, Topo, Sem posição e ciclo recusado', () => {
+test('organograma: líder, liderados e descendentes (o arrastar agora é do js/organograma.js)', () => {
   const rels = [
     { de: 'a', para: 'b', tipo: 'lidera' },
     { de: 'b', para: 'c', tipo: 'lidera' },
     { de: 'c', para: 'd', tipo: 'direto' }
   ];
-  const nomes = { a: 'Ana', b: 'Bia', c: 'Caio', d: 'Duda' };
   assert.deepEqual(AD.descendentes(rels, 'a').sort(), ['b', 'c']);
-  // Duda passa a ser liderada por Caio: some o 'direto' entre os dois
-  let r = AD.moverNoOrganograma(rels, 'd', { tipo: 'lider', id: 'c' }, nomes);
-  assert.equal(r.erro, '');
-  assert.equal(AD.liderDe(r.relacoes, 'd'), 'c');
-  assert.equal(r.relacoes.filter((x) => x.tipo === 'direto').length, 0);
-  // Troca de líder: Caio sai da Bia e vai para a Ana (um líder só)
-  r = AD.moverNoOrganograma(rels, 'c', { tipo: 'lider', id: 'a' }, nomes);
-  assert.equal(AD.liderDe(r.relacoes, 'c'), 'a');
-  assert.equal(r.relacoes.filter((x) => x.tipo === 'lidera' && x.para === 'c').length, 1);
-  // Ciclo: Ana sobre o Caio (liderado indireto dela) é recusado sem mudar nada
-  r = AD.moverNoOrganograma(rels, 'a', { tipo: 'lider', id: 'c' }, nomes);
-  assert.match(r.erro, /Não dá para colocar Ana abaixo de Caio/);
-  assert.deepEqual(r.relacoes, rels);
-  assert.equal(AD.moverNoOrganograma(rels, 'a', { tipo: 'lider', id: 'a' }).erro, '');
-  // Topo: sem líder (mantém os liderados); Sem posição: tira todas as 'lidera' dela, mantém 'direto'
-  r = AD.moverNoOrganograma(rels, 'b', { tipo: 'topo' });
-  assert.equal(AD.liderDe(r.relacoes, 'b'), null);
-  assert.deepEqual(AD.lideradosDe(r.relacoes, 'b'), ['c']);
-  r = AD.moverNoOrganograma(rels, 'c', { tipo: 'sem' });
-  assert.deepEqual(r.relacoes, [{ de: 'a', para: 'b', tipo: 'lidera' }, { de: 'c', para: 'd', tipo: 'direto' }]);
-  // Posições: sem líder e sem liderados = "Sem posição" (a não ser que esteja marcada no Topo)
-  const pos = AD.posicoesOrganograma(['a', 'b', 'c', 'd', 'e'], rels, { e: true });
-  assert.deepEqual(pos.raizes, ['a', 'e']);
-  assert.deepEqual(pos.sem, ['d']);
-  assert.deepEqual(pos.filhos.a, ['b']);
+  assert.equal(AD.liderDe(rels, 'c'), 'b');
+  assert.deepEqual(AD.lideradosDe(rels, 'b'), ['c']);
+  assert.equal(AD.moverNoOrganograma, undefined, 'o organograma antigo (lista recuada) saiu do painel');
+  assert.equal(AD.posicoesOrganograma, undefined);
+});
+
+test('painel: organograma antigo e o "topo" no localStorage foram removidos; usa DISC_ORGANOGRAMA', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const js = fs.readFileSync(path.join(__dirname, '..', 'js', 'admin.js'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'assets', 'admin.css'), 'utf8');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'admin.html'), 'utf8');
+  assert.doesNotMatch(js, /disc_admin_org_topo|orgd-/);
+  assert.doesNotMatch(css, /\.orgd-/);
+  assert.match(js, /DISC_ORGANOGRAMA/);
+  assert.match(js, /api\('salvarRelacoes', p\.emp\.id, rels, \{ topoIds:/);
+  const scripts = [...html.matchAll(/<script src="([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(scripts.indexOf('js/organograma.js') !== -1 && scripts.indexOf('js/organograma.js') < scripts.indexOf('js/admin.js'));
+  assert.match(html, /href="assets\/organograma\.css"/);
+  assert.match(html, /data-aba="relatorios"[^>]*>Relatórios</);
+  assert.match(html, /id="vista-relatorios"/);
+  assert.match(html, /id="faixa-banco"[^>]*hidden/);
 });
 
 test('resumo do formulário: Nome e WhatsApp sempre, campos e perguntas extras', () => {
@@ -796,4 +792,76 @@ test('painel: sem <select> nativo nem confirm/prompt do navegador nas telas nova
   const js = fs.readFileSync(path.join(__dirname, '..', 'js', 'admin.js'), 'utf8');
   assert.doesNotMatch(js, /createElement\('select'\)|el\('select'/);
   assert.doesNotMatch(js, /\b(window|root)\.(confirm|prompt|alert)\(/);
+});
+
+/* ---------- Rodada 4: aba Relatórios, mover resposta, contratar e aviso de banco ---------- */
+
+test('catálogo dos modelos: 5 cartões na ordem, com para quem é e o que responde', () => {
+  assert.deepEqual(AD.MODELOS_CATALOGO.map((m) => m.chave), ['pessoa-completo', 'pessoa-simples', 'lideranca', 'equipe', 'processo']);
+  assert.deepEqual(AD.MODELOS_CATALOGO.map((m) => m.titulo), ['Pessoa · completo', 'Pessoa · simples', 'Como liderar', 'Equipe', 'Processo seletivo']);
+  for (const m of AD.MODELOS_CATALOGO) {
+    assert.ok(m.paraQuem.length > 10 && m.responde.length > 10, m.chave);
+    assert.ok(['pessoa', 'colaborador', 'empresa', 'processo'].includes(m.alvo));
+  }
+  assert.equal(AD.modeloDoCatalogo('equipe').modelo, 'equipe');
+  assert.equal(AD.modeloDoCatalogo('x'), null);
+});
+
+test('exemplos dos modelos: dados fictícios fixos montados pelos modelos e pelo motor do processo', () => {
+  const M = require('../js/relatorio-modelos.js');
+  const pc = AD.exemploModelo('pessoa-completo', { modelos: M });
+  const ps = AD.exemploModelo('pessoa-simples', { modelos: M });
+  const li = AD.exemploModelo('lideranca', { modelos: M });
+  const eq = AD.exemploModelo('equipe', { modelos: M });
+  assert.equal(pc.modelo, 'pessoa');
+  assert.equal(ps.modelo, 'pessoa');
+  assert.equal(ps.variante, 'simples');
+  assert.equal(li.modelo, 'lideranca');
+  assert.equal(eq.modelo, 'equipe');
+  assert.match(JSON.stringify(eq), /Loja Exemplo/);
+  // determinístico (só a data de geração pode mudar)
+  const semData = (x) => JSON.stringify(x).replace(/"geradoEm":"[^"]*"/g, '');
+  assert.equal(semData(AD.exemploModelo('equipe', { modelos: M })), semData(eq));
+  const pr = AD.exemploModelo('processo', { motor: require('../js/relatorio-motor.js'), fixture: require('../js/fixture-processo-exemplo.js') });
+  assert.ok(pr && pr.processo, 'relatório do processo de exemplo');
+  assert.equal(pr.processo.clickupListId, undefined);
+  assert.throws(() => AD.exemploModelo('processo', {}), /não carregou/);
+  assert.throws(() => AD.exemploModelo('equipe', {}), /modelos de relatório/);
+});
+
+test('gerados: junta modelos e processos (mais recente primeiro) e filtra por modelo, empresa e situação', () => {
+  const href = 'https://site.com/painel/admin.html';
+  const lista = AD.juntarGerados(
+    [{ id: 'm1', modelo: 'equipe', token: 't1', status: 'publicado', empresaId: 'e1', titulo: 'Relatório da equipe', criadoEm: '2026-10-01T10:00:00Z' },
+      { id: 'm2', modelo: 'pessoa', token: 't2', status: 'rascunho', pessoaId: 'p1', titulo: 'Ana', criadoEm: '2026-10-03T10:00:00Z' }],
+    [{ token: 'tp', processoId: 'pr1', status: 'publicado', criadoEm: '2026-10-02T10:00:00Z', publicadoEm: '2026-10-02T11:00:00Z' }],
+    { empresas: { e1: 'Loja Ávila' }, processos: { pr1: { nome: 'Vendedor 2026', empresa: 'Loja Ávila' } }, href });
+  assert.deepEqual(lista.map((r) => r.id), ['m:m2', 'p:tp', 'm:m1']);
+  assert.equal(lista[2].url, 'https://site.com/painel/relatorio.html#r-t1');
+  assert.equal(lista[1].url, 'https://site.com/painel/relatorio.html?r=tp');
+  assert.equal(lista[0].url, '');
+  assert.equal(lista[1].titulo, 'Processo seletivo · Vendedor 2026');
+  assert.deepEqual(AD.filtrarGerados(lista, { modelo: 'processo' }).map((r) => r.id), ['p:tp']);
+  assert.deepEqual(AD.filtrarGerados(lista, { empresa: 'loja avila' }).map((r) => r.id), ['p:tp', 'm:m1']);
+  assert.deepEqual(AD.filtrarGerados(lista, { status: 'rascunho' }).map((r) => r.id), ['m:m2']);
+  assert.equal(AD.filtrarGerados(lista, {}).length, 3);
+});
+
+test('mover resposta: processos de destino sem o atual, com "Sem processo"', () => {
+  const procs = [{ id: 'a', codigo: 'AAA1', nome: 'Vendedor', empresa: 'Loja', tipo: 'selecao' }, { id: 'b', codigo: 'BBB2', nome: 'Caixa', tipo: 'selecao', ativa: false }];
+  const ops = AD.opcoesMoverProcesso(procs, 'AAA1');
+  assert.deepEqual(ops.map((o) => o.valor), ['', 'b']);
+  assert.match(ops[1].rotulo, /Caixa \(BBB2\)/);
+  assert.match(ops[1].sub, /desativado/);
+  assert.deepEqual(AD.opcoesMoverProcesso(procs, '').map((o) => o.valor), ['a', 'b'], 'sem processo hoje: não oferece "Sem processo"');
+});
+
+test('aviso de banco desatualizado: lista o que falta; sem a função = mesmo aviso; em dia = nada', () => {
+  assert.equal(AD.mensagemBanco({ ok: true, versao: 20261010120000, faltando: [] }), '');
+  assert.equal(AD.mensagemBanco({ ok: true, versao: 20261010120000 }), '');
+  assert.equal(AD.mensagemBanco({ ok: true, faltando: ['20261010120000_mover_versao', 'fotos'] }),
+    'O banco de dados está desatualizado: faltam 20261010120000_mover_versao, fotos. Peça para aplicar as migrações (veja docs/SUPABASE.md).');
+  assert.match(AD.mensagemBanco({ ok: false, erro: 'function versao_banco does not exist' }), /^O banco de dados está desatualizado: faltam as migrações mais recentes\. Peça/);
+  assert.match(AD.mensagemBanco(null), /desatualizado/);
+  assert.match(AD.mensagemBanco({ ok: true, faltando: [], semFuncao: true }), /faltam as migrações mais recentes/);
 });

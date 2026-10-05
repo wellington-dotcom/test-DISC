@@ -231,7 +231,7 @@ test.describe('Admin com API (servidor simulado por page.route)', () => {
     expect(await page.evaluate(() => sessionStorage.getItem('disc_admin_token'))).toBe(TOKEN);
     expect(await page.evaluate(() => JSON.stringify(sessionStorage))).not.toContain('senha-certa-1');
     await expect(page.locator('#usuario-nome')).toHaveText('Ana Admin');
-    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'empresas', 'usuarios', 'comparativo', 'importar']);
+    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'empresas', 'relatorios', 'usuarios', 'comparativo', 'importar']);
     await expect(page.locator('.aba[data-aba="processos"]')).toHaveText('Processos');
     // Apps Script (legado): a aba Empresas só avisa que precisa do Supabase, sem chamar a API
     await page.locator('.aba[data-aba="empresas"]').click();
@@ -891,7 +891,7 @@ test.describe('Admin na prévia (API_URL "simulada")', () => {
     await expect(page.locator('#tela-painel')).toBeHidden();
 
     await entrar(page, 'admin@previa.com', 'previa123');
-    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'empresas', 'usuarios', 'comparativo', 'importar']);
+    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'empresas', 'relatorios', 'usuarios', 'comparativo', 'importar']);
 
     // Processo novo
     await page.locator('.aba[data-aba="processos"]').click();
@@ -1124,6 +1124,13 @@ const API_SUPABASE_FALSA = `
     },
     listarEmpresas: function () { return ok({ empresas: [] }); },
     clickupStatus: function () { return ok({ configurado: false }); },
+    // Banco em dia por padrão; window.__bancoFaltando (addInitScript) simula migração faltando ou a função ausente.
+    versaoBanco: function () {
+      anotar('versaoBanco', arguments);
+      var f = window.__bancoFaltando;
+      if (f === 'sem-funcao') return Promise.reject(new Error('function versao_banco() does not exist'));
+      return ok({ versao: 20261010120000, faltando: Array.isArray(f) ? f : [] });
+    },
     convidarUsuario: function (token, dados) {
       anotar('convidarUsuario', arguments);
       sb.usuarios.push({ id: 'u' + (sb.usuarios.length + 1), nome: dados.nome, email: dados.email, papel: 'admin', ativo: true, convitePendente: true });
@@ -1201,7 +1208,7 @@ test.describe('Admin com Supabase (DISC_API.MODO "supabase", API falsa)', () => 
     await entrar(page, 'dona@empresa.com', 'senha-boa-1');
     await expect(page.locator('#aviso-geral')).toContainText('você agora é o administrador do painel');
     await expect(page.locator('#usuario-nome')).toHaveText('Dona do Sistema');
-    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'empresas', 'usuarios', 'comparativo', 'importar']);
+    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'empresas', 'relatorios', 'usuarios', 'comparativo', 'importar']);
     expect(await page.evaluate(() => sessionStorage.getItem('disc_admin_token'))).toBe('tk-dona');
 
     // Segundo login não repete o aviso
@@ -1309,7 +1316,8 @@ test.describe('Admin com Supabase (DISC_API.MODO "supabase", API falsa)', () => 
 const API_EMPRESAS_FALSA = `
 (function () {
   var sb = window.__sb;
-  sb.empresas = []; sb.vinculos = []; sb.relacoes = {}; sb.relatorios = []; sb.processos = [];
+  sb.empresas = []; sb.vinculos = []; sb.relacoes = {}; sb.topo = {}; sb.relatorios = []; sb.processos = (window.__procsIniciais || []).slice();
+  sb.relProcessos = (window.__relProcessos || []).slice(); sb.movidas = {};
   sb.pessoas = {
     'p-bruno': { nome: 'Bruno Lima Costa', telefone: '5511977776666', resultado: { percentuais: { D: 15, I: 25, S: 40, C: 20 }, codigo: 'SI' },
       exigido: { percentuais: { D: 34, I: 30, S: 16, C: 20 }, codigo: 'DI' } },
@@ -1335,7 +1343,9 @@ const API_EMPRESAS_FALSA = `
     listar: function () {
       // Bruno respondeu a Parte 2 (exigido de 40 dígitos: D mais alto); Diego não
       var bruno = Object.assign(resp('p-bruno', 'Bruno Lima Costa', '5511977776666', '1234'.repeat(25)), { exigido: '4321'.repeat(10), resultadoExigido: null, foto: sb.fotoBruno });
-      return ok({ itens: [bruno, resp('p-diego', 'Diego Rocha', '5511955554444', '4321'.repeat(25))] });
+      var itens = [bruno, resp('p-diego', 'Diego Rocha', '5511955554444', '4321'.repeat(25))];
+      itens.forEach(function (it) { if (Object.prototype.hasOwnProperty.call(sb.movidas, it.id)) it.avaliacao = sb.movidas[it.id]; });
+      return ok({ itens: itens });
     },
     processosListar: function () { return ok({ processos: sb.processos.slice() }); },
     processosSalvar: function (t, p) {
@@ -1344,7 +1354,21 @@ const API_EMPRESAS_FALSA = `
       sb.processos.push(novo);
       return ok({ processo: novo });
     },
-    relatoriosListar: function () { return ok({ relatorios: [] }); },
+    relatoriosListar: function (t, pid) { return ok({ relatorios: sb.relProcessos.filter(function (r) { return !pid || r.processoId === pid; }) }); },
+    moverResposta: function (t, rid, pid) {
+      anotar('moverResposta', arguments);
+      var p = sb.processos.filter(function (x) { return x.id === pid; })[0];
+      sb.movidas[rid] = p ? p.codigo : '';
+      return ok({ id: rid, processoId: pid, avaliacao: p ? p.codigo : '' });
+    },
+    contratarPessoa: function (t, d) {
+      anotar('contratarPessoa', arguments);
+      var pid = d.pessoaId || String(d.respostaId).replace(/^r-/, '');
+      sb.vinculos.forEach(function (v) { if (v.pessoaId === pid && v.status === 'ativo') { v.status = 'desligado'; v.fim = '2026-10-05'; tirarRelacoes(v.empresaId, pid); } });
+      var v = { id: id('v'), pessoaId: pid, empresaId: d.empresaId, status: 'ativo', cargo: d.cargo, area: d.area, inicio: '2026-10-05', fim: null };
+      sb.vinculos.push(v);
+      return ok({ colaborador: colab(v) });
+    },
     clickupListas: function () { return ok({ listas: [] }); },
     removerFoto: function (t, rid) {
       anotar('removerFoto', arguments);
@@ -1369,7 +1393,7 @@ const API_EMPRESAS_FALSA = `
     },
     listarEquipe: function (t, eid) {
       var e = sb.empresas.filter(function (y) { return y.id === eid; })[0];
-      return ok({ empresa: e, colaboradores: ativos(eid).map(colab), relacoes: (sb.relacoes[eid] || []).slice(),
+      return ok({ empresa: e, colaboradores: ativos(eid).map(colab), relacoes: (sb.relacoes[eid] || []).slice(), topoIds: (sb.topo[eid] || []).slice(),
         historico: sb.vinculos.filter(function (v) { return v.empresaId === eid && v.status === 'desligado'; }).map(colab) });
     },
     salvarColaborador: function (t, d) {
@@ -1392,7 +1416,11 @@ const API_EMPRESAS_FALSA = `
       sb.vinculos.forEach(function (v) { if (v.id === vid) { v.status = 'desligado'; v.fim = '2026-10-05'; tirarRelacoes(v.empresaId, v.pessoaId); } });
       return ok();
     },
-    salvarRelacoes: function (t, eid, rels) { anotar('salvarRelacoes', arguments); sb.relacoes[eid] = rels.slice(); return ok(); },
+    salvarRelacoes: function (t, eid, rels, op) {
+      anotar('salvarRelacoes', arguments); sb.relacoes[eid] = rels.slice();
+      if (op && Array.isArray(op.topoIds)) sb.topo[eid] = op.topoIds.slice();
+      return ok();
+    },
     salvarRelatorioModelo: function (t, d) {
       anotar('salvarRelatorioModelo', arguments);
       var r = d.id ? sb.relatorios.filter(function (x) { return x.id === d.id; })[0] : null;
@@ -1401,7 +1429,7 @@ const API_EMPRESAS_FALSA = `
       return ok({ relatorio: { id: r.id, token: r.token, status: r.status, modelo: r.modelo } });
     },
     listarRelatoriosModelo: function (t, f) {
-      return ok({ relatorios: sb.relatorios.filter(function (r) { return f.empresaId ? r.empresaId === f.empresaId : r.pessoaId === f.pessoaId; }) });
+      return ok({ relatorios: sb.relatorios.filter(function (r) { return f.empresaId ? r.empresaId === f.empresaId : (f.pessoaId ? r.pessoaId === f.pessoaId : true); }) });
     },
     excluirRelatorioModelo: function (t, rid) { anotar('excluirRelatorioModelo', arguments); sb.relatorios = sb.relatorios.filter(function (r) { return r.id !== rid; }); return ok(); }
   });
@@ -1423,6 +1451,13 @@ async function escolherBusca(page, id, texto) {
   if (await pronto.count() && await pronto.isVisible()) await pronto.click();
 }
 
+// Capturas para revisão visual: só quando CAPTURAS_DIR está definido (ex.: CAPTURAS_DIR=/tmp/capturas npx playwright test …).
+async function capturar(page, nome) {
+  if (!process.env.CAPTURAS_DIR) return;
+  await page.waitForTimeout(450);
+  await page.screenshot({ path: require('node:path').join(process.env.CAPTURAS_DIR, 'painel-' + nome + '.png'), fullPage: true });
+}
+
 async function semRolagemLateral(page) {
   return page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 }
@@ -1433,7 +1468,7 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await simularEmpresas(page);
     await page.goto('/admin.html');
     await entrar(page, 'dona@empresa.com', 'senha-boa-1');
-    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'empresas', 'usuarios', 'comparativo', 'importar']);
+    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'empresas', 'relatorios', 'usuarios', 'comparativo', 'importar']);
 
     // Cadastro: duas empresas
     await page.locator('.aba[data-aba="empresas"]').click();
@@ -1498,20 +1533,24 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     expect(rels[0][2]).toEqual([{ de: idAna, para: 'p-bruno', tipo: 'lidera' }, { de: 'p-bruno', para: idCarla, tipo: 'direto' }]);
     await expect(bruno.locator('.colab-card__ligacoes')).toContainText('Líder: Ana Souza');
 
-    // Organograma (desenho do relatório num quadro) e mapa de compatibilidade
+    await expect(bruno.locator('.colab-card__esforco')).toContainText('índice');
+
+    // Subaba Organograma (componente DISC_ORGANOGRAMA): Ana no topo liderando o Bruno; Carla na coluna "Sem posição"
+    await page.click('#emp-subaba-organograma');
     const org = page.locator('#emp-organograma');
     await expect(org).toBeVisible();
-    await expect(org.locator('.orgd-no[data-pessoa="' + idAna + '"] .orgd-filhos .orgd-cartao[data-pessoa="p-bruno"]')).toHaveCount(1);
-    await expect(org.locator('#emp-org-sem .orgd-cartao[data-pessoa="' + idCarla + '"]')).toHaveCount(1);
-    await expect(org.locator('.orgd-cartao[data-pessoa="p-bruno"] .avatar__letra')).toHaveClass(/disc-fundo-S/);
+    await expect(page.locator('#lista-colaboradores')).toHaveCount(0);
+    await expect(org.locator('.orgx-cartao[data-org-id="p-bruno"]')).toHaveCount(1);
+    await expect(org.locator('.orgx-sem .orgx-cartao[data-org-id="' + idCarla + '"]')).toHaveCount(1);
+    await expect(org.locator('.orgx-sem .orgx-cartao[data-org-id="' + idAna + '"]')).toHaveCount(0);
+
+    // Subaba Compatibilidade: mapa de compatibilidade, ritmo × foco e esforço de adaptação (só o Bruno fez a Parte 2)
+    await page.click('#emp-subaba-compatibilidade');
     await expect(page.locator('#emp-compat')).toContainText('Harmonia da equipe');
     await expect(page.locator('#emp-pares > li')).toHaveCount(2);
-
-    // Mapa ritmo × foco com quem tem teste e esforço de adaptação de quem respondeu a Parte 2 (só o Bruno)
     await expect(page.locator('#emp-mapa svg')).toHaveCount(1);
     await expect(page.locator('#emp-esforco > li')).toHaveCount(1);
     await expect(page.locator('#emp-esforco > li[data-pessoa="p-bruno"] .esforco-selo')).toHaveText(/^Esforço /);
-    await expect(bruno.locator('.colab-card__esforco')).toContainText('índice');
 
     // Relatório da equipe com o encaixe de um candidato (Diego, de um processo)
     await page.click('#btn-relatorio-equipe');
@@ -1540,9 +1579,12 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await expect(listaRel).toHaveCount(1);
     await page.click('#btn-voltar-relatorio');
     await expect(page.locator('#vista-empresas h2')).toHaveText('Loja Modelo');
-    await expect(page.locator('#emp-relatorios, [id^="rel-modelos-e_"]').locator('li')).toHaveCount(1);
+    await expect(page.locator('#emp-subaba-compatibilidade')).toHaveAttribute('aria-current', 'page');
+    await page.click('#emp-subaba-relatorios');
+    await expect(page.locator('[id^="rel-modelos-e_"]').locator('li')).toHaveCount(1);
 
     // Como liderar o Bruno (líder = Ana, da ligação)
+    await page.click('#emp-subaba-colaboradores');
     await bruno.locator('[data-acao="como-liderar"]').click();
     await expect(page.locator('#rel-modelo-previa')).toBeVisible();
     await page.click('#btn-rel-publicar');
@@ -1571,6 +1613,8 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await page.click('#janela-ok');
     await expect(page.locator('#aviso-geral')).toHaveText('Carla Dias agora está em Filial Norte.');
     await expect(colabs).toHaveCount(2);
+    await expect(page.locator('#emp-subaba-historico .subaba__n')).toHaveText('1');
+    await page.click('#emp-subaba-historico');
     await expect(page.locator('#emp-historico')).toContainText('Carla Dias');
     expect((await chamadasSb(page, 'moverColaborador'))[0][1]).toMatchObject({ empresaId: 'emp1', cargo: 'Caixa' });
     await page.click('#btn-voltar-empresas');
@@ -1620,92 +1664,99 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     expect(erros.filter((e) => !/Blocked script execution in 'about:srcdoc'/.test(e))).toEqual([]);
   });
 
-  test('organograma de arrastar: soltar sobre um cartão vira liderado, ciclo recusado, Topo, Sem posição e "Mover para…"', async ({ page }) => {
+  test('empresa em subabas; organograma: arrastar da coluna "Sem posição" para o Topo e para um líder salva relações e topoIds', async ({ page }) => {
     const erros = coletarErros(page);
+    await page.setViewportSize({ width: 1366, height: 900 });
     await simularEmpresas(page);
     await page.goto('/admin.html');
     await entrar(page, 'dona@empresa.com', 'senha-boa-1');
     await page.locator('.aba[data-aba="empresas"]').click();
     await page.click('#btn-nova-empresa');
     await page.fill('#emp-nome', 'Loja Modelo');
+    await page.fill('#emp-cidade', 'Boa Vista / RR');
     await page.click('#janela-ok');
-    for (const [nome, tel] of [['Ana Souza', '11988881111'], ['Carla Dias', '11977770000']]) {
+    for (const [nome, tel, cargo] of [['Ana Souza', '11988881111', 'Gerente'], ['Carla Dias', '11977770000', 'Caixa']]) {
       await page.click('#btn-add-colaborador');
       await page.fill('#colab-nome', nome);
       await page.fill('#colab-telefone', tel);
+      await page.fill('#colab-cargo', cargo);
       await page.click('#janela-ok');
     }
     await page.click('#btn-add-colaborador');
     await escolherBusca(page, 'colab-pessoa', 'Bruno');
+    await page.fill('#colab-cargo', 'Vendedor');
     await page.click('#janela-ok');
     await expect(page.locator('#lista-colaboradores > li')).toHaveCount(3);
     const id = async (nome) => page.locator('#lista-colaboradores > li[data-nome="' + nome + '"]').getAttribute('data-pessoa');
     const idAna = await id('Ana Souza'), idCarla = await id('Carla Dias');
-    // Todos começam em "Sem posição"
-    await expect(page.locator('#emp-org-sem .orgd-cartao')).toHaveCount(3);
-    await expect(page.locator('#emp-org-arvore')).toHaveCount(0);
+
+    // Subabas: Colaboradores (padrão, com a contagem) | Organograma | Compatibilidade | Relatórios | Histórico
+    await expect(page.locator('#emp-subabas .subaba')).toHaveText([/^Colaboradores\s*3$/, 'Organograma', 'Compatibilidade', 'Relatórios', /^Histórico\s*0$/]);
+    await expect(page.locator('#emp-subaba-colaboradores')).toHaveAttribute('aria-current', 'page');
+    await expect(page.locator('#emp-link')).toBeVisible();
+    await expect(page.locator('#emp-organograma')).toHaveCount(0);
+    await capturar(page, 'empresa-colaboradores');
+
+    // Organograma: todos começam na coluna "Sem posição"
+    await page.click('#emp-subaba-organograma');
+    await expect(page.locator('#emp-subaba-organograma')).toHaveAttribute('aria-current', 'page');
+    const org = page.locator('#emp-organograma');
+    await expect(org.locator('.orgx-sem .orgx-cartao[data-org-id]')).toHaveCount(3);
+    expect(await page.locator('#vista-empresas select').count()).toBe(0);
 
     async function arrastar(de, para) {
-      await page.locator('#emp-organograma').evaluate((n) => n.scrollIntoView({ block: 'start' }));
-      // Espera a animação do redesenho (FLIP) terminar antes de medir os cartões
-      await page.waitForFunction(() => ![...document.querySelectorAll('.orgd-cartao')].some((n) => n.style.transform || n.style.transition));
+      await page.waitForTimeout(400); // animação do redesenho
       const a = await page.locator(de).first().boundingBox();
       const b = await page.locator(para).first().boundingBox();
       await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
       await page.mouse.down();
-      await page.mouse.move(a.x + a.width / 2 + 10, a.y + a.height / 2 + 10, { steps: 3 });
-      await expect(page.locator('.orgd-fantasma')).toHaveCount(1);
-      await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 12 });
+      await page.mouse.move(a.x + a.width / 2 + 12, a.y + a.height / 2 + 12, { steps: 4 });
+      await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 14 });
       await page.mouse.up();
     }
-    const cartao = (pid) => '.orgd-cartao[data-pessoa="' + pid + '"] .orgd-nome';
-    const salvas = async () => (await chamadasSb(page, 'salvarRelacoes')).map((c) => c[2]);
+    const cartao = (pid) => '#emp-organograma .orgx-cartao[data-org-id="' + pid + '"]';
+    const ultima = async () => (await chamadasSb(page, 'salvarRelacoes')).pop();
 
-    // Ana no Topo; Bruno e Carla sobre a Ana (liderados); salva uma vez só depois de parar (debounce)
-    await arrastar(cartao(idAna), '#emp-org-topo');
-    await expect(page.locator('#emp-org-arvore > .orgd-no[data-pessoa="' + idAna + '"]')).toHaveCount(1);
+    // Ana para o Topo (sem liderados ainda): vai para o banco em topoIds
+    await arrastar(cartao(idAna), '#emp-organograma .orgx-topo');
+    await expect(page.locator('#emp-org-status')).toHaveText('Salvo');
+    let s = await ultima();
+    expect(s.slice(1)).toEqual(['emp1', [], { topoIds: [idAna] }]);
+    await expect(org.locator('.orgx-sem .orgx-cartao[data-org-id]')).toHaveCount(2);
+
+    // Bruno, da coluna, sobre a Ana: passa a ser liderado dela
     await arrastar(cartao('p-bruno'), cartao(idAna));
-    await arrastar(cartao(idCarla), cartao(idAna));
     await expect(page.locator('#emp-org-status')).toHaveText('Salvo');
-    let rels = (await salvas()).pop();
-    expect(rels).toEqual([{ de: idAna, para: 'p-bruno', tipo: 'lidera' }, { de: idAna, para: idCarla, tipo: 'lidera' }]);
-    await expect(page.locator('.orgd-no[data-pessoa="' + idAna + '"] > .orgd-filhos > .orgd-no')).toHaveCount(2);
-    await expect(page.locator('#emp-org-sem .orgd-cartao')).toHaveCount(0);
-    // A compatibilidade e os cartões acompanham
+    s = await ultima();
+    expect(s[2]).toEqual([{ de: idAna, para: 'p-bruno', tipo: 'lidera' }]);
+    expect(s[3].topoIds).toEqual([idAna]);
+    await expect(org.locator('.orgx-sem .orgx-cartao[data-org-id]')).toHaveCount(1);
+    await expect(org.locator('.orgx-sem .orgx-cartao[data-org-id="' + idCarla + '"]')).toHaveCount(1);
+    await expect(org.locator('svg path').first()).toBeAttached();
+    await capturar(page, 'empresa-organograma');
+
+    // Os outros lugares acompanham: cartão do Bruno mostra a líder
+    await page.click('#emp-subaba-colaboradores');
     await expect(page.locator('#lista-colaboradores > li[data-nome="Bruno Lima Costa"] .colab-card__ligacoes')).toContainText('Líder: Ana Souza');
-
-    // Carla passa para baixo do Bruno (troca de líder)
-    await arrastar(cartao(idCarla), cartao('p-bruno'));
-    await expect(page.locator('.orgd-no[data-pessoa="p-bruno"] .orgd-cartao[data-pessoa="' + idCarla + '"]')).toHaveCount(1);
-    // Ciclo: Ana sobre a Carla (liderada indireta dela) é recusado com aviso na página
-    await arrastar(cartao(idAna), cartao(idCarla));
-    await expect(page.locator('#emp-org-aviso')).toContainText('Não dá para colocar Ana Souza abaixo de Carla Dias');
-    await expect(page.locator('#emp-org-status')).toHaveText('Salvo');
-    rels = (await salvas()).pop();
-    expect(rels).toContainEqual({ de: 'p-bruno', para: idCarla, tipo: 'lidera' });
-    expect(rels.filter((r) => r.para === idAna)).toEqual([]);
-
-    // "Mover para…" (sem arrastar, por teclado): Bruno para "Sem posição" — Carla, liderada dele, sobe para o Topo
-    await page.locator('.orgd-cartao[data-pessoa="p-bruno"] [data-acao="mover-org"]').focus();
-    await page.keyboard.press('Enter');
-    await expect(page.locator('#janela-mover-org')).toBeVisible();
-    // Opções não incluem a própria pessoa nem quem ela lidera
-    await page.click('#org-destino');
-    await expect(page.locator('#org-destino-lista [role="option"][data-valor="' + idAna + '"]')).toHaveCount(1);
-    await expect(page.locator('#org-destino-lista [role="option"][data-valor="' + idCarla + '"]')).toHaveCount(0);
-    await expect(page.locator('#org-destino-lista [role="option"][data-valor="p-bruno"]')).toHaveCount(0);
-    await page.fill('#org-destino-busca', 'Sem posição');
-    await page.locator('#org-destino-lista [role="option"]', { hasText: 'Sem posição' }).first().click();
-    await page.click('#janela-ok');
-    await expect(page.locator('#emp-org-sem .orgd-cartao[data-pessoa="p-bruno"]')).toHaveCount(1);
-    await expect(page.locator('#emp-org-arvore > .orgd-no[data-pessoa="' + idCarla + '"]')).toHaveCount(1);
-    await expect(page.locator('#emp-org-status')).toHaveText('Salvo');
-    rels = (await salvas()).pop();
-    expect(rels).toEqual([]);
+    await page.click('#emp-subaba-compatibilidade');
+    await expect(page.locator('#emp-compat')).toContainText('Harmonia da equipe');
+    await capturar(page, 'empresa-compatibilidade');
+    await page.click('#emp-subaba-relatorios');
+    await expect(page.locator('#btn-emp-rel-equipe')).toBeEnabled();
+    await expect(page.locator('[id^="rel-modelos-e_"]')).toContainText('Nenhum relatório salvo ainda.');
+    await capturar(page, 'empresa-relatorios');
+    await page.click('#emp-subaba-historico');
+    await expect(page.locator('#emp-historico')).toContainText('Ninguém saiu desta empresa');
+    await capturar(page, 'empresa-historico');
+    // Voltar à lista e abrir de novo: o Topo e as ligações vêm do servidor (sem localStorage)
+    await page.click('#btn-voltar-empresas');
+    expect(await page.evaluate(() => Object.keys(localStorage).filter((k) => /org/.test(k)))).toEqual([]);
+    await page.locator('#lista-empresas li[data-nome="Loja Modelo"] [data-acao="abrir"]').click();
+    await expect(page.locator('#emp-subaba-colaboradores')).toHaveAttribute('aria-current', 'page');
     expect(erros.filter((e) => !/Blocked script execution in 'about:srcdoc'/.test(e))).toEqual([]);
   });
 
-  test('"Minha foto": envia pelo menu (reduzida para JPEG), aparece no topo e na aba Usuários; celular 375px no organograma', async ({ page }) => {
+  test('"Minha foto": envia pelo menu (reduzida para JPEG), aparece no topo e na aba Usuários', async ({ page }) => {
     const erros = coletarErros(page);
     await page.setViewportSize({ width: 375, height: 800 });
     await simularEmpresas(page);
@@ -1737,30 +1788,6 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     expect((await chamadasSb(page, 'salvarMinhaFoto'))[1][1]).toBe('');
     await expect(page.locator('#usuario-inicial img')).toHaveCount(0);
 
-    // Organograma no celular: faixa "Sem posição" acima, sem rolagem lateral; "Mover para…" coloca no Topo
-    await page.locator('.aba[data-aba="empresas"]').click();
-    await page.click('#btn-nova-empresa');
-    await page.fill('#emp-nome', 'Loja Modelo');
-    await page.click('#janela-ok');
-    for (const [nome, tel] of [['Maria Eduarda Albuquerque Figueiredo', '11988881111'], ['Ana Souza', '11977770000']]) {
-      await page.click('#btn-add-colaborador');
-      await page.fill('#colab-nome', nome);
-      await page.fill('#colab-telefone', tel);
-      await page.fill('#colab-cargo', 'Coordenadora de atendimento ao cliente');
-      await page.click('#janela-ok');
-    }
-    await expect(page.locator('#emp-org-sem .orgd-cartao')).toHaveCount(2);
-    expect(await semRolagemLateral(page)).toBe(true);
-    const semY = (await page.locator('#emp-org-sem').boundingBox()).y;
-    const topoY = (await page.locator('#emp-org-topo').boundingBox()).y;
-    expect(semY).toBeLessThan(topoY);
-    await page.locator('#emp-org-sem .orgd-cartao[data-nome="Ana Souza"] [data-acao="mover-org"]').click();
-    await escolherBusca(page, 'org-destino', 'Topo');
-    await page.click('#janela-ok');
-    await expect(page.locator('#emp-org-arvore .orgd-cartao[data-nome="Ana Souza"]')).toHaveCount(1);
-    expect(await semRolagemLateral(page)).toBe(true);
-    const alca = await page.locator('.orgd-alca').first().evaluate((n) => getComputedStyle(n).touchAction);
-    expect(alca).toBe('none');
     expect(erros.filter((e) => !/Blocked script execution in 'about:srcdoc'/.test(e))).toEqual([]);
   });
 
@@ -1831,6 +1858,7 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await page.locator('#lig-diretos-lista [role="option"]').first().click();
     await page.click('#lig-diretos-pronto');
     await page.click('#janela-ok');
+    await page.click('#emp-subaba-compatibilidade');
     await expect(page.locator('#emp-pares > li')).toHaveCount(1);
     expect(await semRolagemLateral(page)).toBe(true);
     expect(erros.filter((e) => !/Blocked script execution in 'about:srcdoc'/.test(e))).toEqual([]);
@@ -1841,6 +1869,7 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await configurar(page, { API_URL: 'simulada' });
     await page.goto('/admin.html');
     await entrar(page, 'admin@previa.com', 'previa123');
+    await expect(page.locator('#faixa-banco')).toBeHidden();
     await page.locator('.aba[data-aba="empresas"]').click();
     const card = page.locator('#lista-empresas > li').first();
     await expect(card).toBeVisible();
@@ -1848,7 +1877,9 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await expect(page.locator('#lista-colaboradores > li').first()).toBeVisible();
     const n = await page.locator('#lista-colaboradores > li').count();
     await expect(page.locator('#vista-empresas .emp-secao__titulo')).toHaveText('Colaboradores ativos (' + n + ')');
-    await expect(page.locator('#emp-organograma .orgd-cartao')).toHaveCount(n);
+    await page.click('#emp-subaba-organograma');
+    await expect(page.locator('#emp-organograma .orgx-cartao[data-org-id]')).toHaveCount(n);
+    await page.click('#emp-subaba-compatibilidade');
     await expect(page.locator('#emp-compat')).toContainText('Harmonia da equipe');
     await page.click('#btn-relatorio-equipe');
     await page.click('#janela-ok');
@@ -1873,6 +1904,7 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     const comTeste = await page.locator('#lista-colaboradores > li .colab-card__codigo').count();
     const comEsforco = await page.locator('#lista-colaboradores > li .colab-card__esforco').count();
     expect(comEsforco).toBeGreaterThan(0);
+    await page.click('#emp-subaba-compatibilidade');
     await expect(page.locator('#emp-mapa svg')).toHaveCount(1);
     await expect(page.locator('#emp-esforco > li')).toHaveCount(comEsforco);
     expect(comTeste).toBeGreaterThanOrEqual(comEsforco);
@@ -1882,6 +1914,7 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     expect(await semRolagemLateral(page)).toBe(true);
 
     // Processo da equipe: resumo "Segunda parte do teste: Ligada"
+    await page.click('#emp-subaba-colaboradores');
     await page.locator('#emp-link').getByRole('button', { name: 'Abrir o processo' }).click();
     await expect(page.locator('#proc-parte2-resumo')).toHaveAttribute('data-parte2', 'ligada');
     await expect(page.locator('#proc-parte2-resumo')).toContainText('Ligada');
@@ -1905,5 +1938,192 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await expect(page.locator('#det-mapa svg')).toHaveCount(1);
     expect(await semRolagemLateral(page)).toBe(true);
     expect(erros.filter((e) => !/Blocked script execution in 'about:srcdoc'/.test(e))).toEqual([]);
+  });
+
+  /* ----- Rodada 4: mover resposta, contratar, aba Relatórios e aviso de banco desatualizado ----- */
+
+  const PROCS_INICIAIS = [
+    { id: 'proc-a', codigo: 'SEL1', nome: 'Vendedor Centro', empresa: 'Loja Modelo', tipo: 'selecao', ativa: true, respostas: 2 },
+    { id: 'proc-b', codigo: 'SEL2', nome: 'Vendedor Shopping', empresa: 'Loja Modelo', tipo: 'selecao', ativa: true, respostas: 0 }
+  ];
+
+  async function criarLojaModelo(page) {
+    await page.locator('.aba[data-aba="empresas"]').click();
+    await page.click('#btn-nova-empresa');
+    await page.fill('#emp-nome', 'Loja Modelo');
+    await page.fill('#emp-cidade', 'Boa Vista / RR');
+    await page.click('#janela-ok');
+    await expect(page.locator('#vista-empresas h2')).toHaveText('Loja Modelo');
+  }
+
+  test('detalhe do candidato: "Mover para outro processo" e "Adicionar à empresa (contratar)" com link para a empresa', async ({ page }) => {
+    const erros = coletarErros(page);
+    await page.setViewportSize({ width: 1366, height: 900 });
+    await page.addInitScript((p) => { window.__procsIniciais = p; }, PROCS_INICIAIS);
+    await simularEmpresas(page);
+    await page.goto('/admin.html');
+    await entrar(page, 'dona@empresa.com', 'senha-boa-1');
+    await expect(page.locator('#faixa-banco')).toBeHidden();
+    await criarLojaModelo(page);
+
+    await page.locator('.aba[data-aba="lista"]').click();
+    await page.locator('#lista-candidatos > li', { hasText: 'Diego Rocha' }).getByRole('button', { name: /Ver detalhes/ }).click();
+    await expect(page.locator('#det-avaliacao')).toContainText('Vendedor Centro');
+    await expect(page.locator('#btn-mover-processo')).toBeVisible();
+    await expect(page.locator('#btn-contratar')).toHaveText('Adicionar à empresa (contratar)');
+    await expect(page.locator('#det-empresa-vinculo')).toBeHidden();
+    await capturar(page, 'detalhe-botoes');
+
+    // Mover: lista com busca dos processos (sem o atual), "Sem processo" no topo
+    await page.click('#btn-mover-processo');
+    await expect(page.locator('#janela-mover-processo')).toBeVisible();
+    await page.click('#janela-ok');
+    await expect(page.locator('#janela-erro')).toHaveText('Escolha o processo de destino.');
+    await page.click('#mover-processo');
+    await expect(page.locator('#mover-processo-lista [role="option"]')).toHaveText([/Escolher o processo/, /Sem processo/, /Vendedor Shopping \(SEL2\)/]);
+    await page.fill('#mover-processo-busca', 'shopping');
+    await page.locator('#mover-processo-lista [role="option"]', { hasText: 'Vendedor Shopping' }).click();
+    await page.click('#janela-ok');
+    await expect(page.locator('#aviso-geral')).toHaveText('Resposta movida para "Vendedor Shopping".');
+    await expect(page.locator('#det-avaliacao')).toContainText('Vendedor Shopping');
+    expect((await chamadasSb(page, 'moverResposta'))[0]).toEqual(['tk-dona', 'r-p-diego', 'proc-b']);
+
+    // Contratar: escolhe a empresa, cargo vem da vaga; depois mostra "Colaborador(a) em Loja Modelo" com link
+    await page.click('#btn-contratar');
+    await expect(page.locator('#janela-contratar')).toBeVisible();
+    await expect(page.locator('#contratar-cargo')).toHaveValue('Vendedor');
+    await page.click('#janela-ok');
+    await expect(page.locator('#janela-erro')).toHaveText('Escolha a empresa.');
+    await escolherBusca(page, 'contratar-empresa', 'Loja');
+    await page.fill('#contratar-area', 'Comercial');
+    await page.click('#janela-ok');
+    await expect(page.locator('#aviso-geral')).toHaveText('Diego Rocha agora é colaborador(a) em Loja Modelo.');
+    expect((await chamadasSb(page, 'contratarPessoa'))[0][1]).toEqual({ respostaId: 'r-p-diego', empresaId: 'emp1', cargo: 'Vendedor', area: 'Comercial' });
+    await expect(page.locator('#det-empresa-vinculo')).toContainText('Colaborador(a) em Loja Modelo · Vendedor');
+    await capturar(page, 'detalhe-contratado');
+    await page.click('#det-link-empresa');
+    await expect(page.locator('#vista-empresas h2')).toHaveText('Loja Modelo');
+    await expect(page.locator('#lista-colaboradores > li[data-nome="Diego Rocha"]')).toHaveCount(1);
+    expect(erros.filter((e) => !/Blocked script execution in 'about:srcdoc'/.test(e))).toEqual([]);
+  });
+
+  test('aba Relatórios: 5 modelos com "Ver exemplo", assistente gera e publica, gerados com filtro e excluir', async ({ page }) => {
+    const erros = coletarErros(page);
+    await page.setViewportSize({ width: 1366, height: 900 });
+    await page.addInitScript((p) => {
+      window.__procsIniciais = p;
+      window.__relProcessos = [{ token: 'tok-proc-1', processoId: 'proc-a', status: 'publicado', criadoEm: '2026-10-02T10:00:00Z', publicadoEm: '2026-10-02T11:00:00Z' }];
+    }, PROCS_INICIAIS);
+    await simularEmpresas(page);
+    await page.goto('/admin.html');
+    await entrar(page, 'dona@empresa.com', 'senha-boa-1');
+    await criarLojaModelo(page);
+    await page.click('#btn-add-colaborador');
+    await escolherBusca(page, 'colab-pessoa', 'Bruno');
+    await page.fill('#colab-cargo', 'Vendedor');
+    await page.click('#janela-ok');
+    await expect(page.locator('#lista-colaboradores > li')).toHaveCount(1);
+
+    // Modelos: 5 cartões com para quem é e o que responde
+    await page.locator('.aba[data-aba="relatorios"]').click();
+    await expect(page.locator('#rel-subaba-modelos')).toHaveAttribute('aria-current', 'page');
+    const cartoes = page.locator('#lista-modelos > li');
+    await expect(cartoes.locator('.modelo-card__titulo')).toHaveText(['Pessoa · completo', 'Pessoa · simples', 'Como liderar', 'Equipe', 'Processo seletivo']);
+    for (const c of await cartoes.all()) {
+      await expect(c).toContainText('Para quem é');
+      await expect(c).toContainText('O que responde');
+    }
+    await capturar(page, 'relatorios-modelos');
+
+    // "Ver exemplo" de cada um abre a prévia com dados fictícios
+    const esperado = { 'pessoa-completo': /Marina/, 'pessoa-simples': /Marina/, lideranca: /Rafael/, equipe: /Loja Exemplo/, processo: /Cartório Exemplo/ };
+    for (const [chave, texto] of Object.entries(esperado)) {
+      await page.locator('#modelo-' + chave + ' [data-acao="ver-exemplo"]').click();
+      await expect(page.locator('#rel-exemplo-previa')).toBeVisible();
+      await expect(page.frameLocator('#rel-exemplo-previa').locator('body')).toContainText(texto);
+      if (chave === 'equipe') await capturar(page, 'relatorios-exemplo-equipe');
+      await page.click('#btn-exemplo-voltar');
+      await expect(page.locator('#lista-modelos')).toBeVisible();
+    }
+
+    // Assistente: modelo -> para quem -> prévia -> publicar -> link e mensagem
+    await page.locator('#modelo-equipe [data-acao="gerar"]').click();
+    await expect(page.locator('#assist-modelo-equipe')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('#assist-passos li[aria-current="step"]')).toContainText('Para quem');
+    await page.click('#btn-assist-gerar');
+    await expect(page.locator('#assist-erro')).toHaveText('Escolha a empresa.');
+    await escolherBusca(page, 'assist-empresa', 'Loja');
+    await capturar(page, 'relatorios-assistente');
+    await page.click('#btn-assist-gerar');
+    await expect(page.locator('#rel-modelo-previa')).toBeVisible();
+    await expect(page.locator('#assist-passos li[aria-current="step"]')).toContainText('Prévia e envio');
+    await expect(page.frameLocator('#rel-modelo-previa').locator('body')).toContainText('Loja Modelo');
+    await page.click('#btn-rel-publicar');
+    await expect(page.locator('#rel-modelo-link')).toContainText('/relatorio.html#r-tok-modelo-');
+    await expect(page.locator('#rel-modelo-mensagem')).toContainText('relatório da equipe da Loja Modelo');
+    expect((await chamadasSb(page, 'salvarRelatorioModelo')).pop()[1]).toMatchObject({ modelo: 'equipe', empresaId: 'emp1', publicar: true });
+    await capturar(page, 'relatorios-assistente-publicado');
+
+    // Também gera o relatório da pessoa (simples) pelo assistente, como rascunho
+    await page.click('#btn-voltar-relatorio');
+    await page.click('#btn-rel-novo');
+    await page.click('#assist-modelo-pessoa-simples');
+    await escolherBusca(page, 'assist-pessoa', 'Diego');
+    await page.click('#btn-assist-gerar');
+    await expect(page.locator('#btn-rel-simples')).toHaveAttribute('aria-pressed', 'true');
+    await page.click('#btn-rel-rascunho');
+    await expect(page.locator('#aviso-geral')).toHaveText('Rascunho salvo.');
+    expect((await chamadasSb(page, 'salvarRelatorioModelo')).pop()[1]).toMatchObject({ modelo: 'pessoa', pessoaId: 'p-diego', publicar: false });
+
+    // Gerados: os dois dos modelos + o do processo, com filtros
+    await page.click('#btn-voltar-relatorio');
+    await expect(page.locator('#rel-subaba-gerados')).toHaveAttribute('aria-current', 'page');
+    const linhas = page.locator('#lista-gerados > li[data-id]');
+    await expect(linhas).toHaveCount(3);
+    await expect(page.locator('#gerados-contagem')).toHaveText('3 de 3 relatórios');
+    await expect(linhas.filter({ hasText: 'Processo seletivo · Vendedor Centro' })).toHaveCount(1);
+    await capturar(page, 'relatorios-gerados');
+    await escolher(page, '#filtro-rel-modelo', 'processo');
+    await expect(linhas).toHaveCount(1);
+    await expect(linhas.first()).toHaveAttribute('data-tipo', 'processo');
+    await expect(linhas.first().locator('[data-acao="excluir"]')).toHaveCount(0);
+    await escolher(page, '#filtro-rel-modelo', '');
+    await escolher(page, '#filtro-rel-status', 'rascunho');
+    await expect(linhas).toHaveCount(1);
+    await expect(linhas.first()).toHaveAttribute('data-modelo', 'pessoa');
+    await escolher(page, '#filtro-rel-status', '');
+    await escolherBusca(page, 'filtro-rel-empresa', 'Loja');
+    await expect(linhas).toHaveCount(2);
+    await expect(page.locator('#gerados-contagem')).toHaveText('2 de 3 relatórios');
+    // Excluir o da equipe
+    await linhas.filter({ hasText: 'equipe' }).first().locator('[data-acao="excluir"]').click();
+    await page.click('#confirmar-ok');
+    await expect(page.locator('#aviso-geral')).toHaveText('Relatório excluído.');
+    await expect(linhas).toHaveCount(1);
+    expect(await chamadasSb(page, 'excluirRelatorioModelo')).toHaveLength(1);
+    expect(await page.locator('#vista-relatorios select').count()).toBe(0);
+    expect(erros.filter((e) => !/Blocked script execution in 'about:srcdoc'/.test(e))).toEqual([]);
+  });
+
+  test('faixa de banco desatualizado: lista as migrações que faltam; sem a função no banco, mesmo aviso', async ({ page }) => {
+    const erros = coletarErros(page);
+    await page.setViewportSize({ width: 1366, height: 900 });
+    await page.addInitScript(() => { window.__bancoFaltando = ['20261009120000_fotos', '20261010120000_mover_versao']; });
+    await simularEmpresas(page);
+    await page.goto('/admin.html');
+    await entrar(page, 'dona@empresa.com', 'senha-boa-1');
+    await expect(page.locator('#faixa-banco')).toBeVisible();
+    await expect(page.locator('#faixa-banco-texto')).toHaveText('O banco de dados está desatualizado: faltam 20261009120000_fotos, 20261010120000_mover_versao. Peça para aplicar as migrações (veja docs/SUPABASE.md).');
+    const faixaY = (await page.locator('#faixa-banco').boundingBox()).y;
+    const abasY = (await page.locator('.abas').boundingBox()).y;
+    expect(faixaY).toBeLessThan(abasY);
+    await capturar(page, 'faixa-banco');
+    await sairDoPainel(page);
+    await expect(page.locator('#faixa-banco')).toBeHidden();
+
+    await page.evaluate(() => { window.__bancoFaltando = 'sem-funcao'; });
+    await entrar(page, 'dona@empresa.com', 'senha-boa-1');
+    await expect(page.locator('#faixa-banco-texto')).toHaveText(/^O banco de dados está desatualizado: faltam as migrações mais recentes\. Peça para aplicar/);
+    expect(erros).toEqual([]);
   });
 });

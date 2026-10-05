@@ -45,12 +45,18 @@
  * Semente: avatares FICTÍCIOS (iniciais sobre a cor DISC) para Ana, Carla, Diego, Marta e Renata — os mesmos do
  * supabase/seed_previa.sql; no relatório do Cartório Exemplo, a Ana e a Carla da fixture usam os avatares AE e CM.
  *
+ * Rodada 4 (como a migração 20261010120000_mover_versao.sql): moverResposta(token, respostaId, processoId|'') troca o
+ * processo (código e empresa) e guarda item.historicoProcessos; contratarPessoa(token, {respostaId|pessoaId, empresaId,
+ * cargo, area}) leva a pessoa para a empresa (ativa em outra = move) e aprova a resposta; salvarRelacoes(…, {topoIds})
+ * guarda o topo do organograma na empresa (listarEquipe devolve topoIds); versaoBanco() -> a mais nova, nada faltando.
+ *
  * No Node (testes): require('./js/api-simulada.js').criar({ armazenamento, scoring, latenciaMs: 0, semente: false }).
  * Opcional: { motor, fixture } para trocar o motor do relatório e os dados do processo de exemplo.
  */
 (function (root) {
   'use strict';
 
+  var VERSAO_BANCO = 20261010120000;                     // última migração (supabase/migrations)
   var CHAVE_ARMAZENAMENTO = 'disc_planilha_simulada';     // respostas (mesma chave das versões anteriores)
   var CHAVES = {
     usuarios: 'disc_simulada_usuarios',
@@ -1162,7 +1168,13 @@
         email: String(l.email == null ? '' : l.email),
         cidade: String(l.cidade == null ? '' : l.cidade),
         extras: (Array.isArray(l.extras) ? l.extras : []).filter(function (e) { return e && typeof e === 'object' && !Array.isArray(e); })
-          .map(function (e) { return { id: String(e.id || ''), pergunta: String(e.pergunta || ''), resposta: String(e.resposta || '') }; })
+          .map(function (e) { return { id: String(e.id || ''), pergunta: String(e.pergunta || ''), resposta: String(e.resposta || '') }; }),
+        historicoProcessos: (Array.isArray(l.historicoProcessos) ? l.historicoProcessos : [])
+          .filter(function (e) { return e && typeof e === 'object' && !Array.isArray(e); })
+          .map(function (e) {
+            return { de: String(e.de || ''), para: String(e.para || ''), deCodigo: String(e.deCodigo || ''),
+              paraCodigo: String(e.paraCodigo || ''), em: String(e.em || '') };
+          })
       };
     }
 
@@ -1191,6 +1203,7 @@
         item.empresaNome = emp[item.empresaId] || '';
         item.avaliacaoNome = av ? av.nome : '';
         item.avaliacaoTipo = av ? av.tipo : 'selecao';
+        item.processoId = av ? String(av.id) : '';
         itens.push(item);
       });
       return { ok: true, itens: itens };
@@ -1222,6 +1235,79 @@
       gravar(linhas);
       if (tirarFoto) acaoRemoverFoto(id);
       return { ok: true, id: id };
+    }
+
+    // Troca a resposta de processo (como mover_resposta do banco). processoId '' = sem processo.
+    function acaoMoverResposta(idBruto, processoBruto) {
+      var id = limparTexto(idBruto, 80);
+      if (!id) return erro('Candidato não informado.');
+      var procId = limparTexto(processoBruto, 40);
+      var av = null;
+      if (procId) {
+        av = buscarPor(avaliacoes(), 'id', procId);
+        if (!av) return erro('Processo não encontrado.');
+      }
+      var linhas = ler();
+      var i = indice(linhas, id);
+      if (i === -1) return erro('Candidato não encontrado.');
+      var l = linhas[i];
+      var antigo = normalizarCodigoAvaliacao(l.avaliacao) ? buscarPor(avaliacoes(), 'codigo', normalizarCodigoAvaliacao(l.avaliacao)) : null;
+      var deId = antigo ? String(antigo.id) : '';
+      var hist = Array.isArray(l.historicoProcessos) ? l.historicoProcessos.slice() : [];
+      var codigo = av ? av.codigo : '';
+      if (deId === procId) {
+        return { ok: true, id: id, processoId: procId, avaliacao: normalizarCodigoAvaliacao(l.avaliacao), historicoProcessos: hist, mudou: false };
+      }
+      hist.push({ de: deId, para: procId, deCodigo: normalizarCodigoAvaliacao(l.avaliacao), paraCodigo: codigo, em: agoraIso() });
+      if (hist.length > 50) hist = hist.slice(hist.length - 50);
+      l.avaliacao = codigo;
+      l.empresaId = av ? (av.empresaId || '') : '';
+      l.historicoProcessos = hist;
+      gravar(linhas);
+      return { ok: true, id: id, processoId: procId, avaliacao: codigo, historicoProcessos: hist, mudou: true };
+    }
+
+    // Candidato aprovado vira colaborador ativo (como contratar_pessoa do banco): ativo em outra empresa = move.
+    function acaoContratar(dados) {
+      if (!dados || typeof dados !== 'object') return erro('Dados da contratação ausentes.');
+      var empresaId = limparTexto(dados.empresaId, 40);
+      if (!empresaId || !buscarPor(empresas(), 'id', empresaId)) return erro('Empresa não encontrada.');
+      var cargo = limparTexto(dados.cargo, 120);
+      var area = limparTexto(dados.area, 120);
+      var respId = limparTexto(dados.respostaId, 80);
+      var pessoaId = '';
+      var linhas = null, i = -1;
+      if (respId) {
+        linhas = ler();
+        if (ligarPessoas(linhas)) gravar(linhas);
+        i = indice(linhas, respId);
+        if (i === -1) return erro('Candidato não encontrado.');
+        pessoaId = String(linhas[i].pessoaId || '');
+        if (!pessoaId || !buscarPor(pessoas(), 'id', pessoaId)) {
+          return erro('Esta resposta não tem um WhatsApp válido. Cadastre a pessoa pela empresa (Colaboradores).');
+        }
+        if (!cargo) cargo = limparTexto(linhas[i].vaga, 120);
+      } else if (limparTexto(dados.pessoaId, 40)) {
+        pessoaId = limparTexto(dados.pessoaId, 40);
+        if (!buscarPor(pessoas(), 'id', pessoaId)) return erro('Pessoa não encontrada.');
+      } else {
+        return erro('Informe a pessoa.');
+      }
+      var lsV = vinculos();
+      var atual = null;
+      var de = '';
+      lsV.forEach(function (v) { if (v.pessoaId === pessoaId && v.status === 'ativo') atual = v; });
+      if (atual && atual.empresaId === empresaId) {
+        atual.cargo = cargo;
+        atual.area = area;
+      } else {
+        if (atual) { de = atual.empresaId; desligar(atual); }
+        atual = novoVinculo(pessoaId, empresaId, cargo, area);
+        lsV.push(atual);
+      }
+      gravarChave(CHAVES.vinculos, lsV);
+      if (linhas && i !== -1) { linhas[i].status = 'aprovado'; gravar(linhas); }
+      return { ok: true, colaborador: colaboradorPublico(atual, mapaPessoas()), movido: !!de, deEmpresaId: de };
     }
 
     // LGPD: apaga a foto da resposta, da ficha da pessoa e das outras respostas dela (como remover_foto do banco).
@@ -1393,7 +1479,8 @@
         .map(function (r) { return { de: r.de, para: r.para, tipo: r.tipo }; });
       var emp = empresaPublica(e);
       emp.colaboradores = ativos.length;
-      return { ok: true, empresa: emp, colaboradores: ativos, relacoes: relacoes, historico: historico };
+      return { ok: true, empresa: emp, colaboradores: ativos, relacoes: relacoes, topoIds: topoAtivos(empresaId, topoGuardado(e)),
+        historico: historico };
     }
 
     function acaoColaboradorSalvar(dados) {
@@ -1460,11 +1547,29 @@
       return { ok: true, id: id };
     }
 
-    function acaoRelacoesSalvar(empresaIdBruto, lista) {
+    // Topo do organograma (empresas.organograma.topoIds no banco): só colaboradores ativos, sem repetir.
+    function topoGuardado(e) {
+      return e && e.organograma && typeof e.organograma === 'object' && Array.isArray(e.organograma.topoIds) ? e.organograma.topoIds : [];
+    }
+    function topoAtivos(empresaId, ids) {
+      var ativos = {};
+      vinculos().forEach(function (v) { if (v.empresaId === empresaId && v.status === 'ativo') ativos[v.pessoaId] = true; });
+      var vistos = {};
+      return (Array.isArray(ids) ? ids : []).map(function (x) { return limparTexto(x, 40); }).filter(function (x) {
+        if (!x || !ativos[x] || vistos[x]) return false;
+        vistos[x] = true;
+        return true;
+      });
+    }
+
+    function acaoRelacoesSalvar(empresaIdBruto, lista, opcoesOrg) {
       var empresaId = limparTexto(empresaIdBruto, 40);
       if (!empresaId || !buscarPor(empresas(), 'id', empresaId)) return erro('Empresa não encontrada.');
       if (!Array.isArray(lista)) return erro('Relações inválidas.');
       if (lista.length > 2000) return erro('Relações demais.');
+      var mudarTopo = !!(opcoesOrg && typeof opcoesOrg === 'object' && opcoesOrg.topoIds !== undefined);
+      if (mudarTopo && !Array.isArray(opcoesOrg.topoIds)) return erro('Relações inválidas.');
+      if (mudarTopo && opcoesOrg.topoIds.length > 2000) return erro('Relações demais.');
       var ativos = {};
       vinculos().forEach(function (v) { if (v.empresaId === empresaId && v.status === 'ativo') ativos[v.pessoaId] = true; });
       var novas = [];
@@ -1484,7 +1589,17 @@
         else novas.push({ empresaId: empresaId, de: de, para: para, tipo: tipo });
       }
       gravarChave(CHAVES.relacoes, relacoesTodas().filter(function (r) { return r.empresaId !== empresaId; }).concat(novas));
-      return { ok: true, relacoes: novas.map(function (r) { return { de: r.de, para: r.para, tipo: r.tipo }; }) };
+      var lsEmp = empresas();
+      var emp = buscarPor(lsEmp, 'id', empresaId);
+      var topo;
+      if (mudarTopo) {
+        topo = topoAtivos(empresaId, opcoesOrg.topoIds);
+        emp.organograma = Object.assign({}, emp.organograma && typeof emp.organograma === 'object' ? emp.organograma : {}, { topoIds: topo });
+        gravarChave(CHAVES.empresas, lsEmp);
+      } else {
+        topo = topoAtivos(empresaId, topoGuardado(emp));
+      }
+      return { ok: true, relacoes: novas.map(function (r) { return { de: r.de, para: r.para, tipo: r.tipo }; }), topoIds: topo };
     }
 
     /* ----- relatórios por modelo (equipe, liderança, pessoa): snapshot pronto vindo do painel ----- */
@@ -2024,7 +2139,9 @@
       'colaboradores.salvar': { soAdmin: true, fn: function (u, c) { return acaoColaboradorSalvar(c.colaborador); } },
       'colaboradores.mover': { soAdmin: true, fn: function (u, c) { return acaoColaboradorMover(c.colaborador); } },
       'colaboradores.desligar': { soAdmin: true, fn: function (u, c) { return acaoColaboradorDesligar(c.id); } },
-      'relacoes.salvar': { soAdmin: true, fn: function (u, c) { return acaoRelacoesSalvar(c.empresaId, c.relacoes); } },
+      'relacoes.salvar': { soAdmin: true, fn: function (u, c) { return acaoRelacoesSalvar(c.empresaId, c.relacoes, c.opcoes); } },
+      'respostas.mover': { soAdmin: true, fn: function (u, c) { return acaoMoverResposta(c.id, c.processoId); } },
+      'colaboradores.contratar': { soAdmin: true, fn: function (u, c) { return acaoContratar(c.dados); } },
       'relatorioModelo.salvar': { soAdmin: true, fn: function (u, c) { return acaoRelatorioModeloSalvar(c.relatorio); } },
       'relatoriosModelo.listar': { soAdmin: true, fn: function (u, c) { return acaoRelatoriosModeloListar(c.filtro); } },
       'relatorioModelo.excluir': { soAdmin: true, fn: function (u, c) { return acaoRelatorioModeloExcluir(c.id); } },
@@ -2612,10 +2729,30 @@
         exigir(vinculoId, 'Colaborador não informado.');
         return comSessao('colaboradores.desligar', token, { id: vinculoId });
       }),
-      salvarRelacoes: seguro(function (token, empresaId, relacoes) {
+      salvarRelacoes: seguro(function (token, empresaId, relacoes, opcoesOrg) {
         exigirToken(token);
         exigir(empresaId, 'Empresa não informada.');
-        return comSessao('relacoes.salvar', token, { empresaId: empresaId, relacoes: relacoes });
+        var dados = { empresaId: empresaId, relacoes: relacoes };
+        if (opcoesOrg && typeof opcoesOrg === 'object' && opcoesOrg.topoIds !== undefined) dados.opcoes = { topoIds: opcoesOrg.topoIds };
+        return comSessao('relacoes.salvar', token, dados);
+      }),
+      moverResposta: seguro(function (token, respostaId, processoId) {
+        exigirToken(token);
+        exigir(respostaId, 'Candidato não informado.');
+        return comSessao('respostas.mover', token, { id: respostaId, processoId: processoId == null ? '' : String(processoId) });
+      }),
+      contratarPessoa: seguro(function (token, dados) {
+        exigirToken(token);
+        exigir(dados && dados.empresaId, 'Empresa não informada.');
+        if (!dados.respostaId && !dados.pessoaId) return Promise.reject(Object.assign(new Error('Informe a pessoa.'),
+          { sessaoExpirada: false, resposta: erro('Informe a pessoa.') }));
+        return comSessao('colaboradores.contratar', token, { dados: dados });
+      }),
+      // Prévia: o "banco" é sempre o mais novo (o aviso de banco desatualizado nunca aparece).
+      versaoBanco: seguro(function () {
+        return new Promise(function (resolver) {
+          setTimeout(function () { resolver({ ok: true, versao: VERSAO_BANCO, faltando: [] }); }, latencia);
+        });
       }),
       salvarRelatorioModelo: seguro(function (token, dados) {
         return comSessao('relatorioModelo.salvar', token, { relatorio: dados || {} });
@@ -2639,7 +2776,8 @@
     'relatorioRascunho', 'relatorioSalvar', 'relatorioPublicar', 'relatorioDespublicar', 'relatoriosListar',
     'relatorioMelhorarTextos', 'relatorioPublico',
     'listarEquipe', 'salvarColaborador', 'moverColaborador', 'desligarColaborador', 'salvarRelacoes',
-    'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo', 'salvarMinhaFoto', 'removerFoto'];
+    'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo', 'salvarMinhaFoto', 'removerFoto',
+    'moverResposta', 'contratarPessoa', 'versaoBanco'];
 
   // Liga no lugar do DISC_API real quando CONFIG.API_URL === 'simulada' (o objeto continua o mesmo).
   function instalar(alvo, cfg, opcoes) {

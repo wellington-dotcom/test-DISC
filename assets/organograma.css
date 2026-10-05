@@ -1,0 +1,220 @@
+/*
+ * Organograma corporativo (js/organograma.js, DISC_ORGANOGRAMA). Só tokens de assets/notus.css.
+ * Feito para computador (≥1024px): coluna "Sem posição" à esquerda + quadro com a árvore (rola dentro do quadro).
+ * Cartões brancos com borda; linhas em azul acinzentado; laranja só no alvo do arrasto.
+ */
+
+.orgx {
+  --orgx-altura: clamp(440px, calc(100vh - 260px), 860px);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  min-width: 0;
+  color: var(--tinta);
+  font-family: var(--fonte);
+}
+.orgx--editar { grid-template-columns: 264px minmax(0, 1fr); }
+@media (max-width: 899px) { .orgx--editar { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---------- Coluna "Sem posição" ---------- */
+.orgx-sem {
+  display: flex; flex-direction: column; min-height: 0; max-height: calc(var(--orgx-altura) + 104px);
+  background: var(--nevoa); border-radius: 16px; padding: 14px 12px 12px;
+  box-shadow: inset 0 0 0 1px transparent;
+  transition: box-shadow .15s var(--curva), background-color .15s var(--curva);
+}
+.orgx-sem__cab { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 4px; }
+.orgx-sem__titulo { font-size: var(--t-rotulo); font-weight: 600; }
+.orgx-sem__n {
+  min-width: 24px; padding: 1px 8px; border-radius: var(--raio-pilula); background: var(--branco);
+  font-size: var(--t-eixo); font-weight: 600; color: var(--medio); text-align: center;
+}
+.orgx-sem__dica { font-size: var(--t-nota); color: var(--suave); line-height: 1.4; margin: 6px 4px 12px; }
+.orgx-sem__lista { flex: 1 1 auto; min-height: 64px; overflow-y: auto; margin: 0 -4px; padding: 0 4px 4px; }
+.orgx-sem__itens { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.orgx-sem__itens .orgx-cartao { position: relative; width: 100%; height: 76px; padding-top: 10px; padding-bottom: 10px; }
+.orgx-sem__itens > li[hidden] { display: none; }
+.orgx-sem__busca { font-size: var(--t-rotulo); padding: 8px 12px; margin-bottom: 10px; }
+.orgx-sem__busca[hidden] { display: none; }
+.orgx-sem__vazio {
+  font-size: var(--t-nota); color: var(--suave); text-align: center; padding: 20px 8px;
+  border: 1px dashed var(--cinza-claro); border-radius: 12px;
+}
+.orgx--arrastando .orgx-sem { box-shadow: inset 0 0 0 1px var(--cinza-claro); }
+
+/* ---------- Área do diagrama ---------- */
+.orgx-area { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.orgx-barra { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px 16px; min-height: 40px; }
+.orgx-barra__acoes { display: inline-flex; align-items: center; gap: 8px; margin-left: auto; }
+.orgx-botao { min-height: 36px; padding: 6px 14px; }
+.orgx-botao[aria-pressed="true"] { border-color: rgba(19, 40, 63, .35); background: var(--nevoa); }
+.orgx-nota { font-size: var(--t-nota); color: var(--suave); }
+
+.orgx-legenda { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 14px; font-size: var(--t-nota); color: var(--suave); }
+.orgx-legenda__item { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.orgx-legenda__letra {
+  display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 50%;
+  font-size: var(--t-eixo); font-weight: 700; line-height: 1;
+}
+
+.orgx-zoom {
+  display: inline-flex; align-items: center; height: 36px; border: 1px solid var(--linha); border-radius: var(--raio-pilula);
+  background: var(--branco); overflow: hidden;
+}
+.orgx-zoom__b {
+  width: 34px; height: 100%; border: 0; background: none; color: var(--tinta); font: inherit; font-size: var(--t-corpo);
+  font-weight: 600; cursor: pointer; transition: background-color .15s;
+}
+.orgx-zoom__b:hover:not(:disabled) { background: var(--nevoa); }
+.orgx-zoom__b:disabled { color: var(--cinza-claro); cursor: default; }
+.orgx-zoom__valor { min-width: 46px; text-align: center; font-size: var(--t-nota); color: var(--medio); }
+
+/* Faixa "Topo": soltar aqui = sem líder */
+.orgx-topo {
+  display: flex; align-items: center; justify-content: center; gap: 10px; min-height: 44px; padding: 8px 16px;
+  border: 1px dashed var(--cinza-claro); border-radius: 12px; background: var(--branco);
+  font-size: var(--t-rotulo); color: var(--medio);
+  transition: border-color .15s var(--curva), background-color .15s var(--curva), box-shadow .15s var(--curva);
+}
+.orgx-topo__seta {
+  display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 24px; border-radius: 50%;
+  background: var(--nevoa); color: var(--ardosia);
+}
+.orgx-topo__dica { color: var(--suave); }
+.orgx--arrastando .orgx-topo { border-color: var(--ardosia-clara); }
+
+/* Quadro: a árvore rola aqui dentro (nunca a página de lado) */
+.orgx-quadro {
+  position: relative; height: var(--orgx-altura); overflow: auto; overscroll-behavior: contain;
+  border: 1px solid var(--linha); border-radius: 16px;
+  background-color: var(--branco);
+  background-image: radial-gradient(circle, var(--linha) 1.2px, transparent 1.4px);
+  background-size: 22px 22px; background-attachment: local;
+  cursor: grab;
+}
+.orgx-quadro--movendo { cursor: grabbing; }
+.orgx-tela { position: relative; }
+.orgx-mundo { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.orgx-linhas { position: absolute; left: 0; top: 0; overflow: visible; pointer-events: none; }
+.orgx-linha { fill: none; stroke: var(--ardosia-clara); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.orgx-colega { fill: none; stroke: var(--ardosia-media); stroke-width: 1.25; stroke-dasharray: 5 5; opacity: .8; }
+.orgx-colega--indireto { stroke: var(--ardosia-clara); stroke-dasharray: 2 5; }
+.orgx-vazio {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: min(420px, 80%);
+  text-align: center; font-size: var(--t-rotulo); color: var(--suave); line-height: 1.5; pointer-events: none;
+}
+.orgx-quadro[data-org-alvo="topo"] { transition: box-shadow .15s var(--curva); }
+.orgx-moldura { position: relative; min-width: 0; }
+.orgx-aviso {
+  position: absolute; left: 50%; top: 14px; z-index: 5; transform: translateX(-50%); width: max-content; max-width: calc(100% - 32px);
+  padding: 10px 16px; border-radius: 12px; background: var(--erro-fundo); color: var(--erro);
+  box-shadow: inset 0 0 0 1px rgba(220, 38, 38, .25), 0 12px 28px -16px rgba(19, 40, 63, .45);
+  font-size: var(--t-rotulo); line-height: 1.4;
+}
+.orgx-aviso[hidden], .orgx-vazio[hidden] { display: none; }
+
+/* ---------- Cartão de pessoa ---------- */
+.orgx-cartao {
+  position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr); align-items: center; gap: 12px;
+  padding: 12px 12px 12px 14px; background: var(--branco); color: var(--tinta);
+  border: 1px solid var(--linha); border-radius: 16px;
+  box-shadow: 0 1px 2px rgba(19, 40, 63, .05), 0 10px 24px -18px rgba(19, 40, 63, .35);
+  user-select: none; -webkit-user-select: none; cursor: default; outline: none;
+  transition: border-color .15s, box-shadow .15s, opacity .15s;
+}
+.orgx--editar .orgx-cartao { cursor: grab; }
+.orgx--ler .orgx-cartao { cursor: pointer; }
+.orgx-cartao--no { position: absolute; }
+.orgx-cartao:hover { border-color: rgba(19, 40, 63, .22); }
+.orgx-cartao:focus-visible { outline: 2px solid var(--notus); outline-offset: 2px; }
+.orgx-cartao--origem { opacity: .35; }
+
+.orgx-avatar {
+  display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border-radius: 50%;
+  overflow: hidden; flex: none; background: var(--nevoa); color: var(--tinta);
+  font-size: var(--t-rotulo); font-weight: 600; letter-spacing: .02em;
+  box-shadow: 0 0 0 2px var(--branco), 0 0 0 3.5px var(--cinza-claro);
+}
+.orgx-avatar img { width: 100%; height: 100%; object-fit: cover; display: block; pointer-events: none; }
+.orgx-avatar--D { box-shadow: 0 0 0 2px var(--branco), 0 0 0 3.5px var(--disc-D); }
+.orgx-avatar--I { box-shadow: 0 0 0 2px var(--branco), 0 0 0 3.5px var(--disc-I); }
+.orgx-avatar--S { box-shadow: 0 0 0 2px var(--branco), 0 0 0 3.5px var(--disc-S); }
+.orgx-avatar--C { box-shadow: 0 0 0 2px var(--branco), 0 0 0 3.5px var(--disc-C); }
+
+.orgx-texto { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.orgx-nome, .orgx-cargo, .orgx-perfil { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.orgx-nome { font-size: var(--t-rotulo); font-weight: 600; padding-right: 22px; }
+.orgx-cargo { font-size: var(--t-nota); color: var(--medio); }
+.orgx-cargo--vazio { color: var(--ardosia-clara); }
+.orgx-perfil { font-size: var(--t-eixo); color: var(--suave); margin-top: 2px; padding-right: 22px; }
+.orgx-cartao--sem-teste .orgx-perfil { color: var(--ardosia-clara); }
+
+/* Selo da letra DISC (canto, sem encostar no avatar) */
+.orgx-selo {
+  position: absolute; top: 10px; right: 10px; display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; border-radius: 50%; font-size: var(--t-eixo); font-weight: 700; line-height: 1;
+}
+.orgx-cartao--sem-teste .orgx-selo { background: var(--fundo); color: var(--suave); }
+
+.orgx-mover {
+  position: absolute; right: 6px; bottom: 6px; display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; padding: 0; border: 0; border-radius: 8px; background: none; color: var(--ardosia-clara);
+  cursor: pointer; opacity: 0; transition: opacity .15s, background-color .15s, color .15s;
+}
+.orgx-cartao:hover .orgx-mover, .orgx-cartao:focus-within .orgx-mover, .orgx-mover:focus-visible { opacity: 1; }
+.orgx-mover:hover { background: var(--nevoa); color: var(--tinta); }
+
+/* ---------- Arrasto ---------- */
+.orgx-corpo--arrastando, .orgx-corpo--arrastando * { cursor: grabbing !important; }
+.orgx-fantasma {
+  position: fixed !important; z-index: 1000; pointer-events: none; margin: 0;
+  border-color: rgba(19, 40, 63, .25);
+  box-shadow: 0 24px 48px -18px rgba(19, 40, 63, .45), 0 2px 6px rgba(19, 40, 63, .08);
+  transform-origin: 0 0; will-change: transform;
+}
+.orgx-fantasma .orgx-mover { display: none; }
+.orgx-fantasma__dica {
+  position: absolute; left: 12px; top: calc(100% + 8px); padding: 4px 10px; border-radius: var(--raio-pilula);
+  background: var(--tinta); color: var(--branco); font-size: var(--t-eixo); font-weight: 600; white-space: nowrap;
+}
+.orgx-fantasma--proibido .orgx-fantasma__dica { background: var(--erro); }
+
+/* Alvo do arrasto: o único laranja da tela */
+.orgx-cartao.orgx-alvo { border-color: var(--notus); box-shadow: 0 0 0 3px rgba(243, 68, 5, .22), 0 10px 24px -18px rgba(19, 40, 63, .35); }
+.orgx-cartao.orgx-alvo--proibido { border-color: var(--erro); box-shadow: 0 0 0 3px var(--erro-fundo); cursor: not-allowed; }
+.orgx-topo.orgx-alvo { border-style: solid; border-color: var(--notus); background: rgba(243, 68, 5, .05); color: var(--tinta); }
+.orgx-topo.orgx-alvo .orgx-topo__seta { background: var(--notus); color: var(--sobre-notus); }
+.orgx-sem.orgx-alvo { box-shadow: inset 0 0 0 2px var(--notus); background: var(--branco); }
+.orgx-quadro.orgx-alvo { box-shadow: inset 0 0 0 2px var(--notus); }
+
+/* ---------- Menu "Mover para…" ---------- */
+.orgx-menu {
+  position: fixed; z-index: 1001; width: 320px; max-width: calc(100vw - 16px); padding: 14px; border-radius: 16px;
+  font-family: var(--fonte); color: var(--tinta);
+  animation: surgir .2s var(--curva) both;
+}
+.orgx-menu__titulo { font-size: var(--t-rotulo); margin: 0 2px 10px; }
+.orgx-menu__busca { font-size: var(--t-rotulo); padding: 8px 12px; }
+.orgx-menu__lista { list-style: none; margin: 8px 0 0; padding: 0; max-height: 280px; overflow-y: auto; }
+.orgx-menu__op {
+  display: flex; flex-direction: column; padding: 8px 10px; border-radius: 10px; cursor: pointer; line-height: 1.3;
+}
+.orgx-menu__op:hover:not([aria-disabled="true"]) { background: var(--nevoa); }
+.orgx-menu__op--ativa { background: var(--nevoa); box-shadow: inset 2px 0 0 var(--tinta); }
+.orgx-menu__op[aria-disabled="true"] { cursor: default; color: var(--ardosia-clara); }
+.orgx-menu__op-tit { font-size: var(--t-rotulo); font-weight: 600; }
+.orgx-menu__op[aria-disabled="true"] .orgx-menu__op-tit { font-weight: 400; }
+.orgx-menu__op-sub { font-size: var(--t-nota); color: var(--suave); }
+.orgx-menu__nada { padding: 10px; font-size: var(--t-nota); color: var(--suave); }
+.orgx-menu__dica { margin: 10px 2px 0; font-size: var(--t-eixo); color: var(--suave); }
+
+/* ---------- Versão estática (paraHtml: leitura e impressão A4) ---------- */
+.orgx-impresso { margin: 0; break-inside: avoid; page-break-inside: avoid; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+.orgx-impresso__area { position: relative; margin: 0 auto; overflow: hidden; }
+.orgx-impresso .orgx-cartao { box-shadow: none; cursor: default; }
+.orgx-impresso__rodape { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-top: 16px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .orgx-menu { animation: none; }
+  .orgx-sem, .orgx-topo, .orgx-cartao, .orgx-mover { transition: none; }
+}

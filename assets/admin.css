@@ -773,58 +773,89 @@
 .foto-escolha__acoes { display: flex; flex-wrap: wrap; gap: 8px; }
 .foto-escolha label.botao { cursor: pointer; }
 
-/* ---------- Organograma de arrastar ---------- */
-.orgd-cabeca { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.orgd-cabeca .caixa__titulo { margin: 0; }
-.orgd-status { min-height: 1em; }
-.orgd-aviso[hidden] { display: none; }
-.orgd { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
-@media (min-width: 900px) { .orgd { grid-template-columns: 240px minmax(0, 1fr); } }
-.orgd-sem, .orgd-topo { border-radius: 16px; background: var(--fundo); padding: 12px; transition: box-shadow .2s var(--curva), background .2s var(--curva); }
-.orgd-zona__titulo { font-size: var(--t-rotulo); margin-bottom: 8px; }
-.orgd-sem__lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
-@media (max-width: 899px) {
-  .orgd-sem__lista { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scroll-snap-type: x proximity; }
-  .orgd-sem__lista > li { flex: 0 0 min(240px, 80%); scroll-snap-align: start; }
+/* ---------- Subabas (página da empresa e aba Relatórios): pílulas menores, linha própria abaixo do cabeçalho ---------- */
+.subabas {
+  display: flex; flex-wrap: wrap; gap: 4px; padding: 4px; margin: 0 0 16px;
+  width: fit-content; max-width: 100%; border-radius: var(--raio-pilula); background: var(--branco);
+  box-shadow: inset 0 0 0 1px var(--linha);
 }
-.orgd-palco { display: grid; gap: 10px; min-width: 0; }
-.orgd-topo { padding: 10px 14px; font-size: var(--t-rotulo); border: 1px dashed var(--cinza-claro); background: var(--branco); }
-.orgd-vazio { padding: 8px 2px; }
-.orgd-arvore, .orgd-filhos { list-style: none; margin: 0; padding: 0; }
-.orgd-arvore { display: grid; gap: 10px; }
-.orgd-filhos { margin: 8px 0 0 16px; padding-left: 14px; border-left: 1px solid var(--cinza-claro); display: grid; gap: 8px; }
-.orgd-no { min-width: 0; }
-.orgd-cartao {
-  display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 4px; border-radius: 16px; background: var(--branco);
-  box-shadow: inset 0 0 0 1px var(--linha); min-width: 0; cursor: grab; user-select: none; -webkit-user-select: none;
-  transition: box-shadow .2s var(--curva), opacity .2s var(--curva);
+.subaba {
+  display: inline-flex; align-items: center; gap: 8px; min-height: 38px; padding: 6px 16px;
+  border: 0; border-radius: var(--raio-pilula); background: none; color: var(--medio);
+  font: inherit; font-size: var(--t-rotulo); font-weight: 600; cursor: pointer; white-space: nowrap;
+  transition: background-color .15s, color .15s;
 }
-.orgd-cartao:hover { box-shadow: inset 0 0 0 1px var(--tinta-30); }
-.orgd-alca { display: grid; place-items: center; width: 24px; height: 36px; flex: none; color: var(--ardosia-clara); touch-action: none; cursor: grab; }
-.orgd-alca__icone { width: 18px; height: 18px; stroke-width: 3; }
-.orgd-avatar { width: 36px; height: 36px; }
-.orgd-texto { display: grid; min-width: 0; flex: 1; }
-.orgd-nome { font-size: var(--t-rotulo); overflow-wrap: anywhere; }
-.orgd-cargo { font-size: var(--t-nota); color: var(--suave); overflow-wrap: anywhere; }
-.orgd-mover { flex: none; border: 0; background: none; color: var(--medio); font: inherit; font-size: var(--t-nota); padding: 6px 10px; border-radius: var(--raio-pilula); cursor: pointer; min-height: 32px; }
-.orgd-mover:hover, .orgd-mover:focus-visible { background: var(--fundo); color: var(--tinta); }
-.orgd-mover { display: inline-flex; align-items: center; gap: 4px; }
-.orgd-mover__icone { width: 16px; height: 16px; display: none; }
-.orgd-avatar .avatar__iniciais { font-size: var(--t-nota); }
-@media (max-width: 639px) {
-  .orgd-mover { width: 36px; height: 36px; padding: 0; justify-content: center; background: var(--fundo); }
-  .orgd-mover__icone { display: block; }
-  .orgd-mover__texto { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-  .orgd-filhos { margin-left: 8px; padding-left: 8px; }
-  .orgd-cartao { gap: 8px; padding-right: 6px; }
+.subaba:hover { color: var(--tinta); background: var(--fundo); }
+.subaba[aria-current="page"] { background: var(--tinta); color: var(--branco); }
+.subaba__n { min-width: 22px; padding: 1px 7px; border-radius: var(--raio-pilula); background: var(--fundo); color: var(--medio); font-size: var(--t-eixo); text-align: center; }
+.subaba[aria-current="page"] .subaba__n { background: var(--ardosia); color: var(--branco); }
+.emp-painel { display: grid; gap: 12px; }
+.emp-painel > * { margin-bottom: 0; }
+
+/* ---------- Organograma na página da empresa (o desenho vem de assets/organograma.css) ---------- */
+.org-cabeca { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.org-cabeca .caixa__titulo { margin: 0 0 4px; }
+.org-dica { margin: 0; max-width: 72ch; }
+.org-status { min-height: 1em; white-space: nowrap; padding-top: 4px; }
+.org-aviso[hidden] { display: none; }
+.org-quadro { min-width: 0; }
+
+/* ---------- Faixa: banco de dados desatualizado ---------- */
+.faixa-banco {
+  display: flex; align-items: flex-start; gap: 10px; margin: 16px 0 0; padding: 12px 16px;
+  border-radius: 16px; background: var(--branco); color: var(--tinta); box-shadow: inset 0 0 0 1px var(--notus);
 }
-.orgd-cartao--origem { opacity: .35; }
-.orgd-alvo--ativo { box-shadow: inset 0 0 0 2px var(--notus) !important; background: var(--branco); }
-.orgd-sem.orgd-alvo--ativo, .orgd-topo.orgd-alvo--ativo { background: var(--nevoa); }
-.orgd-alvo--proibido { box-shadow: inset 0 0 0 2px var(--erro) !important; cursor: not-allowed; }
-.orgd-fantasma { position: fixed; left: 0; top: 0; z-index: 60; pointer-events: none; opacity: .95; cursor: grabbing; box-shadow: 0 18px 40px -18px rgba(19, 40, 63, .45), inset 0 0 0 1px var(--linha); }
-.org-arrastando, .org-arrastando * { cursor: grabbing !important; }
-@media (prefers-reduced-motion: reduce) { .orgd-cartao, .orgd-sem, .orgd-topo { transition: none; } }
+.faixa-banco[hidden] { display: none; }
+.faixa-banco__icone { width: 18px; height: 18px; margin-top: 1px; color: var(--notus-forte); }
+.faixa-banco__texto { margin: 0; font-size: var(--t-rotulo); }
+
+/* ---------- Detalhe: vínculo com empresa ---------- */
+.det-vinculo-topo { margin: 6px 0 0; font-size: var(--t-rotulo); }
+.det-vinculo-topo[hidden] { display: none; }
+
+/* ---------- Aba Relatórios ---------- */
+.modelos-grade { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.modelo-card { display: flex; flex-direction: column; gap: 10px; }
+.modelo-card .sobretitulo { margin: 0; }
+.modelo-card__titulo { font-size: var(--t-titulo); margin: 0; }
+.modelo-card__dl { margin: 0; display: grid; gap: 10px; flex: 1; }
+.modelo-card__dl dt { font-size: var(--t-nota); color: var(--suave); }
+.modelo-card__dl dd { margin: 2px 0 0; font-size: var(--t-rotulo); color: var(--medio); }
+.modelo-card__acoes { margin-top: 4px; }
+
+.passos-assist { list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.passos-assist__item {
+  display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px 6px 6px; border-radius: var(--raio-pilula);
+  background: var(--branco); color: var(--suave); font-size: var(--t-rotulo); box-shadow: inset 0 0 0 1px var(--linha);
+}
+.passos-assist__num { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--fundo); color: var(--medio); font-size: var(--t-nota); font-weight: 600; }
+.passos-assist__item--feito { color: var(--medio); }
+.passos-assist__item--feito .passos-assist__num { background: var(--nevoa); color: var(--tinta); }
+.passos-assist__item[aria-current="step"] { color: var(--tinta); font-weight: 600; box-shadow: inset 0 0 0 1px var(--tinta); }
+.passos-assist__item[aria-current="step"] .passos-assist__num { background: var(--tinta); color: var(--branco); }
+
+.assist-passo { margin-bottom: 12px; display: grid; gap: 12px; }
+.assist-passo .caixa__titulo { margin: 0; }
+.assist-modelos { display: grid; gap: 8px; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); }
+.assist-modelo {
+  display: grid; gap: 4px; text-align: left; padding: 12px 14px; border: 0; border-radius: 16px; cursor: pointer;
+  background: var(--branco); color: var(--tinta); font: inherit; font-size: var(--t-rotulo); box-shadow: inset 0 0 0 1px var(--linha);
+  transition: box-shadow .15s, background-color .15s;
+}
+.assist-modelo:hover { box-shadow: inset 0 0 0 1px var(--tinta); }
+.assist-modelo[aria-pressed="true"] { box-shadow: inset 0 0 0 2px var(--notus); background: var(--branco); }
+.assist-modelo:disabled { cursor: not-allowed; opacity: .55; }
+.assist-passo .campo { max-width: 520px; }
+
+.gerados-filtros { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+.gerados-filtros .busca-sel { width: 260px; }
+.gerados-lista { grid-template-columns: minmax(0, 1fr); }
+.gerados-lista .gerado { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-top: 18px; padding-bottom: 18px; }
+.gerados-lista .gerado .gestao-card__acoes { margin: 0 0 0 auto; justify-content: flex-end; }
+.gerado__texto { flex: 1 1 420px; }
+.gerado__texto { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.gerado__titulo { font-size: var(--t-corpo); overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { .subaba, .assist-modelo { transition: none; } }
 
 /* ---------- Impressão: branco, sem botões, cores das barras mantidas ---------- */
 @media print {

@@ -30,6 +30,9 @@ const MIGRACAO_EQUIPES = fs.readFileSync(path.join(RAIZ, 'supabase', 'migrations
 const MIGRACAO_PARTE2 = fs.readFileSync(path.join(RAIZ, 'supabase', 'migrations', '20261008120000_parte2.sql'), 'utf8');
 // A 5ª (fotos) tem testes próprios em tests/supabase/fotos.test.js; aplicada em seguida (o seed usa a foto).
 const MIGRACAO_FOTOS = fs.readFileSync(path.join(RAIZ, 'supabase', 'migrations', '20261009120000_fotos.sql'), 'utf8');
+// A 6ª (mover resposta, contratar, topo do organograma, versão do banco) tem testes próprios em
+// tests/supabase/mover_versao.test.js; aplicada em seguida (o seed grava o topo do organograma).
+const MIGRACAO_MOVER = fs.readFileSync(path.join(RAIZ, 'supabase', 'migrations', '20261010120000_mover_versao.sql'), 'utf8');
 const TABELAS = ['admins', 'configuracoes', 'empresas', 'pessoas', 'processos', 'relacoes', 'relatorios', 'respostas', 'vinculos'];
 // Campos que a migração nova acrescenta ao payload (o Code.gs, legado, não tem): com o formulário padrão
 // eles vêm vazios e o resto do payload continua igual ao do Code.gs.
@@ -204,6 +207,7 @@ test('migração nova sobre dados antigos: idempotente, cria pessoas agrupando p
   await db.query(MIGRACAO_EQUIPES);
   await db.query(MIGRACAO_PARTE2);
   await db.query(MIGRACAO_FOTOS);
+  await db.query(MIGRACAO_MOVER);
   const t = await db.query(`select tablename, rowsecurity from pg_tables where schemaname = 'public' order by 1`);
   assert.deepEqual(t.rows.map((r) => r.tablename), TABELAS);
   assert.ok(t.rows.every((r) => r.rowsecurity), 'RLS ligado em todas as tabelas');
@@ -280,6 +284,9 @@ test('seed da prévia (opcional) roda duas vezes e cria SEL1/EQP1/ATD1, a mesma 
   assert.equal(lidera.length, 6);
   assert.equal(lidera.filter((x) => x.de === 'Marta Exemplo Diretora').length, 2, 'diretora lidera os 2 líderes de área');
   assert.equal((await db.query(`select count(*)::int n from public.relacoes where empresa_id = $1`, [EMP])).rows[0].n, 9);
+  const topo = (await db.query(`select organograma from public.empresas where id = $1`, [EMP])).rows[0].organograma;
+  const marta = (await db.query(`select id from public.pessoas where telefone = '5511900000006'`)).rows[0].id;
+  assert.deepEqual(topo, { topoIds: [marta] }, 'topo do organograma gravado (Marta)');
   const ligados = (await db.query(`select codigo, empresa from public.processos where empresa_id = $1 order by codigo`, [EMP])).rows;
   assert.deepEqual(ligados, [{ codigo: 'EQP1', empresa: 'Clínica Exemplo' }, { codigo: 'SEL1', empresa: 'Clínica Exemplo' }]);
   // Sai do caminho dos outros testes (que esperam banco limpo) — mesma limpeza do cabeçalho do seed.
@@ -320,13 +327,14 @@ test('anon só executa as 3 funções públicas', async () => {
   const f = await db.query(`
     select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public' and has_function_privilege('anon', p.oid, 'execute') order by 1`);
-  assert.deepEqual(f.rows.map((x) => x.proname), ['avaliacao_publica', 'enviar_resposta', 'relatorio_publico']);
+  assert.deepEqual(f.rows.map((x) => x.proname), ['avaliacao_publica', 'enviar_resposta', 'relatorio_publico', 'versao_banco']);
   const g = await db.query(`
     select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public' and has_function_privilege('authenticated', p.oid, 'execute') order by 1`);
   assert.deepEqual(g.rows.map((x) => x.proname),
-    ['avaliacao_publica', 'e_admin', 'enviar_resposta', 'garantir_primeiro_admin', 'mover_colaborador', 'relatorio_publico',
-      'remover_foto', 'salvar_colaborador', 'salvar_minha_foto', 'salvar_relacoes']);
+    ['avaliacao_publica', 'contratar_pessoa', 'e_admin', 'enviar_resposta', 'garantir_primeiro_admin', 'mover_colaborador',
+      'mover_resposta', 'relatorio_publico', 'remover_foto', 'salvar_colaborador', 'salvar_minha_foto', 'salvar_relacoes',
+      'versao_banco']);
   assert.equal((await db.query(`select has_schema_privilege('anon', 'disc_interno', 'usage') v`)).rows[0].v, false);
   assert.equal((await db.query(`select has_schema_privilege('authenticated', 'disc_interno', 'usage') v`)).rows[0].v, false);
 });
@@ -1057,6 +1065,7 @@ test('rodar a migração antiga de novo depois da nova não perde a ligação co
   await db.query(MIGRACAO_EQUIPES);
   await db.query(MIGRACAO_PARTE2);
   await db.query(MIGRACAO_FOTOS);
+  await db.query(MIGRACAO_MOVER);
   assert.equal((await rpc('anon', null, 'avaliacao_publica', ['PUB1'])).formulario.parte2, 'desligada');
   await limparRespostas();
   assert.equal((await db.query(`select count(*)::int n from public.pessoas`)).rows[0].n, 0);
