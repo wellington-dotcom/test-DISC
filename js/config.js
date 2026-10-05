@@ -40,6 +40,23 @@
     WHATSAPP_SUPORTE: '',
     EMPRESA_LEGAL: ''
   };
+  // Modo demonstração (?demo=1 ou #demo): passa pelas telas com dados fictícios, 3 grupos e pagamento simulado.
+  // Nada vai para o servidor (usa a API simulada, só neste navegador). Vale para a aba toda (sessionStorage).
+  try {
+    var loc = root.location;
+    if (loc) {
+      var pedido = /[?&]demo=(1|sim|true)\b/.test(loc.search || '') || /(^#|[&?#])demo\b/.test(loc.hash || '');
+      var sair = /[?&]demo=0\b/.test(loc.search || '');
+      var ss = root.sessionStorage;
+      if (ss) { if (sair) ss.removeItem('disc_demo'); else if (pedido) ss.setItem('disc_demo', '1'); }
+      if (!sair && (pedido || (ss && ss.getItem('disc_demo') === '1'))) {
+        CONFIG.DEMO = true;
+        CONFIG.BACKEND = 'simulada';
+        CONFIG.GRUPOS_DEMONSTRACAO = 3;
+        CONFIG.PAGAMENTO_PREVIA = 'asaas';
+      }
+    }
+  } catch (e) { /* sem location/sessionStorage: segue normal */ }
   var backend = String(CONFIG.BACKEND || '').trim().toLowerCase();
   if (backend === 'simulada') CONFIG.API_URL = 'simulada';
   else if (backend === 'supabase') CONFIG.API_URL = String(CONFIG.SUPABASE_URL || '').trim();

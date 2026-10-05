@@ -37,7 +37,7 @@
     }
   ];
   var DESTAQUE = 'completo';
-  var PARAMS_CAMPANHA = /^(utm_[a-z]+|gclid|fbclid|ref|cupom)$/;
+  var PARAMS_CAMPANHA = /^(utm_[a-z]+|gclid|fbclid|ref|cupom|demo)$/;
 
   function escapar(t) {
     return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) {
