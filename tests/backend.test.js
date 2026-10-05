@@ -26,7 +26,7 @@ test('enviar grava linha com cabeçalho e resultado recalculado (ignora resultad
   assert.ok(aba, 'aba Respostas criada');
   const cab = aba.linhas[0];
   assert.deepEqual(cab, ['id', 'recebidoEm', 'nome', 'telefone', 'vaga', 'inicio', 'fim', 'duracaoSeg',
-    'respostas', 'D', 'I', 'S', 'C', 'perfil', 'status', 'observacoes', 'payloadJson']);
+    'respostas', 'D', 'I', 'S', 'C', 'perfil', 'status', 'observacoes', 'payloadJson', 'protocolo']);
   assert.equal(aba.linhas.length, 2);
   const linha = aba.linhas[1];
   const col = (n) => linha[cab.indexOf(n)];
@@ -38,6 +38,8 @@ test('enviar grava linha com cabeçalho e resultado recalculado (ignora resultad
   assert.equal(col('C'), 10);
   assert.equal(col('perfil'), 'DI');
   assert.equal(col('status'), 'em_analise');
+  assert.match(r.protocolo, /^[0-9]{2}[A-HJ-NP-Z]$/);
+  assert.equal(String(col('protocolo')).replace(/^'/, ''), r.protocolo);
 });
 
 test('enviar normaliza telefone de 11 dígitos para 55 + número', () => {
@@ -262,4 +264,177 @@ test('limitador global recusa envios em excesso na mesma janela', () => {
   assert.equal(recusado.i, 40);
   assert.match(recusado.r.erro, /Muitos envios/);
   assert.equal(ctx.aba().linhas.length, 41);
+});
+
+// ---------------------------------------------------------------------------
+// Protocolo (código curto do candidato)
+// ---------------------------------------------------------------------------
+
+const RE_PROTOCOLO = /^[0-9]{2}[A-HJ-NP-Z]$/;
+
+// Monta a aba à mão: cabeçalho + uma linha por protocolo (ids distintos).
+function abaComProtocolos(ctx, protocolos, cabecalho) {
+  const aba = ctx.g.SpreadsheetApp.getActiveSpreadsheet().insertSheet('Respostas');
+  const cab = cabecalho || ctx.g.CABECALHO.slice();
+  aba.linhas.push(cab.slice());
+  const iId = cab.indexOf('id');
+  const iProt = cab.indexOf('protocolo');
+  protocolos.forEach((p, n) => {
+    const l = new Array(cab.length).fill('');
+    l[iId] = 'ocupado-' + String(n).padStart(5, '0');
+    if (iProt >= 0) l[iProt] = "'" + p;
+    aba.linhas.push(l);
+  });
+  return aba;
+}
+
+function todosProtocolos(g) {
+  const out = [];
+  for (let n = 0; n < 100; n++) for (const l of g.LETRAS_PROTOCOLO) out.push(String(n).padStart(2, '0') + l);
+  return out;
+}
+
+test('protocoloValido: 2 algarismos + 1 letra maiúscula sem I e O', () => {
+  const { g } = novo();
+  assert.equal(g.LETRAS_PROTOCOLO, 'ABCDEFGHJKLMNPQRSTUVWXYZ');
+  assert.equal(g.TOTAL_PROTOCOLOS, 2400);
+  ['47K', '00A', '99Z', '10H', '05J'].forEach((p) => assert.equal(g.protocoloValido(p), true, p));
+  ['47k', '4K', '470K', '47I', '47O', 'K47', '47 K', '', null, 47, '4KK', '47Ç'].forEach((p) => assert.equal(g.protocoloValido(p), false, String(p)));
+  assert.equal(g.normalizarProtocolo(" 4 7k "), '47K');
+  assert.equal(g.normalizarProtocolo("'47K"), '47K');
+  assert.equal(g.normalizarProtocolo('47I'), '');
+});
+
+test('gerarProtocolo sorteia só no formato do contrato (nunca I ou O)', () => {
+  const { g } = novo();
+  const rnd = prng(7);
+  const vistos = new Set();
+  for (let k = 0; k < 3000; k++) {
+    const p = g.gerarProtocolo({}, rnd);
+    assert.match(p, RE_PROTOCOLO);
+    vistos.add(p);
+  }
+  assert.ok(vistos.size > 1500, 'sorteio espalhado');
+  // extremos do sorteio
+  assert.equal(g.gerarProtocolo({}, () => 0), '00A');
+  assert.equal(g.gerarProtocolo({}, () => 0.9999999999), '99Z');
+});
+
+test('gerarProtocolo com a planilha quase cheia acha o único código livre; cheia dá erro claro', () => {
+  const { g } = novo();
+  const todos = todosProtocolos(g);
+  assert.equal(todos.length, 2400);
+  assert.equal(new Set(todos).size, 2400);
+  const livre = '58R';
+  const usados = todos.filter((p) => p !== livre);
+  assert.equal(usados.length, 2399);
+  for (let k = 0; k < 5; k++) assert.equal(g.gerarProtocolo(usados, prng(k)), livre);
+  assert.throws(() => g.gerarProtocolo(todos), /Limite de códigos atingido/);
+});
+
+test('enviar devolve protocolo único entre vários envios', () => {
+  const ctx = novo();
+  const vistos = new Set();
+  for (let i = 0; i < 30; i++) {
+    const r = ctx.post({ acao: 'enviar', payload: payloadValido({ id: 'unico-envio-' + String(i).padStart(3, '0') }) });
+    assert.equal(r.ok, true, r.erro);
+    assert.match(r.protocolo, RE_PROTOCOLO);
+    assert.ok(!vistos.has(r.protocolo), 'protocolo repetido: ' + r.protocolo);
+    vistos.add(r.protocolo);
+  }
+  const itens = ctx.post({ acao: 'listar', chave: CHAVE }).itens;
+  assert.deepEqual(new Set(itens.map((i) => i.protocolo)), vistos);
+});
+
+test('enviar com 2.399 códigos já usados grava o único livre; com todos usados recusa', () => {
+  const ctx = novo();
+  ctx.g.LIMITE_LINHAS = 10000; // o limite de linhas real (500) barraria antes; aqui o alvo é o protocolo
+  const todos = todosProtocolos(ctx.g);
+  const livre = '03W';
+  abaComProtocolos(ctx, todos.filter((p) => p !== livre));
+  const r = ctx.post({ acao: 'enviar', payload: payloadValido({ id: 'penultimo-01' }) });
+  assert.equal(r.ok, true, r.erro);
+  assert.equal(r.protocolo, livre);
+
+  const r2 = ctx.post({ acao: 'enviar', payload: payloadValido({ id: 'sem-codigo-02' }) });
+  assert.equal(r2.ok, false);
+  assert.match(r2.erro, /Limite de códigos atingido/);
+  assert.equal(ctx.aba().linhas.length, 2401, 'nada gravado sem protocolo');
+
+  // Reenvio do que já entrou continua funcionando e devolve o mesmo código.
+  const r3 = ctx.post({ acao: 'enviar', payload: payloadValido({ id: 'penultimo-01' }) });
+  assert.equal(r3.ok, true, r3.erro);
+  assert.equal(r3.duplicado, true);
+  assert.equal(r3.protocolo, livre);
+});
+
+test('reenvio com id duplicado devolve o mesmo protocolo e não grava de novo', () => {
+  const ctx = novo();
+  const p = payloadValido({ id: 'reenvio-000001' });
+  const r1 = ctx.post({ acao: 'enviar', payload: p });
+  assert.equal(r1.ok, true, r1.erro);
+  for (let k = 0; k < 3; k++) {
+    const r = ctx.post({ acao: 'enviar', payload: p });
+    assert.deepEqual(r, { ok: true, duplicado: true, id: p.id, protocolo: r1.protocolo });
+  }
+  assert.equal(ctx.aba().linhas.length, 2);
+});
+
+test('planilha antiga sem a coluna protocolo: a coluna é criada e os registros antigos continuam', () => {
+  const ctx = novo();
+  const antigo = ctx.g.CABECALHO.filter((c) => c !== 'protocolo');
+  assert.equal(antigo.length, 17);
+  const aba = ctx.g.SpreadsheetApp.getActiveSpreadsheet().insertSheet('Respostas');
+  aba.linhas.push(antigo.slice());
+  // linha gravada pela versão anterior do Code.gs (17 colunas)
+  const pAntigo = payloadValido({ id: 'antigo-000001', nome: 'Maria Antiga Souza' });
+  aba.linhas.push(ctx.g.montarLinha(pAntigo, '2026-09-01T10:00:00.000Z').slice(0, 17));
+
+  // listar antes de qualquer envio já ajusta o cabeçalho e devolve protocolo vazio para o antigo
+  let l = ctx.post({ acao: 'listar', chave: CHAVE });
+  assert.equal(l.ok, true, l.erro);
+  assert.equal(aba.linhas[0][17], 'protocolo');
+  assert.equal(l.itens[0].protocolo, '');
+  assert.equal(l.itens[0].nome, 'Maria Antiga Souza');
+  assert.ok(aba.formatos.some((f) => f.coluna === 18 && f.f === '@'), 'coluna nova em formato texto');
+
+  const r = ctx.post({ acao: 'enviar', payload: payloadValido({ id: 'novo-0000001' }) });
+  assert.equal(r.ok, true, r.erro);
+  assert.match(r.protocolo, RE_PROTOCOLO);
+  assert.deepEqual(aba.linhas[0], ctx.g.CABECALHO.slice());
+
+  // reenvio do registro antigo: ganha um código agora e passa a devolver sempre o mesmo
+  const a1 = ctx.post({ acao: 'enviar', payload: pAntigo });
+  assert.equal(a1.duplicado, true);
+  assert.match(a1.protocolo, RE_PROTOCOLO);
+  assert.notEqual(a1.protocolo, r.protocolo);
+  const a2 = ctx.post({ acao: 'enviar', payload: pAntigo });
+  assert.equal(a2.protocolo, a1.protocolo);
+
+  l = ctx.post({ acao: 'listar', chave: CHAVE });
+  const porId = Object.fromEntries(l.itens.map((i) => [i.id, i.protocolo]));
+  assert.deepEqual(porId, { 'antigo-000001': a1.protocolo, 'novo-0000001': r.protocolo });
+  assert.equal(aba.linhas.length, 3);
+});
+
+test('planilha antiga com só 17 colunas físicas: insere a coluna antes de escrever o cabeçalho', () => {
+  const ctx = novo();
+  const antigo = ctx.g.CABECALHO.filter((c) => c !== 'protocolo');
+  const aba = ctx.g.SpreadsheetApp.getActiveSpreadsheet().insertSheet('Respostas');
+  aba.maxColunas = 17; // dono apagou as colunas vazias R..Z
+  aba.linhas.push(antigo.slice());
+  const r = ctx.post({ acao: 'enviar', payload: payloadValido({ id: 'estreita-0001' }) });
+  assert.equal(r.ok, true, r.erro);
+  assert.match(r.protocolo, RE_PROTOCOLO);
+  assert.equal(aba.maxColunas, 18);
+  assert.deepEqual(aba.linhas[0], ctx.g.CABECALHO.slice());
+});
+
+test('listar devolve protocolo em cada item (sem apóstrofo, maiúsculo)', () => {
+  const ctx = novo();
+  const r = ctx.post({ acao: 'enviar', payload: payloadValido() });
+  const celula = ctx.aba().linhas[1][ctx.g.CABECALHO.indexOf('protocolo')];
+  assert.equal(celula, "'" + r.protocolo, 'gravado como texto');
+  const item = ctx.post({ acao: 'listar', chave: CHAVE }).itens[0];
+  assert.equal(item.protocolo, r.protocolo);
 });

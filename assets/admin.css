@@ -74,6 +74,8 @@
 .login__erro[hidden] { display: block !important; visibility: hidden; }
 .login__botao { margin-top: 16px; }
 .login__nota { font-size: var(--t-nota); color: var(--sobre-noite-fraco); text-align: center; margin-top: 20px; }
+.login__previa { margin-top: 8px; color: var(--sobre-noite-suave); }
+.login__previa .negrito { color: var(--ambar); }
 
 @media (min-width: 640px) {
   .login__laranja { padding: 48px; }
@@ -210,6 +212,16 @@
 .card-aviso { font-size: var(--t-rotulo); }
 .card-rodape { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 4px; }
 .card-invalido { background: var(--nevoa); }
+.card-selos { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; min-width: 0; }
+
+/* Código do candidato (protocolo "47K"): rótulo pequeno em cinza e o código grande em negrito */
+.protocolo { display: inline-flex; flex-direction: column; align-items: flex-end; flex: none; line-height: 1.1; }
+.protocolo__rotulo { font-size: var(--t-eixo); color: var(--suave); }
+.protocolo__valor { color: var(--tinta); letter-spacing: .02em; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.protocolo--vazio .protocolo__valor { color: var(--cinza-claro); }
+.det-protocolo { display: flex; align-items: baseline; gap: 6px; margin-top: 8px; }
+.det-protocolo__rotulo { font-size: var(--t-corpo); color: var(--suave); }
+.det-protocolo__valor { line-height: 1; letter-spacing: .02em; font-variant-numeric: tabular-nums; }
 
 .link-wa { color: var(--tinta); text-decoration: underline; text-decoration-color: var(--linha); text-underline-offset: 3px; }
 .link-wa:hover { text-decoration-color: currentColor; }

@@ -12,6 +12,9 @@ function criarAba(nome) {
     linhas: [],          // matriz de valores (linha 1 = índice 0)
     formatos: [],
     congeladas: 0,
+    maxColunas: 26,      // planilha nova do Google tem 26 colunas (A..Z)
+    getMaxColumns() { return this.maxColunas; },
+    insertColumnsAfter(depoisDe, qtd) { if (depoisDe > this.maxColunas) throw new Error('coluna inexistente'); this.maxColunas += qtd; },
     getLastRow() { return this.linhas.length; },
     getMaxRows() { return Math.max(1000, this.linhas.length); },
     setFrozenRows(n) { this.congeladas = n; },
@@ -21,6 +24,10 @@ function criarAba(nome) {
     getRange(linha, coluna, nLinhas, nColunas) {
       nLinhas = nLinhas || 1; nColunas = nColunas || 1;
       const self = this;
+      // Igual ao Apps Script: intervalo fora das dimensões da aba lança erro.
+      if (coluna < 1 || coluna - 1 + nColunas > self.maxColunas) {
+        throw new Error('The coordinates of the range are outside the dimensions of the sheet.');
+      }
       const range = {
         getValues() {
           const out = [];

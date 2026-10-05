@@ -17,11 +17,15 @@
  *
  * O resultado DISC é SEMPRE recalculado aqui a partir de "respostas" (o campo "resultado"
  * enviado pelo navegador é ignorado).
+ *
+ * Código do candidato (protocolo): ao gravar um envio, o servidor gera um código curto e único
+ * (2 algarismos + 1 letra maiúscula sem I e O, ex.: "47K") e devolve {ok, id, protocolo}.
+ * O candidato informa esse código ao recrutador, que o encontra pela busca do painel.
  */
 
 var NOME_ABA = 'Respostas';
 var CABECALHO = ['id', 'recebidoEm', 'nome', 'telefone', 'vaga', 'inicio', 'fim', 'duracaoSeg',
-  'respostas', 'D', 'I', 'S', 'C', 'perfil', 'status', 'observacoes', 'payloadJson'];
+  'respostas', 'D', 'I', 'S', 'C', 'perfil', 'status', 'observacoes', 'payloadJson', 'protocolo'];
 var COL = {}; // nome da coluna -> índice (0-based)
 CABECALHO.forEach(function (nome, i) { COL[nome] = i; });
 
@@ -34,7 +38,12 @@ var JANELA_ENVIOS_SEG = 600;   // janela de 10 minutos
 var STATUS_VALIDOS = ['em_analise', 'aprovado', 'reprovado'];
 var STATUS_PADRAO = 'em_analise';
 var COLUNAS_TEXTO = ['id', 'recebidoEm', 'nome', 'telefone', 'vaga', 'inicio', 'fim',
-  'respostas', 'perfil', 'status', 'observacoes', 'payloadJson'];
+  'respostas', 'perfil', 'status', 'observacoes', 'payloadJson', 'protocolo'];
+
+// Protocolo: 2 algarismos + 1 letra (sem I e O, que se confundem com 1 e 0) -> 100 × 24 = 2.400 códigos.
+var LETRAS_PROTOCOLO = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+var TOTAL_PROTOCOLOS = 100 * LETRAS_PROTOCOLO.length;
+var TENTATIVAS_SORTEIO = 40;
 
 // ---------------------------------------------------------------------------
 // Pontos de entrada do Web App
@@ -237,8 +246,55 @@ function validarPayload(p) {
   };
 }
 
+/** Protocolo no formato do contrato: 2 algarismos + 1 letra maiúscula sem I/O (ex.: "47K"). */
+function protocoloValido(v) {
+  return typeof v === 'string' && /^[0-9]{2}[A-HJ-NP-Z]$/.test(v);
+}
+
+/** Normaliza o que veio da planilha ou foi digitado: tira apóstrofo e espaços, deixa maiúsculo. '' se inválido. */
+function normalizarProtocolo(v) {
+  if (v === null || v === undefined) return '';
+  var s = String(v).replace(/^'/, '').replace(/\s+/g, '').toUpperCase();
+  return protocoloValido(s) ? s : '';
+}
+
+/** Protocolo de índice n (0..TOTAL_PROTOCOLOS-1): "00A", "00B", … "99Z". */
+function protocoloPorIndice_(n) {
+  var numero = Math.floor(n / LETRAS_PROTOCOLO.length);
+  return (numero < 10 ? '0' : '') + numero + LETRAS_PROTOCOLO.charAt(n % LETRAS_PROTOCOLO.length);
+}
+
+/**
+ * Sorteia um protocolo que não está em "usados" (lista ou mapa {codigo:true}).
+ * Tenta alguns sorteios; se a planilha estiver quase cheia, sorteia entre os códigos livres
+ * (assim sempre acha o último livre). Sem nenhum livre, lança erro em pt-BR.
+ * "aleatorio" é opcional (função 0..1, como Math.random) para testes.
+ */
+function gerarProtocolo(usados, aleatorio) {
+  var rnd = typeof aleatorio === 'function' ? aleatorio : Math.random;
+  var mapa = {};
+  if (Array.isArray(usados)) usados.forEach(function (u) { var p = normalizarProtocolo(u); if (p) mapa[p] = true; });
+  else if (usados) for (var k in usados) if (Object.prototype.hasOwnProperty.call(usados, k) && usados[k]) mapa[k] = true;
+
+  function sorteio(max) { return Math.min(max - 1, Math.floor(rnd() * max)); }
+  for (var t = 0; t < TENTATIVAS_SORTEIO; t++) {
+    var p = protocoloPorIndice_(sorteio(TOTAL_PROTOCOLOS));
+    if (!mapa[p]) return p;
+  }
+  var livres = [];
+  for (var i = 0; i < TOTAL_PROTOCOLOS; i++) {
+    var c = protocoloPorIndice_(i);
+    if (!mapa[c]) livres.push(c);
+  }
+  if (!livres.length) {
+    throw new Error('Limite de códigos atingido: todos os ' + TOTAL_PROTOCOLOS + ' códigos estão em uso. ' +
+      'Exclua candidatos antigos ou de teste no painel e tente de novo.');
+  }
+  return livres[sorteio(livres.length)];
+}
+
 /** Monta a linha da planilha (na ordem de CABECALHO), já protegida contra fórmulas. */
-function montarLinha(payload, recebidoEm) {
+function montarLinha(payload, recebidoEm, protocolo) {
   var r = calcularDisc(payload.respostas);
   var linha = [];
   linha[COL.id] = payload.id;
@@ -258,6 +314,7 @@ function montarLinha(payload, recebidoEm) {
   linha[COL.status] = STATUS_PADRAO;
   linha[COL.observacoes] = '';
   linha[COL.payloadJson] = JSON.stringify(payload);
+  linha[COL.protocolo] = normalizarProtocolo(protocolo);
   return linha.map(function (v, i) {
     return COLUNAS_TEXTO.indexOf(CABECALHO[i]) >= 0 ? forcarTexto(v) : protegerCelula(v);
   });
@@ -298,7 +355,8 @@ function linhaParaItem(linha) {
     resultado: null,
     status: STATUS_VALIDOS.indexOf(txt('status')) >= 0 ? txt('status') : STATUS_PADRAO,
     observacoes: txt('observacoes'),
-    recebidoEm: txt('recebidoEm')
+    recebidoEm: txt('recebidoEm'),
+    protocolo: normalizarProtocolo(txt('protocolo'))
   };
   if (validarRespostasCompactas(respostas)) {
     var r = calcularDisc(respostas);
@@ -320,11 +378,52 @@ function obterAba_() {
     prepararAba_(aba);
   } else if (aba.getLastRow() === 0) {
     prepararAba_(aba);
+  } else {
+    garantirColunas_(aba);
   }
   return aba;
 }
 
+/**
+ * Planilhas criadas antes de uma coluna existir (ex.: "protocolo"): escreve o nome que falta no
+ * cabeçalho e deixa a coluna em formato texto. As linhas antigas ficam com a célula vazia.
+ */
+function garantirColunas_(aba) {
+  garantirLargura_(aba);
+  var cab = aba.getRange(1, 1, 1, CABECALHO.length).getValues()[0];
+  CABECALHO.forEach(function (nome, i) {
+    var atual = String(cab[i] === undefined || cab[i] === null ? '' : cab[i]).trim();
+    if (atual === nome) return;
+    if (atual !== '') {
+      throw new Error('Cabeçalho da aba "' + NOME_ABA + '" diferente do esperado na coluna ' + (i + 1) +
+        ' ("' + cab[i] + '" em vez de "' + nome + '").');
+    }
+    aba.getRange(1, i + 1).setValue(nome).setFontWeight('bold');
+    if (COLUNAS_TEXTO.indexOf(nome) >= 0) aba.getRange(1, i + 1, aba.getMaxRows(), 1).setNumberFormat('@');
+  });
+}
+
+/** Garante que a aba tem colunas físicas suficientes (getRange fora da aba lança erro no Apps Script). */
+function garantirLargura_(aba) {
+  var max = aba.getMaxColumns();
+  if (max < CABECALHO.length) aba.insertColumnsAfter(max, CABECALHO.length - max);
+}
+
+/** Protocolos já gravados na planilha, como mapa {codigo: true}. */
+function protocolosUsados_(aba) {
+  var usados = {};
+  var ultima = aba.getLastRow();
+  if (ultima < 2) return usados;
+  var valores = aba.getRange(2, COL.protocolo + 1, ultima - 1, 1).getValues();
+  for (var i = 0; i < valores.length; i++) {
+    var p = normalizarProtocolo(valores[i][0]);
+    if (p) usados[p] = true;
+  }
+  return usados;
+}
+
 function prepararAba_(aba) {
+  garantirLargura_(aba);
   aba.getRange(1, 1, 1, CABECALHO.length).setValues([CABECALHO]).setFontWeight('bold');
   aba.setFrozenRows(1);
   // Colunas de texto em formato "texto simples" para o Sheets não converter telefone,
@@ -378,17 +477,28 @@ function acaoEnviar_(payloadBruto) {
 
   return comTrava_(function () {
     var aba = obterAba_();
-    if (localizarLinha_(aba, payload.id) !== -1) {
-      return { ok: true, duplicado: true, id: payload.id };
+    var existente = localizarLinha_(aba, payload.id);
+    if (existente !== -1) {
+      // Reenvio (ex.: o candidato tocou de novo em Enviar): devolve o mesmo código já gravado.
+      var celula = aba.getRange(existente, COL.protocolo + 1);
+      var gravado = normalizarProtocolo(celula.getValues()[0][0]);
+      if (!gravado) {
+        // Linha de antes do protocolo existir: ganha um código agora.
+        try { gravado = gerarProtocolo(protocolosUsados_(aba)); } catch (err) { return erro_(err.message); }
+        celula.setValue(forcarTexto(gravado));
+      }
+      return { ok: true, duplicado: true, id: payload.id, protocolo: gravado };
     }
     if (aba.getLastRow() - 1 >= LIMITE_LINHAS) {
       return erro_('Limite de respostas atingido. Avise o recrutador.');
     }
+    var protocolo;
+    try { protocolo = gerarProtocolo(protocolosUsados_(aba)); } catch (err) { return erro_(err.message); }
     if (!permitirEnvio_()) {
       return erro_('Muitos envios em pouco tempo. Aguarde alguns minutos e tente novamente.');
     }
-    aba.appendRow(montarLinha(payload, new Date().toISOString()));
-    return { ok: true, id: payload.id };
+    aba.appendRow(montarLinha(payload, new Date().toISOString(), protocolo));
+    return { ok: true, id: payload.id, protocolo: protocolo };
   });
 }
 
@@ -498,6 +608,8 @@ if (typeof module !== 'undefined' && module.exports) {
     doGet: doGet, doPost: doPost, setup: setup,
     validarRespostasCompactas: validarRespostasCompactas, calcularDisc: calcularDisc,
     validarPayload: validarPayload, protegerCelula: protegerCelula, forcarTexto: forcarTexto, normalizarTelefone: normalizarTelefone,
-    montarLinha: montarLinha, linhaParaItem: linhaParaItem, CABECALHO: CABECALHO
+    montarLinha: montarLinha, linhaParaItem: linhaParaItem, CABECALHO: CABECALHO,
+    protocoloValido: protocoloValido, normalizarProtocolo: normalizarProtocolo, gerarProtocolo: gerarProtocolo,
+    LETRAS_PROTOCOLO: LETRAS_PROTOCOLO, TOTAL_PROTOCOLOS: TOTAL_PROTOCOLOS
   };
 }

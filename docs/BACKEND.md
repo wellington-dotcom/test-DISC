@@ -79,6 +79,8 @@ Este guia mostra, passo a passo, como fazer as respostas dos candidatos chegarem
 
 ## 6. Atualizar o servidor (quando o `Code.gs` mudar)
 
+> **Sempre que atualizar o `Code.gs`, reimplante o App da Web como "Nova versão"** (passos abaixo). Só salvar o código **não basta**: a URL `/exec` continua rodando a versão antiga até você publicar a nova. Exemplo: o **código do candidato** (seção 6.1) só começa a aparecer depois dessa reimplantação.
+
 Se você receber uma versão nova do `Code.gs`:
 
 1. Em **Extensões > Apps Script**, substitua todo o conteúdo pelo novo e salve.
@@ -89,6 +91,21 @@ Se você receber uma versão nova do `Code.gs`:
 Assim a **URL continua a mesma** e não é preciso mexer no `js/config.js`.
 
 > Atenção: se você usar **Nova implantação** em vez de editar a existente, o Google gera uma **URL nova**, e aí é preciso atualizar o `API_URL` no `js/config.js`.
+
+### 6.1 O código do candidato (ex.: `47K`)
+
+Quando o candidato envia o teste, o servidor cria um **código curto e único** para ele: **2 números + 1 letra**, por exemplo **47K**. Esse código aparece grande na tela final do candidato, que pode passá-lo a você (por exemplo, pelo WhatsApp: "Fiz o teste, meu código é 47K").
+
+- No painel, digite o código na **busca** da lista de candidatos para achar a pessoa na hora. Pode digitar em minúscula ou com espaço (`47 k` também encontra).
+- O código aparece em cada cartão da lista, no detalhe do candidato ("Código 47K") e na coluna **protocolo** do CSV e da planilha.
+- As letras **I** e **O** nunca são usadas (para não confundir com 1 e 0). São 2.400 códigos possíveis, sem repetição na mesma planilha. Se um dia todos estiverem em uso, o candidato vê "Limite de códigos atingido": exclua candidatos antigos ou de teste.
+- Se o candidato tocar em Enviar duas vezes, o servidor reconhece o mesmo envio e devolve **o mesmo código**.
+- **Planilha de antes desta versão:** não precisa fazer nada. Depois de reimplantar (seção 6), a coluna **protocolo** é criada sozinha no fim do cabeçalho da aba **Respostas**. Quem respondeu antes fica sem código (o painel mostra "—").
+- **Sem servidor ou se o envio falhar**, não há código curto: o candidato vê um **Código de segurança** longo com o aviso "Não conseguimos enviar suas respostas. Envie este código ao recrutador pelo WhatsApp." Cole esse código na aba **Importar códigos** do painel (seção "Problemas comuns"). Candidatos importados assim no modo sem servidor aparecem sem código curto ("—").
+
+### 6.2 Prévia sem servidor (demonstração)
+
+Para mostrar o sistema sem criar planilha, coloque `API_URL: 'simulada'` no `js/config.js`. O site passa a usar uma planilha **de mentira**, guardada só no navegador (dados de demonstração), com as mesmas regras do servidor de verdade — inclusive o código do candidato. A chave do painel nesse modo é **`previa`**. Não use em processo seletivo real: os dados não saem do navegador de quem fez o teste.
 
 ## 7. Apagar os dados ao fim do processo seletivo (LGPD)
 
@@ -132,15 +149,20 @@ Uso das outras opções:
 | Painel diz "A chave de administrador ainda não foi configurada" | Rode a função **setup** no editor (seção 3). |
 | Painel diz "Chave de administrador inválida" | Confira se copiou a chave inteira, sem espaços. Rode **setup** para vê-la de novo. |
 | Mudei o `Code.gs` e nada mudou | Faltou publicar **Nova versão** na implantação existente (seção 6). |
-| Candidato diz que deu erro ao enviar | Peça para ele usar o **código de resultado** exibido na tela (ou o botão do WhatsApp) e importe no painel, na aba **Importar códigos**. O código vai para a planilha como se o candidato tivesse enviado. |
+| O candidato não recebeu o código curto (ex.: `47K`) | O servidor ainda está na versão antiga: reimplante como **Nova versão** (seção 6). |
+| Candidato vê "Limite de códigos atingido" | Os 2.400 códigos estão em uso na planilha. Exclua candidatos antigos ou de teste. |
+| Candidato diz que deu erro ao enviar | Peça para ele enviar o **Código de segurança** (o código longo exibido na tela, ou pelo botão do WhatsApp) e importe no painel, na aba **Importar códigos**. Com o servidor ligado, o código vai para a planilha como se o candidato tivesse enviado e ganha um código curto na hora. |
 | Candidato vê "Muitos envios em pouco tempo" | Muitas pessoas enviaram ao mesmo tempo (limite de 40 a cada 10 minutos). Peça para tentar de novo após alguns minutos ou usar o código de resultado. |
 | Candidato vê "Limite de respostas atingido" | A planilha chegou a 500 linhas. Exclua os registros antigos ou de teste. Se precisar de mais, aumente `LIMITE_LINHAS` no `Code.gs` e publique nova versão (seção 6). |
 | Envio repetido do mesmo candidato | Não há problema: o servidor reconhece o mesmo envio e não duplica a linha. |
 
 ## Referência técnica (para quem for mexer no código)
 
-- Aba `Respostas`, colunas: `id, recebidoEm, nome, telefone, vaga, inicio, fim, duracaoSeg, respostas, D, I, S, C, perfil, status, observacoes, payloadJson`.
+- Aba `Respostas`, colunas: `id, recebidoEm, nome, telefone, vaga, inicio, fim, duracaoSeg, respostas, D, I, S, C, perfil, status, observacoes, payloadJson, protocolo`. Em planilhas antigas (17 colunas) a coluna `protocolo` é acrescentada automaticamente no primeiro acesso.
+- Protocolo: `/^[0-9]{2}[A-HJ-NP-Z]$/` (2 algarismos + 1 letra maiúscula sem I/O; 2.400 combinações). Gerado na ação `enviar`, dentro do `LockService`: sorteia e confere contra a coluna `protocolo` até achar um livre (com a planilha quase cheia, sorteia entre os livres; sem nenhum, responde `{ok:false, erro:'Limite de códigos atingido…'}`). Resposta: `{ok:true, id, protocolo}`; id repetido: `{ok:true, duplicado:true, id, protocolo}` com o mesmo protocolo já gravado (linha antiga sem protocolo ganha um nesse momento). `listar` devolve `protocolo` em cada item (`''` quando não há). O payload do candidato não muda.
+- `API_URL: 'simulada'` (prévia): `js/api-simulada.js` troca o `DISC_API` por um backend falso em `localStorage` (`disc_planilha_simulada`) com as mesmas regras e mensagens deste arquivo, chave admin `previa` e latência de ~400 ms.
 - `doGet` → `{ok:true, servico:'DISC'}`. `doPost` recebe `text/plain` com JSON `{acao, ...}`; ações `enviar` (pública), `listar`, `atualizar`, `excluir`, `excluirTodos` (exigem `chave` = Script Property `ADMIN_KEY`).
 - O servidor **recalcula** D/I/S/C e o perfil a partir de `respostas` (100 dígitos, cada bloco de 4 é uma permutação de 1..4; percentual = total / 2,5). O campo `resultado` enviado pelo navegador é ignorado.
 - Proteções: corpo limitado a 20 KB; textos aparados e com tamanho máximo; telefone só com dígitos e prefixo `55`; valores que começam com `= + - @` recebem apóstrofo (evita fórmulas maliciosas na planilha); escrita com `LockService`; `id` repetido responde `{ok:true, duplicado:true}` sem gravar de novo; limite de 500 linhas; no máximo 40 envios a cada 10 minutos (todos os candidatos juntos, via `CacheService`) para impedir que alguém encha a planilha com envios falsos.
 - Funções para rodar no editor: `setup()`, `gerarNovaChave()`, `apagarTodosOsDados()`.
+- Depois de qualquer mudança no `Code.gs`: **Implantar > Gerenciar implantações > Editar > Versão: Nova versão > Implantar** (mantém a URL).

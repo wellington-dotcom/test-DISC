@@ -123,8 +123,8 @@ test('perguntas do candidato cobrem os 25 grupos e corrigem textos da planilha',
 });
 
 test('mensagemErroEnvio esconde erros técnicos e mantém os de conexão', () => {
-  assert.match(A.mensagemErroEnvio('Resposta inesperada do servidor. Confira se a URL do Apps Script está correta'), /Gerar código de resultado/);
-  assert.match(A.mensagemErroEnvio('O endereço do servidor (API_URL) não está configurado.'), /Gerar código de resultado/);
+  assert.match(A.mensagemErroEnvio('Resposta inesperada do servidor. Confira se a URL do Apps Script está correta'), /Gerar código de segurança/);
+  assert.match(A.mensagemErroEnvio('O endereço do servidor (API_URL) não está configurado.'), /Gerar código de segurança/);
   assert.match(A.mensagemErroEnvio('Não foi possível conectar ao servidor. Verifique sua conexão'), /conexão/);
 });
 
@@ -134,4 +134,64 @@ test('progressoExpirado: vence após 7 dias', () => {
   assert.equal(A.progressoExpirado({ salvoEm: '2026-10-01T12:00:00Z' }, agora), true);
   assert.equal(A.progressoExpirado({ inicio: '2026-10-08T12:00:00Z' }, agora), false);
   assert.equal(A.progressoExpirado({ nome: 'Sem Data' }, agora), true);
+});
+
+test('protocolo: 2 dígitos + 1 letra maiúscula, sem I e O', () => {
+  assert.equal(A.protocoloValido('47K'), true);
+  assert.equal(A.protocoloValido('00A'), true);
+  assert.equal(A.protocoloValido('99Z'), true);
+  ['47I', '47O', '47k', '4K', '470', 'K47', '147K', '', null, undefined, 47].forEach((p) =>
+    assert.equal(A.protocoloValido(p), false, String(p)));
+  assert.equal(A.normalizarProtocolo(' 47 k '), '47K');
+  assert.equal(A.normalizarProtocolo('47K'), '47K');
+  assert.equal(A.normalizarProtocolo('47o'), '');
+  assert.equal(A.normalizarProtocolo('DISC1.abc'), '');
+  assert.equal(A.normalizarProtocolo(null), '');
+});
+
+test('gruposDoTeste: modo demonstração só com 1..24', () => {
+  assert.equal(A.gruposDoTeste({}), 25);
+  assert.equal(A.gruposDoTeste({ GRUPOS_DEMONSTRACAO: 0 }), 25);
+  assert.equal(A.gruposDoTeste({ GRUPOS_DEMONSTRACAO: 3 }), 3);
+  assert.equal(A.gruposDoTeste({ GRUPOS_DEMONSTRACAO: '5' }), 5);
+  assert.equal(A.gruposDoTeste({ GRUPOS_DEMONSTRACAO: 25 }), 25);
+  assert.equal(A.gruposDoTeste({ GRUPOS_DEMONSTRACAO: 40 }), 25);
+  assert.equal(A.gruposDoTeste({ GRUPOS_DEMONSTRACAO: -2 }), 25);
+  assert.equal(A.gruposDoTeste(null), 25);
+  assert.equal(require('../js/config.js').GRUPOS_DEMONSTRACAO, 0, 'desligado no site real');
+});
+
+test('completarGruposDemonstracao: preenche o resto com permutações válidas sem mexer nos respondidos', () => {
+  const ordens = [['S', 'C', 'I', 'D'], ['D', 'I', 'S', 'C'], ['C', 'S', 'I', 'D']];
+  const respondidos = [true, true, true];
+  const copiaOrdens = JSON.stringify(ordens);
+  for (let semente = 1; semente <= 20; semente++) {
+    const c = A.completarGruposDemonstracao(ordens, respondidos, 3, prng(semente));
+    assert.equal(c.ordens.length, 25);
+    assert.equal(c.respondidos.length, 25);
+    assert.deepEqual(c.ordens.slice(0, 3), ordens, 'respondidos ficam iguais');
+    c.ordens.forEach((o, i) => {
+      assert.ok(A.ordemValida(o), 'grupo ' + i);
+      assert.deepEqual(o.slice().sort(), ['C', 'D', 'I', 'S']);
+    });
+    assert.ok(c.respondidos.every(Boolean));
+    assert.deepEqual(c.preenchidos, Array.from({ length: 22 }, (_, k) => k + 3));
+    // payload com as 25 respostas (100 dígitos)
+    const p = A.montarPayload({ id: 'abc123-x', nome: 'Ana Lima', telefone: '11999998888', consentimento: true }, c.ordens);
+    assert.match(p.respostas, /^[1-4]{100}$/);
+    assert.equal(p.respostas.slice(0, 4), '1243', 'grupo 1: S=4 C=3 I=2 D=1');
+  }
+  assert.equal(JSON.stringify(ordens), copiaOrdens, 'não altera a lista original');
+  // Idempotente: o que já foi completado não muda numa segunda chamada.
+  const c1 = A.completarGruposDemonstracao(ordens, respondidos, 3, prng(7));
+  const c2 = A.completarGruposDemonstracao(c1.ordens, c1.respondidos, 3, prng(8));
+  assert.deepEqual(c2.ordens, c1.ordens);
+  assert.deepEqual(c2.preenchidos, []);
+  // Grupo respondido além de N também é preservado; mexido mas não confirmado é sorteado de novo.
+  const parcial = A.completarGruposDemonstracao([null, null, null, ['C', 'I', 'S', 'D'], ['D', 'C', 'I', 'S']], [false, false, false, true, false], 3, prng(3));
+  assert.deepEqual(parcial.ordens[3], ['C', 'I', 'S', 'D']);
+  assert.equal(parcial.preenchidos.indexOf(3), -1);
+  assert.ok(parcial.preenchidos.indexOf(4) !== -1);
+  assert.equal(parcial.ordens[0], null, 'os N primeiros não são preenchidos');
+  assert.equal(parcial.respondidos[0], false);
 });

@@ -49,6 +49,7 @@
           <p class="login__erro" id="erro-login" role="alert" hidden></p>
           <button type="submit" class="botao botao--branco botao--grande botao--bloco login__botao" id="btn-entrar">Entrar</button>
           <p class="login__nota">Não tem a chave? Fale com quem configurou o sistema.</p>
+          <p class="login__nota login__previa" id="dica-previa" hidden>Prévia: use a chave <span class="negrito">previa</span></p>
         </form>
       </div>
     </section>
@@ -85,7 +86,7 @@
           <label class="filtros__busca">
             <span class="visualmente-oculto">Buscar</span>
             <svg class="filtros__lupa" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-            <input id="filtro-busca" class="entrada" type="search" placeholder="Buscar por nome, telefone ou vaga">
+            <input id="filtro-busca" class="entrada" type="search" placeholder="Buscar por nome, código ou telefone">
           </label>
           <div class="filtros__escolhas" id="filtros-escolhas"></div>
         </form>
@@ -127,6 +128,7 @@
   <script src="js/scoring.js"></script>
   <script src="js/codec.js"></script>
   <script src="js/api.js"></script>
+  <script src="js/api-simulada.js"></script>
   <script src="js/lideranca.js"></script>
   <script src="js/admin.js"></script>
 </body>

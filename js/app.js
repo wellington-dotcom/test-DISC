@@ -1,7 +1,7 @@
 /*
  * Fluxo do candidato — Teste DISC.
  * Telas: boas-vindas → identificação → 25 grupos → revisão → envio → conclusão.
- * Depende de: CONFIG, DISC_DATA, DISC_SCORING, DISC_CODEC, DISC_API (globais).
+ * Depende de: CONFIG, DISC_DATA, DISC_SCORING, DISC_CODEC, DISC_API, DISC_DICAS (globais; DISC_DICAS é opcional).
  * No Node exporta apenas as funções puras (validações, máscara, payload) para testes.
  */
 (function (root) {
@@ -224,7 +224,44 @@
   function mensagemErroEnvio(msg) {
     msg = String(msg || '');
     if (/conex|conectar|internet|demorou|ocupado|Muitos envios/i.test(msg)) return msg;
-    return 'Não conseguimos enviar agora. Toque em "Gerar código de resultado" e envie o código ao recrutador.';
+    return 'Não conseguimos enviar agora. Toque em "Gerar código de segurança" e envie o código ao recrutador.';
+  }
+
+  // Protocolo curto gerado pelo servidor: 2 dígitos + 1 letra maiúscula (sem I e O), ex.: "47K".
+  var RE_PROTOCOLO = /^[0-9]{2}[A-HJ-NP-Z]$/;
+  function protocoloValido(p) {
+    return typeof p === 'string' && RE_PROTOCOLO.test(p);
+  }
+  // Aceita minúsculas e espaços ("47 k" -> "47K"). Retorna '' se não for um protocolo válido.
+  function normalizarProtocolo(p) {
+    var s = String(p == null ? '' : p).replace(/\s+/g, '').toUpperCase();
+    return RE_PROTOCOLO.test(s) ? s : '';
+  }
+
+  // Quantos grupos a pessoa responde: CONFIG.GRUPOS_DEMONSTRACAO (1..24) liga o modo demonstração; senão, 25.
+  function gruposDoTeste(cfg) {
+    var n = Math.floor(Number(cfg && cfg.GRUPOS_DEMONSTRACAO) || 0);
+    return n > 0 && n < TOTAL ? n : TOTAL;
+  }
+
+  // Modo demonstração: completa os grupos a partir de `n` com ordens aleatórias válidas e marca como respondidos.
+  // Não altera os grupos já respondidos. Retorna { ordens, respondidos, preenchidos: [índices preenchidos agora] }.
+  function completarGruposDemonstracao(ordens, respondidos, n, aleatorio) {
+    var o = [], r = [], preenchidos = [];
+    var inicio = Math.max(0, Math.min(TOTAL, Math.floor(Number(n) || 0)));
+    for (var i = 0; i < TOTAL; i++) {
+      var atual = Array.isArray(ordens) ? ordens[i] : null;
+      var marcado = !!(Array.isArray(respondidos) && respondidos[i]);
+      if (i >= inicio && !(marcado && ordemValida(atual))) {
+        o.push(embaralhar(LETRAS, aleatorio));
+        r.push(true);
+        preenchidos.push(i);
+      } else {
+        o.push(ordemValida(atual) ? atual.slice() : (atual == null ? null : atual));
+        r.push(marcado);
+      }
+    }
+    return { ordens: o, respondidos: r, preenchidos: preenchidos };
   }
 
   // Progresso salvo há mais de 7 dias (ou sem data) é considerado vencido.
@@ -255,6 +292,10 @@
     palavraDoGrupo: palavraDoGrupo,
     mensagemErroEnvio: mensagemErroEnvio,
     progressoExpirado: progressoExpirado,
+    protocoloValido: protocoloValido,
+    normalizarProtocolo: normalizarProtocolo,
+    gruposDoTeste: gruposDoTeste,
+    completarGruposDemonstracao: completarGruposDemonstracao,
     PERGUNTAS: PERGUNTAS,
     ROTULOS: ROTULOS
   };
@@ -272,6 +313,9 @@
 
   var CONFIG = root.CONFIG || {};
   var DATA = root.DISC_DATA;
+  var DICAS = root.DISC_DICAS || null;
+  var N = gruposDoTeste(CONFIG);          // grupos que a pessoa responde (25, ou menos no modo demonstração)
+  var DEMO = N < TOTAL;
   var app, aviso;
   var estado;
   var envio = { carregando: false, erro: '' };
@@ -290,7 +334,8 @@
       ordens: [],
       respondidos: [],
       grupo: 0,
-      voltarParaRevisao: false
+      voltarParaRevisao: false,
+      preenchidosAoAcaso: []   // modo demonstração: grupos completados automaticamente
     };
   }
 
@@ -367,15 +412,32 @@
     return !!(estado.respondidos[i] && ordemValida(estado.ordens[i]));
   }
 
+  // Só os grupos que a pessoa responde (no modo demonstração, os N primeiros).
   function gruposRespondidos() {
     var n = 0;
-    for (var i = 0; i < TOTAL; i++) if (grupoCompleto(i)) n++;
+    for (var i = 0; i < N; i++) if (grupoCompleto(i)) n++;
     return n;
   }
 
   function primeiroIncompleto() {
-    for (var i = 0; i < TOTAL; i++) if (!grupoCompleto(i)) return i;
+    for (var i = 0; i < N; i++) if (!grupoCompleto(i)) return i;
     return -1;
+  }
+
+  // Modo demonstração: completa ao acaso os grupos que a pessoa não responde (o payload segue com os 25).
+  function completarDemonstracao() {
+    if (!DEMO) return;
+    var c = completarGruposDemonstracao(estado.ordens, estado.respondidos, N);
+    estado.ordens = c.ordens;
+    estado.respondidos = c.respondidos;
+    var marcados = Array.isArray(estado.preenchidosAoAcaso) ? estado.preenchidosAoAcaso : [];
+    c.preenchidos.forEach(function (i) { if (marcados.indexOf(i) === -1) marcados.push(i); });
+    estado.preenchidosAoAcaso = marcados;
+  }
+
+  function faixaDemonstracao() {
+    if (!DEMO) return '';
+    return '<p class="faixa-demo">Modo demonstração: só ' + N + ' grupos; os outros são preenchidos ao acaso. O resultado não vale como avaliação.</p>';
   }
 
   /* -------------------------- Render ------------------------------- */
@@ -383,6 +445,7 @@
   function render(focar) {
     var html;
     arraste = null;
+    fecharDica(false);
     switch (estado.etapa) {
       case 'identificacao': html = telaIdentificacao(); break;
       case 'teste': html = telaGrupo(); break;
@@ -411,13 +474,14 @@
   }
 
   // Passos do processo em mini-cartões numerados (1º azul-escuro, demais brancos), como no login do BI.
-  var PASSOS = ['Seus dados', 'Ordene 25 grupos de palavras', 'Pronto, cerca de 10 minutos'];
+  var PASSOS = ['Seus dados', 'Ordene ' + TOTAL + ' grupos de palavras', 'Pronto, cerca de 10 minutos'];
 
   function telaBoasVindas() {
     var salvo = lerStorage(CHAVE_PROGRESSO);
     var continuar = temProgresso(salvo);
     var empresa = nomeEmpresa();
     var passos = PASSOS.map(function (t, k) {
+      if (k === 1) t = 'Ordene ' + N + ' grupos de palavras';
       return '<li class="passo' + (k === 0 ? ' passo--noite' : '') + '"><span class="passo-num" aria-hidden="true">' + (k + 1) + '</span><span class="passo-texto">' + t + '</span></li>';
     }).join('');
     return '' +
@@ -435,7 +499,8 @@
           '<p class="boasvindas-destaque">Este teste ajuda a entender como você costuma agir, se comunicar e trabalhar em equipe.</p>' +
           '<ul class="lista-info">' +
             '<li><strong>Leva cerca de 10 minutos.</strong> Faça com calma, em um lugar tranquilo.</li>' +
-            '<li><strong>São 25 grupos de 4 palavras.</strong> Em cada grupo, arraste as palavras para colocar no topo a que <em>mais</em> combina com você e embaixo a que <em>menos</em> combina.</li>' +
+            '<li><strong>São ' + N + ' grupos de 4 palavras.</strong> Em cada grupo, arraste as palavras para colocar no topo a que <em>mais</em> combina com você e embaixo a que <em>menos</em> combina.</li>' +
+            '<li><strong>Não entendeu uma palavra?</strong> Toque no i ao lado dela.</li>' +
             '<li><strong>Não há respostas certas ou erradas.</strong> Responda pensando em como você realmente é, e não em como gostaria de ser.</li>' +
             '<li>Seu progresso fica salvo neste aparelho por até 7 dias caso a página seja fechada, e é apagado ao concluir.</li>' +
           '</ul>' +
@@ -495,15 +560,15 @@
   // Barra de progresso no padrão BarraMeta do BI: feito em azul-escuro, trilho liso, bolinha de vidro.
   function progressoHtml(i, completo) {
     var feitos = i + (completo ? 1 : 0);
-    var pct = Math.round((feitos / TOTAL) * 100);
+    var pct = Math.round((feitos / N) * 100);
     var visivel = Math.max(pct, 8);
     return '' +
       '<div class="progresso">' +
         '<div class="progresso-topo">' +
-          '<span class="progresso-texto">Grupo <strong class="progresso-num">' + (i + 1) + '</strong> de ' + TOTAL + '</span>' +
+          '<span class="progresso-texto">Grupo <strong class="progresso-num">' + (i + 1) + '</strong> de ' + N + '</span>' +
           '<span class="progresso-pct texto-suave">' + pct + '%</span>' +
         '</div>' +
-        '<div class="progresso-barra" role="progressbar" aria-label="Progresso do teste" aria-valuemin="0" aria-valuemax="' + TOTAL + '" aria-valuenow="' + feitos + '" aria-valuetext="Grupo ' + (i + 1) + ' de ' + TOTAL + '">' +
+        '<div class="progresso-barra" role="progressbar" aria-label="Progresso do teste" aria-valuemin="0" aria-valuemax="' + N + '" aria-valuenow="' + feitos + '" aria-valuetext="Grupo ' + (i + 1) + ' de ' + N + '">' +
           '<span class="progresso-trilho trilho"></span>' +
           '<span class="progresso-feito" style="width:' + visivel + '%"></span>' +
           '<span class="progresso-ponto vidro-claro" style="left:clamp(22px, ' + (visivel - 0.5) + '%, calc(100% - 22px))"></span>' +
@@ -515,11 +580,28 @@
     '<circle cx="3" cy="4" r="1.6"/><circle cx="9" cy="4" r="1.6"/><circle cx="3" cy="10" r="1.6"/>' +
     '<circle cx="9" cy="10" r="1.6"/><circle cx="3" cy="16" r="1.6"/><circle cx="9" cy="16" r="1.6"/></svg>';
   var ICONE_CIMA = '<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false"><path d="M6 2.5 11 9.5H1z"/></svg>';
+  // Ícone "i" (círculo + i), no padrão do componente Info do BI.
+  var ICONE_INFO = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' +
+    '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>';
+
+  function botaoInfo(rotulo, atributos) {
+    return '<button type="button" class="info" data-sem-arraste aria-expanded="false" aria-haspopup="dialog" aria-controls="dica-janela" ' +
+      'aria-label="' + escapar(rotulo) + '" title="' + escapar(rotulo) + '" ' + atributos + '>' + ICONE_INFO + '</button>';
+  }
+
   var ICONE_BAIXO = '<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false"><path d="M6 9.5 1 2.5h10z"/></svg>';
 
   function descricaoPosicao(k) {
     var nota = 4 - k;
     return 'posição ' + (k + 1) + ' de 4' + (nota === 4 || nota === 1 ? ', ' + textoRotulo(nota).toLowerCase() : '');
+  }
+
+  function temDicaPalavra(i, letra) {
+    try { return !!(DICAS && DICAS.dicaPalavra(i, letra)); } catch (e) { return false; }
+  }
+  function temDicaPergunta(i) {
+    try { return !!(DICAS && DICAS.dicaPergunta(i)); } catch (e) { return false; }
   }
 
   function cartaoHtml(i, g, letra, k) {
@@ -528,6 +610,7 @@
       '<li class="cartao" data-letra="' + letra + '" tabindex="0" style="--pos:' + k + '" aria-describedby="ajuda-teclado">' +
         '<span class="cartao-alca" aria-hidden="true">' + ICONE_ALCA + '</span>' +
         '<span class="cartao-texto">' + texto + '<span class="visualmente-oculto cartao-pos">, ' + descricaoPosicao(k) + '</span></span>' +
+        (temDicaPalavra(i, letra) ? botaoInfo('O que significa ' + palavraDoGrupo(i, g, letra) + '?', 'data-dica="palavra" data-letra="' + letra + '"') : '') +
         '<span class="cartao-setas">' +
           '<button type="button" class="seta" data-mover="-1" aria-label="Subir ' + texto + '"' + (k === 0 ? ' disabled' : '') + '>' + ICONE_CIMA + '</button>' +
           '<button type="button" class="seta" data-mover="1" aria-label="Descer ' + texto + '"' + (k === 3 ? ' disabled' : '') + '>' + ICONE_BAIXO + '</button>' +
@@ -550,7 +633,7 @@
     var g = DATA.grupos[i];
     var ordem = ordemDoGrupo(i);
     var completo = grupoCompleto(i);
-    var ultimo = i === TOTAL - 1;
+    var ultimo = i === N - 1;
     var posicoes = [4, 3, 2, 1].map(function (n) {
       var texto = n === 4 ? 'Mais me identifica' : (n === 1 ? 'Menos me identifica' : '');
       return '<li class="posicao' + (n === 4 ? ' posicao--topo' : '') + '">' +
@@ -561,8 +644,11 @@
     var cartoes = ordem.map(function (l, k) { return cartaoHtml(i, g, l, k); }).join('');
     return '' +
       '<section class="caixa tela-grupo" aria-labelledby="titulo">' +
+        faixaDemonstracao() +
         progressoHtml(i, completo) +
-        '<h1 id="titulo" class="titulo-grupo">' + escapar(perguntaDoGrupo(i, g)) + '</h1>' +
+        '<h1 id="titulo" class="titulo-grupo">' + escapar(perguntaDoGrupo(i, g)) +
+          (temDicaPergunta(i) ? '\u00a0' + botaoInfo('Entender a pergunta', 'data-dica="pergunta"') : '') +
+        '</h1>' +
         '<p class="instrucao" id="instrucao">No topo, a palavra que <strong>mais</strong> combina com você; embaixo, a que <strong>menos</strong> combina.</p>' +
         '<p class="visualmente-oculto" id="ajuda-teclado">Use as setas para cima e para baixo do teclado, ou os botões Subir e Descer, para mudar a posição.</p>' +
         '<div class="ordenar">' +
@@ -583,7 +669,7 @@
   }
 
   function telaRevisao() {
-    var linhas = DATA.grupos.map(function (g, i) {
+    var linhas = DATA.grupos.slice(0, N).map(function (g, i) {
       var completo = grupoCompleto(i);
       var ordem = estado.ordens[i];
       var conteudo = completo
@@ -601,9 +687,10 @@
           conteudo +
         '</li>';
     }).join('');
-    var faltando = TOTAL - gruposRespondidos();
+    var faltando = N - gruposRespondidos();
     return '' +
       '<section class="caixa surgir" aria-labelledby="titulo">' +
+        faixaDemonstracao() +
         '<p class="sobretitulo etapa">Etapa 3 de 3</p>' +
         '<h1 id="titulo" class="titulo-pagina">Revise suas respostas</h1>' +
         '<div class="resumo-dados">' +
@@ -638,10 +725,10 @@
       '<section class="caixa surgir" aria-labelledby="titulo">' +
         '<h1 id="titulo" class="titulo-pagina">Não foi possível enviar</h1>' +
         '<div class="aviso aviso--erro alerta" role="alert">' + escapar(envio.erro) + '</div>' +
-        '<p class="subtitulo">Suas respostas continuam salvas neste aparelho. Você pode tentar de novo ou gerar um código de resultado para enviar ao recrutador.</p>' +
+        '<p class="subtitulo">Suas respostas continuam salvas neste aparelho. Você pode tentar de novo ou gerar um código de segurança para enviar ao recrutador.</p>' +
         '<div class="acoes acoes-coluna">' +
           '<button type="button" class="botao botao--principal botao--grande" data-acao="retentar">Tentar novamente</button>' +
-          '<button type="button" class="botao botao--claro botao--grande" data-acao="usar-codigo">Gerar código de resultado</button>' +
+          '<button type="button" class="botao botao--claro botao--grande" data-acao="usar-codigo">Gerar código de segurança</button>' +
           '<button type="button" class="botao botao--link" data-acao="voltar-revisao">Voltar à revisão</button>' +
         '</div>' +
       '</section>';
@@ -674,12 +761,30 @@
       '</section>';
   }
 
+  function numeroWhatsApp() {
+    return String(CONFIG.WHATSAPP_RECRUTADOR || '').replace(/\D/g, '');
+  }
+
+  // Plano B (sem envio): mensagem com o código de segurança longo.
   function linkWhatsApp(codigo, payload) {
-    var num = String(CONFIG.WHATSAPP_RECRUTADOR || '').replace(/\D/g, '');
+    var num = numeroWhatsApp();
     if (!num) return '';
     var texto = 'Olá! Concluí o teste DISC.\nNome: ' + payload.nome + '\nTelefone: ' + formatarTelefone(payload.telefone) +
-      (payload.vaga ? '\nVaga: ' + payload.vaga : '') + '\n\nCódigo de resultado:\n' + codigo;
+      (payload.vaga ? '\nVaga: ' + payload.vaga : '') + '\n\nCódigo de segurança:\n' + codigo;
     return 'https://wa.me/' + num + '?text=' + encodeURIComponent(texto);
+  }
+
+  // Envio confirmado: mensagem curta com o protocolo.
+  function linkWhatsAppProtocolo(nome, protocolo) {
+    var num = numeroWhatsApp();
+    if (!num) return '';
+    var texto = 'Olá! Concluí o Teste DISC. Nome: ' + nome + '. Código: ' + protocolo + '.';
+    return 'https://wa.me/' + num + '?text=' + encodeURIComponent(texto);
+  }
+
+  // Protocolo grande e em negrito; o espaço fino entre os dígitos e a letra é só visual (o texto continua "47K").
+  function protocoloHtml(p) {
+    return '<span class="protocolo-digitos">' + escapar(p.slice(0, 2)) + '</span><span class="protocolo-letra">' + escapar(p.slice(2)) + '</span>';
   }
 
   function telaConclusao() {
@@ -687,6 +792,7 @@
     if (!dados || (!dados.payload && !dados.enviado)) { estado = estadoInicial(); return telaBoasVindas(); }
     var payload = dados.payload || null;
     var enviado = !!dados.enviado;
+    var protocolo = enviado ? normalizarProtocolo(dados.protocolo) : '';
     var primeiroNome = payload ? normalizarNome(payload.nome).split(' ')[0] : String(dados.primeiroNome || '');
     var titulo = primeiroNome ? 'Obrigado, ' + escapar(primeiroNome) + '!' : 'Obrigado!';
     var rodape = '' +
@@ -695,17 +801,40 @@
         '<button type="button" class="botao botao--link" data-acao="novo-teste">Iniciar um novo teste neste aparelho</button>' +
       '</div>';
     // O único card "vidro" da tela.
-    function agradecimento(texto) {
+    function agradecimento(texto, extra) {
       return '' +
         '<section class="caixa caixa--vidro agradecimento surgir" aria-labelledby="titulo">' +
           '<div class="icone-ok" aria-hidden="true">✓</div>' +
           '<h1 id="titulo" class="titulo-pagina">' + titulo + '</h1>' +
           '<p class="destaque">' + texto + '</p>' +
+          (extra || '') +
         '</section>';
     }
 
+    if (enviado && protocolo) {
+      var nomeWa = payload ? normalizarNome(payload.nome) : primeiroNome;
+      var waP = linkWhatsAppProtocolo(nomeWa, protocolo);
+      var blocoProtocolo = '' +
+        '<div class="protocolo-bloco">' +
+          '<p class="protocolo-rotulo" id="rotulo-protocolo">Seu código</p>' +
+          '<p class="protocolo t-numero-grande" id="protocolo" aria-describedby="rotulo-protocolo" data-protocolo="' + escapar(protocolo) + '">' + protocoloHtml(protocolo) + '</p>' +
+          '<p class="protocolo-dica">Guarde este código. Se o recrutador pedir, é só informar.</p>' +
+          '<div class="acoes acoes-coluna protocolo-acoes">' +
+            (waP ? '<a class="botao botao--laranja botao--grande btn-whatsapp" href="' + escapar(waP) + '" target="_blank" rel="noopener noreferrer">Enviar pelo WhatsApp</a>' : '') +
+            '<button type="button" class="botao botao--claro botao--grande" data-acao="copiar-protocolo">Copiar código</button>' +
+          '</div>' +
+          '<p class="sucesso" id="copiado" role="status" aria-live="polite"></p>' +
+        '</div>';
+      return '' +
+        '<div class="pilha-telas">' +
+          agradecimento('Suas respostas foram enviadas com sucesso. O recrutador entrará em contato pelo telefone informado.', blocoProtocolo) +
+          (CONFIG.MOSTRAR_RESULTADO_AO_CANDIDATO && payload ? blocoPerfil(payload) : '') +
+          rodape +
+        '</div>';
+    }
+
     if (enviado) {
-      // Enviado com sucesso: nenhum dado pessoal fica guardado nem é exibido (aparelho pode ser compartilhado).
+      // Enviado com sucesso (servidor antigo, sem protocolo): nenhum dado pessoal fica guardado nem é exibido.
       return '' +
         '<div class="pilha-telas">' +
           agradecimento('Suas respostas foram enviadas com sucesso. O recrutador entrará em contato pelo telefone informado.') +
@@ -714,20 +843,20 @@
         '</div>';
     }
 
+    // Plano B: sem servidor ou envio falhou → código de segurança longo.
     var codigo = root.DISC_CODEC.encode(payload);
     var wa = linkWhatsApp(codigo, payload);
-    var semContato = !wa;
     return '' +
       '<div class="pilha-telas">' +
-        agradecimento('Você concluiu o teste. Para finalizar, envie o código abaixo ao recrutador' +
-          (semContato ? ' pelo mesmo canal (WhatsApp ou e-mail) em que você recebeu o link deste teste.' : '.')) +
+        agradecimento('Você concluiu o teste. Falta só um passo: enviar o código abaixo ao recrutador.') +
         (CONFIG.MOSTRAR_RESULTADO_AO_CANDIDATO ? blocoPerfil(payload) : '') +
-        '<section class="caixa codigo-bloco surgir" aria-label="Código de resultado">' +
-          '<label class="caixa__titulo" for="codigo">Código de resultado</label>' +
+        '<section class="caixa codigo-bloco surgir" aria-label="Código de segurança">' +
+          '<label class="caixa__titulo" for="codigo">Código de segurança</label>' +
+          '<p class="codigo-texto" id="texto-codigo">Não conseguimos enviar suas respostas. Envie este código ao recrutador pelo WhatsApp.</p>' +
           '<p class="campo__ajuda dica" id="dica-codigo">' +
-            'Copie o código e envie ao recrutador' + (wa ? ', ou use o botão do WhatsApp.' : '.') +
+            'Copie o código' + (wa ? ' ou use o botão do WhatsApp' : '') + '.' +
             ' Por segurança, ele deixa de aparecer quando esta aba for fechada.</p>' +
-          '<textarea id="codigo" class="entrada codigo" readonly rows="4" aria-describedby="dica-codigo" spellcheck="false">' + escapar(codigo) + '</textarea>' +
+          '<textarea id="codigo" class="entrada codigo" readonly rows="4" aria-describedby="texto-codigo dica-codigo" spellcheck="false">' + escapar(codigo) + '</textarea>' +
           '<div class="acoes acoes-coluna">' +
             (wa ? '<a class="botao botao--laranja botao--grande btn-whatsapp" href="' + escapar(wa) + '" target="_blank" rel="noopener noreferrer">Enviar pelo WhatsApp</a>' : '') +
             '<button type="button" class="botao ' + (wa ? 'botao--claro' : 'botao--principal') + ' botao--grande" data-acao="copiar">Copiar código</button>' +
@@ -820,6 +949,10 @@
       if (cartao) moverPorPasso(cartao.getAttribute('data-letra'), Number(alvo.getAttribute('data-mover')), alvo);
       return;
     }
+    if (alvo.hasAttribute('data-dica')) {
+      alternarDica(alvo);
+      return;
+    }
     var acao = alvo.getAttribute('data-acao');
     if (!acao) return;
 
@@ -859,18 +992,18 @@
         break;
       case 'proximo':
         if (!grupoCompleto(estado.grupo)) return;
-        if (estado.voltarParaRevisao || estado.grupo === TOTAL - 1) {
+        if (estado.voltarParaRevisao || estado.grupo === N - 1) {
           estado.voltarParaRevisao = false;
           var falta = primeiroIncompleto();
           if (falta !== -1 && falta > estado.grupo) { estado.grupo = falta; irPara('teste'); }
-          else irPara('revisao');
+          else { if (falta === -1) completarDemonstracao(); irPara('revisao'); }
         } else {
           estado.grupo++;
           irPara('teste');
         }
         break;
       case 'editar-grupo':
-        estado.grupo = Number(alvo.getAttribute('data-grupo')) || 0;
+        estado.grupo = Math.min(N - 1, Number(alvo.getAttribute('data-grupo')) || 0);
         estado.voltarParaRevisao = true;
         irPara('teste');
         break;
@@ -881,7 +1014,7 @@
       case 'voltar-teste':
         envio = { carregando: false, erro: '' };
         var inc = primeiroIncompleto();
-        estado.grupo = inc === -1 ? TOTAL - 1 : inc;
+        estado.grupo = inc === -1 ? N - 1 : inc;
         irPara('teste');
         break;
       case 'enviar':
@@ -889,6 +1022,7 @@
         concluir();
         break;
       case 'usar-codigo':
+        completarDemonstracao();
         finalizar(montarPayload(estado, estado.ordens), false);
         break;
       case 'voltar-revisao':
@@ -897,6 +1031,10 @@
         break;
       case 'copiar':
         copiarCodigo();
+        break;
+      case 'copiar-protocolo':
+        var elP = app.querySelector('#protocolo');
+        copiarTexto(elP ? elP.getAttribute('data-protocolo') : '', null);
         break;
       case 'novo-teste':
         // Confirmação em dois toques (sem confirm() do navegador)
@@ -921,6 +1059,102 @@
     estado.telefone = limparTelefone(form.querySelector('#telefone').value);
     estado.vaga = form.querySelector('#vaga').value;
     estado.consentimento = form.querySelector('#consentimento').checked;
+  }
+
+  /* ------------------- Dicas (botão "i") --------------------------- */
+  // Um painel flutuante só (position: fixed no body): não empurra nada nem move o cartão.
+
+  var dica = { botao: null, painel: null };
+
+  function painelDica() {
+    if (dica.painel && document.body.contains(dica.painel)) return dica.painel;
+    var el = document.createElement('div');
+    el.id = 'dica-janela';
+    el.className = 'dica-janela vidro-janela';
+    el.setAttribute('role', 'dialog');
+    el.hidden = true;
+    document.body.appendChild(el);
+    dica.painel = el;
+    return el;
+  }
+
+  function conteudoDica(botao) {
+    var i = estado.grupo;
+    var g = DATA.grupos[i];
+    try {
+      if (botao.getAttribute('data-dica') === 'pergunta') {
+        var texto = DICAS && DICAS.dicaPergunta(i);
+        return texto ? { palavra: perguntaDoGrupo(i, g), sentido: texto, exemplo: '' } : null;
+      }
+      return DICAS ? DICAS.dicaPalavra(i, botao.getAttribute('data-letra')) : null;
+    } catch (e) { return null; }
+  }
+
+  function posicionarDica() {
+    var b = dica.botao, p = dica.painel;
+    if (!b || !p || p.hidden) return;
+    var r = b.getBoundingClientRect();
+    var vw = document.documentElement.clientWidth || root.innerWidth;
+    var vh = root.innerHeight;
+    var margem = 16, vao = 8;
+    var w = p.offsetWidth, h = p.offsetHeight;
+    // Alinha a borda direita do painel com a do botão, sem sair da tela.
+    var left = Math.max(margem, Math.min(r.right - w, vw - margem - w));
+    var top = r.bottom + vao;
+    if (top + h > vh - margem && r.top - vao - h >= margem) top = r.top - vao - h;   // sem espaço embaixo: abre em cima
+    top = Math.max(margem, Math.min(top, vh - margem - h));
+    p.style.left = Math.round(left) + 'px';
+    p.style.top = Math.round(top) + 'px';
+  }
+
+  function abrirDica(botao) {
+    var d = conteudoDica(botao);
+    if (!d) return;
+    fecharDica(false);
+    var p = painelDica();
+    p.innerHTML =
+      '<p class="dica-palavra">' + escapar(d.palavra) + '</p>' +
+      (d.sentido ? '<p class="dica-sentido">' + escapar(d.sentido) + '</p>' : '') +
+      (d.exemplo ? '<p class="dica-exemplo">' + escapar(d.exemplo) + '</p>' : '');
+    p.setAttribute('aria-label', botao.getAttribute('aria-label') || 'Dica');
+    p.style.left = '-9999px';
+    p.style.top = '-9999px';
+    p.hidden = false;
+    dica.botao = botao;
+    botao.setAttribute('aria-expanded', 'true');
+    posicionarDica();
+    anunciar(d.palavra + '. ' + (d.sentido || '') + (d.exemplo ? ' ' + d.exemplo : ''));
+  }
+
+  function fecharDica(devolverFoco) {
+    var b = dica.botao;
+    dica.botao = null;
+    if (dica.painel) { dica.painel.hidden = true; dica.painel.innerHTML = ''; }
+    if (b) {
+      b.setAttribute('aria-expanded', 'false');
+      if (devolverFoco && document.body.contains(b)) { try { b.focus({ preventScroll: true }); } catch (e) { b.focus(); } }
+    }
+  }
+
+  function alternarDica(botao) {
+    if (dica.botao === botao) fecharDica(false);
+    else abrirDica(botao);
+  }
+
+  function ligarDicasGlobais() {
+    // Clique/toque fora fecha (o próprio "i" alterna no clique).
+    document.addEventListener('pointerdown', function (ev) {
+      if (!dica.botao) return;
+      var t = ev.target;
+      if (dica.painel && dica.painel.contains(t)) return;
+      if (t && t.closest && t.closest('[data-dica]') === dica.botao) return;
+      fecharDica(false);
+    }, true);
+    document.addEventListener('keydown', function (ev) {
+      if (dica.botao && (ev.key === 'Escape' || ev.key === 'Esc')) { ev.preventDefault(); fecharDica(true); }
+    });
+    root.addEventListener('resize', posicionarDica);
+    root.addEventListener('scroll', posicionarDica, true);
   }
 
   /* ------------------- Lista ordenável (grupos) -------------------- */
@@ -955,7 +1189,7 @@
     if (conf && !conf.querySelector(querConfirmado)) conf.innerHTML = confirmarHtml(completo);
     // Barra de progresso (anima a largura; não redesenha a tela)
     var feitos = i + (completo ? 1 : 0);
-    var pct = Math.round((feitos / TOTAL) * 100);
+    var pct = Math.round((feitos / N) * 100);
     var visivel = Math.max(pct, 8);
     var barra = app.querySelector('.progresso-barra');
     if (barra) {
@@ -1071,6 +1305,7 @@
   function aoPressionar(ev) {
     if (arraste) return;
     if (ev.pointerType === 'mouse' && ev.button !== 0) return;
+    if (ev.target.closest('[data-sem-arraste]')) return; // botão "i": abre a dica, nunca arrasta
     if (ev.target.closest('button')) return;           // ▲/▼ têm o próprio clique
     var cartao = ev.target.closest('.cartao');
     var lista = app.querySelector('.cartoes');
@@ -1095,6 +1330,7 @@
     if (!a.ativo) {
       if (Math.abs(dy) < 6) return;
       a.ativo = true;
+      fecharDica(false);
       a.cartao.classList.add('arrastando');
       a.lista.classList.add('ordenando');
     }
@@ -1143,12 +1379,14 @@
     if (a.ativo) aplicarOrdem(a.ordem);
   }
 
-  function finalizar(payload, enviado) {
-    var concluido = { payload: payload, enviado: enviado };
-    // Só o necessário, só nesta aba: com envio confirmado não guarda nome, telefone nem respostas;
-    // sem envio guarda o payload para o código continuar visível se a página for recarregada.
+  function finalizar(payload, enviado, protocolo) {
+    protocolo = enviado ? normalizarProtocolo(protocolo) : '';
+    var concluido = { payload: payload, enviado: enviado, protocolo: protocolo };
+    // Só o necessário, só nesta aba: com envio confirmado guarda só o primeiro nome e o protocolo
+    // (nada de telefone nem respostas); sem envio guarda o payload para o código continuar visível ao recarregar.
+    var primeiroNome = normalizarNome(payload.nome).split(' ')[0];
     gravarSessao(CHAVE_CONCLUIDO, enviado
-      ? { enviado: true, primeiroNome: normalizarNome(payload.nome).split(' ')[0] }
+      ? (protocolo ? { enviado: true, primeiroNome: primeiroNome, protocolo: protocolo } : { enviado: true, primeiroNome: primeiroNome })
       : { enviado: false, payload: payload });
     apagarStorage(CHAVE_CONCLUIDO);
     apagarStorage(CHAVE_PROGRESSO);
@@ -1161,6 +1399,7 @@
   function concluir() {
     if (envio.carregando) return;
     if (primeiroIncompleto() !== -1) { irPara('revisao'); return; }
+    completarDemonstracao();
     var payload;
     try {
       payload = montarPayload(estado, estado.ordens);
@@ -1175,8 +1414,9 @@
 
     envio = { carregando: true, erro: '' };
     irPara('enviando');
-    api.enviar(payload).then(function () {
-      finalizar(payload, true);
+    api.enviar(payload).then(function (resp) {
+      // O servidor gera o protocolo (também no reenvio com id duplicado, devolvendo o mesmo).
+      finalizar(payload, true, resp && resp.protocolo);
     }, function (erro) {
       var msg = (erro && erro.message) || 'Erro desconhecido.';
       // Se uma tentativa anterior chegou ao servidor, o id já existe: tratar como sucesso.
@@ -1190,17 +1430,32 @@
 
   function copiarCodigo() {
     var ta = app.querySelector('#codigo');
-    var status = app.querySelector('#copiado');
     if (!ta) return;
-    var texto = ta.value;
+    copiarTexto(ta.value, ta);
+  }
+
+  // Copia para a área de transferência; sem a API moderna, usa um campo (o visível ou um temporário).
+  function copiarTexto(texto, campo) {
+    var status = app.querySelector('#copiado');
+    if (!texto) return;
     function ok() { if (status) status.textContent = 'Código copiado!'; }
     function manual() {
+      var ta = campo;
+      var temporario = !ta;
+      if (temporario) {
+        ta = document.createElement('textarea');
+        ta.value = texto;
+        ta.setAttribute('readonly', '');
+        ta.className = 'visualmente-oculto';
+        document.body.appendChild(ta);
+      }
       ta.focus();
       ta.select();
       var copiou = false;
       try { copiou = document.execCommand('copy'); } catch (e) { copiou = false; }
+      if (temporario) document.body.removeChild(ta);
       if (copiou) ok();
-      else if (status) status.textContent = 'Selecione o código e copie manualmente.';
+      else if (status) status.textContent = temporario ? 'Anote o código: ' + texto + '.' : 'Selecione o código e copie manualmente.';
     }
     if (root.navigator && root.navigator.clipboard && root.isSecureContext) {
       root.navigator.clipboard.writeText(texto).then(ok, manual);
@@ -1233,6 +1488,7 @@
       estado.etapa = 'concluido';
     }
     app.addEventListener('click', aoClicar);
+    ligarDicasGlobais();
     render(false);
   }
 

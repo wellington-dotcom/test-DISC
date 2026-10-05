@@ -5,6 +5,10 @@
  * Cada função retorna a Promise do JSON de resposta (ok === true) ou rejeita com Error em pt-BR.
  *
  * A URL vem de CONFIG.API_URL (global) ou de DISC_API.definirUrl(url) (útil em testes/Node).
+ *
+ * enviar(payload) resolve com { ok, id, protocolo } — o protocolo (ex.: "47K") é gerado pelo servidor.
+ * Reenvio do mesmo id: { ok, duplicado: true, id, protocolo } com o mesmo protocolo já gravado.
+ * CONFIG.API_URL === 'simulada' liga a API de demonstração de js/api-simulada.js (carregado depois deste).
  */
 (function (root) {
   var TIMEOUT_MS = 20000;
@@ -68,6 +72,17 @@
     if (valor === undefined || valor === null || valor === '') throw new Error(mensagem);
   }
 
+  // Código do candidato (protocolo) gerado pelo servidor: 2 algarismos + 1 letra maiúscula sem I e O.
+  function protocoloValido(v) {
+    return typeof v === 'string' && /^[0-9]{2}[A-HJ-NP-Z]$/.test(v);
+  }
+  // Aceita minúsculas e espaços ("47 k" -> "47K"); devolve '' se não for um protocolo.
+  function normalizarProtocolo(v) {
+    if (v === null || v === undefined) return '';
+    var s = String(v).replace(/\s+/g, '').toUpperCase();
+    return protocoloValido(s) ? s : '';
+  }
+
   function seguro(fn) {
     return function () {
       try { return fn.apply(null, arguments); } catch (e) { return Promise.reject(e); }
@@ -78,6 +93,8 @@
     TIMEOUT_MS: TIMEOUT_MS,
     definirUrl: definirUrl,
     configurado: configurado,
+    protocoloValido: protocoloValido,
+    normalizarProtocolo: normalizarProtocolo,
     enviar: seguro(function (payload) {
       exigir(payload, 'Nenhum resultado para enviar.');
       return chamar({ acao: 'enviar', payload: payload });

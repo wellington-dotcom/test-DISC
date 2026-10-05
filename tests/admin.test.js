@@ -97,3 +97,48 @@ test('painel não usa a identidade antiga (amarelo/preto, hachuras) nem cor/tama
   assert.doesNotMatch(css, /font-size:\s*\d/, 'tamanho de fonte fora da escala --t-*');
   assert.doesNotMatch(css, /font-weight:\s*(?!400|600|700)\d/, 'peso fora de 400/600/700');
 });
+
+test('protocolo: normaliza, mostra "—" quando não há e recalcular preserva', () => {
+  assert.equal(AD.normalizarProtocolo(' 47k '), '47K');
+  assert.equal(AD.normalizarProtocolo('4 7 K'), '47K');
+  assert.equal(AD.normalizarProtocolo('47I'), '');
+  assert.equal(AD.normalizarProtocolo(undefined), '');
+  assert.equal(AD.textoProtocolo('47K'), '47K');
+  assert.equal(AD.textoProtocolo(''), '—');
+  assert.equal(AD.recalcular(payloadValido({ protocolo: '12a' })).protocolo, '12A');
+  assert.equal(AD.recalcular(payloadValido()).protocolo, '', 'importado por código longo não tem protocolo');
+});
+
+test('busca encontra por protocolo (ignorando maiúsculas e espaços), nome, vaga e telefone', () => {
+  const r = AD.recalcular(payloadValido({ protocolo: '47K', telefone: '5511988887777', vaga: 'Supervisora' }));
+  const sem = AD.recalcular(payloadValido());
+  ['47K', '47k', '47 k', ' 4 7 K ', '47', 'joão', 'SILVA', 'super', '98888', '(11) 98888'].forEach((b) => {
+    assert.equal(AD.correspondeBusca(r, b), true, b);
+  });
+  ['48K', '47L', '7K', 'maria', '4'].forEach((b) => assert.equal(AD.correspondeBusca(r, b), false, b));
+  assert.equal(AD.correspondeBusca(sem, '47K'), false);
+  assert.equal(AD.correspondeBusca(sem, ''), true);
+});
+
+test('CSV ganha a coluna protocolo ("—" para quem não tem)', () => {
+  const csv = AD.gerarCsv([AD.recalcular(payloadValido({ id: 'com-cod-1', protocolo: '47K' })), AD.recalcular(payloadValido({ id: 'sem-cod-2' }))]);
+  const linhas = csv.slice(1).split('\r\n').map((l) => l.split(';'));
+  const i = linhas[0].indexOf('protocolo');
+  assert.ok(i > 0, 'coluna protocolo no cabeçalho');
+  assert.equal(linhas[1][i], '47K');
+  assert.equal(linhas[2][i], '—');
+});
+
+test('guia copiado leva o código do candidato quando existe', () => {
+  const reg = AD.recalcular(payloadValido({ protocolo: '47K' }));
+  assert.ok(AD.guiaComoTexto(L.gerarGuia(reg.calc, reg.nome), reg).indexOf('Código 47K') !== -1);
+});
+
+test('admin.html carrega js/api-simulada.js logo depois de js/api.js', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'admin.html'), 'utf8');
+  const scripts = [...html.matchAll(/<script src="([^"]+)"/g)].map((m) => m[1]);
+  assert.equal(scripts[scripts.indexOf('js/api.js') + 1], 'js/api-simulada.js');
+  assert.match(html, /id="dica-previa"[^>]*hidden/);
+});

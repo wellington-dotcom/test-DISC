@@ -76,6 +76,29 @@
     return m + ' min ' + (s < 10 ? '0' : '') + s + ' s';
   }
 
+  // Código do candidato (protocolo) gerado pelo servidor: "47K". Aceita minúsculas e espaços; '' se inválido.
+  function normalizarProtocolo(v) {
+    if (v == null) return '';
+    var s = String(v).replace(/\s+/g, '').toUpperCase();
+    return /^[0-9]{2}[A-HJ-NP-Z]$/.test(s) ? s : '';
+  }
+
+  // Texto exibido: o código, ou "—" para quem não tem (importado por código longo, envio antigo).
+  function textoProtocolo(v) { return normalizarProtocolo(v) || '—'; }
+
+  // Busca da lista: nome/vaga (texto), telefone (3+ dígitos) ou protocolo (ignora maiúsculas e espaços).
+  function correspondeBusca(r, busca) {
+    var termo = String(busca == null ? '' : busca).trim().toLowerCase();
+    if (!termo) return true;
+    var alvo = (String(r.nome || '') + ' ' + String(r.vaga || '')).toLowerCase();
+    if (alvo.indexOf(termo) !== -1) return true;
+    var dig = soDigitos(termo);
+    if (dig.length >= 3 && soDigitos(r.telefone).indexOf(dig) !== -1) return true;
+    var prot = normalizarProtocolo(r.protocolo);
+    var buscaProt = termo.replace(/\s+/g, '').toUpperCase();
+    return !!prot && buscaProt.length >= 2 && prot.indexOf(buscaProt) === 0;
+  }
+
   function normalizarStatus(s) {
     return (s === 'aprovado' || s === 'reprovado' || s === 'em_analise') ? s : 'em_analise';
   }
@@ -86,6 +109,7 @@
     var r = {};
     for (var k in registro) if (Object.prototype.hasOwnProperty.call(registro, k)) r[k] = registro[k];
     r.status = normalizarStatus(r.status);
+    r.protocolo = normalizarProtocolo(r.protocolo);
     r.observacoes = r.observacoes == null ? '' : String(r.observacoes);
     try {
       r.calc = SC.calcular(SC.descompactar(r.respostas));
@@ -132,13 +156,13 @@
   }
 
   function gerarCsv(registros) {
-    var cab = ['id', 'nome', 'telefone', 'vaga', 'data', 'duração', 'D %', 'I %', 'S %', 'C %', 'perfil', 'status', 'observações'];
+    var cab = ['id', 'protocolo', 'nome', 'telefone', 'vaga', 'data', 'duração', 'D %', 'I %', 'S %', 'C %', 'perfil', 'status', 'observações'];
     var linhas = [cab.map(celulaCsv).join(';')];
     registros.forEach(function (r) {
       var p = r.calc ? r.calc.percentuais : {};
       function num(l) { return r.calc ? String(p[l]).replace('.', ',') : ''; }
       linhas.push([
-        r.id, r.nome, formatarTelefone(r.telefone), r.vaga || '',
+        r.id, textoProtocolo(r.protocolo), r.nome, formatarTelefone(r.telefone), r.vaga || '',
         formatarData(r.fim || r.recebidoEm), formatarDuracao(r.duracaoSeg),
         num('D'), num('I'), num('S'), num('C'),
         r.calc ? r.calc.codigo : 'inválido',
@@ -169,7 +193,8 @@
     var out = [];
     out.push(guia.titulo || 'Guia para a Liderança');
     if (registro) {
-      out.push('Candidato: ' + (registro.nome || '') + ' — ' + formatarTelefone(registro.telefone));
+      out.push('Candidato: ' + (registro.nome || '') + ' — ' + formatarTelefone(registro.telefone) +
+        (normalizarProtocolo(registro.protocolo) ? ' — Código ' + normalizarProtocolo(registro.protocolo) : ''));
       if (registro.calc) out.push('Perfil: ' + registro.calc.codigo + ' (D ' + registro.calc.percentuais.D + '% · I ' + registro.calc.percentuais.I + '% · S ' + registro.calc.percentuais.S + '% · C ' + registro.calc.percentuais.C + '%)');
     }
     out.push('');
@@ -189,6 +214,9 @@
     formatarData: formatarData,
     formatarDuracao: formatarDuracao,
     normalizarStatus: normalizarStatus,
+    normalizarProtocolo: normalizarProtocolo,
+    textoProtocolo: textoProtocolo,
+    correspondeBusca: correspondeBusca,
     recalcular: recalcular,
     extrairCodigos: extrairCodigos,
     validarImportado: validarImportado,
@@ -417,6 +445,16 @@
     return el('span', { classe: 'status selo ' + CLASSE_STATUS[s], texto: STATUS[s] });
   }
 
+  // Código do candidato em destaque (título, negrito, algarismos de largura fixa); "—" quando não há.
+  function seloProtocolo(r, extra) {
+    var p = normalizarProtocolo(r.protocolo);
+    return el('span', { classe: 'protocolo' + (p ? '' : ' protocolo--vazio') + (extra ? ' ' + extra : ''),
+      title: p ? 'Código do candidato' : 'Sem código (importado pelo código de resultado)' }, [
+      el('span', { classe: 'protocolo__rotulo', texto: 'Código' }),
+      el('span', { classe: 'protocolo__valor t-titulo negrito tabular', texto: textoProtocolo(p) })
+    ]);
+  }
+
   function letraDisc(l, extra) {
     return el('span', { classe: 'letra-disc disc-' + l + (extra ? ' ' + extra : ''), 'aria-hidden': 'true', texto: l });
   }
@@ -618,21 +656,14 @@
   /* ---------- Lista ---------- */
 
   function filtrados() {
-    var busca = $('filtro-busca').value.trim().toLowerCase();
-    var buscaDig = soDigitos(busca);
+    var busca = $('filtro-busca').value;
     var perfil = $('filtro-perfil').value;
     var status = $('filtro-status').value;
     return estado.registros.filter(function (r) {
       if (perfil && (!r.calc || r.calc.primario !== perfil)) return false;
       if (status === 'invalido' && !r.invalido) return false;
       if (status && status !== 'invalido' && (r.invalido || r.status !== status)) return false;
-      if (busca) {
-        var alvo = (String(r.nome || '') + ' ' + String(r.vaga || '')).toLowerCase();
-        var okTexto = alvo.indexOf(busca) !== -1;
-        var okTel = buscaDig.length >= 3 && soDigitos(r.telefone).indexOf(buscaDig) !== -1;
-        if (!okTexto && !okTel) return false;
-      }
-      return true;
+      return correspondeBusca(r, busca);
     });
   }
 
@@ -677,12 +708,12 @@
           r.calc ? letraDisc(r.calc.primario, 'card-letra') : el('span', { classe: 'letra-disc card-letra card-letra--vazia', 'aria-hidden': 'true', texto: '?' }),
           el('button', { type: 'button', classe: 'card-nome', texto: r.nome || '(sem nome)',
             onclick: function () { abrirDetalhe(r.id); } }),
-          badgePerfil(r)
+          seloProtocolo(r, 'card-protocolo')
         ]),
         el('div', { classe: 'card-meta' }, meta),
         r.calc ? miniBarras(r.calc.percentuais) : el('p', { classe: 'aviso aviso--erro card-aviso', texto: 'Respostas inválidas — resultado não pode ser calculado.' }),
         el('div', { classe: 'card-rodape' }, [
-          badgeStatus(r),
+          el('div', { classe: 'card-selos' }, [badgePerfil(r), badgeStatus(r)]),
           el('button', { type: 'button', classe: 'botao botao--claro botao--pequeno', texto: 'Ver detalhes',
             'aria-label': 'Ver detalhes de ' + (r.nome || 'candidato'), onclick: function () { abrirDetalhe(r.id); } })
         ])
@@ -739,6 +770,10 @@
         el('p', { classe: 'det-relatorio so-imprimir', texto: 'Relatório DISC' + (CONFIG.EMPRESA ? ' — ' + CONFIG.EMPRESA : '') }),
         el('p', { classe: 'sobretitulo nao-imprimir', texto: 'Processo seletivo · Candidato' }),
         el('h2', { classe: 'cabecalho__titulo t-pagina seminegrito', texto: r.nome || '(sem nome)' }),
+        el('p', { classe: 'det-protocolo', id: 'det-protocolo' }, [
+          el('span', { classe: 'det-protocolo__rotulo', texto: 'Código ' }),
+          el('span', { classe: 'det-protocolo__valor t-indicador negrito tabular', texto: textoProtocolo(r.protocolo) })
+        ]),
         sub ? el('p', { classe: 'cabecalho__texto', texto: sub }) : null
       ]),
       el('div', { classe: 'cabecalho__acoes nao-imprimir' }, [
@@ -1073,7 +1108,9 @@
 
   function iniciar() {
     if (CONFIG.EMPRESA) $('nome-empresa').textContent = '· ' + CONFIG.EMPRESA;
-    $('modo-indicador').textContent = MODO_API ? 'Conectado à planilha' : 'Modo local (importar códigos)';
+    var SIMULADA = String(CONFIG.API_URL || '').trim() === 'simulada';
+    $('modo-indicador').textContent = SIMULADA ? 'Prévia (dados de demonstração)' : (MODO_API ? 'Conectado à planilha' : 'Modo local (importar códigos)');
+    $('dica-previa').hidden = !SIMULADA;
     $('aba-importar').hidden = false;
     if (MODO_API) $('destino-importacao').textContent = 'Os resultados são enviados para a planilha, como se o candidato tivesse enviado.';
 
@@ -1089,7 +1126,10 @@
       id: 'filtro-status', rotulo: 'Status', prefixo: 'Status', valor: '',
       opcoes: [{ valor: '', rotulo: 'Todos' }].concat(['em_analise', 'aprovado', 'reprovado', 'invalido'].map(function (s) { return { valor: s, rotulo: STATUS[s] }; }))
     }).caixa);
-    ['filtro-busca', 'filtro-perfil', 'filtro-status'].forEach(function (id) {
+    // Busca: só 'input'. Um 'change' na busca dispara no blur (ao tocar em "Ver detalhes") e recriaria
+    // a lista no meio do clique, que então se perde no botão já removido.
+    $('filtro-busca').addEventListener('input', renderizarLista);
+    ['filtro-perfil', 'filtro-status'].forEach(function (id) {
       $(id).addEventListener('input', renderizarLista);
       $(id).addEventListener('change', renderizarLista);
     });

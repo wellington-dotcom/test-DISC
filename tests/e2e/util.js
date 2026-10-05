@@ -14,7 +14,7 @@ function coletarErros(page) {
 
 // Substitui js/config.js por uma versão com API_URL e outros campos.
 async function configurar(page, cfg) {
-  const conf = Object.assign({ API_URL: '', WHATSAPP_RECRUTADOR: '', EMPRESA: '', MOSTRAR_RESULTADO_AO_CANDIDATO: false }, cfg);
+  const conf = Object.assign({ API_URL: '', WHATSAPP_RECRUTADOR: '', EMPRESA: '', MOSTRAR_RESULTADO_AO_CANDIDATO: false, GRUPOS_DEMONSTRACAO: 0 }, cfg);
   await page.route('**/js/config.js', (route) => route.fulfill({
     status: 200,
     contentType: 'text/javascript; charset=utf-8',

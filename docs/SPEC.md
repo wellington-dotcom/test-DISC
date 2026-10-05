@@ -13,7 +13,8 @@ Contrato compartilhado entre todos os módulos. Se algo aqui conflitar com o có
 
 - Site estático (HTML + CSS + JS puro, sem frameworks, sem bundler), publicável no GitHub Pages.
 - Backend: **Google Apps Script** publicado como Web App, gravando numa **Google Sheet** do recrutador.
-- Plano B sem backend: ao concluir, o candidato vê um **código de resultado** (e botão "Enviar pelo WhatsApp" quando `CONFIG.WHATSAPP_RECRUTADOR` está preenchido). O admin cola o código no painel para importar.
+- Com backend, o servidor devolve um **protocolo** curto (ex. `47K`) que o candidato vê na conclusão e informa ao recrutador.
+- Plano B sem backend (ou envio com falha): ao concluir, o candidato vê um **código de segurança** longo (e botão "Enviar pelo WhatsApp" quando `CONFIG.WHATSAPP_RECRUTADOR` está preenchido). O admin cola o código no painel para importar.
 
 ## Arquivos e responsáveis
 
@@ -21,9 +22,11 @@ Contrato compartilhado entre todos os módulos. Se algo aqui conflitar com o có
 |---|---|
 | `js/disc-data.js` | **Pronto.** `DISC_DATA = { grupos: [25 × {titulo, D, I, S, C}], perfis: {D,I,S,C: {nome, rotulo, cor, positivos[], valorEquipe[], ambienteIdeal[], sobPressao[], limitantes[]}} }` |
 | `js/scoring.js` | **Pronto.** `DISC_SCORING = { LETRAS, TOTAL_GRUPOS, validarGrupo, validarRespostas, calcular, compactar, descompactar }` |
-| `js/config.js` | `CONFIG = { API_URL: '', WHATSAPP_RECRUTADOR: '', EMPRESA: '', MOSTRAR_RESULTADO_AO_CANDIDATO: false }` |
+| `js/config.js` | `CONFIG = { API_URL: '', WHATSAPP_RECRUTADOR: '', EMPRESA: '', MOSTRAR_RESULTADO_AO_CANDIDATO: false, GRUPOS_DEMONSTRACAO: 0 }`. `API_URL: 'simulada'` liga a API simulada (prévia). |
 | `js/codec.js` | `DISC_CODEC = { encode(payload) -> string, decode(string) -> payload }` (base64url de JSON UTF-8, prefixo `DISC1.`) |
-| `js/api.js` | `DISC_API = { enviar(payload), listar(chave), atualizar(chave, id, campos), excluir(chave, id), excluirTodos(chave) }` |
+| `js/api.js` | `DISC_API = { enviar(payload), listar(chave), atualizar(chave, id, campos), excluir(chave, id), excluirTodos(chave), protocoloValido(v), normalizarProtocolo(v) }` |
+| `js/api-simulada.js` | Só age com `CONFIG.API_URL === 'simulada'`: troca `DISC_API` por um backend falso em `localStorage` (`disc_planilha_simulada`) que imita o `Code.gs` (protocolo único, chave admin `previa`, ~400 ms de latência). |
+| `js/dicas.js` | **Pronto.** `DISC_DICAS = { dicaPergunta(grupo), dicaPalavra(grupo, letra) -> {palavra, sentido, exemplo} }` (botão "i") |
 | `index.html`, `js/app.js`, `assets/styles.css` | Fluxo do candidato |
 | `admin.html`, `js/admin.js`, `assets/admin.css` | Painel do recrutador |
 | `js/lideranca.js` | `DISC_LIDERANCA = { gerarGuia(resultado, nome) -> {titulo, resumo, secoes:[{titulo, itens:[]}]}, combinacoes: {...} }` |
@@ -32,7 +35,7 @@ Contrato compartilhado entre todos os módulos. Se algo aqui conflitar com o có
 | `README.md` | Guia de uso para o recrutador (pt-BR, leigo) |
 
 Todos os módulos JS usam o padrão UMD já usado em `scoring.js` (global no navegador, `module.exports` no Node) para serem testáveis com `node --test`.
-Ordem de scripts nas páginas: `config.js`, `disc-data.js`, `scoring.js`, `codec.js`, `api.js`, (`lideranca.js`), `app.js`/`admin.js`.
+Ordem de scripts nas páginas: `config.js`, `disc-data.js`, `scoring.js`, `codec.js`, `api.js`, `api-simulada.js`, (`dicas.js` no candidato | `lideranca.js` no painel), `app.js`/`admin.js`.
 
 ## Payload de resultado (candidato → backend / código)
 
@@ -53,6 +56,13 @@ Ordem de scripts nas páginas: `config.js`, `disc-data.js`, `scoring.js`, `codec
 ```
 
 O admin e o backend **recalculam** o resultado a partir de `respostas` (nunca confiam no campo `resultado`).
+O payload **não** leva protocolo: ele é gerado pelo servidor e volta só na resposta de `enviar`.
+
+### Protocolo (código curto do candidato)
+
+- Formato: 2 algarismos + 1 letra maiúscula sem I e O — `/^[0-9]{2}[A-HJ-NP-Z]$/` (ex. `47K`; 2.400 combinações). Digitação no painel aceita minúsculas e espaços (`47 k`).
+- Gerado pelo servidor na ação `enviar`, dentro do `LockService`: sorteia e confere contra a coluna `protocolo` até achar um livre. Sem nenhum livre: `{ok:false, erro:"Limite de códigos atingido: …"}`.
+- Sem servidor ou com falha no envio **não há protocolo**: vale o código de segurança longo (`DISC_CODEC`). Itens importados por código no painel mostram `—`.
 
 ## Regras do teste (iguais à planilha)
 
@@ -69,23 +79,33 @@ O admin e o backend **recalculam** o resultado a partir de `respostas` (nunca co
 - Checkbox de consentimento LGPD obrigatório (texto: dados usados apenas neste processo seletivo e excluídos ao final).
 - Progresso salvo em `localStorage` (try/catch) para não perder se fechar a aba; limpo ao concluir.
 
+## UX do candidato (complementos)
+
+- **Dicas ("i")**: botão no título da pergunta e em cada palavra (entre a palavra e ▲▼). Abre um painel flutuante (`#dica-janela`) dentro da tela, sem mover nada; fecha com Esc, toque fora, novo toque no "i" ou ao arrastar. Tocar/puxar o "i" não arrasta o cartão nem conta como resposta.
+- **Conclusão com envio confirmado**: "Seu código" + protocolo grande, botões "Copiar código" e WhatsApp (mensagem curta com nome e código). `sessionStorage` guarda só `{enviado, primeiroNome, protocolo}`. Servidor antigo sem protocolo: "obrigado" sem código.
+- **Sem servidor / falha**: "Código de segurança" — "Não conseguimos enviar suas respostas. Envie este código ao recrutador pelo WhatsApp."
+- **Modo demonstração** (`CONFIG.GRUPOS_DEMONSTRACAO = N > 0`, nunca no site real): a pessoa responde só N grupos ("Grupo X de N", faixa de aviso no grupo e na revisão); os demais são preenchidos ao acaso (`preenchidosAoAcaso` no estado) e o payload segue com os 100 dígitos.
+
 ## API do Apps Script
 
 Todas as requisições usam `Content-Type: text/plain;charset=utf-8` (evita preflight CORS). Respostas JSON `{ ok: boolean, ... , erro?: string }`.
 
-- `POST API_URL` corpo `{"acao":"enviar","payload":{...}}` → grava linha. Pública (candidato). Rejeita payload inválido e id duplicado.
-- `POST API_URL` corpo `{"acao":"listar","chave":"..."}` → `{ok, itens:[payload + status + observacoes + recebidoEm]}`.
+- `POST API_URL` corpo `{"acao":"enviar","payload":{...}}` → grava linha e responde `{ok:true, id, protocolo}`. Pública (candidato). Rejeita payload inválido. Id já gravado → `{ok:true, duplicado:true, id, protocolo}` com o **mesmo** protocolo (linha antiga sem protocolo ganha um nesse momento).
+- `POST API_URL` corpo `{"acao":"listar","chave":"..."}` → `{ok, itens:[payload + status + observacoes + recebidoEm + protocolo]}` (`protocolo` = `''` quando não há).
 - `POST API_URL` corpo `{"acao":"atualizar","chave":"...","id":"...","campos":{"status":"aprovado|reprovado|em_analise","observacoes":"..."}}`.
 - `POST API_URL` corpo `{"acao":"excluir","chave":"...","id":"..."}` e `{"acao":"excluirTodos","chave":"..."}`.
 - A chave admin fica nas Script Properties (`ADMIN_KEY`). Comparação em tempo constante não é necessária, mas nunca retornar a chave.
 
-Colunas da aba `Respostas`: `id, recebidoEm, nome, telefone, vaga, inicio, fim, duracaoSeg, respostas, D, I, S, C, perfil, status, observacoes, payloadJson`.
+Colunas da aba `Respostas`: `id, recebidoEm, nome, telefone, vaga, inicio, fim, duracaoSeg, respostas, D, I, S, C, perfil, status, observacoes, payloadJson, protocolo`. Planilhas antigas sem `protocolo` ganham a coluna automaticamente (formato texto) no primeiro acesso; se a aba tiver menos colunas físicas, elas são inseridas.
+
+Prévia: com `API_URL: 'simulada'` a mesma API roda em `js/api-simulada.js` (chave `previa`).
 
 ## Painel admin
 
 - Login pela chave admin (guardada em `sessionStorage`). Se `API_URL` vazio, funciona só em modo "importar código" (salvo em `localStorage`).
 - Lista: nome, telefone (link `https://wa.me/55...`), vaga, data, perfil (badge colorido), barras D/I/S/C, status.
-- Filtros: busca por nome/telefone, perfil primário, status.
+- Protocolo em cada card ("Código 47K", ou `—`), no detalhe abaixo do nome, no CSV (coluna `protocolo`) e no "Copiar guia".
+- Filtros: busca por nome, código (ignora maiúsculas e espaços) ou telefone, perfil primário, status.
 - Detalhe do candidato: gráfico de barras DISC (SVG/CSS, sem libs), características do perfil (de `DISC_DATA.perfis`), e o **Guia para a Liderança** de `DISC_LIDERANCA.gerarGuia`. Botão imprimir/salvar PDF (CSS `@media print`) e "copiar guia" (texto).
 - Ações: marcar aprovado/reprovado/em análise, observações, excluir, excluir todos (com confirmação digitando EXCLUIR), exportar CSV.
 - Comparativo: tabela com distribuição dos perfis dos aprovados (útil para montar equipe).
