@@ -17,7 +17,7 @@
  */
 (function (root) {
   var CONFIG = {
-    API_URL: '',
+    API_URL: 'https://script.google.com/macros/s/AKfycbyg2ENrVTcvztZPOjJfpGc5ug4yIIxnco_AspnL4osjFr5_f1xsOqcJ8hPHzf5QEHybaQ/exec',
     WHATSAPP_RECRUTADOR: '',
     EMPRESA: '',
     MOSTRAR_RESULTADO_AO_CANDIDATO: false,

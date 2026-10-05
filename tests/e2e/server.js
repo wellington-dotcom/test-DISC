@@ -29,6 +29,11 @@ const servidor = http.createServer((req, res) => {
   }
   fs.readFile(arquivo, (erro, dados) => {
     if (erro) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); res.end('Não encontrado'); return; }
+    // Nunca falar com a planilha de verdade nos testes: o js/config.js sai sem API_URL
+    // (cada teste que precisa de servidor simula o seu via page.route). USAR_API_REAL=1 desliga isso.
+    if (caminho === '/js/config.js' && !process.env.USAR_API_REAL) {
+      dados = Buffer.from(dados.toString('utf8').replace(/API_URL:\s*'[^']*'/, "API_URL: ''"), 'utf8');
+    }
     res.writeHead(200, { 'Content-Type': TIPOS[path.extname(arquivo)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
     res.end(dados);
   });
