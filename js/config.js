@@ -25,7 +25,7 @@
  */
 (function (root) {
   var CONFIG = {
-    BACKEND: 'appsscript',
+    BACKEND: 'supabase',
     API_URL: 'https://script.google.com/macros/s/AKfycbyg2ENrVTcvztZPOjJfpGc5ug4yIIxnco_AspnL4osjFr5_f1xsOqcJ8hPHzf5QEHybaQ/exec',
     SUPABASE_URL: 'https://tevpqngqzxcswmticjnr.supabase.co',
     SUPABASE_ANON_KEY: 'sb_publishable_8B735nOKFWn-CC8dYpr1sg_RQs5y_W-',

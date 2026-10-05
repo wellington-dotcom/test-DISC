@@ -198,11 +198,13 @@ test('instalar: só com BACKEND "supabase" e URL/chave; troca os métodos no mes
   assert.equal(lib.estado.criados[0].op.auth.detectSessionInUrl, true);
 });
 
-test('config.js: padrão continua appsscript; tem BACKEND, SUPABASE_URL e SUPABASE_ANON_KEY', () => {
+test('config.js: site em produção usa o Supabase do projeto, só com a chave pública', () => {
   const cfg = require('../js/config.js');
-  assert.equal(cfg.BACKEND, 'appsscript');
-  assert.ok('SUPABASE_URL' in cfg && 'SUPABASE_ANON_KEY' in cfg);
-  assert.match(cfg.API_URL, /^https:\/\/script\.google\.com\//);
+  assert.equal(cfg.BACKEND, 'supabase');
+  assert.match(cfg.SUPABASE_URL, /^https:\/\/[a-z0-9]{20}\.supabase\.co$/);
+  assert.match(cfg.SUPABASE_ANON_KEY, /^(sb_publishable_|eyJ)/, 'só a chave pública pode ficar no site');
+  assert.doesNotMatch(cfg.SUPABASE_ANON_KEY, /^sb_secret_/);
+  assert.equal(cfg.API_URL, cfg.SUPABASE_URL);
 });
 
 test('páginas carregam assets/vendor/supabase.js e js/api-supabase.js depois de api.js/api-simulada.js', () => {

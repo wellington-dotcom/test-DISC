@@ -32,7 +32,11 @@ const servidor = http.createServer((req, res) => {
     // Nunca falar com a planilha de verdade nos testes: o js/config.js sai sem API_URL
     // (cada teste que precisa de servidor simula o seu via page.route). USAR_API_REAL=1 desliga isso.
     if (caminho === '/js/config.js' && !process.env.USAR_API_REAL) {
-      dados = Buffer.from(dados.toString('utf8').replace(/API_URL:\s*'[^']*'/, "API_URL: ''"), 'utf8');
+      dados = Buffer.from(dados.toString('utf8')
+        .replace(/API_URL:\s*'[^']*'/, "API_URL: ''")
+        .replace(/BACKEND:\s*'[^']*'/, "BACKEND: 'appsscript'")
+        .replace(/SUPABASE_URL:\s*'[^']*'/, "SUPABASE_URL: ''")
+        .replace(/SUPABASE_ANON_KEY:\s*'[^']*'/, "SUPABASE_ANON_KEY: ''"), 'utf8');
     }
     res.writeHead(200, { 'Content-Type': TIPOS[path.extname(arquivo)] || 'application/octet-stream', 'Cache-Control': 'no-store' });
     res.end(dados);
