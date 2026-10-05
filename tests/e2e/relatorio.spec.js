@@ -35,7 +35,7 @@ for (const [nome, viewport] of [['celular 375', { width: 375, height: 812 }], ['
     await expect(page.locator('.rec__nome')).toContainText(RELATORIO.sumario.recomendacao.nome);
     await expect(page.locator('.analise__item')).toHaveCount(RELATORIO.ranking.linhas.length);
     await expect(page.locator('.quadro-disc__item')).toHaveCount(RELATORIO.disc.quadro.length);
-    await expect(page.locator('.rodape-doc')).toContainText('Notus Agência');
+    await expect(page.locator('.rodape-doc')).toContainText('Gestão sem Caos');
     await expect(page.locator('.rodape-doc')).toContainText(RELATORIO.processo.consultor);
     await expect(page).toHaveTitle(/Relatório/);
     expect(chamadas.map((c) => c.corpo.acao)).toEqual(['relatorioPublico']);

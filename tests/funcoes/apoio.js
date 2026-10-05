@@ -206,6 +206,8 @@ export function criarSupabaseFalso(inicial) {
       upsert(v, o) { q.op = 'upsert'; q.valores = v; q.conflito = o && o.onConflict; return b; },
       delete() { q.op = 'delete'; return b; },
       eq(col, val) { q.filtros.push((l) => String(valorColuna(l, col)) === String(val)); return b; },
+      in(col, vals) { q.filtros.push((l) => vals.map(String).includes(String(valorColuna(l, col)))); return b; },
+      gte(col, val) { q.filtros.push((l) => valorColuna(l, col) !== null && valorColuna(l, col) !== undefined && String(valorColuna(l, col)) >= String(val)); return b; },
       or(expr) { const cs = separarTopo(expr).map(condicao); q.filtros.push((l) => cs.some((c) => c(l))); return b; },
       order(col, o) { q.ordem = { col, asc: !(o && o.ascending === false) }; return b; },
       limit(n) { q.limite = n; return b; },

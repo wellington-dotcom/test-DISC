@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Termos de uso | Gestão sem Caos</title>
+  <meta name="description" content="Termos de uso do Mapa DISC da Gestão sem Caos.">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#13283f">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%2313283f'/%3E%3Ctext x='32' y='43' font-family='Arial,sans-serif' font-size='32' font-weight='700' text-anchor='middle' fill='%23ffffff'%3EG%3C/text%3E%3Ccircle cx='48' cy='18' r='6' fill='%23f34405'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="assets/notus.css">
+  <link rel="stylesheet" href="assets/landing.css">
+</head>
+<body class="landing">
+  <a class="pular" href="#conteudo">Pular para o conteúdo</a>
+  <header class="topo-landing vidro-cabecalho">
+    <div class="envoltorio topo-landing__interno">
+      <a class="marca-texto" href="descubra.html" aria-label="Gestão sem Caos, voltar para a página do Mapa DISC"><span class="marca-texto__nome">Gestão <b>sem Caos</b></span></a>
+      <a class="botao botao--claro" href="descubra.html">Voltar</a>
+    </div>
+  </header>
+  <main id="conteudo" class="legal" tabindex="-1">
+    <div class="envoltorio">
+      <article class="legal__papel">
+        <h1>Termos de uso</h1>
+        <p class="legal__rascunho" role="note">Rascunho — revisar com advogado antes de publicar.</p>
+        <p class="legal__data">Mapa DISC · versão de outubro de 2026</p>
+
+        <h2>1. Quem somos</h2>
+        <p>O Mapa DISC é oferecido por <span data-empresa-legal>Gestão sem Caos (razão social e CNPJ a preencher)</span>, aqui chamada de “Gestão sem Caos”.</p>
+
+        <h2>2. O que é o Mapa DISC</h2>
+        <p>O Mapa DISC é um questionário de perfil comportamental baseado no modelo DISC (Dominância, Influência, Estabilidade e Conformidade). Ele descreve o seu estilo de agir e se comunicar e sugere ações práticas de desenvolvimento.</p>
+        <p><strong>Ele não é avaliação psicológica, não faz diagnóstico de nenhuma condição de saúde, não mede inteligência nem competência e não substitui o acompanhamento de um profissional de saúde.</strong> Não existe perfil melhor ou pior. Não use o resultado como único critério para decisões importantes sobre você ou sobre outras pessoas.</p>
+
+        <h2>3. Como funciona</h2>
+        <ul>
+          <li>Para fazer o teste, você informa nome e e-mail (e, se quiser, WhatsApp) e aceita estes termos e a <a href="privacidade.html">Política de privacidade</a>.</li>
+          <li>Ao terminar, você vê o resumo grátis. Os pacotes pagos liberam o relatório completo ligado às respostas daquele teste.</li>
+          <li>Você pode refazer o teste. Um teste novo gera um resultado novo, e o relatório completo do novo resultado precisa de uma nova compra.</li>
+          <li>O relatório fica disponível por um link pessoal. Guarde-o: quem tiver o link consegue abrir o relatório.</li>
+        </ul>
+
+        <h2>4. Preços e pagamento</h2>
+        <p>Os preços aparecem na página antes da compra. O pagamento é único (não é assinatura), por Pix ou cartão, processado por uma empresa de pagamentos parceira. A Gestão sem Caos não recebe nem guarda os dados do seu cartão.</p>
+
+        <h2>5. Garantia de 7 dias e reembolso</h2>
+        <p>Você pode pedir o reembolso em até 7 dias corridos da compra, sem precisar justificar, pelos canais de suporte. Devolvemos o valor integral pelo mesmo meio de pagamento, e o relatório completo volta a ficar bloqueado.</p>
+
+        <h2>6. Uso adequado</h2>
+        <ul>
+          <li>Responda com sinceridade e por você mesmo.</li>
+          <li>Não tente burlar o sistema, automatizar respostas ou acessar relatórios de outras pessoas.</li>
+          <li>Os textos e o desenho dos relatórios são da Gestão sem Caos; o seu relatório é para uso pessoal.</li>
+        </ul>
+
+        <h2>7. Limites de responsabilidade</h2>
+        <p>O conteúdo do relatório é orientativo. As decisões que você tomar a partir dele são suas. Fazemos o possível para manter o serviço no ar, mas podem ocorrer interrupções para manutenção ou por falhas de terceiros.</p>
+
+        <h2>8. Mudanças nestes termos</h2>
+        <p>Podemos atualizar estes termos. A versão em vigor fica sempre nesta página, com a data de atualização.</p>
+
+        <h2>9. Contato e foro</h2>
+        <p>Dúvidas, reembolso ou pedidos sobre os seus dados: fale com o suporte da Gestão sem Caos. Fica eleito o foro do domicílio do consumidor, conforme o Código de Defesa do Consumidor.</p>
+      </article>
+    </div>
+  </main>
+  <footer class="rodape">
+    <div class="envoltorio">
+      <ul class="rodape__links">
+        <li><a href="descubra.html">Mapa DISC</a></li>
+        <li><a href="termos.html">Termos de uso</a></li>
+        <li><a href="privacidade.html">Privacidade</a></li>
+      </ul>
+      <p class="rodape__legal" id="empresa-legal">© 2026 Gestão sem Caos. Todos os direitos reservados.</p>
+    </div>
+  </footer>
+  <script src="js/config.js"></script>
+  <script>
+    (function () {
+      var cfg = window.CONFIG || {};
+      var legal = String(cfg.EMPRESA_LEGAL || '').trim();
+      var el = document.getElementById('empresa-legal');
+      if (el) el.textContent = '© ' + new Date().getFullYear() + ' ' + (legal || 'Gestão sem Caos') + '. Todos os direitos reservados.';
+      Array.prototype.forEach.call(document.querySelectorAll('[data-empresa-legal]'), function (n) { if (legal) n.textContent = legal; });
+    })();
+  </script>
+</body>
+</html>

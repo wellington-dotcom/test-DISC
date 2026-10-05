@@ -229,3 +229,41 @@ test('Onde você está se esticando: integra com DISC_EXIGIDO (string de 40 díg
   assert.equal(R.montar(nat, 'Ana', DATA, { exigido: { percentuais: null } }).esticando, null);
   assert.deepEqual(R.montar(nat, 'Ana', DATA, { exigido: '123' }).aprofundamento.map((x) => x.id), IDS_APROF);
 });
+
+test('O que está te travando: 1 ação por item, linguagem de desenvolvimento, compatível com o formato antigo', () => {
+  const SENS = /diagn|cura|ansiedade|depress|transtorno|patolog|teste psicol|clínic/i;
+  perfis().forEach((rel) => {
+    const d = R.montar(rel, 'Ana', DATA);
+    assert.equal(d.travas.id, 'travas');
+    assert.equal(d.travas.titulo, 'O que está te travando');
+    assert.ok(d.travas.itens.length >= 2 && d.travas.itens.length <= 5, rel.codigo);
+    d.travas.itens.forEach((it) => {
+      assert.ok(it.titulo && it.texto && it.acao, rel.codigo);
+      assert.ok(['adaptacao', 'excesso', 'falta', 'pressao'].includes(it.tipo));
+      [it.titulo, it.texto, it.acao].forEach((t) => assert.doesNotMatch(t, SENS, t));
+    });
+    // Sempre a força principal passando do ponto e a reação sob pressão; sem Parte 2, nada de adaptação nem plano de 90 dias
+    assert.equal(d.travas.itens[0].tipo, 'excesso');
+    assert.equal(d.travas.itens[0].letra, rel.codigo.charAt(0));
+    assert.equal(d.travas.itens[d.travas.itens.length - 1].tipo, 'pressao');
+    assert.ok(!d.travas.itens.some((i) => i.tipo === 'adaptacao'));
+    assert.equal(d.plano90, null);
+    const titulos = d.travas.itens.map((i) => i.titulo);
+    assert.equal(new Set(titulos).size, titulos.length);
+  });
+  // Fator muito baixo entra como "o que quase não aparece" (REL: I = 10%)
+  const d = R.montar(REL, 'Bruna', DATA);
+  assert.ok(d.travas.itens.some((i) => i.tipo === 'falta' && i.letra === 'I'));
+  assert.deepEqual(d.secoes.map((s) => s.id), ['fortes', 'atencao', 'pressao', 'comunicacao', 'plano'], 'formato antigo intacto');
+});
+
+test('Com a Parte 2: travas começa pelo esforço de adaptação e há o plano de 90 dias no trabalho', () => {
+  const nat = { percentuais: { D: 38, I: 30, S: 16, C: 16 }, codigo: 'DI' };
+  const d = R.montar(nat, 'Ana', DATA, { exigido: '1234'.repeat(10) });   // o trabalho pede mais C
+  assert.equal(d.travas.itens[0].tipo, 'adaptacao');
+  assert.equal(d.travas.itens[0].letra, 'C');
+  assert.match(d.travas.itens[0].texto, /Conformidade/);
+  assert.equal(d.plano90.id, 'plano90');
+  assert.deepEqual(d.plano90.itens.map((i) => i.prazo), ['Dias 1 a 30', 'Dias 31 a 60', 'Dias 61 a 90', 'Toda semana']);
+  assert.doesNotMatch(JSON.stringify([d.travas, d.plano90]), /vaga|aderência|nota final|empresa|liderança/i);
+});

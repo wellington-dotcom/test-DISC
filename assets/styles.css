@@ -729,3 +729,170 @@ body[data-etapa="confirmacao"] .conteudo { padding-bottom: calc(132px + env(safe
 .acesso-recrutador { margin: 16px 0 0; text-align: center; font-size: var(--t-nota); }
 .acesso-recrutador a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 8px; color: rgba(255, 255, 255, .65); text-underline-offset: 3px; }
 .acesso-recrutador a:hover, .acesso-recrutador a:focus-visible { color: #fff; }
+
+/* =====================================================================================
+   Modo pessoal (venda B2C, Gestão sem Caos): identificação, resumo grátis, paywall,
+   checkout (js/checkout.js), "O que está te travando", mapa ritmo × foco e meu-relatorio.html.
+   Marca em texto (sem o ícone da estrela) até o logo da Gestão sem Caos chegar.
+   ===================================================================================== */
+html[data-modo="pessoal"] body:not([data-modo]) .topo-interno { visibility: hidden; }
+[data-modo="pessoal"] .topo .logo { display: none; }
+.marca-texto, body[data-modo="pessoal"] .topo-nome { font-size: var(--t-corpo); font-weight: 600; letter-spacing: -0.01em; }
+body[data-modo="pessoal"] .topo-empresa { background: var(--branco); border: 1px solid var(--linha); color: var(--medio); }
+.titulo-secao { font-size: var(--t-titulo); font-weight: 600; line-height: 1.3; margin-top: 6px; }
+
+/* Identificação e retomada */
+.pessoal-lembrete { font-size: var(--t-rotulo); color: var(--suave); line-height: 1.5; }
+.consentimento a { color: var(--tinta); }
+.pessoal-retomar .acoes .botao--link { align-self: center; }
+
+/* Resumo grátis (o card de vidro da tela) */
+.resumo-gratis .resumo-titulo { font-size: var(--t-indicador); line-height: 1.2; }
+.resumo-gratis .rel-h3 { margin-top: 24px; }
+
+/* Prévia borrada do que é pago: títulos reais, texto como linhas borradas */
+.previa-paga .titulo-secao { margin-bottom: 4px; }
+.previa-travas { margin-top: 18px; padding: 16px; border-radius: 16px; background: var(--branco); box-shadow: inset 0 0 0 1px rgba(243, 68, 5, .25); }
+.previa-rotulo { font-size: var(--t-eixo); font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--notus-forte); }
+.previa-lista, .previa-secoes { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 14px; }
+.previa-item { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 10px; align-items: start; }
+.previa-corpo { min-width: 0; }
+.previa-item-titulo { font-size: var(--t-corpo); font-weight: 600; color: var(--tinta); line-height: 1.35; }
+.previa-frase { margin-top: 4px; font-size: var(--t-rotulo); color: var(--medio); line-height: 1.5; }
+.previa-desc { margin-top: 2px; font-size: var(--t-rotulo); color: var(--suave); line-height: 1.45; }
+.previa-trancado { display: flex; align-items: center; gap: 6px; margin-top: 6px; font-size: var(--t-nota); color: var(--suave); }
+.previa-trancado svg { flex: none; }
+.previa-secao { padding: 14px 16px; border-radius: 16px; background: var(--nevoa); }
+.borrado { display: grid; gap: 6px; margin-top: 8px; filter: blur(3px); -webkit-user-select: none; user-select: none; }
+.borrado-linha { display: block; height: 10px; border-radius: var(--raio-pilula); background: var(--cinza-claro); }
+.previa-secao .borrado-linha { background: var(--ardosia-clara); opacity: .45; }
+.trava-num {
+  display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 50%;
+  background: var(--tinta); color: var(--branco); font-size: var(--t-rotulo); font-weight: 700; font-variant-numeric: tabular-nums;
+}
+
+/* Paywall: cards dos pacotes */
+.paywall .subtitulo { margin-top: 4px; }
+.pacotes { list-style: none; margin: 18px 0 0; padding: 0; display: grid; gap: 12px; }
+.pacote { position: relative; padding: 24px 20px 20px; border-radius: 20px; background: var(--branco); box-shadow: inset 0 0 0 1px var(--linha); display: flex; flex-direction: column; min-width: 0; }
+.pacote--destaque { box-shadow: inset 0 0 0 2px var(--notus), 0 18px 40px -26px rgba(243, 68, 5, .55); }
+.pacote-selo { position: absolute; top: -10px; left: 20px; }
+.pacote-nome { font-size: var(--t-titulo); font-weight: 600; }
+.pacote-preco { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; margin-top: 8px; }
+.pacote-cheio { font-size: var(--t-corpo); color: var(--suave); }
+.pacote-valor { font-size: var(--t-numero); font-weight: 700; letter-spacing: -0.02em; color: var(--tinta); line-height: 1.1; }
+.pacote--destaque .pacote-valor { color: var(--notus-forte); }
+.pacote-lancamento { width: 100%; font-size: var(--t-nota); color: var(--suave); }
+.pacote-itens { list-style: none; margin: 14px 0 18px; padding: 0; display: grid; gap: 8px; flex: 1; }
+.pacote-itens li { position: relative; padding-left: 22px; font-size: var(--t-rotulo); color: var(--medio); line-height: 1.45; }
+.pacote-itens li::before {
+  content: ''; position: absolute; left: 2px; top: 5px; width: 10px; height: 6px;
+  border: 2px solid var(--notus); border-top: 0; border-right: 0; transform: rotate(-45deg);
+}
+.ck-garantia { display: flex; align-items: flex-start; gap: 10px; margin-top: 18px; font-size: var(--t-rotulo); color: var(--medio); line-height: 1.45; }
+.ck-garantia svg { flex: none; color: var(--ok); margin-top: 1px; }
+.ck-garantia strong { color: var(--tinta); }
+.liberado .acoes { margin-top: 16px; }
+.pessoal-resumo .rodape { gap: 2px; }
+.pessoal-resumo .rodape .botao--link { min-height: 44px; }
+.pessoal-resumo #nota-refazer { max-width: 44ch; }
+
+/* Checkout */
+.ck .titulo-pagina { margin-top: 4px; }
+.ck-pacote { margin-top: 18px; padding: 16px; border-radius: 16px; background: var(--nevoa); }
+.ck-pacote-topo { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.ck-pacote-nome { font-size: var(--t-corpo); font-weight: 600; }
+.ck-preco { display: flex; align-items: baseline; gap: 8px; }
+.ck-preco-cheio { font-size: var(--t-rotulo); color: var(--suave); }
+.ck-preco-valor { font-size: var(--t-indicador); font-weight: 700; color: var(--tinta); font-variant-numeric: tabular-nums; }
+.ck-pacote-nota { margin-top: 4px; font-size: var(--t-nota); color: var(--suave); }
+.ck-indisponivel { margin-top: 14px; }
+.ck-cupom { margin-top: 12px; }
+.ck-cupom-abrir { padding-left: 0; min-height: 44px; }
+.ck-cupom-campo { margin-top: 4px; }
+.ck-cpf { margin-top: 12px; }
+.ck-cupom-campo .entrada { text-transform: uppercase; }
+.ck-acoes { margin-top: 18px; }
+.ck-erro { margin-top: 12px; }
+.ck-letra-miuda { margin-top: 12px; font-size: var(--t-nota); color: var(--suave); }
+.ck-metodos { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px; margin-top: 18px; padding: 4px; border-radius: var(--raio-pilula); background: var(--fundo); }
+.ck-metodo {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px;
+  border: 0; border-radius: var(--raio-pilula); background: transparent; color: var(--medio);
+  font: inherit; font-size: var(--t-rotulo); font-weight: 600; cursor: pointer;
+}
+.ck-metodo[aria-selected="true"] { background: var(--branco); color: var(--tinta); box-shadow: 0 1px 3px rgba(19, 40, 63, .12); }
+.ck-painel { margin-top: 16px; }
+.ck-passos { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: var(--t-rotulo); color: var(--medio); }
+.ck-passos strong { color: var(--tinta); }
+.ck-qr { display: flex; justify-content: center; margin-top: 16px; }
+.ck-qr img { display: block; width: 200px; height: 200px; padding: 8px; border-radius: 16px; background: var(--branco); box-shadow: inset 0 0 0 1px var(--linha); }
+.ck-copia { margin-top: 16px; display: grid; gap: 10px; }
+.ck-copia .campo__rotulo { margin-bottom: 0; }
+.ck-pix-texto { min-height: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: var(--t-campo); word-break: break-all; background: var(--nevoa); border-color: transparent; resize: none; }
+.ck-texto { font-size: var(--t-rotulo); color: var(--medio); margin-bottom: 14px; }
+.ck-espera { display: flex; align-items: flex-start; gap: 10px; min-height: 84px; margin-top: 18px; padding: 12px 16px; border-radius: 16px; background: var(--nevoa); font-size: var(--t-rotulo); color: var(--medio); }
+.ck-espera .giro { margin-top: 3px; color: var(--tinta); flex: none; }
+.ck .sucesso, .meu-link .sucesso { display: block; min-height: 20px; margin-top: 8px; }
+.ck-ok .destaque { margin-top: 10px; font-size: var(--t-corpo); color: var(--medio); }
+.ck-link { margin-top: 20px; }
+.ck-link-texto { font-size: var(--t-campo); color: var(--medio); background: var(--branco); }
+.ck-link-botoes { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; margin-top: 10px; }
+.ck-link-botoes .botao { width: 100%; min-height: 44px; }
+
+/* "O que está te travando" */
+.travas { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 10px; }
+.trava { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 12px; padding: 16px; border-radius: 16px; background: var(--nevoa); min-width: 0; }
+.trava-corpo { min-width: 0; }
+.trava-tipo { font-size: var(--t-eixo); font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--notus-forte); margin-bottom: 2px; }
+.trava-acao { margin-top: 10px; padding: 10px 12px; border-radius: 12px; background: var(--branco); box-shadow: inset 0 0 0 1px rgba(243, 68, 5, .25); font-size: var(--t-rotulo); color: var(--tinta); line-height: 1.5; }
+.trava-acao-rotulo { display: block; font-size: var(--t-eixo); font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--notus-forte); }
+
+/* Mapa ritmo × foco (Completo + Parte 2): quadro com eixos, ponto "Você" e ponto "Trabalho" */
+.mapa { position: relative; margin: 34px 34px 30px; aspect-ratio: 1 / 1; max-width: 360px; border-radius: 16px; background: var(--nevoa); }
+@supports not (aspect-ratio: 1 / 1) { .mapa { height: 260px; } }
+.mapa-eixo { position: absolute; background: var(--cinza-claro); }
+.mapa-eixo--x { left: 0; right: 0; top: 50%; height: 1px; }
+.mapa-eixo--y { top: 0; bottom: 0; left: 50%; width: 1px; }
+.mapa-canto { position: absolute; font-size: var(--t-eixo); color: var(--suave); white-space: nowrap; }
+.mapa-canto--topo { top: -22px; left: 50%; transform: translateX(-50%); }
+.mapa-canto--base { bottom: -22px; left: 50%; transform: translateX(-50%); }
+.mapa-canto--esq { left: -6px; top: 50%; transform: translate(-50%, -50%) rotate(-90deg); }
+.mapa-canto--dir { right: -6px; top: 50%; transform: translate(50%, -50%) rotate(90deg); }
+.mapa-ponto { position: absolute; width: 18px; height: 18px; margin: -9px 0 0 -9px; border-radius: 50%; }
+.mapa-ponto--voce { background: var(--tinta); box-shadow: 0 0 0 3px var(--branco); }
+.mapa-ponto--trabalho { background: var(--branco); box-shadow: inset 0 0 0 3px var(--ambar), 0 0 0 2px var(--branco); }
+.mapa-legenda { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: var(--t-rotulo); color: var(--medio); }
+.mapa-legenda li { display: inline-flex; align-items: center; gap: 8px; }
+.mapa-marca { width: 12px; height: 12px; border-radius: 50%; }
+.mapa-marca--voce { background: var(--tinta); }
+.mapa-marca--trabalho { background: var(--branco); box-shadow: inset 0 0 0 3px var(--ambar); }
+
+/* meu-relatorio.html */
+.meu-cabeca { padding: 8px 4px 4px; }
+.meu-cabeca .titulo-pagina { margin-top: 4px; }
+.meu-aviso-p2 a { color: var(--tinta); font-weight: 600; }
+.meu-link .ck-link-texto { margin-top: 10px; }
+.meu-rodape { text-align: center; padding: 4px 8px 0; }
+.recuperar .formulario { margin-top: 18px; }
+.recuperar-ok { text-align: left; }
+.recuperar-suporte, .recuperar .rodape-nota { margin-top: 12px; }
+.parte2-pedido .destaque { margin-top: 10px; font-size: var(--t-corpo); color: var(--medio); }
+
+@media (min-width: 640px) {
+  .pacotes { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: stretch; }
+  .ck-link-botoes { grid-template-columns: auto auto; justify-content: start; }
+  .ck-link-botoes .botao { width: auto; }
+  .mapa { margin-left: auto; margin-right: auto; }
+}
+
+@media print {
+  /* meu-relatorio.html: A4 limpo, só o relatório, cores preservadas */
+  body[data-etapa="meu-relatorio"] .meu-link, body[data-etapa="meu-relatorio"] .meu-aviso-p2 { display: none !important; }
+  body[data-etapa="meu-relatorio"] .conteudo { max-width: none; padding: 0; }
+  @page { size: A4; margin: 14mm; }
+  .rel-travas .trava, .rel-mapa, .trava-acao { break-inside: avoid; page-break-inside: avoid; }
+  .mapa, .mapa *, .travas, .travas * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
+.ck-redirecionar-nota { margin: 10px 0 0; text-align: center; }
+.ck-espera--discreta { min-height: 0; }

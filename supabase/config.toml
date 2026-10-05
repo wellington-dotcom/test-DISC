@@ -15,3 +15,16 @@ verify_jwt = false
 
 [functions.clickup-webhook]
 verify_jwt = false
+
+# Venda direta (Mapa de Perfil):
+#  - pagamento: chamada pelo site do cliente com a chave pública; confere pedidoId + tokenAcesso do pedido;
+#  - asaas-webhook: chamada pelo Asaas, valida o cabeçalho asaas-access-token (segredo ASAAS_WEBHOOK_TOKEN);
+#  - infinitepay-webhook: chamada pela InfinitePay (sem assinatura); só libera depois de conferir no payment_check.
+[functions.pagamento]
+verify_jwt = false
+
+[functions.asaas-webhook]
+verify_jwt = false
+
+[functions.infinitepay-webhook]
+verify_jwt = false

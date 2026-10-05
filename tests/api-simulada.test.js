@@ -14,7 +14,7 @@ const RE_PROTOCOLO = /^[0-9]{2}[A-HJ-NP-Z]$/;
 // itens de "listar", a pessoa (pessoaId, pessoa), os campos novos do formulário (email, cidade, extras) e a
 // Parte 2 (exigido, resultadoExigido) e a foto (item e usuário).
 const CAMPOS_NOVOS_ITEM = ['pessoaId', 'pessoa', 'email', 'cidade', 'extras', 'exigido', 'resultadoExigido', 'foto',
-  'historicoProcessos', 'processoId'];
+  'historicoProcessos', 'processoId', 'origem'];
 // Empresas (rodada empresas/equipes): cidade, observações, ativo e contagem de colaboradores.
 const CAMPOS_NOVOS_EMPRESA = ['cidade', 'observacoes', 'ativo', 'atualizadoEm', 'colaboradores'];
 function semNovidades(dono, k) {
@@ -1132,5 +1132,124 @@ test('topoIds do organograma: salvarRelacoes guarda na empresa; listarEquipe dev
   assert.deepEqual((await api.listarEquipe(T, clinica.id)).topoIds, [a.pessoaId]);
   await assert.rejects(api.salvarRelacoes(T, clinica.id, [], { topoIds: 'x' }), /Relações inválidas\./);
 
-  assert.deepEqual(await api.versaoBanco(), { ok: true, versao: 20261010120000, faltando: [] });
+  assert.deepEqual(await api.versaoBanco(), { ok: true, versao: 20261012120000, faltando: [] });
+});
+
+// ---------------------------------------------------------------------------
+// Venda direta (B2C) — como a migração 20261011120000_vendas.sql (contrato em js/api-supabase.js)
+// ---------------------------------------------------------------------------
+
+test('vendas (prévia): resumo grátis -> pedido -> Pix fictício -> simularPagamento -> relatório; Parte 2; cupons', async () => {
+  const { api, T } = nova({ provedorPagamento: 'asaas' });
+  const pc = await api.pacotesPublicos();
+  assert.deepEqual(pc.pacotes.map((p) => [p.chave, p.valorCentavos, p.precoCentavos, p.emLancamento]),
+    [['gratis', 0, 0, false], ['completo', 2900, 3900, true], ['completo_plus', 4900, 6900, true]]);
+  await assert.rejects(api.enviarPessoal(payloadValido({ id: 'pessoal-001', email: '' })), /Informe o seu e-mail/);
+  await assert.rejects(api.enviarPessoal(payloadValido({ id: 'pessoal-001', email: 'a@b.com', telefone: '12' })), /WhatsApp inválido/);
+  const e = await api.enviarPessoal(payloadValido({ id: 'pessoal-001', email: 'Bia@X.com', telefone: '', idade: 'x', avaliacao: 'ZZZZ' }));
+  assert.deepEqual(Object.keys(e), ['ok', 'id', 'protocolo', 'tokenResumo']);
+  assert.match(e.tokenResumo, /^[0-9a-f]{64}$/);
+  assert.equal(e.protocolo, '');
+  assert.equal((await api.enviarPessoal(payloadValido({ id: 'pessoal-001', email: 'bia@x.com' }))).tokenResumo, e.tokenResumo, 'reenvio');
+  const r = await api.resumoPessoal(e.tokenResumo);
+  assert.deepEqual([r.nome, r.resultado.codigo, r.temParte2], ['João', 'DI', false]);
+  await assert.rejects(api.resumoPessoal('f'.repeat(64)), /Resultado não encontrado/);
+
+  await assert.rejects(api.criarPedido(e.tokenResumo, 'gratis', ''), /gratuito/);
+  const p = await api.criarPedido(e.tokenResumo, 'completo_plus', '');
+  assert.deepEqual([p.valor, p.valorOriginal, p.gratuito, p.status], [4900, 4900, false, 'aguardando']);
+  assert.equal((await api.criarPedido(e.tokenResumo, 'completo_plus', '')).pedidoId, p.pedidoId, 'não duplica');
+  const pg = await api.iniciarPagamento(p.pedidoId, p.tokenAcesso);
+  assert.deepEqual([pg.ok, pg.provedor], [true, 'asaas']);
+  assert.match(pg.pix.qrBase64, /^iVBORw0KGgo/);
+  assert.match(pg.pix.copiaECola, /^PREVIA-NAO-PAGUE/);
+  await assert.rejects(api.iniciarPagamento(p.pedidoId, 'e'.repeat(64)), /Pedido não encontrado/);
+  assert.deepEqual(await api.statusPedido(p.pedidoId, p.tokenAcesso), { ok: true, status: 'aguardando' });
+  await assert.rejects(api.relatorioPessoal(p.tokenAcesso), (err) => /Pagamento ainda não confirmado/.test(err.message) && err.resposta.status === 'aguardando');
+  assert.deepEqual(await api.simularPagamento(p.pedidoId), { ok: true, status: 'pago' });
+  assert.deepEqual(await api.statusPedido(p.pedidoId, p.tokenAcesso), { ok: true, status: 'pago' });
+  let rel = await api.relatorioPessoal(p.tokenAcesso);
+  assert.deepEqual([rel.nome, rel.pacote, rel.precisaParte2, rel.exigido], ['João', 'completo_plus', true, null]);
+  const EX = '1234'.repeat(10);
+  await assert.rejects(api.salvarParte2Pessoal(p.tokenAcesso, '12'), /Responda todos os grupos/);
+  assert.deepEqual((await api.salvarParte2Pessoal(p.tokenAcesso, EX)).exigido, SIM.calcularExigido(EX));
+  await assert.rejects(api.salvarParte2Pessoal(p.tokenAcesso, '4321'.repeat(10)), /já foi respondida/);
+  rel = await api.relatorioPessoal(p.tokenAcesso);
+  assert.deepEqual([rel.precisaParte2, rel.exigidoRespostas], [false, EX]);
+  assert.equal((await api.criarPedido(e.tokenResumo, 'completo_plus', '')).jaPago, true);
+
+  // Cupons (painel) e cupom 100% = cortesia na hora.
+  await api.salvarCupom(T, { codigo: 'gratis100', tipo: 'percentual', valor: 100, usosMax: 1 });
+  await api.salvarCupom(T, { codigo: 'MENOS5', tipo: 'valor', valor: 500, pacotes: ['completo'] });
+  await assert.rejects(api.criarPedido(e.tokenResumo, 'completo', 'NAOEXISTE'), /Cupom inválido ou expirado/);
+  assert.equal((await api.criarPedido(e.tokenResumo, 'completo', 'menos5')).valor, 2400);
+  const g = await api.criarPedido(e.tokenResumo, 'completo', 'GRATIS100');
+  assert.deepEqual([g.valor, g.gratuito, g.status], [0, true, 'cortesia']);
+  assert.equal((await api.relatorioPessoal(g.tokenAcesso)).ok, true);
+  const cupons = (await api.listarCupons(T)).cupons;
+  assert.equal(cupons.find((c) => c.codigo === 'GRATIS100').usos, 1);
+  const outra = await api.enviarPessoal(payloadValido({ id: 'pessoal-002', email: 'outra@x.com' }));
+  await assert.rejects(api.criarPedido(outra.tokenResumo, 'completo', 'GRATIS100'), /Cupom inválido ou expirado/, 'esgotado');
+  assert.deepEqual(await api.recuperarAcesso('bia@x.com'), { ok: true });
+
+  // Painel: pedidos, estorno, cortesia, pacotes, resumo; Participantes mostra a origem.
+  const ls = await api.listarPedidos(T, { status: 'pago' });
+  assert.deepEqual(ls.pedidos.map((x) => x.id), [p.pedidoId]);
+  assert.ok(!JSON.stringify(ls).includes(p.tokenAcesso), 'o painel não recebe o token do cliente');
+  const est = await api.atualizarPedido(T, p.pedidoId, { status: 'estornado' });
+  assert.ok(est.pedido.reembolsadoEm);
+  await assert.rejects(api.relatorioPessoal(p.tokenAcesso), /estornada/);
+  await assert.rejects(api.atualizarPedido(T, p.pedidoId, { status: 'pago' }), /Não dá para mudar/);
+  assert.equal((await api.atualizarPedido(T, p.pedidoId, { status: 'cortesia' })).pedido.status, 'cortesia');
+  const pk = await api.salvarPacote(T, { chave: 'completo', precoLancamentoCentavos: null });
+  assert.deepEqual([pk.pacote.valorCentavos, pk.pacote.emLancamento], [3900, false]);
+  await api.salvarPacote(T, { chave: 'completo_plus', ativo: false });
+  assert.deepEqual((await api.pacotesPublicos()).pacotes.map((x) => x.chave), ['gratis', 'completo']);
+  assert.equal((await api.listarPacotes(T)).pacotes.length, 3);
+  const v = await api.resumoVendas(T, 'hoje');
+  assert.deepEqual([v.resumos, v.vendas, v.receitaCentavos], [2, 0, 0]);
+  assert.equal(v.cortesias, 2);
+  const itens = (await api.listar(T)).itens;
+  assert.deepEqual(itens.filter((i) => i.origem === 'pessoal').map((i) => i.id).sort(), ['pessoal-001', 'pessoal-002']);
+  assert.equal(itens.find((i) => i.id === 'pessoal-001').email, 'bia@x.com');
+});
+
+test('vendas (prévia): InfinitePay é o padrão — redirecionarUrl de volta ao meu-relatorio; confirmarRetorno marca pago', async () => {
+  const { api, T } = nova();
+  const e = await api.enviarPessoal(payloadValido({ id: 'pessoal-ip1', email: 'ip@x.com', telefone: '' }));
+  const p = await api.criarPedido(e.tokenResumo, 'completo', '');
+  const pg = await api.iniciarPagamento(p.pedidoId, p.tokenAcesso);
+  assert.deepEqual(pg, { ok: true, simulado: true, provedor: 'infinitepay', valor: 2900,
+    redirecionarUrl: 'meu-relatorio.html?pedido=' + p.pedidoId + '&order_nsu=' + p.pedidoId +
+      '&transaction_nsu=SIM&slug=SIM&capture_method=pix#t-' + p.tokenAcesso });
+  assert.ok(!('pix' in pg));
+  // Sem referência, ou token errado: não libera.
+  assert.deepEqual(await api.confirmarRetorno(p.pedidoId, p.tokenAcesso, {}), { ok: true, status: 'aguardando' });
+  await assert.rejects(api.confirmarRetorno(p.pedidoId, 'e'.repeat(64), { transactionNsu: 'SIM' }), /Pedido não encontrado/);
+  assert.deepEqual(await api.confirmarRetorno(p.pedidoId, p.tokenAcesso, { transactionNsu: 'SIM', slug: 'SIM' }), { ok: true, status: 'pago' });
+  assert.deepEqual(await api.statusPedido(p.pedidoId, p.tokenAcesso), { ok: true, status: 'pago' });
+  assert.equal((await api.relatorioPessoal(p.tokenAcesso)).pacote, 'completo');
+  assert.deepEqual(await api.confirmarRetorno(p.pedidoId, p.tokenAcesso, { transactionNsu: 'SIM' }), { ok: true, status: 'pago' }, 'idempotente');
+  const ped = (await api.listarPedidos(T, {})).pedidos.find((x) => x.id === p.pedidoId);
+  assert.deepEqual([ped.provedor, ped.provedorRef, ped.metodo, ped.status], ['infinitepay', 'SIM', 'pix', 'pago']);
+  assert.match(ped.faturaUrl, /^meu-relatorio\.html\?pedido=/);
+  // CONFIG.PAGAMENTO_PREVIA = 'asaas' troca a prévia para o Pix fictício.
+  const alvo = { METODOS: [] };
+  const sim = SIM.instalar(alvo, { API_URL: 'simulada', PAGAMENTO_PREVIA: 'asaas' }, { armazenamento: localStorageFalso(), scoring: S, latenciaMs: 0 });
+  assert.ok(sim);
+  assert.equal(typeof alvo.confirmarRetorno, 'function');
+});
+
+test('vendas (prévia): semente com cupons PREVIA100/LANCA10 e simularPagamento instalado no DISC_API', () => {
+  const alvo = { METODOS: [] };
+  const armazenamento = localStorageFalso();
+  SIM.instalar(alvo, { API_URL: 'simulada' }, { armazenamento, scoring: S, latenciaMs: 0 });
+  assert.equal(typeof alvo.simularPagamento, 'function');
+  assert.equal(typeof alvo.criarPedido, 'function');
+  const api = SIM.criar({ armazenamento: localStorageFalso(), scoring: S, latenciaMs: 0 });
+  assert.equal(api.processar({ acao: 'pacotes.publicos' }).pacotes.length, 3);
+  const e = api.processar({ acao: 'pessoal.enviar', payload: payloadValido({ id: 'pessoal-semente', email: 'x@y.com' }) });
+  assert.equal(e.ok, true, e.erro);
+  assert.equal(api.processar({ acao: 'pedido.criar', tokenResumo: e.tokenResumo, pacote: 'completo', cupom: 'previa100' }).gratuito, true);
+  assert.equal(api.processar({ acao: 'pedido.criar', tokenResumo: e.tokenResumo, pacote: 'completo_plus', cupom: 'LANCA10' }).valor, 4410);
 });

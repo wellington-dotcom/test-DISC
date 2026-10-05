@@ -129,6 +129,7 @@
   // "Recepcionista 2026 · Clínica Exemplo" (avaliação e empresa); "Link geral" para quem respondeu sem código.
   function textoOrigem(r) {
     if (!r) return '';
+    if (r.origem === 'pessoal') return 'Mapa pessoal (venda direta)';
     var av = r.avaliacaoNome ? String(r.avaliacaoNome) : (r.avaliacao ? 'Avaliação ' + r.avaliacao : 'Link geral');
     return [av, r.empresaNome ? String(r.empresaNome) : ''].filter(Boolean).join(' · ');
   }
@@ -138,7 +139,7 @@
   function correspondeBusca(r, busca) {
     var termo = String(busca == null ? '' : busca).trim().toLowerCase();
     if (!termo) return true;
-    var alvo = [r.nome, r.vaga, r.funcao, r.empresa, r.avaliacaoNome, r.empresaNome]
+    var alvo = [r.nome, r.vaga, r.funcao, r.empresa, r.avaliacaoNome, r.empresaNome, r.email]
       .map(function (x) { return String(x == null ? '' : x); }).join(' ').toLowerCase();
     if (alvo.indexOf(termo) !== -1) return true;
     var dig = soDigitos(termo);
@@ -193,9 +194,10 @@
 
   // Abas que cada papel vê. Sem API (modo local) não há login: lista, comparativo e importação.
   // Com API, só o administrador usa o painel (gestor desativado nesta versão).
-  function abasDoPapel(papel, modoApi) {
+  // vendas: true quando o servidor tem a API de vendas (DISC_API.listarPedidos) — a aba Vendas vem depois de Relatórios.
+  function abasDoPapel(papel, modoApi, vendas) {
     if (!modoApi) return ['lista', 'comparativo', 'importar'];
-    if (papel === 'admin') return ['lista', 'processos', 'empresas', 'relatorios', 'usuarios', 'comparativo', 'importar'];
+    if (papel === 'admin') return ['lista', 'processos', 'empresas', 'relatorios'].concat(vendas ? ['vendas'] : []).concat(['usuarios', 'comparativo', 'importar']);
     return [];
   }
 
@@ -1209,6 +1211,254 @@
 
   // Aviso de banco desatualizado a partir da resposta de versaoBanco() ('' = está em dia).
   // Sem a função no banco (erro), o aviso é o mesmo, sem a lista.
+  /* ---------- Vendas (B2C: pedidos, cupons e pacotes) ---------- */
+
+  var STATUS_PEDIDO = { aguardando: 'Aguardando pagamento', pago: 'Pago', cortesia: 'Cortesia', estornado: 'Reembolsado', cancelado: 'Cancelado' };
+  var CLASSE_PEDIDO = { aguardando: 'selo--laranja', pago: 'selo--verde', cortesia: 'selo--noite', estornado: 'selo--vermelho', cancelado: '' };
+  var PERIODOS_VENDAS = { hoje: 'Hoje', '7d': 'Últimos 7 dias', mes: 'Este mês', '30d': 'Últimos 30 dias' };
+  var PACOTES_PADRAO = [
+    { chave: 'gratis', nome: 'Resumo grátis', precoCentavos: 0, precoLancamentoCentavos: null, lancamentoAte: '', ativo: true, ordem: 0 },
+    { chave: 'completo', nome: 'Relatório completo', precoCentavos: 3900, precoLancamentoCentavos: 2900, lancamentoAte: '', ativo: true, ordem: 1 },
+    { chave: 'completo_plus', nome: 'Completo + Parte 2', precoCentavos: 6900, precoLancamentoCentavos: 4900, lancamentoAte: '', ativo: true, ordem: 2 }
+  ];
+  var ASAAS_PAINEL = 'https://www.asaas.com/';
+
+  function campo(o, nomes) {
+    for (var i = 0; i < nomes.length; i++) if (o && o[nomes[i]] != null) return o[nomes[i]];
+    return null;
+  }
+  function inteiroOu(v, padrao) {
+    var n = Number(v);
+    return v === '' || v == null || !isFinite(n) ? padrao : Math.round(n);
+  }
+
+  // 3900 -> "R$ 39,00"; 123456 -> "R$ 1.234,56" (pt-BR, sem depender do Intl do navegador).
+  function formatarReais(centavos) {
+    var n = Math.round(Number(centavos) || 0);
+    var neg = n < 0; n = Math.abs(n);
+    var inteiro = String(Math.floor(n / 100)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+    var cent = String(n % 100); if (cent.length < 2) cent = '0' + cent;
+    return (neg ? '-' : '') + 'R$ ' + inteiro + ',' + cent;
+  }
+
+  // "29,90", "R$ 1.234,56", "29.9", "29" -> centavos (inteiro); vazio ou inválido -> null.
+  function centavosDeTexto(t) {
+    var s = String(t == null ? '' : t).replace(/R\$|\s/gi, '');
+    if (!s) return null;
+    if (s.indexOf(',') !== -1) s = s.replace(/\./g, '').replace(',', '.');
+    else if (/^\d{1,3}(\.\d{3})+$/.test(s)) s = s.replace(/\./g, '');
+    if (!/^\d+(\.\d{1,2})?$/.test(s)) return null;
+    return Math.round(Number(s) * 100);
+  }
+  function textoDeCentavos(c) {
+    if (c == null || c === '') return '';
+    return formatarReais(c).replace(/^R\$ /, '');
+  }
+
+  // Aceita o pedido em camelCase ou com os nomes das colunas (snake_case).
+  function normalizarPedido(p) {
+    p = p || {};
+    var status = String(campo(p, ['status']) || 'aguardando');
+    return {
+      id: String(campo(p, ['id']) || ''),
+      respostaId: campo(p, ['respostaId', 'resposta_id']) == null ? '' : String(campo(p, ['respostaId', 'resposta_id'])),
+      pacote: String(campo(p, ['pacote']) || ''),
+      valorCentavos: inteiroOu(campo(p, ['valorCentavos', 'valor_centavos', 'valor']), 0),
+      cupom: String(campo(p, ['cupom']) || ''),
+      status: Object.prototype.hasOwnProperty.call(STATUS_PEDIDO, status) ? status : 'aguardando',
+      nome: String(campo(p, ['nome']) || ''),
+      email: String(campo(p, ['email']) || ''),
+      telefone: String(campo(p, ['telefone', 'whatsapp']) || ''),
+      tokenAcesso: String(campo(p, ['tokenAcesso', 'token_acesso']) || ''),
+      criadoEm: String(campo(p, ['criadoEm', 'criado_em']) || ''),
+      pagoEm: String(campo(p, ['pagoEm', 'pago_em']) || ''),
+      reembolsadoEm: String(campo(p, ['reembolsadoEm', 'reembolsado_em']) || ''),
+      metodo: String(campo(p, ['metodo']) || ''),
+      asaasCobrancaId: String(campo(p, ['asaasCobrancaId', 'asaas_cobranca_id']) || ''),
+      faturaUrl: /^https:\/\//.test(String(campo(p, ['faturaUrl']) || '')) ? String(p.faturaUrl) : ''
+    };
+  }
+  function normalizarCupom(c) {
+    c = c || {};
+    var pac = campo(c, ['pacotes']);
+    return {
+      codigo: String(campo(c, ['codigo']) || '').toUpperCase(),
+      tipo: campo(c, ['tipo']) === 'valor' ? 'valor' : 'percentual',
+      valor: inteiroOu(campo(c, ['valor']), 0),
+      usosMax: inteiroOu(campo(c, ['usosMax', 'usos_max']), null),
+      usos: inteiroOu(campo(c, ['usos']), 0),
+      validoAte: String(campo(c, ['validoAte', 'valido_ate']) || '').slice(0, 10),
+      ativo: campo(c, ['ativo']) !== false,
+      pacotes: Array.isArray(pac) ? pac.map(String) : []
+    };
+  }
+  function normalizarPacote(p) {
+    p = p || {};
+    return {
+      chave: String(campo(p, ['chave']) || ''),
+      nome: String(campo(p, ['nome']) || ''),
+      precoCentavos: inteiroOu(campo(p, ['precoCentavos', 'preco_centavos']), 0),
+      precoLancamentoCentavos: inteiroOu(campo(p, ['precoLancamentoCentavos', 'preco_lancamento_centavos']), null),
+      lancamentoAte: String(campo(p, ['lancamentoAte', 'lancamento_ate']) || '').slice(0, 10),
+      ativo: campo(p, ['ativo']) !== false,
+      ordem: inteiroOu(campo(p, ['ordem']), 0)
+    };
+  }
+
+  // Data de referência de um pedido: quando foi pago (ou liberado), senão quando foi criado.
+  function dataPedido(p) { return p.pagoEm || p.criadoEm || ''; }
+  function inicioDoDia(d) { return new Date(d.getFullYear(), d.getMonth(), d.getDate()); }
+  // Começo do período ('hoje', '7d', '30d', 'mes') em relação a "agora"; '' -> null (sem limite).
+  function inicioPeriodo(periodo, agora) {
+    var a = agora ? new Date(agora) : new Date();
+    var hoje = inicioDoDia(a);
+    if (periodo === 'hoje') return hoje;
+    if (periodo === '7d') return new Date(hoje.getTime() - 6 * 86400000);
+    if (periodo === '30d') return new Date(hoje.getTime() - 29 * 86400000);
+    if (periodo === 'mes') return new Date(a.getFullYear(), a.getMonth(), 1);
+    return null;
+  }
+  function noPeriodo(iso, periodo, agora) {
+    var ini = inicioPeriodo(periodo, agora);
+    if (!ini) return true;
+    var t = Date.parse(iso);
+    return isFinite(t) && t >= ini.getTime();
+  }
+
+  // filtro: { busca, status, pacote, periodo }. A busca olha nome, e-mail, cupom e o início do id.
+  function filtrarPedidos(lista, filtro, agora) {
+    var f = filtro || {};
+    var termo = semAcento(f.busca);
+    return (lista || []).filter(function (p) {
+      if (f.status && p.status !== f.status) return false;
+      if (f.pacote && p.pacote !== f.pacote) return false;
+      if (f.periodo && !noPeriodo(p.criadoEm || p.pagoEm, f.periodo, agora)) return false;
+      if (!termo) return true;
+      return semAcento([p.nome, p.email, p.cupom, p.id].join(' ')).indexOf(termo) !== -1;
+    }).sort(function (a, b) { return String(b.criadoEm).localeCompare(String(a.criadoEm)); });
+  }
+
+  // Resumo calculado a partir dos pedidos. Venda = pedido pago (cortesia não conta na receita).
+  // gratis = quantos resumos grátis (respostas de origem 'pessoal') existem — base da conversão.
+  function resumoDosPedidos(pedidos, agora, gratis) {
+    var lista = pedidos || [];
+    function bloco(periodo) {
+      var pagos = lista.filter(function (p) { return p.status === 'pago' && noPeriodo(dataPedido(p), periodo, agora); });
+      return { vendas: pagos.length, receitaCentavos: pagos.reduce(function (s, p) { return s + p.valorCentavos; }, 0) };
+    }
+    var todos = bloco('');
+    var compradores = {};
+    lista.forEach(function (p) { if (p.status === 'pago' || p.status === 'cortesia') compradores[p.respostaId || p.email || p.id] = true; });
+    var nCompra = Object.keys(compradores).length;
+    var base = gratis == null ? null : Number(gratis);
+    return {
+      hoje: bloco('hoje'), semana: bloco('7d'), mes: bloco('mes'),
+      ticketMedioCentavos: todos.vendas ? Math.round(todos.receitaCentavos / todos.vendas) : 0,
+      aguardando: lista.filter(function (p) { return p.status === 'aguardando'; }).length,
+      cortesias: lista.filter(function (p) { return p.status === 'cortesia'; }).length,
+      gratis: base, compras: nCompra,
+      conversao: base ? Math.round((nCompra / base) * 1000) / 10 : null,
+      ultimos: lista.slice().sort(function (a, b) { return String(b.criadoEm).localeCompare(String(a.criadoEm)); }).slice(0, 10)
+    };
+  }
+
+  // Junta o que o servidor mandou (resumoVendas) com o calculado aqui; o do servidor vale quando existe.
+  function juntarResumo(doServidor, calculado) {
+    var s = doServidor || {};
+    var r = {};
+    for (var k in calculado) r[k] = calculado[k];
+    ['hoje', 'semana', 'mes'].forEach(function (k) {
+      var b = s[k] || (k === 'semana' ? s['7d'] || s.seteDias : null);
+      if (b && typeof b === 'object') r[k] = {
+        vendas: inteiroOu(campo(b, ['vendas', 'qtd', 'quantidade']), r[k].vendas),
+        receitaCentavos: inteiroOu(campo(b, ['receitaCentavos', 'receita_centavos', 'receita']), r[k].receitaCentavos)
+      };
+    });
+    var t = campo(s, ['ticketMedioCentavos', 'ticket_medio_centavos', 'ticketMedio']);
+    if (t != null) r.ticketMedioCentavos = inteiroOu(t, r.ticketMedioCentavos);
+    var ag = campo(s, ['aguardando']);
+    if (ag != null) r.aguardando = inteiroOu(ag, r.aguardando);
+    var cort = campo(s, ['cortesias']);
+    if (cort != null) r.cortesias = inteiroOu(cort, r.cortesias);
+    // Conversão: compras / resumos grátis. Com os dois números, calcula aqui (em %); senão usa a do servidor
+    // (fração 0–1 do resumo_vendas, ou já em %).
+    var g = campo(s, ['resumos', 'gratis', 'resumosGratis', 'resumos_gratis']);
+    var c = campo(s, ['compras', 'comprasPagas']);
+    if (g != null) r.gratis = inteiroOu(g, r.gratis);
+    if (c != null) r.compras = inteiroOu(c, r.compras);
+    var conv = campo(s, ['conversao']);
+    if (g != null && c != null) r.conversao = r.gratis ? Math.round((r.compras / r.gratis) * 1000) / 10 : null;
+    else if (conv != null && isFinite(Number(conv))) r.conversao = Number(conv) <= 1 ? Math.round(Number(conv) * 1000) / 10 : Number(conv);
+    if (s.periodo) r.periodo = String(s.periodo);
+    return r;
+  }
+
+  function textoPercentual(v) { return v == null ? '—' : String(v).replace('.', ',') + '%'; }
+
+  function nomePacote(chave, pacotes) {
+    var lista = (pacotes && pacotes.length ? pacotes : PACOTES_PADRAO);
+    for (var i = 0; i < lista.length; i++) if (lista[i].chave === chave) return lista[i].nome;
+    return chave || '—';
+  }
+
+  // "20% de desconto" / "R$ 10,00 de desconto"
+  function textoCupom(c) {
+    return (c.tipo === 'valor' ? formatarReais(c.valor) : c.valor + '%') + ' de desconto';
+  }
+
+  // Erro do cupom (texto) ou '' quando está bom. c: { codigo, tipo, valor (% inteiro ou centavos), usosMax, validoAte, pacotes }
+  function validarCupom(c) {
+    if (!c || !/^[A-Z0-9_-]{3,30}$/.test(String(c.codigo || ''))) return 'O código precisa ter de 3 a 30 letras, números, - ou _ (sem espaço).';
+    if (c.tipo !== 'percentual' && c.tipo !== 'valor') return 'Escolha o tipo do desconto.';
+    var v = Number(c.valor);
+    if (!isFinite(v) || v <= 0) return 'Informe o valor do desconto.';
+    if (c.tipo === 'percentual' && (v > 100 || Math.round(v) !== v)) return 'O desconto em % vai de 1 a 100.';
+    if (c.usosMax != null && (!isFinite(Number(c.usosMax)) || Number(c.usosMax) < 1)) return 'O limite de usos precisa ser 1 ou mais (ou deixe vazio).';
+    if (c.validoAte && !/^\d{4}-\d{2}-\d{2}$/.test(c.validoAte)) return 'Validade inválida (use o calendário).';
+    return '';
+  }
+
+  function validarPacote(p) {
+    if (!p || !String(p.nome || '').trim()) return 'Informe o nome do pacote.';
+    if (p.precoCentavos == null || p.precoCentavos < 0) return 'Informe o preço (ex.: 39,00).';
+    if (p.precoLancamentoCentavos != null) {
+      if (p.precoLancamentoCentavos < 0) return 'Preço de lançamento inválido.';
+      if (p.precoLancamentoCentavos >= p.precoCentavos) return 'O preço de lançamento precisa ser menor que o preço normal.';
+    }
+    if (p.lancamentoAte && !/^\d{4}-\d{2}-\d{2}$/.test(p.lancamentoAte)) return 'Data de fim do lançamento inválida.';
+    if (!isFinite(Number(p.ordem))) return 'Ordem inválida.';
+    return '';
+  }
+
+  // Link da landing com o cupom já aplicado: descubra.html?cupom=CODIGO (na mesma pasta do painel).
+  function linkLandingCupom(href, codigo) {
+    var base = String(href || '').split('#')[0].split('?')[0].replace(/[^/]*$/, '');
+    return base + 'descubra.html?cupom=' + encodeURIComponent(String(codigo || '').toUpperCase());
+  }
+  // Link do relatório comprado: meu-relatorio.html#t-<token>.
+  function linkMeuRelatorio(href, token) {
+    var base = String(href || '').split('#')[0].split('?')[0].replace(/[^/]*$/, '');
+    return base + 'meu-relatorio.html#t-' + encodeURIComponent(String(token || ''));
+  }
+  // Página "Recuperar meu relatório" (o painel não recebe o token do cliente): meu-relatorio.html#recuperar.
+  function linkRecuperar(href) {
+    var base = String(href || '').split('#')[0].split('?')[0].replace(/[^/]*$/, '');
+    return base + 'meu-relatorio.html#recuperar';
+  }
+  // Orientação para quem perdeu o link: pedir de novo pelo e-mail da compra.
+  function mensagemOrientacao(pedido, url) {
+    var nome = primeiroNome(pedido && pedido.nome);
+    return 'Olá' + (nome ? ', ' + nome : '') + '! Para abrir de novo o seu Mapa de Perfil completo, entre em:\n' + url +
+      '\n\nInforme o e-mail usado na compra' + (pedido && pedido.email ? ' (' + pedido.email + ')' : '') +
+      ' e o link de acesso chega na sua caixa de entrada (confira também o spam).\nQualquer dúvida, é só responder esta mensagem.\nEquipe Gestão sem Caos';
+  }
+  // Mensagem para reenviar o relatório ao cliente (WhatsApp/e-mail).
+  function mensagemReenvio(pedido, url) {
+    var nome = primeiroNome(pedido && pedido.nome);
+    return 'Olá' + (nome ? ', ' + nome : '') + '! Aqui está o link do seu Mapa de Perfil completo:\n' + url +
+      '\n\nGuarde este link: ele é o seu acesso ao relatório.\nQualquer dúvida, é só responder esta mensagem.\nEquipe Gestão sem Caos';
+  }
+
   function mensagemBanco(resp) {
     if (resp && resp.ok === true && !resp.semFuncao && (!Array.isArray(resp.faltando) || !resp.faltando.length)) return '';
     var faltam = resp && Array.isArray(resp.faltando) && resp.faltando.length ? resp.faltando.map(String).join(', ') : 'as migrações mais recentes';
@@ -1216,6 +1466,25 @@
   }
 
   var util = {
+    STATUS_PEDIDO: STATUS_PEDIDO,
+    PACOTES_PADRAO: PACOTES_PADRAO,
+    formatarReais: formatarReais,
+    centavosDeTexto: centavosDeTexto,
+    normalizarPedido: normalizarPedido,
+    normalizarCupom: normalizarCupom,
+    normalizarPacote: normalizarPacote,
+    inicioPeriodo: inicioPeriodo,
+    filtrarPedidos: filtrarPedidos,
+    resumoDosPedidos: resumoDosPedidos,
+    juntarResumo: juntarResumo,
+    textoCupom: textoCupom,
+    validarCupom: validarCupom,
+    validarPacote: validarPacote,
+    linkLandingCupom: linkLandingCupom,
+    linkMeuRelatorio: linkMeuRelatorio,
+    mensagemReenvio: mensagemReenvio,
+    linkRecuperar: linkRecuperar,
+    mensagemOrientacao: mensagemOrientacao,
     MODELOS_CATALOGO: MODELOS_CATALOGO,
     modeloDoCatalogo: modeloDoCatalogo,
     exemploModelo: exemploModelo,
@@ -1343,12 +1612,13 @@
     registros: [], processos: [], usuarios: [],
     clickup: { configurado: false, iaConfigurada: false, carregado: false },
     abertoId: null, aba: 'lista', listaMostrada: false,
-    filtros: { processo: '', perfil: '', status: '' },
+    filtros: { processo: '', perfil: '', status: '', origem: '' },
     // Tela dentro da aba Processos: 'lista' | 'form' | 'pagina' | 'editor'
     proc: { tela: 'lista', id: null },
     relatorios: {},   // processoId -> [{token, status, criadoEm, publicadoEm}]
     editor: null,     // {processoId, token, relatorio, avisos, status, url, sujo}
     emp: null,        // aba Empresas: ver novoEstadoEmpresas()
+    vd: null,         // aba Vendas: ver novoEstadoVendas()
     rl: null          // aba Relatórios: ver novoEstadoRelatorios()
   };
 
@@ -1669,7 +1939,7 @@
     return new Promise(function (resolver) {
       var anterior = document.activeElement;
       var entrada = opcoes.exigir ? el('input', { classe: 'entrada', id: 'confirmar-texto', autocomplete: 'off', 'aria-label': 'Digite ' + opcoes.exigir + ' para confirmar' }) : null;
-      var btnOk = el('button', { type: 'button', classe: 'botao botao--perigo', id: 'confirmar-ok', texto: opcoes.botao || 'Excluir' });
+      var btnOk = el('button', { type: 'button', classe: 'botao ' + (opcoes.classeBotao || 'botao--perigo'), id: 'confirmar-ok', texto: opcoes.botao || 'Excluir' });
       var btnCancelar = el('button', { type: 'button', classe: 'botao botao--claro', id: 'confirmar-cancelar', texto: 'Cancelar' });
       var caixa = el('div', { classe: 'caixa caixa--ampla vidro-janela confirmar__caixa surgir', role: 'alertdialog', 'aria-modal': 'true', 'aria-labelledby': 'confirmar-titulo', 'aria-describedby': 'confirmar-desc' }, [
         el('h2', { id: 'confirmar-titulo', classe: 'confirmar__titulo', texto: opcoes.titulo }),
@@ -2043,6 +2313,11 @@
       opcoes: [{ valor: '', rotulo: 'Todos' }].concat(LETRAS.map(function (l) { return { valor: l, rotulo: l + ' — ' + NOMES[l] }; })) });
     defs.push({ id: 'filtro-status', chave: 'status', rotulo: 'Status', prefixo: 'Status',
       opcoes: [{ valor: '', rotulo: 'Todos' }].concat(['em_analise', 'aprovado', 'reprovado', 'invalido'].map(function (s) { return { valor: s, rotulo: STATUS[s] }; })) });
+    // Origem: só quando há venda direta (respostas 'pessoal' ou a API de vendas).
+    if (MODO_API && (temVendas() || estado.registros.some(function (r) { return r.origem === 'pessoal'; }))) {
+      defs.push({ id: 'filtro-origem', chave: 'origem', rotulo: 'Origem', prefixo: 'Origem',
+        opcoes: [{ valor: '', rotulo: 'Todas' }, { valor: 'processo', rotulo: 'Processos' }, { valor: 'pessoal', rotulo: 'Pessoal (venda direta)' }] });
+    }
     defs.forEach(function (d) {
       var existe = d.opcoes.some(function (o) { return o.valor === estado.filtros[d.chave]; });
       if (!existe) estado.filtros[d.chave] = '';
@@ -2060,6 +2335,8 @@
       if (f.processo === '-' && r.avaliacao) return false;
       if (f.processo && f.processo !== '-' && r.avaliacao !== f.processo) return false;
       if (f.perfil && (!r.calc || r.calc.primario !== f.perfil)) return false;
+      if (f.origem === 'pessoal' && r.origem !== 'pessoal') return false;
+      if (f.origem === 'processo' && r.origem === 'pessoal') return false;
       if (f.status === 'invalido' && !r.invalido) return false;
       if (f.status && f.status !== 'invalido' && (r.invalido || r.status !== f.status)) return false;
       return correspondeBusca(r, busca);
@@ -2118,6 +2395,7 @@
       var exp = textoExperiencia(r);
       if (exp) meta.push(el('span', { classe: 'card-experiencia', texto: exp }));
       var selos = [badgePerfil(r), badgeStatus(r), badgeConfiabilidade(r)];
+      if (r.origem === 'pessoal') selos.unshift(el('span', { classe: 'selo selo--laranja selo-pessoal', title: 'Fez o Mapa DISC pela página de venda (sem processo)', texto: 'Pessoal' }));
       if (g.total > 1) selos.push(el('span', { classe: 'selo selo--noite selo-respostas', title: 'Respostas desta pessoa' + (estado.filtros.processo ? ' neste filtro' : ''), texto: g.total + ' respostas' }));
       ul.appendChild(el('li', { classe: 'card caixa' + (animar ? ' surgir' : '') + (r.invalido ? ' card-invalido' : ''), 'data-id': r.id, 'data-pessoa': g.chave, 'data-respostas': String(g.total), estilo: animar ? { 'animation-delay': Math.min(i, 8) * 30 + 'ms' } : null }, [
         el('div', { classe: 'card-topo' }, [
@@ -2141,7 +2419,7 @@
   /* ---------- Detalhe ---------- */
 
   function esconderVistas() {
-    ['vista-lista', 'vista-processos', 'vista-empresas', 'vista-usuarios', 'vista-comparativo', 'vista-importar']
+    ['vista-lista', 'vista-processos', 'vista-empresas', 'vista-relatorios', 'vista-vendas', 'vista-usuarios', 'vista-comparativo', 'vista-importar']
       .forEach(function (id) { $(id).hidden = true; });
   }
 
@@ -2387,7 +2665,7 @@
     art.appendChild(el('header', { classe: 'cabecalho det-cabecalho' }, [
       el('div', { classe: 'cabecalho__texto-area' }, [
         el('p', { classe: 'det-relatorio so-imprimir', texto: 'Relatório DISC' + (r.empresaNome ? ' — ' + r.empresaNome : (CONFIG.EMPRESA ? ' — ' + CONFIG.EMPRESA : '')) }),
-        el('p', { classe: 'sobretitulo nao-imprimir', texto: equipe ? 'Avaliação de equipe · Colaborador' : 'Processo seletivo · Candidato' }),
+        el('p', { classe: 'sobretitulo nao-imprimir', texto: r.origem === 'pessoal' ? 'Venda direta · Mapa pessoal' : (equipe ? 'Avaliação de equipe · Colaborador' : 'Processo seletivo · Candidato') }),
         el('div', { classe: 'det-titulo' }, [
           avatar(r.nome, fotoDe(r), { classe: 'avatar--grande det-avatar' }),
           el('h2', { classe: 'cabecalho__titulo t-pagina seminegrito', texto: r.nome || '(sem nome)' })
@@ -2414,7 +2692,7 @@
     // Ficha da pessoa (dados de r.pessoa quando existe; senão os da resposta). Equipe: sem vaga nem empresa anterior.
     var ficha = fichaPessoa(r);
     var dados = el('section', { classe: 'caixa det-dados surgir', id: 'det-ficha' }, [
-      el('h3', { classe: 'caixa__titulo', texto: equipe ? 'Ficha do colaborador' : 'Ficha do candidato' }),
+      el('h3', { classe: 'caixa__titulo', texto: r.origem === 'pessoal' ? 'Ficha do cliente' : (equipe ? 'Ficha do colaborador' : 'Ficha do candidato') }),
       el('dl', { classe: 'det-dl' }, [
         el('div', null, [el('dt', { texto: 'Telefone' }), el('dd', null, linkTelefone({ telefone: ficha.telefone || r.telefone, nome: ficha.nome || r.nome }))]),
         el('div', null, [el('dt', { texto: 'Idade' }), el('dd', { id: 'det-idade', texto: textoIdade(ficha.idade) })]),
@@ -2428,6 +2706,8 @@
         el('div', null, [el('dt', { texto: 'Status' }), el('dd', { id: 'det-status-selo' }, badgeStatus(r))])
       ])
     ]);
+    var pedidoDet = blocoPedidoDetalhe(r);
+    if (pedidoDet) dados.appendChild(pedidoDet);
 
     // Todas as respostas desta pessoa (sem filtro), mais recente primeiro.
     var chave = chavePessoa(r);
@@ -5415,9 +5695,535 @@
     setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
   }
 
+  /* ---------- Vendas (aba do admin; só quando o servidor tem a API de vendas) ---------- */
+
+  // Venda direta só existe no Supabase e na prévia (o js/api.js legado tem o método, mas só para recusar).
+  function temVendas() { return MODO_API && (SUPABASE || SIMULADA) && !!metodoApi('listarPedidos'); }
+  function novoEstadoVendas() {
+    return { sub: 'resumo', pedidoId: null, carregado: false, carregando: false, erro: '', pedidos: [], cupons: [], pacotes: [], resumo: null,
+      filtro: { busca: '', status: '', pacote: '', periodo: '' } };
+  }
+  function listaDe(resp, nomes) {
+    for (var i = 0; i < nomes.length; i++) if (resp && Array.isArray(resp[nomes[i]])) return resp[nomes[i]];
+    return [];
+  }
+  function opcional(p) { return p.catch(function (e) { if (e && e.tratado) throw e; return null; }); }
+
+  function carregarVendas() {
+    var vd = estado.vd;
+    if (vd.carregando) return vd.carregando;
+    vd.erro = '';
+    vd.carregando = Promise.all([
+      api('listarPedidos', {}),
+      metodoApi('listarCupons') ? opcional(api('listarCupons')) : Promise.resolve(null),
+      metodoApi('listarPacotes') ? opcional(api('listarPacotes')) : Promise.resolve(null),
+      metodoApi('resumoVendas') ? opcional(api('resumoVendas', 'mes')) : Promise.resolve(null)
+    ]).then(function (rs) {
+      vd.pedidos = listaDe(rs[0], ['pedidos', 'itens']).map(normalizarPedido);
+      vd.cupons = listaDe(rs[1], ['cupons', 'itens']).map(normalizarCupom);
+      var pac = listaDe(rs[2], ['pacotes', 'itens']).map(normalizarPacote);
+      vd.pacotes = (pac.length ? pac : PACOTES_PADRAO.slice()).sort(function (a, b) { return a.ordem - b.ordem; });
+      vd.resumo = rs[3] ? (rs[3].resumo || rs[3]) : null;
+      vd.carregado = true;
+    }).catch(function (e) {
+      if (e && e.tratado) throw e;
+      vd.erro = (e && e.message) || 'Não foi possível carregar as vendas.';
+      vd.carregado = true;
+    }).then(function () {
+      vd.carregando = false;
+      renderizarVendas();
+      if (estado.abertoId) renderizarDetalhe();
+    }, function () { vd.carregando = false; });
+    return vd.carregando;
+  }
+
+  function irParaVendas(sub, pedidoId) {
+    estado.vd.sub = sub || 'resumo';
+    estado.vd.pedidoId = pedidoId || null;
+    renderizarVendas();
+    mostrarAba('vendas');
+    root.scrollTo(0, 0);
+    var h = $('vista-vendas').querySelector('h2');
+    if (h) { h.setAttribute('tabindex', '-1'); h.focus(); }
+  }
+
+  var SUBABAS_VENDAS = [{ id: 'resumo', rotulo: 'Resumo' }, { id: 'pedidos', rotulo: 'Pedidos' }, { id: 'cupons', rotulo: 'Cupons' }, { id: 'pacotes', rotulo: 'Pacotes' }];
+  var TITULOS_VENDAS = {
+    resumo: ['Vendas', 'Vendas do Mapa DISC e conversão do resumo grátis em compra.'],
+    pedidos: ['Pedidos', 'Cada compra do site. Abra um pedido para reenviar o link, liberar como cortesia ou registrar um reembolso.'],
+    cupons: ['Cupons', 'Descontos para campanhas e parceiros. O link da página de venda já leva o cupom aplicado.'],
+    pacotes: ['Pacotes', 'Preços que aparecem na página de venda e no checkout.']
+  };
+
+  function renderizarVendas() {
+    var box = $('vista-vendas');
+    if (!box || !estado.vd) return;
+    limpar(box);
+    if (!temVendas() || papel() !== 'admin') return;
+    var vd = estado.vd;
+    if (vd.sub === 'pedidos' && vd.pedidoId && vd.carregado) {
+      var ped = vd.pedidos.filter(function (p) { return p.id === vd.pedidoId; })[0];
+      if (ped) return renderizarPedido(box, ped);
+      vd.pedidoId = null;
+    }
+    var t = TITULOS_VENDAS[vd.sub] || TITULOS_VENDAS.resumo;
+    var acoes = [botao('botao--claro', 'Atualizar', function () { vd.carregado = false; renderizarVendas(); }, { id: 'btn-vendas-atualizar' })];
+    if (vd.sub === 'cupons') acoes.push(botao('botao--laranja', 'Novo cupom', function () { janelaCupom(null); }, { id: 'btn-novo-cupom' }));
+    box.appendChild(cabecalhoVista('Venda direta', t[0], t[1], acoes));
+    box.appendChild(el('nav', { classe: 'subabas', id: 'vd-subabas', 'aria-label': 'Seções de vendas' }, SUBABAS_VENDAS.map(function (s) {
+      var n = s.id === 'pedidos' && vd.carregado ? vd.pedidos.length : (s.id === 'cupons' && vd.carregado ? vd.cupons.length : null);
+      return el('button', { type: 'button', classe: 'subaba', id: 'vd-subaba-' + s.id, 'data-subaba': s.id, 'aria-current': s.id === vd.sub ? 'page' : null,
+        onclick: function () { if (vd.sub !== s.id || vd.pedidoId) irParaVendas(s.id); } }, [
+        el('span', { texto: s.rotulo }), n != null ? el('span', { classe: 'subaba__n tabular', texto: String(n) }) : null
+      ]);
+    })));
+    if (!vd.carregado) {
+      box.appendChild(el('p', { classe: 'texto-suave t-corpo', id: 'vd-carregando', texto: 'Carregando…' }));
+      carregarVendas();
+      return;
+    }
+    if (vd.erro) { box.appendChild(el('p', { classe: 'aviso aviso--erro proc-aviso', id: 'vd-erro', role: 'alert', texto: vd.erro })); return; }
+    if (vd.sub === 'pedidos') return renderizarPedidos(box);
+    if (vd.sub === 'cupons') return renderizarCupons(box);
+    if (vd.sub === 'pacotes') return renderizarPacotes(box);
+    vd.sub = 'resumo';
+    renderizarResumoVendas(box);
+  }
+
+  function cartaoVenda(id, rotulo, valor, nota, destaque) {
+    return el('div', { classe: 'caixa caixa--compacta resumo__cartao vd-cartao' + (destaque ? ' caixa--destaque' : ''), id: id }, [
+      el('span', { classe: 'resumo__rotulo', texto: rotulo }),
+      el('span', { classe: 'resumo__numeros' }, [
+        el('span', { classe: 'resumo__valor vd-cartao__valor valor-destaque tabular', texto: valor }),
+        el('span', { classe: 'resumo__nota', texto: nota })
+      ])
+    ]);
+  }
+  function qtdVendas(n) { return n + (n === 1 ? ' venda' : ' vendas'); }
+
+  function renderizarResumoVendas(box) {
+    var vd = estado.vd;
+    var gratis = estado.registros.filter(function (r) { return r.origem === 'pessoal'; }).length;
+    var r = juntarResumo(vd.resumo, resumoDosPedidos(vd.pedidos, null, gratis));
+    box.appendChild(el('div', { classe: 'resumo vd-resumo', id: 'vd-resumo' }, [
+      cartaoVenda('vd-hoje', 'Hoje', formatarReais(r.hoje.receitaCentavos), qtdVendas(r.hoje.vendas), true),
+      cartaoVenda('vd-semana', 'Últimos 7 dias', formatarReais(r.semana.receitaCentavos), qtdVendas(r.semana.vendas)),
+      cartaoVenda('vd-mes', 'Este mês', formatarReais(r.mes.receitaCentavos), qtdVendas(r.mes.vendas)),
+      cartaoVenda('vd-ticket', 'Ticket médio', formatarReais(r.ticketMedioCentavos), 'por venda paga')
+    ]));
+    box.appendChild(el('div', { classe: 'resumo vd-resumo', id: 'vd-resumo-2' }, [
+      cartaoVenda('vd-aguardando', 'Aguardando pagamento', String(r.aguardando), r.aguardando === 1 ? 'pedido sem confirmação' : 'pedidos sem confirmação'),
+      cartaoVenda('vd-conversao', 'Conversão resumo grátis → compra', textoPercentual(r.conversao),
+        r.gratis == null ? 'sem dados de resumos grátis' : r.compras + ' compra' + (r.compras === 1 ? '' : 's') + ' de ' + r.gratis + ' resumo' + (r.gratis === 1 ? '' : 's') + ' grátis' + (r.periodo === 'mes' ? ' no mês' : '')),
+      cartaoVenda('vd-cortesias', 'Cortesias', String(r.cortesias), 'liberadas sem pagamento')
+    ]));
+    var sec = el('section', { classe: 'caixa vd-ultimos-caixa' }, [
+      el('div', { classe: 'gestao-linha' }, [
+        el('h3', { classe: 'caixa__titulo', texto: 'Últimos pedidos' }),
+        botao('botao--claro botao--pequeno', 'Ver todos os pedidos', function () { irParaVendas('pedidos'); }, { id: 'btn-vd-todos' })
+      ])
+    ]);
+    var ul = el('ul', { classe: 'vd-linhas', id: 'vd-ultimos' });
+    if (!r.ultimos.length) ul.appendChild(el('li', { classe: 'vazio' }, el('p', { classe: 'vazio__texto', texto: 'Nenhum pedido ainda. Eles aparecem aqui assim que alguém comprar pelo site.' })));
+    r.ultimos.forEach(function (p) { ul.appendChild(linhaPedido(p)); });
+    sec.appendChild(ul);
+    box.appendChild(sec);
+  }
+
+  function seloPedido(p) {
+    return el('span', { classe: 'selo vd-status ' + (CLASSE_PEDIDO[p.status] || ''), 'data-status': p.status, texto: STATUS_PEDIDO[p.status] || p.status });
+  }
+
+  function linhaPedido(p) {
+    var pacotes = estado.vd.pacotes;
+    return el('li', { classe: 'vd-linha', 'data-id': p.id, 'data-status': p.status, 'data-pacote': p.pacote }, [
+      el('button', { type: 'button', classe: 'vd-linha__abrir', 'aria-label': 'Abrir pedido de ' + (p.nome || p.email || 'cliente'), onclick: function () { irParaVendas('pedidos', p.id); } }, [
+        el('span', { classe: 'vd-linha__quem' }, [
+          el('span', { classe: 'seminegrito vd-linha__nome', texto: p.nome || '(sem nome)' }),
+          el('span', { classe: 'texto-suave t-rotulo vd-linha__email', texto: p.email || '—' })
+        ]),
+        el('span', { classe: 't-rotulo vd-linha__pacote', texto: nomePacote(p.pacote, pacotes) + (p.cupom ? ' · cupom ' + p.cupom : '') }),
+        el('span', { classe: 't-rotulo texto-suave tabular vd-linha__data', texto: formatarData(p.criadoEm) }),
+        el('span', { classe: 'seminegrito tabular vd-linha__valor', texto: formatarReais(p.valorCentavos) }),
+        seloPedido(p)
+      ])
+    ]);
+  }
+
+  function renderizarPedidos(box) {
+    var vd = estado.vd;
+    var f = vd.filtro;
+    var busca = el('input', { id: 'vd-busca', classe: 'entrada', type: 'search', placeholder: 'Nome, e-mail, cupom ou nº do pedido…', value: f.busca });
+    var escStatus = criarEscolha({ id: 'vd-filtro-status', rotulo: 'Situação', prefixo: 'Situação', valor: f.status,
+      opcoes: [{ valor: '', rotulo: 'Todas' }].concat(Object.keys(STATUS_PEDIDO).map(function (s) { return { valor: s, rotulo: STATUS_PEDIDO[s] }; })) });
+    var escPacote = criarEscolha({ id: 'vd-filtro-pacote', rotulo: 'Pacote', prefixo: 'Pacote', valor: f.pacote,
+      opcoes: [{ valor: '', rotulo: 'Todos' }].concat(vd.pacotes.filter(function (p) { return p.chave !== 'gratis'; }).map(function (p) { return { valor: p.chave, rotulo: p.nome }; })) });
+    var escPeriodo = criarEscolha({ id: 'vd-filtro-periodo', rotulo: 'Período', prefixo: 'Período', valor: f.periodo,
+      opcoes: [{ valor: '', rotulo: 'Tudo' }].concat(Object.keys(PERIODOS_VENDAS).map(function (k) { return { valor: k, rotulo: PERIODOS_VENDAS[k] }; })) });
+    box.appendChild(el('form', { classe: 'filtros', id: 'vd-filtros', role: 'search', onsubmit: function (e) { e.preventDefault(); } }, [
+      el('label', { classe: 'filtros__busca' }, [
+        el('span', { classe: 'visualmente-oculto', texto: 'Buscar pedido' }),
+        (function () { var s = svg('svg', { class: 'filtros__lupa', viewBox: '0 0 24 24', 'aria-hidden': 'true' }); s.appendChild(svg('circle', { cx: 11, cy: 11, r: 7 })); s.appendChild(svg('path', { d: 'm20 20-3.5-3.5' })); return s; })(),
+        busca
+      ]),
+      el('div', { classe: 'filtros__escolhas', 'data-qtd': '3' }, [escStatus.caixa, escPacote.caixa, escPeriodo.caixa])
+    ]));
+    var contagem = el('p', { classe: 't-rotulo texto-suave', id: 'vd-contagem', 'aria-live': 'polite' });
+    var ul = el('ul', { classe: 'vd-linhas caixa', id: 'vd-lista-pedidos' });
+    box.appendChild(contagem);
+    box.appendChild(ul);
+    function desenhar() {
+      limpar(ul);
+      var itens = filtrarPedidos(vd.pedidos, f);
+      var soma = itens.filter(function (p) { return p.status === 'pago'; }).reduce(function (s, p) { return s + p.valorCentavos; }, 0);
+      contagem.textContent = itens.length + ' de ' + vd.pedidos.length + ' pedido' + (vd.pedidos.length === 1 ? '' : 's') + ' · ' + formatarReais(soma) + ' pagos';
+      if (!itens.length) {
+        ul.appendChild(el('li', { classe: 'vazio' }, el('p', { classe: 'vazio__texto', texto: vd.pedidos.length ? 'Nenhum pedido com esses filtros.' : 'Nenhum pedido ainda.' })));
+        return;
+      }
+      itens.forEach(function (p) { ul.appendChild(linhaPedido(p)); });
+    }
+    busca.addEventListener('input', function () { f.busca = busca.value; desenhar(); });
+    escStatus.botao.addEventListener('change', function () { f.status = escStatus.botao.value; desenhar(); });
+    escPacote.botao.addEventListener('change', function () { f.pacote = escPacote.botao.value; desenhar(); });
+    escPeriodo.botao.addEventListener('change', function () { f.periodo = escPeriodo.botao.value; desenhar(); });
+    desenhar();
+  }
+
+  function trocarStatusPedido(p, status, msgOk) {
+    return api('atualizarPedido', p.id, { status: status }).then(function (resp) {
+      var novo = resp && resp.pedido ? normalizarPedido(resp.pedido) : null;
+      estado.vd.pedidos = estado.vd.pedidos.map(function (x) {
+        if (x.id !== p.id) return x;
+        if (novo && novo.id) return novo;
+        var c = {}; for (var k in x) c[k] = x[k];
+        c.status = status;
+        if (status === 'estornado') c.reembolsadoEm = new Date().toISOString();
+        return c;
+      });
+      renderizarVendas();
+      if (estado.abertoId) renderizarDetalhe();
+      avisar(msgOk, 'ok');
+    }).catch(falhou);
+  }
+
+  function liberarCortesia(p) {
+    confirmar({ titulo: 'Liberar como cortesia?', botao: 'Liberar relatório', classeBotao: 'botao--principal',
+      texto: 'O relatório de ' + (p.nome || p.email || 'cliente') + ' fica liberado sem pagamento. Use para parceiros, testes ou quando o pagamento foi feito por fora.' })
+      .then(function (ok) { if (ok) trocarStatusPedido(p, 'cortesia', 'Pedido liberado como cortesia. Envie o link ao cliente.'); });
+  }
+
+  function cancelarPedido(p) {
+    confirmar({ titulo: 'Cancelar este pedido?', botao: 'Cancelar pedido', texto: 'Use quando a pessoa desistiu ou o Pix venceu. Nada é cobrado; dá para liberar como cortesia depois.' })
+      .then(function (ok) { if (ok) trocarStatusPedido(p, 'cancelado', 'Pedido cancelado.'); });
+  }
+
+  function marcarReembolsado(p) {
+    var extra = el('div', { classe: 'aviso vd-lembrete', id: 'vd-lembrete-asaas' }, [
+      el('p', { classe: 'seminegrito', texto: 'Lembrete: devolva o dinheiro no Asaas.' }),
+      el('p', { texto: 'Marcar aqui só bloqueia o relatório e registra o reembolso. O estorno do valor (' + formatarReais(p.valorCentavos) + ') é feito no painel do Asaas' +
+        (p.asaasCobrancaId ? ', cobrança ' + p.asaasCobrancaId : '') + '.' }),
+      el('a', { href: ASAAS_PAINEL, target: '_blank', rel: 'noopener noreferrer', classe: 'vd-link', id: 'vd-link-asaas', texto: 'Abrir o Asaas' })
+    ]);
+    confirmar({ titulo: 'Marcar este pedido como reembolsado?', botao: 'Marcar reembolsado', extra: extra,
+      texto: (p.nome || p.email || 'O cliente') + ' perde o acesso ao relatório completo. Garantia de 7 dias: devolva o valor integral.' })
+      .then(function (ok) { if (ok) trocarStatusPedido(p, 'estornado', 'Pedido marcado como reembolsado. Confira o estorno no Asaas.'); });
+  }
+
+  function renderizarPedido(box, p) {
+    var liberado = p.status === 'pago' || p.status === 'cortesia';
+    var url = p.tokenAcesso ? linkMeuRelatorio(root.location.href, p.tokenAcesso) : '';
+    var resposta = p.respostaId ? acharRegistro(p.respostaId) : null;
+    box.appendChild(cabecalhoVista('Pedido', p.nome || p.email || 'Pedido', 'Pedido ' + (p.id.slice(0, 8) || '—') + ' · criado em ' + formatarData(p.criadoEm), [
+      botao('botao--claro', '← Voltar aos pedidos', function () { irParaVendas('pedidos'); }, { id: 'btn-vd-voltar' }),
+      p.status === 'aguardando' || p.status === 'cancelado' || p.status === 'estornado' ? botao('botao--principal', 'Liberar como cortesia', function () { liberarCortesia(p); }, { id: 'btn-vd-cortesia' }) : null,
+      p.status === 'aguardando' ? botao('botao--claro', 'Cancelar pedido', function () { cancelarPedido(p); }, { id: 'btn-vd-cancelar' }) : null,
+      p.status === 'pago' ? botao('botao--perigo', 'Marcar reembolsado', function () { marcarReembolsado(p); }, { id: 'btn-vd-reembolso' }) : null
+    ]));
+    var dl = el('dl', { classe: 'det-dl', id: 'vd-pedido-dados' }, [
+      el('div', null, [el('dt', { texto: 'Situação' }), el('dd', null, seloPedido(p))]),
+      el('div', null, [el('dt', { texto: 'Valor' }), el('dd', { classe: 'seminegrito', id: 'vd-pedido-valor', texto: formatarReais(p.valorCentavos) })]),
+      el('div', null, [el('dt', { texto: 'Pacote' }), el('dd', { texto: nomePacote(p.pacote, estado.vd.pacotes) })]),
+      el('div', null, [el('dt', { texto: 'Cupom' }), el('dd', { texto: p.cupom || '—' })]),
+      el('div', null, [el('dt', { texto: 'E-mail' }), el('dd', { texto: p.email || '—' })]),
+      el('div', null, [el('dt', { texto: 'WhatsApp' }), el('dd', null, p.telefone ? linkTelefone({ telefone: p.telefone, nome: p.nome }) : '—')]),
+      el('div', null, [el('dt', { texto: 'Forma de pagamento' }), el('dd', { texto: ({ pix: 'Pix', cartao: 'Cartão', boleto: 'Boleto', cupom: 'Cupom (100%)', manual: 'Liberado no painel' })[p.metodo] || p.metodo || '—' })]),
+      el('div', null, [el('dt', { texto: 'Pago em' }), el('dd', { texto: formatarData(p.pagoEm) })]),
+      p.reembolsadoEm ? el('div', null, [el('dt', { texto: 'Reembolsado em' }), el('dd', { texto: formatarData(p.reembolsadoEm) })]) : null,
+      p.asaasCobrancaId || p.faturaUrl ? el('div', null, [el('dt', { texto: 'Cobrança no Asaas' }), el('dd', { classe: 'tabular' }, [
+        p.asaasCobrancaId || '',
+        p.faturaUrl ? el('a', { classe: 'vd-link vd-link--fatura', id: 'vd-link-fatura', href: p.faturaUrl, target: '_blank', rel: 'noopener noreferrer', texto: (p.asaasCobrancaId ? ' · ' : '') + 'Abrir a cobrança' }) : null
+      ])]) : null
+    ]);
+    var acesso = el('section', { classe: 'caixa', id: 'vd-pedido-acesso' }, [el('h3', { classe: 'caixa__titulo', texto: 'Link do relatório' })]);
+    if (url && liberado) {
+      acesso.appendChild(el('p', { classe: 'texto-medio t-corpo', texto: 'Reenvie este link se o cliente perdeu o acesso. Ele abre o relatório completo, sem senha.' }));
+      acesso.appendChild(el('p', { classe: 'av-link', id: 'vd-pedido-link', texto: url }));
+      var wa = p.telefone ? linkWhatsApp(p.telefone) : '';
+      acesso.appendChild(el('div', { classe: 'gestao-card__acoes' }, [
+        botao('botao--claro botao--pequeno', 'Copiar link', function () { copiar(url, 'Link do relatório copiado.'); }, { id: 'btn-vd-copiar-link' }),
+        botao('botao--claro botao--pequeno', 'Copiar mensagem', function () { copiar(mensagemReenvio(p, url), 'Mensagem copiada. Cole no WhatsApp ou no e-mail.'); }, { id: 'btn-vd-copiar-msg' }),
+        wa ? el('a', { classe: 'botao botao--principal botao--pequeno', id: 'btn-vd-whatsapp', target: '_blank', rel: 'noopener noreferrer',
+          href: wa + '?text=' + encodeURIComponent(mensagemReenvio(p, url)), texto: 'Enviar no WhatsApp' }) : null,
+        el('a', { classe: 'botao botao--claro botao--pequeno', id: 'btn-vd-abrir-relatorio', href: url, target: '_blank', rel: 'noopener noreferrer', texto: 'Abrir relatório' })
+      ]));
+    } else if (liberado) {
+      // O painel não recebe o token do cliente: orienta a pessoa a pedir o link pelo e-mail da compra.
+      var urlRec = linkRecuperar(root.location.href);
+      acesso.querySelector('h3').textContent = 'Acesso do cliente';
+      acesso.appendChild(el('p', { classe: 'texto-medio t-corpo', id: 'vd-pedido-orientacao', texto: 'Se o cliente perdeu o link, ele pede de novo em "Recuperar meu relatório" com o e-mail da compra (' + (p.email || 'o e-mail do pedido') + ').' }));
+      acesso.appendChild(el('p', { classe: 'av-link', id: 'vd-pedido-recuperar', texto: urlRec }));
+      var wa2 = p.telefone ? linkWhatsApp(p.telefone) : '';
+      acesso.appendChild(el('div', { classe: 'gestao-card__acoes' }, [
+        botao('botao--claro botao--pequeno', 'Copiar mensagem de orientação', function () { copiar(mensagemOrientacao(p, urlRec), 'Mensagem copiada. Cole no WhatsApp ou no e-mail.'); }, { id: 'btn-vd-copiar-orientacao' }),
+        wa2 ? el('a', { classe: 'botao botao--principal botao--pequeno', id: 'btn-vd-whatsapp', target: '_blank', rel: 'noopener noreferrer',
+          href: wa2 + '?text=' + encodeURIComponent(mensagemOrientacao(p, urlRec)), texto: 'Enviar no WhatsApp' }) : null
+      ]));
+    } else {
+      acesso.appendChild(el('p', { classe: 'texto-suave t-corpo', id: 'vd-pedido-sem-link', texto: p.status === 'estornado' ? 'Pedido reembolsado: o relatório completo está bloqueado.'
+        : (p.status === 'aguardando' ? 'O link é liberado quando o pagamento for confirmado (ou ao liberar como cortesia).'
+          : 'Pedido cancelado: nada foi cobrado.') }));
+      if (p.status === 'aguardando' && p.faturaUrl) acesso.appendChild(el('div', { classe: 'gestao-card__acoes' }, [
+        botao('botao--claro botao--pequeno', 'Copiar link de pagamento (cartão)', function () { copiar(p.faturaUrl, 'Link de pagamento copiado.'); }, { id: 'btn-vd-copiar-fatura' })
+      ]));
+    }
+    if (p.status === 'estornado') acesso.appendChild(el('p', { classe: 't-nota texto-suave', texto: 'Confira se o estorno foi feito no Asaas.' }));
+    var quem = el('section', { classe: 'caixa', id: 'vd-pedido-resposta' }, [el('h3', { classe: 'caixa__titulo', texto: 'Teste respondido' })]);
+    if (resposta) {
+      quem.appendChild(el('p', { classe: 't-corpo' }, [
+        badgePerfil(resposta), ' ',
+        el('span', { texto: resposta.calc ? NOMES[resposta.calc.primario] + ' / ' + NOMES[resposta.calc.secundario] : '' })
+      ]));
+      quem.appendChild(el('p', { classe: 't-rotulo texto-suave', texto: 'Respondido em ' + formatarData(resposta.fim || resposta.recebidoEm) }));
+      quem.appendChild(botao('botao--claro botao--pequeno', 'Ver em Participantes', function () { abrirDetalhe(resposta.id); }, { id: 'btn-vd-ver-resposta' }));
+    } else {
+      quem.appendChild(el('p', { classe: 'texto-suave t-corpo', texto: p.respostaId ? 'A resposta deste pedido não está na lista de participantes.' : 'Pedido sem resposta ligada.' }));
+    }
+    box.appendChild(el('div', { classe: 'vd-pedido-grade' }, [
+      el('section', { classe: 'caixa', id: 'vd-pedido-ficha' }, [el('h3', { classe: 'caixa__titulo', texto: 'Dados do pedido' }), dl]),
+      el('div', { classe: 'vd-pedido-lado' }, [acesso, quem])
+    ]));
+  }
+
+  /* Cupons */
+
+  function renderizarCupons(box) {
+    var vd = estado.vd;
+    var ul = el('ul', { classe: 'gestao-lista vd-cupons', id: 'vd-lista-cupons' });
+    if (!vd.cupons.length) ul.appendChild(el('li', { classe: 'caixa vazio' }, el('p', { classe: 'vazio__texto', texto: 'Nenhum cupom ainda. Crie um para a campanha de lançamento ou para parceiros.' })));
+    vd.cupons.slice().sort(function (a, b) { return (b.ativo - a.ativo) || a.codigo.localeCompare(b.codigo); }).forEach(function (c) {
+      var link = linkLandingCupom(root.location.href, c.codigo);
+      var esgotado = c.usosMax != null && c.usos >= c.usosMax;
+      var hoje = new Date(); var vencido = c.validoAte && c.validoAte < (hoje.getFullYear() + '-' + ('0' + (hoje.getMonth() + 1)).slice(-2) + '-' + ('0' + hoje.getDate()).slice(-2));
+      ul.appendChild(el('li', { classe: 'caixa gestao-card vd-cupom' + (c.ativo ? '' : ' vd-cupom--inativo'), 'data-codigo': c.codigo, 'data-ativo': c.ativo ? 'sim' : 'nao' }, [
+        el('div', { classe: 'gestao-card__topo' }, [
+          el('div', { classe: 'gestao-card__titulo-area' }, [
+            el('p', { classe: 'gestao-card__titulo negrito tabular vd-cupom__codigo', texto: c.codigo }),
+            el('p', { classe: 'gestao-card__sub vd-cupom__desconto', texto: textoCupom(c) })
+          ]),
+          el('span', { classe: 'selo ' + (!c.ativo ? '' : (esgotado || vencido ? 'selo--vermelho' : 'selo--verde')), texto: !c.ativo ? 'Desativado' : (esgotado ? 'Esgotado' : (vencido ? 'Vencido' : 'Ativo')) })
+        ]),
+        el('dl', { classe: 'det-dl vd-cupom__dl' }, [
+          el('div', null, [el('dt', { texto: 'Usos' }), el('dd', { classe: 'vd-cupom__usos', texto: c.usos + (c.usosMax != null ? ' de ' + c.usosMax : ' (sem limite)') })]),
+          el('div', null, [el('dt', { texto: 'Validade' }), el('dd', { texto: c.validoAte ? c.validoAte.split('-').reverse().join('/') : 'Sem validade' })]),
+          el('div', { classe: 'det-dl__largo' }, [el('dt', { texto: 'Vale para' }), el('dd', { texto: c.pacotes.length ? c.pacotes.map(function (k) { return nomePacote(k, vd.pacotes); }).join(', ') : 'Todos os pacotes pagos' })])
+        ]),
+        el('p', { classe: 'av-link vd-cupom__link', texto: link }),
+        el('div', { classe: 'gestao-card__acoes' }, [
+          botao('botao--claro botao--pequeno', 'Copiar link da página', function () { copiar(link, 'Link com o cupom ' + c.codigo + ' copiado.'); }, { 'data-acao': 'copiar-link' }),
+          botao('botao--claro botao--pequeno', 'Editar', function () { janelaCupom(c); }, { 'data-acao': 'editar' }),
+          botao('botao--claro botao--pequeno', c.ativo ? 'Desativar' : 'Reativar', function () { alternarCupom(c); }, { 'data-acao': c.ativo ? 'desativar' : 'reativar' }),
+          metodoApi('excluirCupom') && !c.usos ? botao('botao--perigo botao--pequeno', 'Excluir', function () { excluirCupom(c); }, { 'data-acao': 'excluir' }) : null
+        ])
+      ]));
+    });
+    box.appendChild(ul);
+  }
+
+  function salvarCupomApi(dados, msgOk) {
+    return api('salvarCupom', dados).then(function (resp) {
+      var c = normalizarCupom(resp && resp.cupom ? resp.cupom : dados);
+      var achou = false;
+      estado.vd.cupons = estado.vd.cupons.map(function (x) { if (x.codigo === c.codigo) { achou = true; return c; } return x; });
+      if (!achou) estado.vd.cupons.push(c);
+      renderizarVendas();
+      avisar(msgOk, 'ok');
+    });
+  }
+
+  function dadosCupom(c) {
+    return { codigo: c.codigo, tipo: c.tipo, valor: c.valor, usosMax: c.usosMax, validoAte: c.validoAte || null, pacotes: c.pacotes.slice(), ativo: c.ativo };
+  }
+
+  function alternarCupom(c) {
+    var d = dadosCupom(c);
+    d.ativo = !c.ativo;
+    salvarCupomApi(d, d.ativo ? 'Cupom ' + c.codigo + ' reativado.' : 'Cupom ' + c.codigo + ' desativado.').catch(falhou);
+  }
+
+  function excluirCupom(c) {
+    confirmar({ titulo: 'Excluir o cupom ' + c.codigo + '?', texto: 'O cupom some da lista e o link com ele deixa de dar desconto.', botao: 'Excluir' }).then(function (ok) {
+      if (!ok) return;
+      api('excluirCupom', c.codigo).then(function () {
+        estado.vd.cupons = estado.vd.cupons.filter(function (x) { return x.codigo !== c.codigo; });
+        renderizarVendas();
+        avisar('Cupom excluído.', 'ok');
+      }).catch(falhou);
+    });
+  }
+
+  function janelaCupom(c) {
+    var novo = !c;
+    var atual = c || { codigo: '', tipo: 'percentual', valor: 0, usosMax: null, validoAte: '', pacotes: [], ativo: true };
+    var escTipo = criarEscolha({ id: 'cup-tipo', rotulo: 'Tipo do desconto', rotuloId: 'cup-tipo-rotulo', valor: atual.tipo, classe: 'escolha--campo',
+      opcoes: [{ valor: 'percentual', rotulo: 'Porcentagem (%)' }, { valor: 'valor', rotulo: 'Valor fixo (R$)' }] });
+    var valorTxt = atual.valor ? (atual.tipo === 'valor' ? textoDeCentavos(atual.valor) : String(atual.valor)) : '';
+    var rotuloValor = el('span', { classe: 'campo__rotulo', id: 'cup-valor-rotulo' });
+    var campoValor = el('label', { classe: 'campo', for: 'cup-valor' }, [rotuloValor,
+      el('input', { id: 'cup-valor', classe: 'entrada', type: 'text', inputmode: 'decimal', autocomplete: 'off', value: valorTxt })]);
+    function rotular() { rotuloValor.textContent = escTipo.botao.value === 'valor' ? 'Desconto em R$ (ex.: 10,00)' : 'Desconto em % (100 = grátis)'; }
+    escTipo.botao.addEventListener('change', rotular);
+    rotular();
+    var pacotesPagos = estado.vd.pacotes.filter(function (p) { return p.chave !== 'gratis'; });
+    abrirJanela({
+      id: 'form-cupom', titulo: novo ? 'Novo cupom' : 'Editar cupom ' + atual.codigo, botao: novo ? 'Criar cupom' : 'Salvar',
+      texto: 'Um cupom de 100% libera o relatório sem pagamento.',
+      corpo: [
+        campoTexto('cup-codigo', 'Código (o cliente digita no checkout)', { value: atual.codigo, placeholder: 'LANCAMENTO', disabled: novo ? null : true, autocapitalize: 'characters', maxlength: '30' }),
+        el('div', { classe: 'form-grade vd-form-2' }, [campoEscolha('Tipo do desconto', escTipo, 'cup-tipo-rotulo'), campoValor]),
+        el('div', { classe: 'form-grade vd-form-2' }, [
+          campoTexto('cup-usos', 'Limite de usos (vazio = sem limite)', { type: 'number', min: '1', step: '1', inputmode: 'numeric', value: atual.usosMax == null ? '' : String(atual.usosMax) }),
+          campoTexto('cup-validade', 'Válido até (vazio = sem validade)', { type: 'date', value: atual.validoAte || '' })
+        ]),
+        el('fieldset', { classe: 'campo vd-pacotes-campo' }, [
+          el('legend', { classe: 'campo__rotulo', texto: 'Vale para (nenhum marcado = todos os pacotes pagos)' })
+        ].concat(pacotesPagos.map(function (p) { return campoMarcar('cup-pac-' + p.chave, p.nome, atual.pacotes.indexOf(p.chave) !== -1); })))
+      ],
+      aoConfirmar: function () {
+        var tipo = escTipo.botao.value;
+        var bruto = $('cup-valor').value.trim();
+        var valor = tipo === 'valor' ? centavosDeTexto(bruto) : (bruto === '' ? null : Number(bruto.replace(',', '.')));
+        var usos = $('cup-usos').value.trim();
+        var d = {
+          codigo: String($('cup-codigo').value || '').trim().toUpperCase(),
+          tipo: tipo, valor: valor,
+          usosMax: usos === '' ? null : Number(usos),
+          validoAte: $('cup-validade').value || null,
+          pacotes: pacotesPagos.filter(function (p) { return $('cup-pac-' + p.chave).checked; }).map(function (p) { return p.chave; }),
+          ativo: atual.ativo !== false
+        };
+        var erro = validarCupom(d);
+        if (erro) throw new Error(erro);
+        if (novo && estado.vd.cupons.some(function (x) { return x.codigo === d.codigo; })) throw new Error('Já existe um cupom com este código.');
+        return salvarCupomApi(d, novo ? 'Cupom ' + d.codigo + ' criado.' : 'Cupom ' + d.codigo + ' salvo.');
+      }
+    });
+  }
+
+  /* Pacotes */
+
+  function lancamentoValido(p) {
+    if (p.precoLancamentoCentavos == null) return false;
+    if (!p.lancamentoAte) return true;
+    var h = new Date();
+    return p.lancamentoAte >= h.getFullYear() + '-' + ('0' + (h.getMonth() + 1)).slice(-2) + '-' + ('0' + h.getDate()).slice(-2);
+  }
+
+  function renderizarPacotes(box) {
+    var vd = estado.vd;
+    box.appendChild(el('ul', { classe: 'gestao-lista vd-pacotes', id: 'vd-lista-pacotes' }, vd.pacotes.map(function (p) {
+      var lanc = lancamentoValido(p);
+      return el('li', { classe: 'caixa gestao-card vd-pacote', 'data-chave': p.chave, 'data-ativo': p.ativo ? 'sim' : 'nao' }, [
+        el('div', { classe: 'gestao-card__topo' }, [
+          el('div', { classe: 'gestao-card__titulo-area' }, [
+            el('p', { classe: 'sobretitulo', texto: 'Ordem ' + p.ordem + ' · ' + p.chave }),
+            el('p', { classe: 'gestao-card__titulo seminegrito', texto: p.nome })
+          ]),
+          el('span', { classe: 'selo ' + (p.ativo ? 'selo--verde' : ''), texto: p.ativo ? 'À venda' : 'Fora do site' })
+        ]),
+        el('p', { classe: 'vd-pacote__preco' }, p.chave === 'gratis' ? [el('span', { classe: 'vd-pacote__valor tabular', texto: 'Grátis' })] : [
+          el('span', { classe: 'vd-pacote__valor tabular', texto: formatarReais(lanc ? p.precoLancamentoCentavos : p.precoCentavos) }),
+          lanc ? el('s', { classe: 'vd-pacote__antes tabular texto-suave', texto: formatarReais(p.precoCentavos) }) : null
+        ]),
+        el('p', { classe: 't-rotulo texto-suave vd-pacote__nota', texto: p.chave === 'gratis' ? 'Resumo mostrado ao terminar o teste.'
+          : (p.precoLancamentoCentavos == null ? 'Sem preço de lançamento.'
+            : (lanc ? 'Preço de lançamento' + (p.lancamentoAte ? ' até ' + p.lancamentoAte.split('-').reverse().join('/') : ' (sem data de fim)') + '; depois, ' + formatarReais(p.precoCentavos) + '.'
+              : 'Lançamento encerrado em ' + p.lancamentoAte.split('-').reverse().join('/') + '.')) }),
+        el('div', { classe: 'gestao-card__acoes' }, [
+          botao('botao--claro botao--pequeno', 'Editar', function () { janelaPacote(p); }, { 'data-acao': 'editar', disabled: metodoApi('salvarPacote') ? null : true })
+        ])
+      ]);
+    })));
+  }
+
+  function janelaPacote(p) {
+    var gratis = p.chave === 'gratis';
+    abrirJanela({
+      id: 'form-pacote', titulo: 'Editar pacote', botao: 'Salvar',
+      texto: gratis ? 'O resumo grátis não tem preço; dá para mudar o nome, a ordem e se aparece no site.' : 'Valores em reais, com centavos. O preço de lançamento aparece com o preço normal riscado até a data de fim.',
+      corpo: [
+        campoTexto('pac-nome', 'Nome', { value: p.nome, maxlength: '60' }),
+        gratis ? null : el('div', { classe: 'form-grade vd-form-2' }, [
+          campoTexto('pac-preco', 'Preço (R$)', { value: textoDeCentavos(p.precoCentavos), inputmode: 'decimal', placeholder: '39,00' }),
+          campoTexto('pac-lancamento', 'Preço de lançamento (R$, vazio = sem)', { value: p.precoLancamentoCentavos == null ? '' : textoDeCentavos(p.precoLancamentoCentavos), inputmode: 'decimal', placeholder: '29,00' })
+        ]),
+        el('div', { classe: 'form-grade vd-form-2' }, [
+          gratis ? null : campoTexto('pac-lancamento-ate', 'Lançamento até (vazio = sem data)', { type: 'date', value: p.lancamentoAte || '' }),
+          campoTexto('pac-ordem', 'Ordem na página', { type: 'number', step: '1', inputmode: 'numeric', value: String(p.ordem) })
+        ]),
+        campoMarcar('pac-ativo', 'À venda (aparece no site)', p.ativo)
+      ],
+      aoConfirmar: function () {
+        var lanc = gratis ? '' : $('pac-lancamento').value.trim();
+        var d = {
+          chave: p.chave,
+          nome: $('pac-nome').value.trim(),
+          precoCentavos: gratis ? 0 : centavosDeTexto($('pac-preco').value),
+          precoLancamentoCentavos: gratis || lanc === '' ? null : centavosDeTexto(lanc),
+          lancamentoAte: gratis ? null : ($('pac-lancamento-ate').value || null),
+          ativo: $('pac-ativo').checked,
+          ordem: Number($('pac-ordem').value || 0)
+        };
+        if (!gratis && lanc !== '' && d.precoLancamentoCentavos == null) throw new Error('Preço de lançamento inválido (ex.: 29,00).');
+        var erro = validarPacote(d);
+        if (erro) throw new Error(erro);
+        return api('salvarPacote', d).then(function (resp) {
+          var novo = normalizarPacote(resp && resp.pacote ? resp.pacote : d);
+          estado.vd.pacotes = estado.vd.pacotes.map(function (x) { return x.chave === novo.chave ? novo : x; }).sort(function (a, b) { return a.ordem - b.ordem; });
+          renderizarVendas();
+          avisar('Pacote "' + novo.nome + '" salvo.', 'ok');
+        });
+      }
+    });
+  }
+
+  // Detalhe do participante (origem 'pessoal'): o pedido ligado a esta resposta.
+  function blocoPedidoDetalhe(r) {
+    if (r.origem !== 'pessoal' || !temVendas()) return null;
+    var box = el('div', { classe: 'det-pedido', id: 'det-pedido' }, [
+      el('h4', { classe: 'det-pedido__titulo seminegrito', texto: 'Compra' }),
+      r.email ? el('p', { classe: 't-rotulo texto-medio', id: 'det-pedido-email', texto: 'E-mail: ' + r.email }) : null
+    ]);
+    if (!estado.vd.carregado) {
+      box.appendChild(el('p', { classe: 't-rotulo texto-suave', texto: 'Carregando o pedido…' }));
+      carregarVendas();
+      return box;
+    }
+    var peds = estado.vd.pedidos.filter(function (p) { return p.respostaId === String(r.id); });
+    if (!peds.length) { box.appendChild(el('p', { classe: 't-rotulo texto-suave', id: 'det-pedido-nenhum', texto: 'Só o resumo grátis (nenhum pedido ligado a esta resposta).' })); return box; }
+    peds.forEach(function (p) {
+      box.appendChild(el('p', { classe: 'det-pedido__linha', 'data-id': p.id }, [
+        seloPedido(p), ' ',
+        el('span', { classe: 't-rotulo', texto: nomePacote(p.pacote, estado.vd.pacotes) + ' · ' + formatarReais(p.valorCentavos) + ' · ' + formatarData(p.criadoEm) + ' ' }),
+        el('button', { type: 'button', classe: 'link-botao vd-link-pedido seminegrito', 'data-acao': 'abrir-pedido', texto: 'Abrir pedido', onclick: function () { irParaVendas('pedidos', p.id); } })
+      ]));
+    });
+    return box;
+  }
+
   /* ---------- Navegação ---------- */
 
-  function abasPermitidas() { return abasDoPapel(papel(), MODO_API); }
+  function abasPermitidas() { return abasDoPapel(papel(), MODO_API, temVendas()); }
 
   function mostrarAba(aba) {
     var permitidas = abasPermitidas();
@@ -5435,7 +6241,7 @@
   function renderizarTudo() {
     renderizarLista();
     renderizarComparativo();
-    if (MODO_API && papel() === 'admin') { renderizarProcessos(); renderizarEmpresas(); renderizarRelatorios(); renderizarUsuarios(); }
+    if (MODO_API && papel() === 'admin') { renderizarProcessos(); renderizarEmpresas(); renderizarRelatorios(); renderizarVendas(); renderizarUsuarios(); }
     if (estado.abertoId) renderizarDetalhe();
   }
 
@@ -5502,6 +6308,7 @@
     estado.editor = null;
     estado.emp = novoEstadoEmpresas();
     estado.rl = novoEstadoRelatorios();
+    estado.vd = novoEstadoVendas();
     fecharMenuUsuario();
     clearTimeout(avisoTimer);
     $('aviso-geral').hidden = true;
@@ -5610,6 +6417,7 @@
   function iniciar() {
     estado.emp = novoEstadoEmpresas();
     estado.rl = novoEstadoRelatorios();
+    estado.vd = novoEstadoVendas();
     if (CONFIG.EMPRESA) $('nome-empresa').textContent = '· ' + CONFIG.EMPRESA;
     $('modo-indicador').textContent = SIMULADA ? 'Prévia (dados de demonstração)'
       : (SUPABASE ? 'Conectado ao servidor' : (MODO_API ? 'Conectado à planilha' : 'Modo local (importar códigos)'));
@@ -5631,6 +6439,7 @@
         if (aba === 'processos' && estado.proc.tela !== 'lista') { estado.proc = { tela: 'lista', id: null }; renderizarProcessos(); }
         if (aba === 'empresas' && estado.emp.tela !== 'lista') { estado.emp.tela = 'lista'; estado.emp.id = null; renderizarEmpresas(); }
         if (aba === 'relatorios' && estado.rl.tela !== 'modelos' && estado.rl.tela !== 'gerados') { estado.rl.tela = 'modelos'; estado.rl.rel = null; renderizarRelatorios(); }
+        if (aba === 'vendas' && estado.vd.pedidoId) { estado.vd.pedidoId = null; renderizarVendas(); }
         mostrarAba(aba);
       });
     });

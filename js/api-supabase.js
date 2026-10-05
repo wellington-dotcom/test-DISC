@@ -65,6 +65,78 @@
  *   removerFoto(token, respostaId) -> {id, removidas} (LGPD: some da resposta, da ficha e das outras respostas
  *     da pessoa; também por atualizar(token, id, {foto: ''})).
  *
+ *
+ * ============================================================================================================
+ * VENDA DIRETA (B2C, rodada 5 — migrações 20261011120000_vendas.sql e 20261012120000_infinitepay.sql + Edge Functions
+ * "pagamento", "infinitepay-webhook" e "asaas-webhook").
+ * Contrato usado pelas telas do cliente (js/app.js modo pessoal, js/checkout.js, js/meu-relatorio.js) e pelo painel
+ * (aba Vendas). MESMOS nomes, argumentos e respostas em js/api-simulada.js; em js/api.js (Apps Script) todos rejeitam
+ * com "Disponível só com o servidor Supabase.". Valores em dinheiro: SEMPRE centavos (inteiro). Erros: Error em pt-BR
+ * com erro.resposta = {ok:false, erro, ...}, como o resto da API — exceto os 2 casos "não configurado" abaixo, que
+ * RESOLVEM com {ok:false, ...} para a tela mostrar a alternativa.
+ * Públicas (sem login):
+ *   pacotesPublicos() -> {ok, pacotes:[{chave:'gratis'|'completo'|'completo_plus', nome, precoCentavos,
+ *     precoLancamentoCentavos|null, lancamentoAte:'AAAA-MM-DD'|'', valorCentavos (o que vale hoje), emLancamento,
+ *     descricao:{subtitulo, itens:[texto]}, ordem}]} (só os ativos, na ordem)
+ *   enviarPessoal(payload) -> {ok, id, protocolo:'', tokenResumo, duplicado?}
+ *     payload = o mesmo do enviar() (id, nome, respostas, validacao, inicio, fim, duracaoSeg, consentimento:true) +
+ *     email (OBRIGATÓRIO) + telefone (WhatsApp, opcional) + exigido? (Parte 2, opcional). Idade/função/empresa/cidade/
+ *     foto/avaliacao são ignorados. Limite: 2 envios/minuto e 20/dia por e-mail.
+ *   resumoPessoal(tokenResumo) -> {ok, nome (primeiro nome), resultado:{percentuais:{D,I,S,C}, codigo}, recebidoEm, temParte2}
+ *   criarPedido(tokenResumo, pacote, cupom?) -> {ok, pedidoId, tokenAcesso, valor, valorOriginal, gratuito, status, jaPago?}
+ *     gratuito = cupom de 100% (status 'cortesia': relatório liberado na hora). jaPago = esta resposta já tinha
+ *     comprado este pacote (devolve aquele pedido). Cupom ruim: "Cupom inválido ou expirado.".
+ *   iniciarPagamento(pedidoId, tokenAcesso, {cpf}?) -> uma destas (o PROVEDOR é escolhido no servidor pelos segredos
+ *     PAGAMENTO_PROVEDOR / INFINITEPAY_HANDLE / ASAAS_API_KEY; InfinitePay é o padrão quando configurada):
+ *     | InfinitePay (migração 20261012120000_infinitepay.sql): {ok:true, provedor:'infinitepay', redirecionarUrl, valor}
+ *       -> o site faz location.href = redirecionarUrl (página da InfinitePay: Pix e cartão; sem Pix embutido no site).
+ *       Depois de pagar a InfinitePay devolve o cliente para
+ *         meu-relatorio.html?pedido=<pedidoId>&order_nsu=<pedidoId>&transaction_nsu=…&slug=…&capture_method=pix|credit_card
+ *         &receipt_url=…#t-<tokenAcesso>
+ *       (os parâmetros dela são ACRESCENTADOS ao redirect_url; leia-os de location.search e, por tolerância, também de
+ *       depois do token no hash: "#t-<64 hex>?order_nsu=…" ou "#t-<64 hex>&order_nsu=…"). A página chama
+ *       confirmarRetorno(pedidoId, tokenAcesso, {transactionNsu, slug}) e, enquanto 'aguardando', statusPedido a cada 4 s.
+ *     | Asaas: {ok:true, provedor:'asaas', pix:{qrBase64 (PNG base64, sem "data:"), copiaECola, expira}|null,
+ *       cartaoUrl (página do Asaas: cartão/Pix/boleto), valor, vencimento}
+ *     | {ok:true, pago:true, status} (já liberado)
+ *     | {ok:false, erro:'Pagamento ainda não configurado.', naoConfigurado:true} (nenhum provedor configurado ou função não
+ *       publicada: mostre "Compra disponível em breve — use um cupom")
+ *     | {ok:false, erro:'Informe o seu CPF para pagar.' | 'CPF inválido…', precisaCpf:true} (só Asaas, que exige CPF: peça e
+ *       chame de novo com {cpf}; o CPF vai só para o Asaas, não fica no banco)
+ *   confirmarRetorno(pedidoId, tokenAcesso, {transactionNsu, slug}) -> {ok, status:'aguardando'|'pago'|…}
+ *     Volta da InfinitePay: o servidor confere no payment_check (paid=true e valor pago >= valor do pedido) e marca pago.
+ *     'aguardando' = ainda não confirmado (Pix em processamento): siga com statusPedido. Os parâmetros da URL NÃO
+ *     liberam nada sozinhos. Sem a Edge Function: devolve o status do banco.
+ *   statusPedido(pedidoId, tokenAcesso) -> {ok, status:'aguardando'|'pago'|'cortesia'|'estornado'|'cancelado'}
+ *     (consulte a cada 4 s; a Edge Function confere no provedor no máximo a cada 15 s; sem ela, lê do banco)
+ *   relatorioPessoal(tokenAcesso) -> {ok, nome (primeiro nome), resultado:{percentuais, codigo},
+ *     exigido:{percentuais, codigo}|null, exigidoRespostas:'40 dígitos'|'', pacote, pacoteNome, precisaParte2, status}
+ *     SÓ com pedido 'pago'/'cortesia'; senão rejeita ("Pagamento ainda não confirmado." / "Esta compra foi estornada…" /
+ *     "Link inválido…"), com erro.resposta.status quando houver.
+ *   salvarParte2Pessoal(tokenAcesso, exigido) -> {ok, exigido:{percentuais, codigo}, exigidoRespostas} (só completo_plus;
+ *     uma vez: outro conteúdo depois -> "A segunda parte já foi respondida.")
+ *   recuperarAcesso(email) -> {ok:true} (manda os links por e-mail se houver compra; não revela se houve)
+ *     | {ok:false, erro:'O envio por e-mail ainda não está configurado. Fale com o suporte.', naoConfigurado:true}
+ * Painel (token da sessão de admin; tabelas pedidos/cupons/pacotes com RLS):
+ *   listarPedidos(token, {status?, pacote?, de?:'AAAA-MM-DD', ate?, busca?, limite?:500}) -> {ok, pedidos:[{id, respostaId,
+ *     pacote, valorCentavos, valorOriginalCentavos, cupom, status, metodo:''|'pix'|'cartao'|'boleto'|'cupom'|'manual',
+ *     provedor:''|'asaas'|'infinitepay', provedorRef (InfinitePay: transaction_nsu), asaasCobrancaId, faturaUrl (link de
+ *     pagamento: checkout da InfinitePay ou fatura do Asaas), email, nome, criadoEm, pagoEm, reembolsadoEm}]} (mais novos primeiro)
+ *   atualizarPedido(token, id, {status}) -> {ok, pedido} — 'estornado' (de pago/cortesia; o dinheiro é devolvido no
+ *     painel do Asaas), 'cortesia' ("Liberar como cortesia"), 'pago' (confirmação manual), 'cancelado' (de aguardando).
+ *   listarCupons(token) -> {ok, cupons:[{codigo, tipo:'percentual'|'valor', valor (1–100 ou centavos), usosMax|null, usos,
+ *     validoAte:'AAAA-MM-DD'|'', ativo, pacotes:[chaves] ([] = todos), descricao, criadoEm}]}
+ *   salvarCupom(token, {codigo, tipo, valor, usosMax?, validoAte?, ativo?, pacotes?, descricao?}) -> {ok, cupom}
+ *     (cria ou altera pelo código; o código vira MAIÚSCULO) · excluirCupom(token, codigo) -> {ok, codigo}
+ *   listarPacotes(token) -> {ok, pacotes:[{chave, nome, precoCentavos, precoLancamentoCentavos|null, lancamentoAte, ativo,
+ *     ordem, descricao, valorCentavos, emLancamento, atualizadoEm}]}
+ *   salvarPacote(token, {chave, nome?, precoCentavos?, precoLancamentoCentavos? (null = sem lançamento), lancamentoAte?
+ *     ('' = sem fim), ativo?, ordem?, descricao?}) -> {ok, pacote} (só altera; os 3 pacotes vêm da migração)
+ *   resumoVendas(token, 'hoje'|'7d'|'30d'|'mes'|'tudo') -> {ok, periodo, hoje:{vendas, receitaCentavos}, mes:{…}, vendas,
+ *     receitaCentavos, cortesias, estornos, aguardando, resumos, compras, conversao (0–1 = compras/resumos), porPacote:[…]}
+ *   listar: item.origem = 'processo' | 'pessoal'.
+ * Só na prévia (js/api-simulada.js): simularPagamento(pedidoId) -> {ok, status:'pago'} (botão "Simular pagamento aprovado").
+ *
  * No Node (testes): require('./js/api-supabase.js').criar({ supabase: libFalsa, url, chave, local?, timeoutMs? }).
  */
 (function (root) {
@@ -92,9 +164,11 @@
     { nome: '20261008120000_parte2', descricao: 'Parte 2 (perfil exigido)', tabela: 'respostas', coluna: 'exigido' },
     { nome: '20261009120000_fotos', descricao: 'fotos', tabela: 'respostas', coluna: 'foto' },
     { nome: '20261010120000_mover_versao', descricao: 'mover resposta, contratar, topo do organograma e versão do banco',
-      tabela: 'respostas', coluna: 'historico_processos' }
+      tabela: 'respostas', coluna: 'historico_processos' },
+    { nome: '20261011120000_vendas', descricao: 'venda direta (pacotes, cupons, pedidos)', tabela: 'pedidos', coluna: 'id' },
+    { nome: '20261012120000_infinitepay', descricao: 'InfinitePay (provedor do pagamento)', tabela: 'pedidos', coluna: 'provedor_dados' }
   ];
-  var VERSAO_ATUAL = 20261010120000;
+  var VERSAO_ATUAL = 20261012120000;
   var MSG_PRIMEIRO_ACESSO = 'Com o Supabase não há chave de primeiro acesso: crie o seu usuário no painel do Supabase ' +
     '(Authentication > Users > Add user) e entre com esse e-mail e senha. O primeiro login vira administrador.';
   var MSG_REDEFINIR = 'Com o Supabase cada pessoa cria a própria senha nova pelo "Esqueci minha senha", na tela de entrada.';
@@ -580,7 +654,8 @@
       email: l.email || '',
       cidade: l.cidade || '',
       extras: extrasDaLinha(l.extras),
-      historicoProcessos: historicoDaLinha(l.historico_processos)
+      historicoProcessos: historicoDaLinha(l.historico_processos),
+      origem: l.origem === 'pessoal' ? 'pessoal' : 'processo'
     };
   }
   /** respostas.historico_processos -> [{de, para, deCodigo, paraCodigo, em}] (lixo vira lista vazia). */
@@ -643,6 +718,102 @@
   function baseDoSite(local) {
     var painel = enderecoDoPainel(local);
     return painel ? painel.replace(/admin\.html$/, '') : '';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Venda direta (B2C) — formatos (mesmos de js/api-simulada.js)
+  // ---------------------------------------------------------------------------
+  var STATUS_PEDIDO = ['aguardando', 'pago', 'cortesia', 'estornado', 'cancelado'];
+  var PERIODOS_VENDAS = ['hoje', '7d', '30d', 'mes', 'tudo'];
+  var RE_TOKEN_VENDA = /^[0-9a-f]{64}$/;
+  var RE_CUPOM = /^[A-Z0-9_-]{3,30}$/;
+  var MSG_PAG_NAO_CONFIGURADO = 'Pagamento ainda não configurado.';
+  var MSG_EMAIL_NAO_CONFIGURADO = 'O envio por e-mail ainda não está configurado. Fale com o suporte.';
+  var MSG_PEDIDO_NAO_ENCONTRADO = 'Pedido não encontrado.';
+  var MSG_RESUMO_NAO_ENCONTRADO = 'Resultado não encontrado. Faça o teste de novo.';
+  var MSG_LINK_RELATORIO = 'Link inválido. Confira o endereço ou use "Recuperar meu relatório".';
+
+  function inteiroOuNulo(v) {
+    if (v === null || v === undefined || v === '') return null;
+    var n = Number(v);
+    return isFinite(n) ? Math.round(n) : null;
+  }
+  function dataOuVazio(v) {
+    var d = limparTexto(v, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d)) ? d : '';
+  }
+  function normalizarCupom(v) { return String(v == null ? '' : v).replace(/\s+/g, '').toUpperCase(); }
+  function descricaoPacote(d) {
+    d = d && typeof d === 'object' && !Array.isArray(d) ? d : {};
+    return { subtitulo: limparTexto(d.subtitulo, 200),
+      itens: (Array.isArray(d.itens) ? d.itens : []).map(function (x) { return limparTexto(x, 200); }).filter(Boolean).slice(0, 20) };
+  }
+  /** Preço que vale hoje (centavos) — mesma regra de disc_interno.preco_atual (data em Brasília). */
+  function precoAtual(p, hoje) {
+    var lanc = inteiroOuNulo(p.precoLancamentoCentavos);
+    if (lanc !== null && (!p.lancamentoAte || p.lancamentoAte >= hoje)) return lanc;
+    return inteiroOuNulo(p.precoCentavos) || 0;
+  }
+  function hojeBrasil(agoraMs) { return new Date((agoraMs || Date.now()) - 3 * 3600000).toISOString().slice(0, 10); }
+  function pacoteDaLinha(l) {
+    var p = {
+      chave: String(l.chave || ''), nome: l.nome || '', precoCentavos: numero(l.preco_centavos),
+      precoLancamentoCentavos: inteiroOuNulo(l.preco_lancamento_centavos), lancamentoAte: dataOuVazio(l.lancamento_ate),
+      ativo: l.ativo !== false, ordem: numero(l.ordem), descricao: descricaoPacote(l.descricao), atualizadoEm: iso(l.atualizado_em)
+    };
+    p.valorCentavos = precoAtual(p, hojeBrasil());
+    p.emLancamento = p.valorCentavos !== p.precoCentavos;
+    return p;
+  }
+  function pacotePublico(p) {
+    return { chave: String(p.chave || ''), nome: p.nome || '', precoCentavos: numero(p.precoCentavos),
+      precoLancamentoCentavos: inteiroOuNulo(p.precoLancamentoCentavos), lancamentoAte: dataOuVazio(p.lancamentoAte),
+      valorCentavos: numero(p.valorCentavos), emLancamento: p.emLancamento === true, descricao: descricaoPacote(p.descricao),
+      ordem: numero(p.ordem) };
+  }
+  function cupomDaLinha(l) {
+    return { codigo: String(l.codigo || ''), tipo: l.tipo === 'valor' ? 'valor' : 'percentual', valor: numero(l.valor),
+      usosMax: inteiroOuNulo(l.usos_max), usos: numero(l.usos), validoAte: dataOuVazio(l.valido_ate), ativo: l.ativo !== false,
+      pacotes: (Array.isArray(l.pacotes) ? l.pacotes : []).map(String), descricao: l.descricao || '', criadoEm: iso(l.criado_em) };
+  }
+  function pedidoDaLinha(l) {
+    var pag = l.pagamento && typeof l.pagamento === 'object' ? l.pagamento : {};
+    return { id: String(l.id || ''), respostaId: l.resposta_id ? String(l.resposta_id) : '', pacote: String(l.pacote || ''),
+      valorCentavos: numero(l.valor_centavos), valorOriginalCentavos: numero(l.valor_original_centavos), cupom: l.cupom || '',
+      status: STATUS_PEDIDO.indexOf(l.status) >= 0 ? l.status : 'aguardando', metodo: l.metodo || '',
+      provedor: l.provedor || (l.asaas_cobranca_id ? 'asaas' : ''), provedorRef: l.provedor_ref || '',
+      asaasCobrancaId: l.asaas_cobranca_id || '',
+      faturaUrl: l.checkout_url ? String(l.checkout_url) : (typeof pag.cartaoUrl === 'string' ? pag.cartaoUrl : ''),
+      email: l.email || '', nome: l.nome || '', criadoEm: iso(l.criado_em), pagoEm: iso(l.pago_em), reembolsadoEm: iso(l.reembolsado_em) };
+  }
+  /** Pedido do painel vindo da RPC (pedido_json) -> mesmo formato de pedidoDaLinha. */
+  function pedidoDaRpc(p) {
+    p = p && typeof p === 'object' ? p : {};
+    return { id: String(p.id || ''), respostaId: String(p.respostaId || ''), pacote: String(p.pacote || ''),
+      valorCentavos: numero(p.valorCentavos), valorOriginalCentavos: numero(p.valorOriginalCentavos), cupom: p.cupom || '',
+      status: STATUS_PEDIDO.indexOf(p.status) >= 0 ? p.status : 'aguardando', metodo: p.metodo || '',
+      provedor: p.provedor || (p.asaasCobrancaId ? 'asaas' : ''), provedorRef: p.provedorRef || '',
+      asaasCobrancaId: p.asaasCobrancaId || '', faturaUrl: p.checkoutUrl ? String(p.checkoutUrl) : '', email: p.email || '', nome: p.nome || '',
+      criadoEm: iso(p.criadoEm), pagoEm: iso(p.pagoEm), reembolsadoEm: iso(p.reembolsadoEm) };
+  }
+  /** Validação do cupom do painel. {ok, linha} | {ok:false, erro} */
+  function validarCupom(c) {
+    if (!c || typeof c !== 'object') return { ok: false, erro: 'Dados do cupom ausentes.' };
+    var codigo = normalizarCupom(c.codigo);
+    if (!RE_CUPOM.test(codigo)) return { ok: false, erro: 'Código do cupom: 3 a 30 letras, números, - ou _ (sem espaço).' };
+    var tipo = c.tipo === 'valor' ? 'valor' : (c.tipo === 'percentual' ? 'percentual' : '');
+    if (!tipo) return { ok: false, erro: 'Escolha o tipo do cupom: percentual ou valor.' };
+    var valor = inteiroOuNulo(c.valor);
+    if (valor === null || valor <= 0) return { ok: false, erro: 'Informe o desconto do cupom.' };
+    if (tipo === 'percentual' && valor > 100) return { ok: false, erro: 'O desconto percentual vai de 1 a 100.' };
+    var usosMax = inteiroOuNulo(c.usosMax);
+    if (usosMax !== null && usosMax < 1) usosMax = null;
+    var validoAte = c.validoAte ? dataOuVazio(c.validoAte) : '';
+    if (c.validoAte && !validoAte) return { ok: false, erro: 'Data de validade inválida.' };
+    var pacotes = (Array.isArray(c.pacotes) ? c.pacotes : []).map(function (x) { return limparTexto(x, 30); })
+      .filter(function (x) { return /^[a-z0-9_]{2,30}$/.test(x); });
+    return { ok: true, linha: { codigo: codigo, tipo: tipo, valor: valor, usos_max: usosMax, valido_ate: validoAte || null,
+      ativo: c.ativo !== false, pacotes: pacotes, descricao: limparTexto(c.descricao, 200) } };
   }
 
   // ---------------------------------------------------------------------------
@@ -783,7 +954,9 @@
             if (json && typeof json === 'object' && json.erro) throw erroDaResposta(json);
             if (erro.name === 'FunctionsFetchError' || ehFalhaDeRede(erro)) throw new Error(MSG_CONEXAO);
             if (erro.name === 'FunctionsRelayError' || status === 404) {
-              throw recusa('A função "' + nome + '" não está publicada no Supabase. Confira as Edge Functions (docs/SUPABASE.md).');
+              var ausente = recusa('A função "' + nome + '" não está publicada no Supabase. Confira as Edge Functions (docs/SUPABASE.md).');
+              ausente.funcaoAusente = true;
+              throw ausente;
             }
             throw recusa('O servidor respondeu com erro' + (status ? ' (código ' + status + ')' : '') + '. Tente novamente em instantes.');
           });
@@ -997,8 +1170,10 @@
           if (res[i] === false) faltando.push(m.nome);
           else if (res[i] === true) versao = Math.max(versao, Number(m.nome.slice(0, 14)));
         });
-        var ultima = MIGRACOES[MIGRACOES.length - 1].nome;
-        if (faltando.indexOf(ultima) === -1) faltando.push(ultima); // sem a função versao_banco a 20261010 não está completa
+        // Sem a função versao_banco (criada na 20261010) a 20261010 não está completa, nem as seguintes.
+        var desde = MIGRACOES.map(function (m) { return m.nome; }).indexOf('20261010120000_mover_versao');
+        MIGRACOES.slice(desde).forEach(function (m) { if (faltando.indexOf(m.nome) === -1) faltando.push(m.nome); });
+        faltando.sort();
         return { ok: true, versao: versao, faltando: faltando, semFuncao: true };
       });
     }
@@ -1013,6 +1188,10 @@
           if (typeof j === 'string') { try { j = JSON.parse(j); } catch (e) { j = null; } }
           if (!j || j.ok !== true) throw erroDaResposta(j && typeof j === 'object' ? j : { ok: false, erro: MSG_RECUSA });
           var faltando = (Array.isArray(j.faltando) ? j.faltando : []).map(function (x) { return String(x); });
+          // versao_banco de uma migração antiga não conhece as mais novas: as posteriores à versão dela faltam.
+          MIGRACOES.forEach(function (m) {
+            if (Number(m.nome.slice(0, 14)) > numero(j.versao) && faltando.indexOf(m.nome) === -1) faltando.push(m.nome);
+          });
           return { ok: true, versao: numero(j.versao), faltando: faltando };
         }, function (e) {
           if (e && (e.message === MSG_DEMORA || e.sessaoExpirada || e.resposta)) throw e;
@@ -1105,6 +1284,225 @@
           return { ok: true, modelo: MODELOS_RELATORIO.indexOf(r.modelo) >= 0 ? r.modelo : 'processo', relatorio: r.relatorio, publicadoEm: r.publicadoEm || '' };
         });
       }),
+      // --- venda direta (B2C): públicas ---
+      pacotesPublicos: seguro(function () {
+        return rpcOk('pacotes_publicos', {}).then(function (r) {
+          return { ok: true, pacotes: (Array.isArray(r.pacotes) ? r.pacotes : []).map(pacotePublico) };
+        });
+      }),
+      enviarPessoal: seguro(function (payload) {
+        exigir(payload, 'Nenhum resultado para enviar.');
+        return rpcOk('enviar_resposta_pessoal', { p_payload: payload }).then(function (r) {
+          var x = { ok: true, id: String(r.id || ''), protocolo: '', tokenResumo: String(r.tokenResumo || '') };
+          if (r.duplicado) x.duplicado = true;
+          return x;
+        });
+      }),
+      resumoPessoal: seguro(function (tokenResumo) {
+        if (!RE_TOKEN_VENDA.test(String(tokenResumo || ''))) throw recusa(MSG_RESUMO_NAO_ENCONTRADO);
+        return rpcOk('resumo_pessoal', { p_token: String(tokenResumo) }).then(function (r) {
+          return { ok: true, nome: r.nome || '', resultado: r.resultado || null, recebidoEm: iso(r.recebidoEm), temParte2: r.temParte2 === true };
+        });
+      }),
+      criarPedido: seguro(function (tokenResumo, pacote, cupom) {
+        if (!RE_TOKEN_VENDA.test(String(tokenResumo || ''))) throw recusa(MSG_RESUMO_NAO_ENCONTRADO);
+        exigir(pacote, 'Escolha um pacote.');
+        var args = { p_token_resumo: String(tokenResumo), p_pacote: String(pacote), p_cupom: normalizarCupom(cupom) || null };
+        return rpcOk('criar_pedido', args).then(function (r) {
+          var x = { ok: true, pedidoId: String(r.pedidoId || ''), tokenAcesso: String(r.tokenAcesso || ''), valor: numero(r.valor),
+            valorOriginal: numero(r.valorOriginal), gratuito: r.gratuito === true, status: r.status || 'aguardando' };
+          if (r.jaPago) x.jaPago = true;
+          return x;
+        });
+      }),
+      iniciarPagamento: seguro(function (pedidoId, tokenAcesso, dados) {
+        exigir(pedidoId, MSG_PEDIDO_NAO_ENCONTRADO);
+        exigir(tokenAcesso, MSG_PEDIDO_NAO_ENCONTRADO);
+        var corpo = { acao: 'criar', pedidoId: String(pedidoId), tokenAcesso: String(tokenAcesso) };
+        if (dados && dados.cpf) corpo.cpf = String(dados.cpf);
+        return invocar('pagamento', corpo, prazo).then(function (r) {
+          if (r.pago) return { ok: true, pago: true, status: r.status };
+          if (r.redirecionarUrl) {
+            var url = String(r.redirecionarUrl);
+            if (!/^https:\/\//i.test(url)) throw recusa('Não foi possível gerar o pagamento agora. Tente de novo em instantes.');
+            return { ok: true, provedor: 'infinitepay', redirecionarUrl: url, valor: numero(r.valor) };
+          }
+          return { ok: true, provedor: 'asaas', pix: r.pix && typeof r.pix === 'object' ? { qrBase64: String(r.pix.qrBase64 || ''),
+            copiaECola: String(r.pix.copiaECola || ''), expira: String(r.pix.expira || '') } : null,
+            cartaoUrl: String(r.cartaoUrl || ''), valor: numero(r.valor), vencimento: String(r.vencimento || '') };
+        }, function (e) {
+          var resp = e && e.resposta;
+          if (e && e.funcaoAusente) return { ok: false, erro: MSG_PAG_NAO_CONFIGURADO, naoConfigurado: true };
+          if (resp && resp.erro === MSG_PAG_NAO_CONFIGURADO) return { ok: false, erro: MSG_PAG_NAO_CONFIGURADO, naoConfigurado: true };
+          if (resp && resp.precisaCpf) return { ok: false, erro: String(resp.erro), precisaCpf: true };
+          throw e;
+        });
+      }),
+      statusPedido: seguro(function (pedidoId, tokenAcesso) {
+        exigir(pedidoId, MSG_PEDIDO_NAO_ENCONTRADO);
+        exigir(tokenAcesso, MSG_PEDIDO_NAO_ENCONTRADO);
+        var porRpc = function () {
+          return rpcOk('status_pedido', { p_pedido: String(pedidoId), p_token: String(tokenAcesso) })
+            .then(function (r) { return { ok: true, status: r.status }; });
+        };
+        // A Edge Function confere também no Asaas (cobre webhook perdido); fora do ar, lê direto do banco.
+        return invocar('pagamento', { acao: 'status', pedidoId: String(pedidoId), tokenAcesso: String(tokenAcesso) }, prazo)
+          .then(function (r) { return { ok: true, status: r.status }; }, function (e) {
+            if (e && e.resposta && !e.funcaoAusente) throw e;
+            return porRpc();
+          });
+      }),
+      confirmarRetorno: seguro(function (pedidoId, tokenAcesso, dados) {
+        exigir(pedidoId, MSG_PEDIDO_NAO_ENCONTRADO);
+        exigir(tokenAcesso, MSG_PEDIDO_NAO_ENCONTRADO);
+        var d = dados && typeof dados === 'object' ? dados : {};
+        var ref = function (v) { var x = String(v == null ? '' : v).trim(); return /^[A-Za-z0-9._:-]{1,120}$/.test(x) ? x : ''; };
+        var corpo = { acao: 'confirmar', pedidoId: String(pedidoId), tokenAcesso: String(tokenAcesso),
+          transactionNsu: ref(d.transactionNsu), slug: ref(d.slug) };
+        return invocar('pagamento', corpo, prazo).then(function (r) { return { ok: true, status: r.status }; }, function (e) {
+          if (e && e.resposta && !e.funcaoAusente) throw e;
+          return rpcOk('status_pedido', { p_pedido: String(pedidoId), p_token: String(tokenAcesso) })
+            .then(function (r) { return { ok: true, status: r.status }; });
+        });
+      }),
+      relatorioPessoal: seguro(function (tokenAcesso) {
+        if (!RE_TOKEN_VENDA.test(String(tokenAcesso || ''))) throw recusa(MSG_LINK_RELATORIO);
+        return rpcOk('relatorio_pessoal', { p_token: String(tokenAcesso) }).then(function (r) {
+          var ex = exigidoValido(r.exigido) ? r.exigido : '';
+          return { ok: true, nome: r.nome || '', resultado: r.resultado || null, exigido: calcularExigido(ex), exigidoRespostas: ex,
+            pacote: String(r.pacote || ''), pacoteNome: r.pacoteNome || '', precisaParte2: r.precisaParte2 === true, status: r.status || 'pago' };
+        });
+      }),
+      salvarParte2Pessoal: seguro(function (tokenAcesso, exigido) {
+        if (!RE_TOKEN_VENDA.test(String(tokenAcesso || ''))) throw recusa(MSG_LINK_RELATORIO);
+        var ex = typeof exigido === 'string' ? exigido.replace(/\D/g, '') : '';
+        if (!exigidoValido(ex)) throw recusa('Responda todos os grupos da segunda parte.');
+        return rpcOk('salvar_parte2_pessoal', { p_token: String(tokenAcesso), p_exigido: ex }).then(function () {
+          return { ok: true, exigido: calcularExigido(ex), exigidoRespostas: ex };
+        });
+      }),
+      recuperarAcesso: seguro(function (email) {
+        var e = normalizarEmail(email);
+        if (!emailValido(e)) throw recusa('Informe um e-mail válido.');
+        return invocar('pagamento', { acao: 'recuperar', email: e }, prazo).then(function () { return { ok: true }; }, function (err) {
+          if (err && err.funcaoAusente) return { ok: false, erro: MSG_EMAIL_NAO_CONFIGURADO, naoConfigurado: true };
+          if (err && err.resposta && err.resposta.erro === MSG_EMAIL_NAO_CONFIGURADO) {
+            return { ok: false, erro: MSG_EMAIL_NAO_CONFIGURADO, naoConfigurado: true };
+          }
+          throw err;
+        });
+      }),
+
+      // --- venda direta (B2C): painel (só admin; tabelas com RLS) ---
+      listarPedidos: seguro(function (token, filtros) {
+        var f = filtros && typeof filtros === 'object' ? filtros : {};
+        return exigirSessao(token).then(function () {
+          return consulta(function (c) {
+            var q = c.from('pedidos').select('*');
+            if (STATUS_PEDIDO.indexOf(f.status) >= 0) q = q.eq('status', f.status);
+            if (dataOuVazio(f.de)) q = q.gte('criado_em', dataOuVazio(f.de) + 'T03:00:00Z');
+            if (dataOuVazio(f.ate)) q = q.lt('criado_em', new Date(Date.parse(dataOuVazio(f.ate) + 'T03:00:00Z') + 86400000).toISOString());
+            if (f.pacote) q = q.eq('pacote', limparTexto(f.pacote, 30));
+            var lim = Math.max(1, Math.min(MAX_LINHAS, inteiroOuNulo(f.limite) || 500));
+            return q.order('criado_em', { ascending: false }).limit(lim);
+          });
+        }).then(function (linhas) {
+          var lista = (Array.isArray(linhas) ? linhas : []).map(pedidoDaLinha);
+          var busca = normalizarNomeCampo(f.busca || '');
+          if (busca) {
+            lista = lista.filter(function (p) {
+              return normalizarNomeCampo(p.nome + ' ' + p.email + ' ' + p.cupom + ' ' + p.id).indexOf(busca) >= 0;
+            });
+          }
+          return { ok: true, pedidos: lista };
+        });
+      }),
+      atualizarPedido: seguro(function (token, id, campos) {
+        exigir(id, MSG_PEDIDO_NAO_ENCONTRADO);
+        var status = campos && typeof campos === 'object' ? campos.status : campos;
+        if (STATUS_PEDIDO.indexOf(status) < 0) throw recusa('Situação inválida.');
+        return exigirSessao(token).then(function () { return rpcOk('atualizar_pedido', { p_id: String(id), p_status: status }); })
+          .then(function (r) { return { ok: true, pedido: pedidoDaRpc(r.pedido) }; });
+      }),
+      listarCupons: seguro(function (token) {
+        return exigirSessao(token).then(function () {
+          return consulta(function (c) { return c.from('cupons').select('*').order('criado_em', { ascending: false }); });
+        }).then(function (linhas) { return { ok: true, cupons: (Array.isArray(linhas) ? linhas : []).map(cupomDaLinha) }; });
+      }),
+      salvarCupom: seguro(function (token, cupom) {
+        var v = validarCupom(cupom);
+        if (!v.ok) throw recusa(v.erro);
+        return exigirSessao(token).then(function () {
+          return consulta(function (c) { return c.from('cupons').upsert(v.linha, { onConflict: 'codigo' }).select('*'); });
+        }).then(function (linhas) {
+          var l = Array.isArray(linhas) ? linhas[0] : linhas;
+          return { ok: true, cupom: cupomDaLinha(l || v.linha) };
+        });
+      }),
+      excluirCupom: seguro(function (token, codigo) {
+        var cod = normalizarCupom(codigo);
+        if (!RE_CUPOM.test(cod)) throw recusa('Cupom não encontrado.');
+        return exigirSessao(token).then(function () {
+          return consulta(function (c) { return c.from('cupons').delete().eq('codigo', cod).select('codigo'); });
+        }).then(function (linhas) {
+          if (!Array.isArray(linhas) || !linhas.length) throw recusa('Cupom não encontrado.');
+          return { ok: true, codigo: cod };
+        });
+      }),
+      listarPacotes: seguro(function (token) {
+        return exigirSessao(token).then(function () {
+          return consulta(function (c) { return c.from('pacotes').select('*').order('ordem', { ascending: true }); });
+        }).then(function (linhas) { return { ok: true, pacotes: (Array.isArray(linhas) ? linhas : []).map(pacoteDaLinha) }; });
+      }),
+      salvarPacote: seguro(function (token, pacote) {
+        if (!pacote || typeof pacote !== 'object') throw recusa('Dados do pacote ausentes.');
+        var chave = limparTexto(pacote.chave, 30);
+        if (!/^[a-z0-9_]{2,30}$/.test(chave)) throw recusa('Pacote não encontrado.');
+        var veio = function (k) { return Object.prototype.hasOwnProperty.call(pacote, k) && pacote[k] !== undefined; };
+        var mudar = {};
+        if (veio('nome')) {
+          var nome = limparTexto(pacote.nome, 80);
+          if (!nome) throw recusa('Informe o nome do pacote.');
+          mudar.nome = nome;
+        }
+        if (veio('precoCentavos')) {
+          var preco = inteiroOuNulo(pacote.precoCentavos);
+          if (preco === null || preco < 0 || preco > 10000000) throw recusa('Preço inválido.');
+          mudar.preco_centavos = preco;
+        }
+        if (veio('precoLancamentoCentavos')) {
+          var lanc = inteiroOuNulo(pacote.precoLancamentoCentavos);
+          if (lanc !== null && (lanc < 0 || lanc > 10000000)) throw recusa('Preço de lançamento inválido.');
+          mudar.preco_lancamento_centavos = lanc;
+        }
+        if (veio('lancamentoAte')) {
+          if (pacote.lancamentoAte && !dataOuVazio(pacote.lancamentoAte)) throw recusa('Data do fim do lançamento inválida.');
+          mudar.lancamento_ate = dataOuVazio(pacote.lancamentoAte) || null;
+        }
+        if (veio('ativo')) mudar.ativo = pacote.ativo !== false;
+        if (veio('ordem')) mudar.ordem = Math.max(-1000, Math.min(1000, inteiroOuNulo(pacote.ordem) || 0));
+        if (veio('descricao')) mudar.descricao = descricaoPacote(pacote.descricao);
+        if (!Object.keys(mudar).length) throw recusa('Nada para salvar.');
+        return exigirSessao(token).then(function () {
+          return consulta(function (c) { return c.from('pacotes').update(mudar).eq('chave', chave).select('*'); });
+        }).then(function (linhas) {
+          if (!Array.isArray(linhas) || !linhas.length) throw recusa('Pacote não encontrado.');
+          return { ok: true, pacote: pacoteDaLinha(linhas[0]) };
+        });
+      }),
+      resumoVendas: seguro(function (token, periodo) {
+        var p = PERIODOS_VENDAS.indexOf(periodo) >= 0 ? periodo : '30d';
+        return exigirSessao(token).then(function () { return rpcOk('resumo_vendas', { p_periodo: p }); }).then(function (r) {
+          var bloco = function (b) { b = b || {}; return { vendas: numero(b.vendas), receitaCentavos: numero(b.receitaCentavos) }; };
+          return { ok: true, periodo: r.periodo || p, hoje: bloco(r.hoje), mes: bloco(r.mes), vendas: numero(r.vendas),
+            receitaCentavos: numero(r.receitaCentavos), cortesias: numero(r.cortesias), estornos: numero(r.estornos),
+            aguardando: numero(r.aguardando), resumos: numero(r.resumos), compras: numero(r.compras), conversao: numero(r.conversao),
+            porPacote: (Array.isArray(r.porPacote) ? r.porPacote : []).map(function (x) {
+              return { pacote: String(x.pacote || ''), vendas: numero(x.vendas), receitaCentavos: numero(x.receitaCentavos) };
+            }) };
+        });
+      }),
+
       login: seguro(function (email, senha) {
         exigir(email, 'Informe o e-mail e a senha.');
         exigir(senha, 'Informe o e-mail e a senha.');
@@ -1556,7 +1954,10 @@
     'relatorioMelhorarTextos', 'relatorioPublico',
     'listarEquipe', 'salvarColaborador', 'moverColaborador', 'desligarColaborador', 'salvarRelacoes',
     'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo', 'salvarMinhaFoto', 'removerFoto',
-    'moverResposta', 'contratarPessoa', 'versaoBanco'];
+    'moverResposta', 'contratarPessoa', 'versaoBanco',
+    'pacotesPublicos', 'enviarPessoal', 'resumoPessoal', 'criarPedido', 'iniciarPagamento', 'statusPedido', 'relatorioPessoal',
+    'salvarParte2Pessoal', 'recuperarAcesso', 'confirmarRetorno',
+    'listarPedidos', 'atualizarPedido', 'listarCupons', 'salvarCupom', 'excluirCupom', 'listarPacotes', 'salvarPacote', 'resumoVendas'];
 
   var DISC_API_SUPABASE = {
     METODOS: METODOS,

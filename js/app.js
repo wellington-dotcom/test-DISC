@@ -11,6 +11,7 @@
 
   var CHAVE_PROGRESSO = 'disc_progresso_v1';
   var CHAVE_CONCLUIDO = 'disc_concluido_v1';
+  var SEM_VALIDACAO = false;   // modo pessoal (venda B2C): sem a etapa de confirmação
   var VALIDADE_PROGRESSO_MS = 7 * 24 * 60 * 60 * 1000;   // progresso abandonado é apagado após 7 dias
   var LETRAS = ['D', 'I', 'S', 'C'];
   var TOTAL = 25;
@@ -567,8 +568,8 @@
         : 'Precisamos destes dados para vincular o resultado à sua candidatura.',
       // Equipe: o resultado fica no cadastro da empresa e é compartilhado com ela (orientar a liderança).
       escopo: equipe
-        ? 'na avaliação da equipe' + daEmpresa + ', conduzida pela Notus, e sei que o meu resultado será compartilhado com a empresa para orientar a liderança'
-        : (av ? 'apenas nesta avaliação' + daEmpresa + ', conduzida pela Notus' : 'apenas neste processo seletivo' + daEmpresa),
+        ? 'na avaliação da equipe' + daEmpresa + ', conduzida pela Gestão sem Caos, e sei que o meu resultado será compartilhado com a empresa para orientar a liderança'
+        : (av ? 'apenas nesta avaliação' + daEmpresa + ', conduzida pela Gestão sem Caos' : 'apenas neste processo seletivo' + daEmpresa),
       fimDados: equipe ? 'excluídos quando eu deixar a empresa ou pedir a exclusão' : (av ? 'excluídos ao final da avaliação' : 'excluídos ao final do processo'),
       usoDados: equipe
         ? 'Seu resultado fica no cadastro da equipe da empresa e é compartilhado com ela. Você pode pedir a exclusão a qualquer momento.'
@@ -586,6 +587,7 @@
   /* ---------- Etapa de confirmação (js/validacao.js) ---------- */
 
   function modValidacao() {
+    if (SEM_VALIDACAO) return null;
     return root.DISC_VALIDACAO || (typeof require === 'function' ? require('./validacao.js') : null);
   }
   function modScoring() {
@@ -736,7 +738,392 @@
     return { etapa: 'confirmacao', grupo: grupo, confTela: confTela };
   }
 
+  /* ---------------- Relatório da pessoa (renderização pura; usada também por meu-relatorio.html) ---------------- */
+
+  function pctTexto(v) { return String(Math.round(Number(v) * 10) / 10).replace('.', ',') + '%'; }
+
+  function listaTags(itens) {
+    if (!itens || !itens.length) return '';
+    return '<ul class="tags">' + itens.map(function (t) { return '<li class="selo">' + escapar(t) + '</li>'; }).join('') + '</ul>';
+  }
+
+  // Itens { titulo, texto, prazo? } em cartões empilhados.
+  function listaItens(itens, comPrazo) {
+    if (!itens || !itens.length) return '';
+    return '<ul class="rel-itens' + (comPrazo ? ' rel-itens--plano' : '') + '">' + itens.map(function (it) {
+      return '<li class="rel-item">' +
+        (comPrazo ? '<span class="rel-prazo">' + escapar(it.prazo) + '</span>' : '') +
+        '<p class="rel-item-titulo">' + escapar(it.titulo) + '</p>' +
+        '<p class="rel-item-texto">' + escapar(it.texto) + '</p>' +
+      '</li>';
+    }).join('') + '</ul>';
+  }
+
+  function secaoRelatorio(sec) {
+    var corpo = '';
+    if (sec.id === 'fortes') corpo = listaTags(sec.caracteristicas) + '<h3 class="rel-h3">Como usar mais</h3>' + listaItens(sec.itens);
+    else if (sec.id === 'pressao') corpo = listaTags(sec.sinais) + '<h3 class="rel-h3">O que fazer nessas horas</h3>' + listaItens(sec.itens);
+    else if (sec.id === 'comunicacao') {
+      corpo = '<ul class="rel-itens">' + (sec.perfis || []).map(function (pf) {
+        return '<li class="rel-item rel-com" data-letra="' + escapar(pf.letra) + '">' +
+          '<p class="rel-item-titulo"><span class="letra-disc letra-disc--mini disc-' + escapar(pf.letra) + '" aria-hidden="true">' + escapar(pf.letra) + '</span>' +
+            'Com pessoas de perfil ' + escapar(pf.rotulo) + ' <span class="perfil-sub">' + escapar(pf.nome) + '</span></p>' +
+          '<p class="rel-item-texto">' + escapar(pf.texto) + '</p>' +
+        '</li>';
+      }).join('') + '</ul>';
+    } else corpo = listaItens(sec.itens, sec.id === 'plano' || sec.id === 'plano90');
+    var idT = 'rel-' + escapar(sec.id);
+    return '' +
+      '<section class="caixa rel-caixa rel-secao surgir" data-secao="' + escapar(sec.id) + '" aria-labelledby="' + idT + '">' +
+        '<h2 id="' + idT + '" class="caixa__titulo rel-secao-titulo">' + escapar(sec.titulo) + '</h2>' +
+        (sec.intro ? '<p class="rel-nota">' + escapar(sec.intro) + '</p>' : '') +
+        corpo +
+      '</section>';
+  }
+
+  var NOMES_FATORES = { D: 'Dominância', I: 'Influência', S: 'Estabilidade', C: 'Conformidade' };
+
+  function larguraPct(v) { return Math.max(4, Math.min(100, (Number(v) / 40) * 100)); }
+
+  // "Onde você está se esticando" (Parte 2): índice de esforço, natural × trabalho por fator e os textos.
+  function secaoEsticando(sec, d) {
+    var natural = {};
+    (d.fatores || []).forEach(function (f) { natural[f.letra] = Number(f.pct); });
+    var ex = (sec.exigido && sec.exigido.percentuais) || {};
+    var comparacao = LETRAS.map(function (l) {
+      var n = natural[l], e = Number(ex[l]);
+      if (!isFinite(n) || !isFinite(e)) return '';
+      var delta = Math.round((e - n) * 10) / 10;
+      var deltaTxt = delta > 0 ? '+' + pctTexto(delta).replace('%', '') : delta < 0 ? '−' + pctTexto(-delta).replace('%', '') : '0';
+      return '' +
+        '<li class="estica-fator" data-letra="' + l + '">' +
+          '<span class="letra-disc letra-disc--mini disc-' + l + '" aria-hidden="true">' + l + '</span>' +
+          '<span class="estica-nome">' + escapar(NOMES_FATORES[l]) + '</span>' +
+          '<span class="estica-delta' + (Math.abs(delta) >= 3 ? ' estica-delta--forte' : '') + '" aria-label="diferença de ' + escapar(deltaTxt) + ' pontos">' + escapar(deltaTxt) + '</span>' +
+          '<span class="estica-barras">' +
+            '<span class="estica-linha"><span class="estica-rotulo">Natural</span><span class="trilho estica-trilho"><span class="estica-valor disc-' + l + '" style="width:' + larguraPct(n) + '%"></span></span><span class="estica-pct">' + pctTexto(n) + '</span></span>' +
+            '<span class="estica-linha"><span class="estica-rotulo">Trabalho</span><span class="trilho estica-trilho"><span class="estica-valor estica-valor--trabalho" style="width:' + larguraPct(e) + '%"></span></span><span class="estica-pct">' + pctTexto(e) + '</span></span>' +
+          '</span>' +
+        '</li>';
+    }).join('');
+    var indice = Math.max(0, Math.min(100, Math.round(Number(sec.indice) || 0)));
+    var idT = 'rel-' + escapar(sec.id);
+    return '' +
+      '<section class="caixa rel-caixa rel-secao rel-esticando surgir" data-secao="esticando" data-faixa="' + escapar(sec.faixa || '') + '" aria-labelledby="' + idT + '">' +
+        '<h2 id="' + idT + '" class="caixa__titulo rel-secao-titulo">' + escapar(sec.titulo) + '</h2>' +
+        (sec.intro ? '<p class="rel-nota">' + escapar(sec.intro) + '</p>' : '') +
+        '<div class="estica-indice">' +
+          '<p class="estica-indice-num"><span class="t-numero">' + indice + '</span><span class="estica-indice-de">de 100</span></p>' +
+          '<p class="estica-indice-texto">Esforço de adaptação <span class="selo selo--noite estica-faixa">' + escapar(sec.rotulo || '') + '</span></p>' +
+        '</div>' +
+        (comparacao ? '<ul class="estica-fatores" aria-label="Seu jeito natural e o que o trabalho pede, por fator">' + comparacao + '</ul>' : '') +
+        listaItens(sec.itens) +
+      '</section>';
+  }
+
+  // Relatório "modelo pessoa" (dados de js/relatorio-pessoa.js) em cartões empilhados.
+  // Com a rodada 3: nome da combinação, faixa de intensidade de cada fator, as seções de aprofundamento e,
+  // com a Parte 2, "Onde você está se esticando" logo depois do resumo.
+  function avatarHtml(foto, nome) {
+    var inicial = String(nome || '').trim().charAt(0).toUpperCase();
+    return '<span class="rel-avatar" aria-hidden="true">' +
+      (fotoValida(foto) ? '<img src="' + escapar(foto) + '" alt="" width="48" height="48">' : escapar(inicial || '•')) + '</span>';
+  }
+
+  // opcoes (venda B2C, meu-relatorio.html): { travas: true (seção "O que está te travando"), plano90: true (Completo + Parte 2),
+  //   mapa: true (mapa ritmo × foco, com a Parte 2), botaoPdf: texto do botão (padrão "Salvar em PDF") }.
+  // Sem opcoes: exatamente o relatório de antes (fluxo de processo/equipe).
+  function relatorioPessoaHtml(d, foto, opcoes) {
+    if (!d) return '';
+    var op = opcoes || {};
+    var faixas = {};
+    (d.intensidade || []).forEach(function (f) { if (f && f.letra) faixas[f.letra] = f; });
+    var barras = d.fatores.map(function (f) {
+      var largura = larguraPct(f.pct);
+      var fx = faixas[f.letra];
+      return '' +
+        '<li class="barra-linha rel-fator" data-letra="' + escapar(f.letra) + '"' + (fx ? ' data-faixa="' + escapar(fx.faixa) + '"' : '') + '>' +
+          '<span class="letra-disc disc-' + escapar(f.letra) + ' barra-letra" aria-hidden="true">' + escapar(f.letra) + '</span>' +
+          '<span class="barra-nome"><span class="rel-fator-nome">' + escapar(f.nome) + '</span>' +
+            '<span class="visualmente-oculto"> (' + escapar(f.letra) + ')</span>' +
+            (fx && fx.rotulo ? '<span class="rel-fator-faixa">Intensidade ' + escapar(String(fx.rotulo).toLowerCase()) + '</span>' : '') +
+            '<span class="rel-fator-desc">' + escapar(f.descricao) + '</span></span>' +
+          '<span class="barra-trilho trilho" aria-hidden="true"><span class="barra-valor disc-' + escapar(f.letra) + '" style="width:' + largura + '%"></span></span>' +
+          '<span class="barra-pct rel-pct">' + pctTexto(f.pct) + '</span>' +
+        '</li>';
+    }).join('');
+    var titulo = (d.nome ? escapar(d.nome) + ', seu' : 'Seu') + ' estilo é ' + escapar(d.primario.rotulo) + ', com traços de ' + escapar(d.secundario.rotulo);
+    var cb = d.combinacao;
+    var combinacao = cb && cb.nome
+      ? '<p class="rel-combinacao"><span class="rel-combinacao-rotulo">Sua combinação</span><strong class="rel-combinacao-nome">' + escapar(cb.nome) + '</strong>' +
+          (cb.frase ? '<span class="rel-combinacao-frase">' + escapar(cb.frase) + '</span>' : '') + '</p>'
+      : '';
+    var extras = Array.isArray(d.aprofundamento) ? d.aprofundamento : [];
+    var est = extras.filter(function (x) { return x && x.id === 'esticando'; })[0] || d.esticando || null;
+    var outras = extras.filter(function (x) { return x && x.id !== 'esticando'; });
+    return '' +
+      '<div class="relatorio-candidato relatorio-pessoa" data-codigo="' + escapar(d.codigo) + '">' +
+        '<section class="caixa rel-caixa surgir" aria-labelledby="titulo-relatorio">' +
+          '<div class="rel-cabeca">' + avatarHtml(foto, d.nome) + '<p class="sobretitulo">Seu relatório DISC</p></div>' +
+          '<h2 id="titulo-relatorio" class="rel-titulo">' + titulo + '</h2>' +
+          '<p class="rel-intro rel-frase">' + escapar(d.frase) + '</p>' +
+          combinacao +
+          '<h3 class="rel-h3">Seus 4 fatores</h3>' +
+          '<p class="rel-nota">Quanto maior a barra, mais esse jeito aparece no seu dia a dia. Os quatro somam 100%.</p>' +
+          '<ul class="barras rel-barras">' + barras + '</ul>' +
+          '<div class="acoes rel-acoes">' +
+            '<button type="button" class="botao botao--claro" data-acao="imprimir">' + escapar(op.botaoPdf || 'Salvar em PDF') + '</button>' +
+          '</div>' +
+        '</section>' +
+        (op.travas && d.travas ? secaoTravas(d.travas) : '') +
+        (est ? secaoEsticando(est, d) : '') +
+        (op.mapa && est ? mapaRitmoFoco(d, est) : '') +
+        d.secoes.map(secaoRelatorio).join('') +
+        outras.map(secaoRelatorio).join('') +
+        (op.plano90 && d.plano90 ? secaoRelatorio(d.plano90) : '') +
+        '<p class="rel-aviso">' + escapar(d.aviso) + '</p>' +
+      '</div>';
+  }
+
+  // "O que está te travando" (js/relatorio-pessoa.js, montar().travas): cada padrão com UMA ação prática.
+  var ROTULO_TRAVA = { adaptacao: 'Esforço de adaptação', excesso: 'Força que passa do ponto', falta: 'O que quase não aparece', pressao: 'Sob pressão' };
+  function secaoTravas(sec) {
+    if (!sec || !Array.isArray(sec.itens) || !sec.itens.length) return '';
+    return '' +
+      '<section class="caixa rel-caixa rel-secao rel-travas surgir" data-secao="travas" aria-labelledby="rel-travas">' +
+        '<h2 id="rel-travas" class="caixa__titulo rel-secao-titulo">' + escapar(sec.titulo) + '</h2>' +
+        (sec.intro ? '<p class="rel-nota">' + escapar(sec.intro) + '</p>' : '') +
+        '<ol class="travas">' + sec.itens.map(function (it, k) {
+          return '<li class="trava" data-tipo="' + escapar(it.tipo || '') + '">' +
+            '<span class="trava-num" aria-hidden="true">' + (k + 1) + '</span>' +
+            '<div class="trava-corpo">' +
+              '<p class="trava-tipo">' + escapar(ROTULO_TRAVA[it.tipo] || '') + '</p>' +
+              '<p class="rel-item-titulo">' + escapar(it.titulo) + '</p>' +
+              '<p class="rel-item-texto">' + escapar(it.texto) + '</p>' +
+              (it.acao ? '<p class="trava-acao"><span class="trava-acao-rotulo">Para destravar</span>' + escapar(it.acao) + '</p>' : '') +
+            '</div>' +
+          '</li>';
+        }).join('') + '</ol>' +
+      '</section>';
+  }
+
+  // Ritmo = (D + I) − (S + C) (+ acelerado); foco = (D + C) − (I + S) (+ tarefas), como em js/disc-exigido.js.
+  function eixosDe(p) {
+    var v = {};
+    LETRAS.forEach(function (l) { v[l] = Number(p && p[l]) || 0; });
+    return { ritmo: Math.round((v.D + v.I - v.S - v.C) * 10) / 10, foco: Math.round((v.D + v.C - v.I - v.S) * 10) / 10 };
+  }
+  // Posição no quadro (0–100%): x = pessoas → direita, y = acelerado → em cima. Os valores vão de −60 a 60.
+  function posicaoMapa(e) {
+    function pct(v) { return Math.max(6, Math.min(94, Math.round((50 + (v / 60) * 50) * 10) / 10)); }
+    return { x: pct(-e.foco), y: pct(-e.ritmo) };
+  }
+  function mapaRitmoFoco(d, est) {
+    var nat = {};
+    (d.fatores || []).forEach(function (f) { nat[f.letra] = Number(f.pct); });
+    var ex = est && est.exigido && est.exigido.percentuais;
+    var pn = posicaoMapa(eixosDe(nat));
+    var pe = ex ? posicaoMapa(eixosDe(ex)) : null;
+    function ponto(p, classe, rotulo) {
+      return '<span class="mapa-ponto ' + classe + '" style="left:' + p.x + '%;top:' + p.y + '%" data-rotulo="' + rotulo + '"></span>';
+    }
+    return '' +
+      '<section class="caixa rel-caixa rel-secao rel-mapa surgir" data-secao="mapa" aria-labelledby="rel-mapa">' +
+        '<h2 id="rel-mapa" class="caixa__titulo rel-secao-titulo">Mapa ritmo × foco</h2>' +
+        '<p class="rel-nota">Onde o seu jeito natural fica e para onde o seu trabalho puxa você. Quanto mais longe os dois pontos, mais energia a adaptação costuma pedir.</p>' +
+        '<div class="mapa" role="img" aria-label="Seu jeito natural e o que o trabalho pede, no mapa de ritmo (acelerado ou cauteloso) e foco (tarefas ou pessoas)">' +
+          '<span class="mapa-eixo mapa-eixo--x" aria-hidden="true"></span><span class="mapa-eixo mapa-eixo--y" aria-hidden="true"></span>' +
+          '<span class="mapa-canto mapa-canto--topo">Acelerado</span><span class="mapa-canto mapa-canto--base">Cauteloso</span>' +
+          '<span class="mapa-canto mapa-canto--esq">Tarefas</span><span class="mapa-canto mapa-canto--dir">Pessoas</span>' +
+          (pe ? ponto(pe, 'mapa-ponto--trabalho', 'Trabalho') : '') +
+          ponto(pn, 'mapa-ponto--voce', 'Você') +
+        '</div>' +
+        '<ul class="mapa-legenda"><li><span class="mapa-marca mapa-marca--voce" aria-hidden="true"></span>Você (natural)</li>' +
+          (pe ? '<li><span class="mapa-marca mapa-marca--trabalho" aria-hidden="true"></span>O que o trabalho pede</li>' : '') + '</ul>' +
+      '</section>';
+  }
+
+  /* ---------------- Modo pessoal (venda B2C, Gestão sem Caos) ---------------- */
+
+  var EMPRESA_B2C = 'Gestão sem Caos';
+  var PACOTES_PAGOS = ['completo', 'completo_plus'];
+
+  // ?modo=pessoal (ou #pessoal) liga o modo; &pacote=completo|completo_plus pré-escolhe; &cupom=X pré-preenche o cupom
+  // no checkout; #p2-<token> abre a Parte 2 de quem comprou o Completo + Parte 2. -> { pessoal, pacote, parte2Token, cupom }
+  // (utm_*, gclid, fbclid e ref da landing são ignorados: o envio não tem campo para eles)
+  function modoPessoalDaUrl(search, hash) {
+    var q = String(search || ''), h = String(hash || '');
+    function param(nome) {
+      var m = new RegExp('[?&]' + nome + '=([^&#]*)').exec(q);
+      try { return m ? decodeURIComponent(m[1].replace(/\+/g, ' ')) : ''; } catch (e) { return ''; }
+    }
+    var p2 = /^#p2-([A-Za-z0-9_-]{16,128})$/.exec(h);
+    var pessoal = param('modo').toLowerCase() === 'pessoal' || /^#pessoal\b/.test(h) || !!p2;
+    var pacote = param('pacote').toLowerCase();
+    var cupom = param('cupom').replace(/\s+/g, '').toUpperCase();
+    return {
+      pessoal: pessoal,
+      pacote: pessoal && PACOTES_PAGOS.indexOf(pacote) !== -1 ? pacote : '',
+      parte2Token: pessoal && p2 ? p2[1] : '',
+      cupom: pessoal && /^[A-Z0-9_-]{3,30}$/.test(cupom) ? cupom : ''
+    };
+  }
+
+  // Identificação B2C: nome, e-mail (obrigatório, é a "conta"), WhatsApp opcional e consentimento. -> { campo: msg }
+  function validarIdentificacaoPessoal(d) {
+    var erros = {};
+    var en = validarNome(d.nome);
+    if (en) erros.nome = en;
+    var email = limparEmail(d.email);
+    if (!email) erros.email = 'Informe seu e-mail: é por ele que você recebe e recupera o relatório.';
+    else if (!emailValido(email)) erros.email = 'Confira o e-mail (ex.: nome@gmail.com).';
+    if (limparTelefone(d.telefone)) { var et = validarTelefone(d.telefone); if (et) erros.telefone = et; }
+    if (!d.consentimento) erros.consentimento = 'Para continuar, marque a autorização de uso dos dados.';
+    return erros;
+  }
+
+  // Payload do envio pessoal (enviarPessoal): sem idade, vaga, empresa ou processo; telefone só se informado.
+  function montarPayloadPessoal(dados, ordens, agora) {
+    var respostas = ordens.map(ordemParaGrupo);
+    var scoring = modScoring();
+    var res = scoring.calcular(respostas);
+    var fim = agora || new Date();
+    var inicio = dados.inicio ? new Date(dados.inicio) : fim;
+    var tel = limparTelefone(dados.telefone);
+    return {
+      v: 1,
+      origem: 'pessoal',
+      id: dados.id,
+      nome: normalizarNome(dados.nome),
+      email: limparEmail(dados.email),
+      telefone: tel ? telefoneParaSalvar(tel) : '',
+      consentimento: !!dados.consentimento,
+      inicio: inicio.toISOString(),
+      fim: fim.toISOString(),
+      duracaoSeg: Math.max(0, Math.round((fim.getTime() - inicio.getTime()) / 1000)),
+      respostas: scoring.compactar(respostas),
+      resultado: { percentuais: res.percentuais, codigo: res.codigo }
+    };
+  }
+
+  function modCheckout() {
+    return root.DISC_CHECKOUT || (typeof require === 'function' ? require('./checkout.js') : null);
+  }
+
+  // Resumo grátis (montarSimples): perfil em uma frase, combinação, 4 fatores com barras e 3 forças.
+  function resumoGratisHtml(s) {
+    if (!s) return '';
+    var barras = s.fatores.map(function (f) {
+      return '' +
+        '<li class="barra-linha rel-fator" data-letra="' + escapar(f.letra) + '"' + (f.faixa ? ' data-faixa="' + escapar(f.faixa) + '"' : '') + '>' +
+          '<span class="letra-disc disc-' + escapar(f.letra) + ' barra-letra" aria-hidden="true">' + escapar(f.letra) + '</span>' +
+          '<span class="barra-nome"><span class="rel-fator-nome">' + escapar(f.nome) + '</span>' +
+            '<span class="visualmente-oculto"> (' + escapar(f.letra) + ')</span>' +
+            (f.rotulo ? '<span class="rel-fator-faixa">Intensidade ' + escapar(String(f.rotulo).toLowerCase()) + '</span>' : '') + '</span>' +
+          '<span class="barra-trilho trilho" aria-hidden="true"><span class="barra-valor disc-' + escapar(f.letra) + '" style="width:' + larguraPct(f.pct) + '%"></span></span>' +
+          '<span class="barra-pct rel-pct">' + pctTexto(f.pct) + '</span>' +
+        '</li>';
+    }).join('');
+    var cb = s.combinacao;
+    return '' +
+      '<section class="caixa caixa--vidro rel-caixa resumo-gratis surgir" aria-labelledby="titulo" data-codigo="' + escapar(s.codigo) + '">' +
+        '<p class="sobretitulo">Seu resumo grátis</p>' +
+        '<h1 id="titulo" class="rel-titulo resumo-titulo">' + (s.nome ? escapar(s.nome) + ', seu' : 'Seu') + ' estilo é ' + escapar(s.primario.rotulo) + ', com traços de ' + escapar(s.secundario.rotulo) + '</h1>' +
+        '<p class="rel-intro rel-frase">' + escapar(s.frase) + '</p>' +
+        (cb && cb.nome
+          ? '<p class="rel-combinacao"><span class="rel-combinacao-rotulo">Sua combinação</span><strong class="rel-combinacao-nome">' + escapar(cb.nome) + '</strong>' +
+              (cb.frase ? '<span class="rel-combinacao-frase">' + escapar(cb.frase) + '</span>' : '') + '</p>'
+          : '') +
+        '<h2 class="rel-h3">Seus 4 fatores</h2>' +
+        '<p class="rel-nota">Quanto maior a barra, mais esse jeito aparece no seu dia a dia. Os quatro somam 100%.</p>' +
+        '<ul class="barras rel-barras">' + barras + '</ul>' +
+        '<h2 class="rel-h3">Suas 3 forças</h2>' +
+        listaItens(s.forcas) +
+      '</section>';
+  }
+
+  // Prévia do que é pago: títulos reais (inclusive os de "O que está te travando") e só a 1ª frase do 1º item;
+  // o resto aparece como linhas borradas (o texto pago não vai para a tela).
+  var ICONE_CADEADO = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
+  function linhasBorradas(n) {
+    var out = '';
+    for (var k = 0; k < n; k++) out += '<span class="borrado-linha" style="width:' + [96, 88, 92, 70, 84][k % 5] + '%"></span>';
+    return '<span class="borrado" aria-hidden="true">' + out + '</span>';
+  }
+  function primeiraFrase(t) {
+    var m = /^[^.!?]*[.!?]/.exec(String(t || ''));
+    return m ? m[0] : String(t || '');
+  }
+  function previaPagaHtml(d) {
+    if (!d) return '';
+    var tr = d.travas && d.travas.itens ? d.travas.itens : [];
+    var outras = [
+      ['Régua de intensidade', 'Em que faixa está cada fator e o que isso muda no seu dia a dia.'],
+      ['Como você reage sob pressão', 'Os sinais de que o seu jeito passou do ponto e o que fazer nessas horas.'],
+      ['Como você decide, aprende e se comunica', 'O seu jeito de escolher, de aprender e de falar com cada perfil.'],
+      ['Seu plano de 30, 60 e 90 dias', 'Hábitos práticos, um de cada vez, para desenvolver o que mais importa.']
+    ];
+    return '' +
+      '<section class="caixa previa-paga surgir" aria-labelledby="titulo-previa">' +
+        '<p class="sobretitulo">Relatório completo</p>' +
+        '<h2 id="titulo-previa" class="titulo-secao">O que o relatório completo mostra</h2>' +
+        '<div class="previa-travas">' +
+          '<p class="previa-rotulo">O que está te travando</p>' +
+          '<ol class="previa-lista">' + tr.map(function (it, k) {
+            return '<li class="previa-item"><span class="trava-num" aria-hidden="true">' + (k + 1) + '</span><div class="previa-corpo">' +
+              '<p class="previa-item-titulo">' + escapar(it.titulo) + '</p>' +
+              (k === 0 ? '<p class="previa-frase">' + escapar(primeiraFrase(it.texto)) + '</p>' : '') +
+              linhasBorradas(k === 0 ? 2 : 3) +
+              '<p class="previa-trancado">' + ICONE_CADEADO + 'Ação para destravar no relatório completo</p>' +
+            '</div></li>';
+          }).join('') + '</ol>' +
+        '</div>' +
+        '<ul class="previa-secoes">' + outras.map(function (o) {
+          return '<li class="previa-secao"><p class="previa-item-titulo">' + escapar(o[0]) + '</p><p class="previa-desc">' + escapar(o[1]) + '</p>' + linhasBorradas(2) + '</li>';
+        }).join('') + '</ul>' +
+      '</section>';
+  }
+
+  // Cards dos pacotes pagos (o escolhido, ou o Completo + Parte 2, em destaque com o único botão laranja).
+  function pacotesHtml(pacotes, escolhido, hoje) {
+    var CK = modCheckout();
+    var pagos = (pacotes || []).filter(function (p) { return PACOTES_PAGOS.indexOf(p.chave) !== -1; });
+    if (!pagos.length || !CK) return '';
+    var destaque = escolhido && pagos.some(function (p) { return p.chave === escolhido; }) ? escolhido
+      : (pagos.some(function (p) { return p.chave === 'completo_plus'; }) ? 'completo_plus' : pagos[0].chave);
+    return '<ul class="pacotes" id="pacotes">' + pagos.map(function (p) {
+      var pv = CK.precoVigente(p, hoje);
+      var em = p.chave === destaque;
+      return '' +
+        '<li class="pacote' + (em ? ' pacote--destaque' : '') + '" data-pacote="' + escapar(p.chave) + '">' +
+          (em ? '<span class="selo selo--laranja pacote-selo">' + (escolhido === p.chave ? 'Sua escolha' : 'Mais completo') + '</span>' : '') +
+          '<h3 class="pacote-nome">' + escapar(p.nome) + '</h3>' +
+          '<p class="pacote-preco">' +
+            (pv.lancamento ? '<s class="pacote-cheio">' + escapar(CK.formatarPreco(pv.cheioCentavos)) + '</s>' : '') +
+            '<strong class="pacote-valor">' + escapar(CK.formatarPreco(pv.centavos)) + '</strong>' +
+            (pv.lancamento ? '<span class="pacote-lancamento">preço de lançamento</span>' : '') +
+          '</p>' +
+          '<ul class="pacote-itens">' + (p.itens || []).map(function (t) { return '<li>' + escapar(t) + '</li>'; }).join('') + '</ul>' +
+          '<button type="button" class="botao ' + (em ? 'botao--laranja' : 'botao--principal') + ' botao--grande botao--bloco" data-acao="comprar" data-pacote="' + escapar(p.chave) + '">' +
+            'Quero o ' + escapar(p.chave === 'completo_plus' ? 'Completo + Parte 2' : 'Relatório completo') + '</button>' +
+        '</li>';
+    }).join('') + '</ul>';
+  }
+
+
   var PURAS = {
+    modoPessoalDaUrl: modoPessoalDaUrl,
+    validarIdentificacaoPessoal: validarIdentificacaoPessoal,
+    montarPayloadPessoal: montarPayloadPessoal,
+    relatorioPessoaHtml: relatorioPessoaHtml,
+    secaoTravas: secaoTravas,
+    mapaRitmoFoco: mapaRitmoFoco,
+    posicaoMapa: posicaoMapa,
+    eixosDe: eixosDe,
+    resumoGratisHtml: resumoGratisHtml,
+    previaPagaHtml: previaPagaHtml,
+    pacotesHtml: pacotesHtml,
+    EMPRESA_B2C: EMPRESA_B2C,
     deveMostrarDemo: deveMostrarDemo,
     validarNome: validarNome,
     normalizarNome: normalizarNome,
@@ -823,6 +1210,16 @@
   var telaLink = '';    // '', 'carregando', 'invalido' ou 'erro' (enquanto não dá para começar)
   var erroLink = '';
   var crono = null;     // tempo no grupo atual: { estado, grupo, t0 }
+  // Modo pessoal (venda B2C, Gestão sem Caos): index.html?modo=pessoal (&pacote=...) ou #p2-<token> (Parte 2 comprada).
+  var MODO = { pessoal: false, pacote: '', parte2Token: '', cupom: '' };
+  try { MODO = modoPessoalDaUrl(root.location.search, root.location.hash); } catch (e) { /* sem URL */ }
+  var PESSOAL = MODO.pessoal;
+  var P2_TOKEN = '';           // Parte 2 de quem comprou o Completo + Parte 2 (definido ao entrar nela)
+  var CHAVE_PESSOAL = 'disc_pessoal_v1';
+  var PACOTES = null;          // pacotes do servidor (DISC_CHECKOUT.normalizarPacotes) ou null = padrão
+  var checkout = null;         // controlador do checkout na tela
+  var telaP2 = '';             // '', 'carregando' ou mensagem de erro ao abrir a Parte 2 pelo link
+  if (PESSOAL) { SEM_VALIDACAO = true; CHAVE_PROGRESSO = 'disc_pessoal_progresso_v1'; }
 
   function estadoInicial() {
     return {
@@ -893,7 +1290,7 @@
   /* ---- Parte 2 (perfil exigido pelo trabalho) ---- */
   function modExigido() { return root.DISC_EXIGIDO || null; }
   // Liga só com o link de um processo que tem formulario.parte2 === 'ligada'.
-  function P2() { return !!AVAL && parte2Ligada(AVAL.formulario); }
+  function P2() { return !!P2_TOKEN || (!!AVAL && parte2Ligada(AVAL.formulario)); }
   // Índices de DISC_DATA.grupos usados na Parte 2.
   function G2() {
     var E = modExigido();
@@ -1089,6 +1486,7 @@
 
   // Monta (ou remonta, se o resultado mudou) a etapa de confirmação e vai para ela; sem a etapa, envia.
   function irDepoisDosGrupos() {
+    if (PESSOAL) { concluirPessoal(); return; }
     completarDemonstracao();
     if (irParaParte2SePreciso(false)) return;
     completarDemonstracao2();
@@ -1127,20 +1525,28 @@
     avisoTela = '';
     arraste = null;
     fecharDica(false);
+    if (checkout) { checkout.parar(); checkout = null; }
     if (telaLink) html = telaDoLink();
+    else if (telaP2) html = telaParte2Link();
     else switch (estado.etapa) {
-      case 'identificacao': html = telaIdentificacao(); break;
+      case 'identificacao': html = PESSOAL ? telaIdentificacaoPessoal() : telaIdentificacao(); break;
+      case 'resumo': html = telaResumo(); break;
+      case 'checkout': html = '<div class="checkout-raiz" id="checkout-raiz"></div>'; break;
       case 'teste': html = telaGrupo(); break;
       case 'parte2-intro': html = telaParte2Intro(); break;
       case 'parte2': html = telaGrupo(); break;
       case 'confirmacao': html = telaConfirmacao(); break;
       case 'enviando': html = telaEnvio(); break;
       case 'concluido': html = telaConclusao(); break;
-      default: html = telaBoasVindas();
+      default: html = PESSOAL ? telaBoasVindasPessoal() : telaBoasVindas();
     }
     app.innerHTML = html;
+    if (!telaLink && !telaP2 && estado.etapa === 'checkout') montarCheckout();
     // Layout da página depende da tela (boas-vindas é mais larga, como o login do BI).
-    try { document.body.setAttribute('data-etapa', telaLink ? 'link' : (estado.etapa || 'boasvindas')); } catch (e) { /* ignora */ }
+    try {
+      document.body.setAttribute('data-etapa', telaLink ? 'link' : (telaP2 ? 'resumo' : (estado.etapa || 'boasvindas')));
+      if (PESSOAL) document.body.setAttribute('data-modo', 'pessoal');
+    } catch (e) { /* ignora */ }
     ligarEventos();
     iniciarCronometro();
     if (!telaLink && deveMostrarDemo(estado)) iniciarDemo();
@@ -1389,10 +1795,14 @@
   // A barra conta os N grupos + as 2 telas da confirmação.
   // Com a Parte 2, a barra conta também os grupos dela (as duas partes juntas).
   var TELAS_CONFIRMACAO = 2;
-  function passosTotais() { return N + passosParte2() + TELAS_CONFIRMACAO; }
+  function passosTotais() {
+    if (P2_TOKEN) return N2;
+    return N + passosParte2() + (SEM_VALIDACAO ? 0 : TELAS_CONFIRMACAO);
+  }
 
   // Passos feitos no grupo da tela (parte 1: i; parte 2: N + k).
   function feitosGrupo(completo) {
+    if (P2_TOKEN) return estado.grupo2 + (completo ? 1 : 0);
     return naParte2() ? N + estado.grupo2 + (completo ? 1 : 0) : estado.grupo + (completo ? 1 : 0);
   }
 
@@ -1529,6 +1939,7 @@
   // Sem revisão: depois do último grupo vem a confirmação ("Avançar"); sem a etapa de confirmação, já envia.
   // Com a Parte 2, o último grupo da parte 1 leva à transição ("Avançar").
   function rotuloProximo(ultimo) {
+    if (PESSOAL && ultimo) return naParte2() ? 'Ver meu relatório' : 'Ver meu resultado';
     if (ultimo && P2() && !naParte2()) return 'Avançar';
     return ultimo && !modValidacao() ? 'Enviar e finalizar' : 'Avançar';
   }
@@ -1540,9 +1951,9 @@
     return '' +
       '<section class="caixa tela-grupo tela-parte2" aria-labelledby="titulo">' +
         faixaDemonstracao() +
-        barraProgressoHtml('Parte', 2, 2, N) +
+        barraProgressoHtml('Parte', 2, 2, P2_TOKEN ? 0 : N) +
         '<div class="parte2-corpo surgir">' +
-          '<p class="sobretitulo">Primeira parte concluída</p>' +
+          '<p class="sobretitulo">' + (P2_TOKEN ? 'Completo + Parte 2' : 'Primeira parte concluída') + '</p>' +
           '<h1 id="titulo" class="titulo-grupo">Agora pense no seu trabalho</h1>' +
           '<p class="parte2-destaque">Como o seu trabalho exige que você seja? Não é como você gostaria de ser.</p>' +
           '<ul class="parte2-lista">' +
@@ -1554,7 +1965,9 @@
         '<div class="barra-nav">' +
           '<p class="barra-dica" id="dica-avancar">Leva uns 3 minutos.</p>' +
           '<div class="barra-botoes">' +
-            '<button type="button" class="botao botao--claro botao--grande" data-acao="parte2-voltar">Voltar</button>' +
+            (P2_TOKEN
+              ? '<a class="botao botao--claro botao--grande" href="' + escapar(linkMeuRelatorio(P2_TOKEN)) + '">Agora não</a>'
+              : '<button type="button" class="botao botao--claro botao--grande" data-acao="parte2-voltar">Voltar</button>') +
             '<button type="button" class="botao botao--principal botao--grande" data-acao="parte2-comecar" aria-describedby="dica-avancar">' +
               (comecou ? 'Continuar' : 'Começar') +
             '</button>' +
@@ -1680,6 +2093,7 @@
   }
 
   function telaEnvio() {
+    if (PESSOAL) return telaEnvioPessoal();
     if (envio.carregando || !envio.erro) {
       return '' +
         '<section class="caixa centro surgir" aria-labelledby="titulo" aria-busy="true">' +
@@ -1735,144 +2149,6 @@
   // A pessoa vê o próprio resultado? Com link, vale a configuração da avaliação; sem link, a do CONFIG.
   function mostraResultado() {
     return AVAL ? AVAL.mostrarResultado === true : CONFIG.MOSTRAR_RESULTADO_AO_CANDIDATO === true;
-  }
-
-  function pctTexto(v) { return String(Math.round(Number(v) * 10) / 10).replace('.', ',') + '%'; }
-
-  function listaTags(itens) {
-    if (!itens || !itens.length) return '';
-    return '<ul class="tags">' + itens.map(function (t) { return '<li class="selo">' + escapar(t) + '</li>'; }).join('') + '</ul>';
-  }
-
-  // Itens { titulo, texto, prazo? } em cartões empilhados.
-  function listaItens(itens, comPrazo) {
-    if (!itens || !itens.length) return '';
-    return '<ul class="rel-itens' + (comPrazo ? ' rel-itens--plano' : '') + '">' + itens.map(function (it) {
-      return '<li class="rel-item">' +
-        (comPrazo ? '<span class="rel-prazo">' + escapar(it.prazo) + '</span>' : '') +
-        '<p class="rel-item-titulo">' + escapar(it.titulo) + '</p>' +
-        '<p class="rel-item-texto">' + escapar(it.texto) + '</p>' +
-      '</li>';
-    }).join('') + '</ul>';
-  }
-
-  function secaoRelatorio(sec) {
-    var corpo = '';
-    if (sec.id === 'fortes') corpo = listaTags(sec.caracteristicas) + '<h3 class="rel-h3">Como usar mais</h3>' + listaItens(sec.itens);
-    else if (sec.id === 'pressao') corpo = listaTags(sec.sinais) + '<h3 class="rel-h3">O que fazer nessas horas</h3>' + listaItens(sec.itens);
-    else if (sec.id === 'comunicacao') {
-      corpo = '<ul class="rel-itens">' + (sec.perfis || []).map(function (pf) {
-        return '<li class="rel-item rel-com" data-letra="' + escapar(pf.letra) + '">' +
-          '<p class="rel-item-titulo"><span class="letra-disc letra-disc--mini disc-' + escapar(pf.letra) + '" aria-hidden="true">' + escapar(pf.letra) + '</span>' +
-            'Com pessoas de perfil ' + escapar(pf.rotulo) + ' <span class="perfil-sub">' + escapar(pf.nome) + '</span></p>' +
-          '<p class="rel-item-texto">' + escapar(pf.texto) + '</p>' +
-        '</li>';
-      }).join('') + '</ul>';
-    } else corpo = listaItens(sec.itens, sec.id === 'plano');
-    var idT = 'rel-' + escapar(sec.id);
-    return '' +
-      '<section class="caixa rel-caixa rel-secao surgir" data-secao="' + escapar(sec.id) + '" aria-labelledby="' + idT + '">' +
-        '<h2 id="' + idT + '" class="caixa__titulo rel-secao-titulo">' + escapar(sec.titulo) + '</h2>' +
-        (sec.intro ? '<p class="rel-nota">' + escapar(sec.intro) + '</p>' : '') +
-        corpo +
-      '</section>';
-  }
-
-  var NOMES_FATORES = { D: 'Dominância', I: 'Influência', S: 'Estabilidade', C: 'Conformidade' };
-
-  function larguraPct(v) { return Math.max(4, Math.min(100, (Number(v) / 40) * 100)); }
-
-  // "Onde você está se esticando" (Parte 2): índice de esforço, natural × trabalho por fator e os textos.
-  function secaoEsticando(sec, d) {
-    var natural = {};
-    (d.fatores || []).forEach(function (f) { natural[f.letra] = Number(f.pct); });
-    var ex = (sec.exigido && sec.exigido.percentuais) || {};
-    var comparacao = LETRAS.map(function (l) {
-      var n = natural[l], e = Number(ex[l]);
-      if (!isFinite(n) || !isFinite(e)) return '';
-      var delta = Math.round((e - n) * 10) / 10;
-      var deltaTxt = delta > 0 ? '+' + pctTexto(delta).replace('%', '') : delta < 0 ? '−' + pctTexto(-delta).replace('%', '') : '0';
-      return '' +
-        '<li class="estica-fator" data-letra="' + l + '">' +
-          '<span class="letra-disc letra-disc--mini disc-' + l + '" aria-hidden="true">' + l + '</span>' +
-          '<span class="estica-nome">' + escapar(NOMES_FATORES[l]) + '</span>' +
-          '<span class="estica-delta' + (Math.abs(delta) >= 3 ? ' estica-delta--forte' : '') + '" aria-label="diferença de ' + escapar(deltaTxt) + ' pontos">' + escapar(deltaTxt) + '</span>' +
-          '<span class="estica-barras">' +
-            '<span class="estica-linha"><span class="estica-rotulo">Natural</span><span class="trilho estica-trilho"><span class="estica-valor disc-' + l + '" style="width:' + larguraPct(n) + '%"></span></span><span class="estica-pct">' + pctTexto(n) + '</span></span>' +
-            '<span class="estica-linha"><span class="estica-rotulo">Trabalho</span><span class="trilho estica-trilho"><span class="estica-valor estica-valor--trabalho" style="width:' + larguraPct(e) + '%"></span></span><span class="estica-pct">' + pctTexto(e) + '</span></span>' +
-          '</span>' +
-        '</li>';
-    }).join('');
-    var indice = Math.max(0, Math.min(100, Math.round(Number(sec.indice) || 0)));
-    var idT = 'rel-' + escapar(sec.id);
-    return '' +
-      '<section class="caixa rel-caixa rel-secao rel-esticando surgir" data-secao="esticando" data-faixa="' + escapar(sec.faixa || '') + '" aria-labelledby="' + idT + '">' +
-        '<h2 id="' + idT + '" class="caixa__titulo rel-secao-titulo">' + escapar(sec.titulo) + '</h2>' +
-        (sec.intro ? '<p class="rel-nota">' + escapar(sec.intro) + '</p>' : '') +
-        '<div class="estica-indice">' +
-          '<p class="estica-indice-num"><span class="t-numero">' + indice + '</span><span class="estica-indice-de">de 100</span></p>' +
-          '<p class="estica-indice-texto">Esforço de adaptação <span class="selo selo--noite estica-faixa">' + escapar(sec.rotulo || '') + '</span></p>' +
-        '</div>' +
-        (comparacao ? '<ul class="estica-fatores" aria-label="Seu jeito natural e o que o trabalho pede, por fator">' + comparacao + '</ul>' : '') +
-        listaItens(sec.itens) +
-      '</section>';
-  }
-
-  // Relatório "modelo pessoa" (dados de js/relatorio-pessoa.js) em cartões empilhados.
-  // Com a rodada 3: nome da combinação, faixa de intensidade de cada fator, as seções de aprofundamento e,
-  // com a Parte 2, "Onde você está se esticando" logo depois do resumo.
-  function avatarHtml(foto, nome) {
-    var inicial = String(nome || '').trim().charAt(0).toUpperCase();
-    return '<span class="rel-avatar" aria-hidden="true">' +
-      (fotoValida(foto) ? '<img src="' + escapar(foto) + '" alt="" width="48" height="48">' : escapar(inicial || '•')) + '</span>';
-  }
-
-  function relatorioPessoaHtml(d, foto) {
-    if (!d) return '';
-    var faixas = {};
-    (d.intensidade || []).forEach(function (f) { if (f && f.letra) faixas[f.letra] = f; });
-    var barras = d.fatores.map(function (f) {
-      var largura = larguraPct(f.pct);
-      var fx = faixas[f.letra];
-      return '' +
-        '<li class="barra-linha rel-fator" data-letra="' + escapar(f.letra) + '"' + (fx ? ' data-faixa="' + escapar(fx.faixa) + '"' : '') + '>' +
-          '<span class="letra-disc disc-' + escapar(f.letra) + ' barra-letra" aria-hidden="true">' + escapar(f.letra) + '</span>' +
-          '<span class="barra-nome"><span class="rel-fator-nome">' + escapar(f.nome) + '</span>' +
-            '<span class="visualmente-oculto"> (' + escapar(f.letra) + ')</span>' +
-            (fx && fx.rotulo ? '<span class="rel-fator-faixa">Intensidade ' + escapar(String(fx.rotulo).toLowerCase()) + '</span>' : '') +
-            '<span class="rel-fator-desc">' + escapar(f.descricao) + '</span></span>' +
-          '<span class="barra-trilho trilho" aria-hidden="true"><span class="barra-valor disc-' + escapar(f.letra) + '" style="width:' + largura + '%"></span></span>' +
-          '<span class="barra-pct rel-pct">' + pctTexto(f.pct) + '</span>' +
-        '</li>';
-    }).join('');
-    var titulo = (d.nome ? escapar(d.nome) + ', seu' : 'Seu') + ' estilo é ' + escapar(d.primario.rotulo) + ', com traços de ' + escapar(d.secundario.rotulo);
-    var cb = d.combinacao;
-    var combinacao = cb && cb.nome
-      ? '<p class="rel-combinacao"><span class="rel-combinacao-rotulo">Sua combinação</span><strong class="rel-combinacao-nome">' + escapar(cb.nome) + '</strong>' +
-          (cb.frase ? '<span class="rel-combinacao-frase">' + escapar(cb.frase) + '</span>' : '') + '</p>'
-      : '';
-    var extras = Array.isArray(d.aprofundamento) ? d.aprofundamento : [];
-    var est = extras.filter(function (x) { return x && x.id === 'esticando'; })[0] || d.esticando || null;
-    var outras = extras.filter(function (x) { return x && x.id !== 'esticando'; });
-    return '' +
-      '<div class="relatorio-candidato relatorio-pessoa" data-codigo="' + escapar(d.codigo) + '">' +
-        '<section class="caixa rel-caixa surgir" aria-labelledby="titulo-relatorio">' +
-          '<div class="rel-cabeca">' + avatarHtml(foto, d.nome) + '<p class="sobretitulo">Seu relatório DISC</p></div>' +
-          '<h2 id="titulo-relatorio" class="rel-titulo">' + titulo + '</h2>' +
-          '<p class="rel-intro rel-frase">' + escapar(d.frase) + '</p>' +
-          combinacao +
-          '<h3 class="rel-h3">Seus 4 fatores</h3>' +
-          '<p class="rel-nota">Quanto maior a barra, mais esse jeito aparece no seu dia a dia. Os quatro somam 100%.</p>' +
-          '<ul class="barras rel-barras">' + barras + '</ul>' +
-          '<div class="acoes rel-acoes">' +
-            '<button type="button" class="botao botao--claro" data-acao="imprimir">Salvar em PDF</button>' +
-          '</div>' +
-        '</section>' +
-        (est ? secaoEsticando(est, d) : '') +
-        d.secoes.map(secaoRelatorio).join('') +
-        outras.map(secaoRelatorio).join('') +
-        '<p class="rel-aviso">' + escapar(d.aviso) + '</p>' +
-      '</div>';
   }
 
   // Relatório DISC da pessoa na conclusão (desenvolvimento pessoal). Nunca o Guia para a Liderança, a confiabilidade,
@@ -2057,6 +2333,14 @@
 
   // Nome da empresa no cabeçalho e no título da aba.
   function aplicarMarca() {
+    if (PESSOAL) {
+      var nomeTopo = document.getElementById('marca');
+      if (nomeTopo) nomeTopo.textContent = EMPRESA_B2C;
+      var seloP = document.getElementById('topo-empresa');
+      if (seloP) { seloP.textContent = 'Mapa de Perfil'; seloP.hidden = false; }
+      document.title = 'Seu Mapa de Perfil · ' + EMPRESA_B2C;
+      return;
+    }
     var empresa = nomeEmpresa();
     var selo = document.getElementById('topo-empresa');
     if (selo) { selo.textContent = empresa; selo.hidden = !empresa; }
@@ -2147,6 +2431,7 @@
   }
 
   function enviarIdentificacao(form) {
+    if (PESSOAL) { enviarIdentificacaoPessoal(form); return; }
     var f = FORM();
     var nome = form.querySelector('#nome').value;
     var tel = form.querySelector('#telefone').value;
@@ -2200,6 +2485,11 @@
 
   // A identificação salva ainda vale para o formulário atual? (ex.: progresso de antes do campo idade)
   function identificacaoValida() {
+    if (PESSOAL) {
+      var ep = validarIdentificacaoPessoal(estado);
+      for (var c in ep) if (Object.prototype.hasOwnProperty.call(ep, c)) return false;
+      return true;
+    }
     if (validarNome(estado.nome) || validarTelefone(estado.telefone) || !estado.consentimento) return false;
     var erros = validarCamposFormulario(estado, FORM());
     for (var k in erros) if (Object.prototype.hasOwnProperty.call(erros, k)) return false;
@@ -2218,6 +2508,24 @@
     if (!acao) return;
 
     switch (acao) {
+      case 'comprar':
+        abrirCheckout(alvo.getAttribute('data-pacote'));
+        break;
+      case 'refazer':
+        if (alvo.getAttribute('data-confirmar') !== 'sim') {
+          alvo.setAttribute('data-confirmar', 'sim');
+          alvo.textContent = 'Toque de novo para refazer';
+          var nota = app.querySelector('#nota-refazer');
+          if (nota) nota.hidden = false;
+          return;
+        }
+        refazerPessoal();
+        break;
+      case 'ver-resumo':
+        estado = estadoInicial();
+        estado.etapa = 'resumo';
+        render(true);
+        break;
       case 'comecar':
         // Concluído ou dados de outro link: começa do zero.
         if (estado.etapa === 'concluido' || String(estado.avaliacaoCodigo || '') !== (AVAL ? AVAL.codigo : '')) estado = estadoInicial();
@@ -2776,6 +3084,7 @@
   }
 
   function concluir() {
+    if (PESSOAL) { concluirPessoal(); return; }
     if (envio.carregando) return;
     envio = { carregando: false, erro: '' };
     if (primeiroIncompleto() !== -1) { irParaGrupoIncompleto('Falta ordenar este grupo para concluir.'); return; }
@@ -2861,6 +3170,398 @@
     }
   }
 
+  /* ------------------------------------------------------------------ */
+  /* Modo pessoal (venda B2C): identificação, resumo grátis, paywall,    */
+  /* checkout (js/checkout.js) e Parte 2 do Completo + Parte 2.          */
+  /* ------------------------------------------------------------------ */
+
+  function lerPessoal() {
+    var p = lerStorage(CHAVE_PESSOAL);
+    return p && typeof p === 'object' && p.relatorio ? p : null;
+  }
+  function gravarPessoal(p) { gravarStorage(CHAVE_PESSOAL, p); }
+  function CK() { return root.DISC_CHECKOUT || null; }
+  function pacotesAtuais() {
+    var ck = CK();
+    return PACOTES || (ck ? ck.normalizarPacotes(null) : []);
+  }
+  function linkMeuRelatorio(token) {
+    var ck = CK();
+    return ck ? ck.linkRelatorio(root.location.href, token) : 'meu-relatorio.html#t-' + encodeURIComponent(token);
+  }
+  function pedidoLiberado(ps) {
+    var ck = CK();
+    return !!(ps && ps.pedido && ps.pedido.tokenAcesso && ck && ck.liberado(ps.pedido.status));
+  }
+
+  function telaBoasVindasPessoal() {
+    var ps = lerPessoal();
+    return '' +
+      '<section class="caixa surgir pessoal-retomar" aria-labelledby="titulo">' +
+        '<p class="sobretitulo">' + escapar(EMPRESA_B2C) + ' · Mapa de Perfil</p>' +
+        '<h1 id="titulo" class="titulo-pagina">Você tem um teste em andamento</h1>' +
+        '<p class="subtitulo">Suas respostas ficaram salvas neste aparelho. Continue de onde parou ou comece de novo.</p>' +
+        '<div class="acoes acoes-coluna">' +
+          '<button type="button" class="botao botao--principal botao--grande" data-acao="continuar">Continuar de onde parei</button>' +
+          '<button type="button" class="botao botao--claro botao--grande" data-acao="recomecar">Começar do zero</button>' +
+          (ps ? '<button type="button" class="botao botao--link" data-acao="ver-resumo">Ver o meu último resumo</button>' : '') +
+        '</div>' +
+      '</section>';
+  }
+
+  function telaIdentificacaoPessoal() {
+    return '' +
+      '<section class="caixa surgir pessoal-id" aria-labelledby="titulo">' +
+        '<p class="sobretitulo etapa">Seu Mapa de Perfil</p>' +
+        '<h1 id="titulo" class="titulo-pagina">Antes de começar</h1>' +
+        '<p class="subtitulo">São 25 grupos de 4 palavras, cerca de 10 minutos. No fim, você vê o seu resumo grátis na hora.</p>' +
+        avisoHtml() +
+        '<form id="form-identificacao" class="formulario" novalidate>' +
+          '<div class="campo">' +
+            '<label class="campo__rotulo" for="nome">Nome completo <span class="obrigatorio" aria-hidden="true">*</span></label>' +
+            '<input class="entrada entrada--principal" id="nome" name="nome" type="text" autocomplete="name" autocapitalize="words" required maxlength="120" ' +
+              'aria-describedby="erro-nome" value="' + escapar(estado.nome) + '">' +
+            '<p class="campo__erro erro" id="erro-nome" role="alert"></p>' +
+          '</div>' +
+          '<div class="campo">' +
+            '<label class="campo__rotulo" for="email">E-mail <span class="obrigatorio" aria-hidden="true">*</span></label>' +
+            '<input class="entrada" id="email" name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" required maxlength="' + LIMITE_EMAIL + '" ' +
+              'aria-describedby="dica-email erro-email" value="' + escapar(estado.email) + '">' +
+            '<p class="campo__ajuda" id="dica-email">É por ele que você recebe e recupera o seu relatório.</p>' +
+            '<p class="campo__erro erro" id="erro-email" role="alert"></p>' +
+          '</div>' +
+          '<div class="campo">' +
+            '<label class="campo__rotulo" for="telefone">WhatsApp com DDD <span class="texto-suave">(opcional)</span></label>' +
+            '<input class="entrada" id="telefone" name="telefone" type="tel" inputmode="numeric" autocomplete="tel-national" maxlength="25" ' +
+              'placeholder="(11) 99999-8888" aria-describedby="dica-telefone erro-telefone" value="' + escapar(formatarTelefone(estado.telefone)) + '">' +
+            '<p class="campo__ajuda" id="dica-telefone">Para mandar o link do relatório para você, se quiser.</p>' +
+            '<p class="campo__erro erro" id="erro-telefone" role="alert"></p>' +
+          '</div>' +
+          '<div class="campo consentimento">' +
+            '<label class="marcar" for="consentimento">' +
+              '<input id="consentimento" name="consentimento" type="checkbox" required aria-describedby="erro-consentimento"' + (estado.consentimento ? ' checked' : '') + '>' +
+              '<span>Autorizo a <strong>' + escapar(EMPRESA_B2C) + '</strong> a usar meus dados (nome, e-mail, WhatsApp e respostas) <strong>para gerar o meu relatório</strong> e me enviar o acesso a ele. ' +
+                'Eles <strong>não são compartilhados com empresas</strong> e posso pedir a exclusão quando quiser, conforme a LGPD. ' +
+                '<a href="privacidade.html" target="_blank" rel="noopener">Política de privacidade</a>.</span>' +
+            '</label>' +
+            '<p class="campo__erro erro" id="erro-consentimento" role="alert"></p>' +
+          '</div>' +
+          '<p class="pessoal-lembrete">Não há respostas certas ou erradas, nem perfil melhor ou pior. Responda pensando em como você realmente é.</p>' +
+          '<div class="acoes">' +
+            '<a class="botao botao--claro botao--grande" href="descubra.html">Voltar</a>' +
+            '<button type="submit" class="botao botao--principal botao--grande">' + (estado.reenviar ? 'Salvar e ver meu resultado' : 'Começar o teste') + '</button>' +
+          '</div>' +
+        '</form>' +
+      '</section>';
+  }
+
+  function enviarIdentificacaoPessoal(form) {
+    var dados = {
+      nome: form.querySelector('#nome').value,
+      email: form.querySelector('#email').value,
+      telefone: form.querySelector('#telefone').value,
+      consentimento: form.querySelector('#consentimento').checked
+    };
+    var erros = validarIdentificacaoPessoal(dados);
+    var ok = true;
+    ['nome', 'email', 'telefone', 'consentimento'].forEach(function (c) { if (!mostrarErro(form, c, erros[c] || '')) ok = false; });
+    if (!ok) {
+      var primeiro = form.querySelector('[aria-invalid="true"]');
+      if (primeiro) primeiro.focus();
+      return;
+    }
+    estado.nome = normalizarNome(dados.nome);
+    estado.email = limparEmail(dados.email);
+    estado.telefone = limparTelefone(dados.telefone);
+    estado.consentimento = true;
+    if (!estado.id) estado.id = gerarId();
+    if (!estado.permutacoes) estado.permutacoes = gerarPermutacoes();
+    if (!estado.inicio) estado.inicio = new Date().toISOString();
+    if (estado.reenviar) { estado.reenviar = false; concluirPessoal(); return; }
+    var p = primeiroIncompleto();
+    if (p === -1) { concluirPessoal(); return; }
+    estado.grupo = p;
+    irPara('teste');
+  }
+
+  function telaEnvioPessoal() {
+    var p2 = !!P2_TOKEN;
+    if (envio.carregando || !envio.erro) {
+      return '' +
+        '<section class="caixa centro surgir" aria-labelledby="titulo" aria-busy="true">' +
+          '<div class="giro giro--grande" aria-hidden="true"></div>' +
+          '<h1 id="titulo" class="titulo-pagina">' + (p2 ? 'Montando o seu relatório…' : 'Calculando o seu resultado…') + '</h1>' +
+          '<p class="subtitulo">Isso leva só alguns segundos. Não feche esta página.</p>' +
+        '</section>';
+    }
+    return '' +
+      '<section class="caixa surgir" aria-labelledby="titulo">' +
+        '<h1 id="titulo" class="titulo-pagina">Não foi possível continuar</h1>' +
+        '<div class="aviso aviso--erro alerta" role="alert">' + escapar(envio.erro) + '</div>' +
+        '<p class="subtitulo">Suas respostas continuam salvas neste aparelho. Verifique a conexão e tente de novo.</p>' +
+        '<div class="acoes acoes-coluna">' +
+          '<button type="button" class="botao botao--principal botao--grande" data-acao="retentar">Tentar novamente</button>' +
+        '</div>' +
+      '</section>';
+  }
+
+  function concluirPessoal() {
+    if (P2_TOKEN) { enviarParte2Pessoal(); return; }
+    if (envio.carregando) return;
+    envio = { carregando: false, erro: '' };
+    if (primeiroIncompleto() !== -1) { irParaGrupoIncompleto('Falta ordenar este grupo para concluir.'); return; }
+    if (!identificacaoValida()) {
+      estado.reenviar = true;
+      avisoTela = 'Falta completar seus dados. Confira e toque em Salvar e ver meu resultado.';
+      irPara('identificacao');
+      return;
+    }
+    completarDemonstracao();
+    var payload;
+    try { payload = montarPayloadPessoal(estado, estado.ordens); }
+    catch (e) { irParaGrupoIncompleto('Encontramos um problema nas respostas. Confira este grupo e continue.'); return; }
+    var R = root.DISC_RELATORIO_PESSOA;
+    var base = {
+      primeiroNome: normalizarNome(estado.nome).split(' ')[0],
+      email: payload.email,
+      telefone: limparTelefone(estado.telefone),
+      relatorio: R ? R.dadosDoResultado(payload.resultado.percentuais, payload.resultado.codigo) : payload.resultado,
+      pacoteEscolhido: MODO.pacote || '',
+      cupom: MODO.cupom || '',
+      etapa: 'resumo',
+      criadoEm: new Date().toISOString()
+    };
+    var api = root.DISC_API;
+    var temApi = !!(CONFIG.API_URL && String(CONFIG.API_URL).trim() && api && typeof api.enviarPessoal === 'function');
+    function pronto(extra) {
+      for (var k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) base[k] = extra[k];
+      gravarPessoal(base);
+      apagarStorage(CHAVE_PROGRESSO);
+      envio = { carregando: false, erro: '' };
+      pararCronometro();
+      estado = estadoInicial();
+      estado.etapa = 'resumo';
+      render(true);
+      anunciar('Seu resumo grátis está pronto.');
+    }
+    if (!temApi) { pronto({ tokenResumo: '' }); return; }
+    envio = { carregando: true, erro: '' };
+    irPara('enviando');
+    api.enviarPessoal(payload).then(function (resp) {
+      var token = String((resp && (resp.tokenResumo || resp.token_resumo || resp.token)) || '');
+      pronto({ tokenResumo: token, protocolo: String((resp && resp.protocolo) || '') });
+    }, function (erro) {
+      var msg = (erro && erro.message) || 'Erro desconhecido.';
+      if (root.console && root.console.warn) root.console.warn('Falha no envio do Mapa de Perfil:', msg);
+      envio = { carregando: false, erro: erro && erro.resposta ? msg : mensagemErroEnvio(msg) };
+      estado.etapa = 'enviando';
+      render(true);
+    });
+  }
+
+  function telaResumo() {
+    var ps = lerPessoal();
+    var R = root.DISC_RELATORIO_PESSOA;
+    if (!ps || !R) { estado.etapa = 'identificacao'; return telaIdentificacaoPessoal(); }
+    var s = null, d = null;
+    try { s = R.montarSimples(ps.relatorio, ps.primeiroNome, DATA); d = R.montar(ps.relatorio, ps.primeiroNome, DATA); } catch (e) { s = null; }
+    if (!s) { estado.etapa = 'identificacao'; return telaIdentificacaoPessoal(); }
+    var venda;
+    if (pedidoLiberado(ps)) {
+      var url = linkMeuRelatorio(ps.pedido.tokenAcesso);
+      venda = '' +
+        '<section class="caixa caixa--destaque liberado surgir" aria-labelledby="titulo-liberado">' +
+          '<h2 id="titulo-liberado" class="titulo-secao">Seu relatório completo está liberado</h2>' +
+          '<p class="subtitulo">Abra quando quiser pelo seu link. Ele não expira.</p>' +
+          '<div class="acoes acoes-coluna"><a class="botao botao--laranja botao--grande" href="' + escapar(url) + '">Abrir meu relatório</a></div>' +
+        '</section>';
+    } else if (!ps.tokenResumo) {
+      venda = previaPagaHtml(d) +
+        '<section class="caixa paywall surgir" aria-labelledby="titulo-paywall">' +
+          '<h2 id="titulo-paywall" class="titulo-secao">Relatório completo</h2>' +
+          '<div class="aviso">A compra do relatório completo fica disponível em breve.</div>' +
+        '</section>';
+    } else {
+      venda = previaPagaHtml(d) +
+        '<section class="caixa paywall surgir" aria-labelledby="titulo-paywall">' +
+          '<p class="sobretitulo">Destrave o seu relatório</p>' +
+          '<h2 id="titulo-paywall" class="titulo-secao">Escolha o seu relatório</h2>' +
+          '<p class="subtitulo">Pagamento único, por Pix ou cartão. O acesso abre na hora e fica no seu link.</p>' +
+          '<div id="pacotes-caixa">' + pacotesHtml(pacotesAtuais(), ps.pacoteEscolhido || MODO.pacote) + '</div>' +
+          '<p class="ck-garantia"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg>' +
+            '<span><strong>Garantia de 7 dias.</strong> Não gostou? Devolvemos o valor, sem perguntas.</span></p>' +
+        '</section>';
+    }
+    return '' +
+      '<div class="pilha-telas pessoal-resumo">' +
+        resumoGratisHtml(s) +
+        venda +
+        '<div class="rodape">' +
+          '<p class="rodape-nota">O DISC descreve estilo de comportamento, não competência. Não existe perfil melhor ou pior.</p>' +
+          '<a class="botao botao--link" href="meu-relatorio.html#recuperar">Já comprei: recuperar meu relatório</a>' +
+          '<button type="button" class="botao botao--link" data-acao="refazer">Refazer o teste</button>' +
+          '<p class="rodape-nota" id="nota-refazer" hidden>Um relatório já comprado continua no seu link, ligado a este resultado. Um novo resultado precisa de uma nova compra.</p>' +
+        '</div>' +
+      '</div>';
+  }
+
+  function abrirCheckout(chave) {
+    var ps = lerPessoal();
+    if (!ps || !ps.tokenResumo) return;
+    ps.pacoteEscolhido = PACOTES_PAGOS.indexOf(chave) !== -1 ? chave : 'completo';
+    ps.etapa = 'checkout';
+    gravarPessoal(ps);
+    estado.etapa = 'checkout';
+    render(true);
+  }
+
+  function montarCheckout() {
+    var ck = CK();
+    var el = app.querySelector('#checkout-raiz');
+    var ps = lerPessoal();
+    if (!ck || !el || !ps) return;
+    var pac = pacotesAtuais().filter(function (p) { return p.chave === ps.pacoteEscolhido; })[0] ||
+      ck.PACOTES_PADRAO.filter(function (p) { return p.chave === ps.pacoteEscolhido; })[0] || ck.PACOTES_PADRAO[1];
+    var salvo = ps.pedido && ps.pedido.pacote === pac.chave ? ps.pedido : null;
+    checkout = ck.criar({
+      api: root.DISC_API,
+      tokenResumo: ps.tokenResumo,
+      pacote: pac,
+      pedido: salvo,
+      cupom: ps.cupom || '',
+      telefone: ps.telefone,
+      aoAnunciar: anunciar,
+      aoMudar: function (pedido) {
+        var atual = lerPessoal();
+        if (!atual) return;
+        if (pedido) atual.pedido = pedido; else delete atual.pedido;
+        gravarPessoal(atual);
+      },
+      aoVoltar: function () {
+        var atual = lerPessoal();
+        if (atual) { atual.etapa = 'resumo'; gravarPessoal(atual); }
+        checkout = null;
+        estado.etapa = 'resumo';
+        render(true);
+      },
+      aoParte2: function (pedido) {
+        checkout = null;
+        entrarParte2(pedido.tokenAcesso, { primeiroNome: ps.primeiroNome });
+      }
+    });
+    checkout.montar(el);
+  }
+
+  function refazerPessoal() {
+    var ps = lerPessoal() || {};
+    apagarStorage(CHAVE_PESSOAL);
+    apagarStorage(CHAVE_PROGRESSO);
+    estado = estadoInicial();
+    estado.email = ps.email || '';
+    estado.telefone = ps.telefone || '';
+    irPara('identificacao');
+  }
+
+  /* ---- Parte 2 do Completo + Parte 2 (mesma mecânica de arrastar) ---- */
+
+  function telaParte2Link() {
+    if (telaP2 === 'carregando') {
+      return '<section class="caixa centro" aria-labelledby="titulo" aria-busy="true"><div class="giro giro--grande" aria-hidden="true"></div>' +
+        '<h1 id="titulo" class="subtitulo">Abrindo a Parte 2…</h1></section>';
+    }
+    return '' +
+      '<section class="caixa surgir" aria-labelledby="titulo">' +
+        '<h1 id="titulo" class="titulo-pagina">Não foi possível abrir a Parte 2</h1>' +
+        '<div class="aviso aviso--erro alerta" role="alert">' + escapar(telaP2) + '</div>' +
+        '<div class="acoes acoes-coluna"><a class="botao botao--principal botao--grande" href="meu-relatorio.html#recuperar">Recuperar meu relatório</a></div>' +
+      '</section>';
+  }
+
+  function entrarParte2(token, dados) {
+    P2_TOKEN = token;
+    SEM_VALIDACAO = true;
+    CHAVE_PROGRESSO = 'disc_pessoal_parte2_v1';
+    telaP2 = '';
+    var salvo = lerStorage(CHAVE_PROGRESSO);
+    estado = estadoInicial();
+    estado.p2Token = token;
+    estado.nome = String((dados && dados.primeiroNome) || '');
+    if (salvo && salvo.p2Token === token && !progressoExpirado(salvo)) {
+      if (Array.isArray(salvo.ordens2)) estado.ordens2 = salvo.ordens2;
+      if (Array.isArray(salvo.respondidos2)) estado.respondidos2 = salvo.respondidos2;
+      if (Array.isArray(salvo.permutacoes2) && salvo.permutacoes2.length === TOTAL2) estado.permutacoes2 = salvo.permutacoes2;
+    }
+    if (!estado.permutacoes2) estado.permutacoes2 = gerarPermutacoes2();
+    try { root.history.replaceState(null, '', root.location.pathname + '?modo=pessoal#p2-' + token); } catch (e) { /* ignora */ }
+    if (algumRespondido2() && primeiroIncompleto2() !== -1) { estado.grupo2 = primeiroIncompleto2(); irPara('parte2'); }
+    else irPara('parte2-intro');
+  }
+
+  function carregarParte2(token) {
+    var api = root.DISC_API;
+    if (!api || typeof api.relatorioPessoal !== 'function') { telaP2 = 'A Parte 2 precisa do servidor.'; render(true); return; }
+    telaP2 = 'carregando';
+    render(false);
+    api.relatorioPessoal(token).then(function (r) {
+      var rel = (r && r.relatorio) || r || {};
+      var pacote = String(rel.pacote || '');
+      var temExigido = !!(rel.exigido && (typeof rel.exigido === 'string' ? rel.exigido : rel.exigido.percentuais));
+      if (pacote !== 'completo_plus' || temExigido) { root.location.replace(linkMeuRelatorio(token)); return; }
+      entrarParte2(token, { primeiroNome: rel.primeiroNome || rel.nome || '' });
+    }, function (e) {
+      telaP2 = (e && e.message) || 'Verifique a sua conexão e tente de novo.';
+      render(true);
+    });
+  }
+
+  function enviarParte2Pessoal() {
+    if (envio.carregando) return;
+    completarDemonstracao2();
+    var falta = primeiroIncompleto2();
+    if (falta !== -1) { estado.grupo2 = falta; avisoTela = 'Falta ordenar este grupo para concluir.'; irPara('parte2'); return; }
+    var exigido = exigidoDasOrdens(estado.ordens2);
+    var api = root.DISC_API;
+    envio = { carregando: true, erro: '' };
+    irPara('enviando');
+    Promise.resolve().then(function () { return api.salvarParte2Pessoal(P2_TOKEN, exigido); }).then(function (r) {
+      if (r && r.ok === false) throw new Error(r.erro || 'Não foi possível salvar a Parte 2.');
+      apagarStorage(CHAVE_PROGRESSO);
+      envio = { carregando: false, erro: '' };
+      root.location.assign(linkMeuRelatorio(P2_TOKEN));
+    }).catch(function (e) {
+      envio = { carregando: false, erro: (e && e.message) || 'Não foi possível salvar a Parte 2.' };
+      estado.etapa = 'enviando';
+      render(true);
+    });
+  }
+
+  function carregarPacotes() {
+    var api = root.DISC_API, ck = CK();
+    if (!api || typeof api.pacotesPublicos !== 'function' || !ck) return;
+    Promise.resolve().then(function () { return api.pacotesPublicos(); }).then(function (r) {
+      PACOTES = ck.normalizarPacotes(r);
+      var caixa = app.querySelector('#pacotes-caixa');
+      var ps = lerPessoal();
+      if (caixa && ps) caixa.innerHTML = pacotesHtml(PACOTES, ps.pacoteEscolhido || MODO.pacote);
+    }, function () { /* fica o padrão */ });
+  }
+
+  function iniciarPessoal() {
+    aplicarMarca();
+    estado = estadoInicial();
+    var temApi = !!(CONFIG.API_URL && String(CONFIG.API_URL).trim() && root.DISC_API);
+    if (temApi) carregarPacotes();
+    if (MODO.parte2Token) { carregarParte2(MODO.parte2Token); return; }
+    var ps = lerPessoal();
+    var salvo = lerStorage(CHAVE_PROGRESSO);
+    if (MODO.pacote && ps && !pedidoLiberado(ps)) { ps.pacoteEscolhido = MODO.pacote; gravarPessoal(ps); }
+    if (MODO.cupom && ps) { ps.cupom = MODO.cupom; gravarPessoal(ps); }
+    if (temProgresso(salvo)) estado.etapa = 'boasvindas';
+    else if (ps) estado.etapa = ps.etapa === 'checkout' && ps.tokenResumo && !pedidoLiberado(ps) ? 'checkout' : 'resumo';
+    else estado.etapa = 'identificacao';
+    render(false);
+  }
+
   function iniciar() {
     app = document.getElementById('app');
     aviso = document.getElementById('aviso');
@@ -2877,7 +3578,8 @@
     var temApi = !!(CONFIG.API_URL && String(CONFIG.API_URL).trim() && api && api.avaliacaoPublica);
     if (!temApi) CODIGO_LINK = '';
     // Algo em ?a= ou #a- que não é um código válido: link inválido, sem chamar o servidor.
-    var linkMalFormado = temApi && !CODIGO_LINK && /[?&]a=|^#a-/.test(String(root.location.search || '') + String(root.location.hash || ''));
+    if (PESSOAL) CODIGO_LINK = '';
+    var linkMalFormado = !PESSOAL && temApi && !CODIGO_LINK && /[?&]a=|^#a-/.test(String(root.location.search || '') + String(root.location.hash || ''));
     if (!CODIGO_LINK) aplicarMarca();
 
     estado = estadoInicial();
@@ -2901,6 +3603,7 @@
       if (document.hidden) { if (crono) { pararCronometro(); salvar(); } }
       else iniciarCronometro();
     });
+    if (PESSOAL) { iniciarPessoal(); return; }
     if (linkMalFormado) { telaLink = 'invalido'; render(false); return; }
     if (CODIGO_LINK) { carregarAvaliacao(); return; }
     render(false);

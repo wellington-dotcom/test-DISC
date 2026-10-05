@@ -39,6 +39,10 @@
  *              moverColaborador, desligarColaborador, salvarRelacoes, salvarRelatorioModelo, listarRelatoriosModelo,
  *              excluirRelatorioModelo, salvarMinhaFoto, removerFoto, moverResposta, contratarPessoa, versaoBanco
  *              (contrato em js/api-supabase.js e docs/SPEC.md).
+ *   Venda direta (só Supabase; aqui também "Disponível só com o servidor Supabase."): pacotesPublicos, enviarPessoal,
+ *              resumoPessoal, criarPedido, iniciarPagamento, statusPedido, relatorioPessoal, salvarParte2Pessoal,
+ *              recuperarAcesso, confirmarRetorno, listarPedidos, atualizarPedido, listarCupons, salvarCupom, excluirCupom, listarPacotes,
+ *              salvarPacote, resumoVendas.
  *   Utilitários: protocoloValido, normalizarProtocolo, normalizarCodigoAvaliacao, codigoAvaliacaoDaUrl.
  */
 (function (root) {
@@ -306,6 +310,25 @@
     moverResposta: soSupabase,
     contratarPessoa: soSupabase,
     versaoBanco: soSupabase,
+    // Venda direta (B2C): só no Supabase (contrato em js/api-supabase.js).
+    pacotesPublicos: soSupabase,
+    enviarPessoal: soSupabase,
+    resumoPessoal: soSupabase,
+    criarPedido: soSupabase,
+    iniciarPagamento: soSupabase,
+    statusPedido: soSupabase,
+    relatorioPessoal: soSupabase,
+    salvarParte2Pessoal: soSupabase,
+    recuperarAcesso: soSupabase,
+    confirmarRetorno: soSupabase,
+    listarPedidos: soSupabase,
+    atualizarPedido: soSupabase,
+    listarCupons: soSupabase,
+    salvarCupom: soSupabase,
+    excluirCupom: soSupabase,
+    listarPacotes: soSupabase,
+    salvarPacote: soSupabase,
+    resumoVendas: soSupabase,
 
     // --- pública: página do relatório para o contratante ---
     relatorioPublico: seguro(function (relatorioToken) {
@@ -324,7 +347,10 @@
     'relatorioMelhorarTextos', 'relatorioPublico',
     'listarEquipe', 'salvarColaborador', 'moverColaborador', 'desligarColaborador', 'salvarRelacoes',
     'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo', 'salvarMinhaFoto', 'removerFoto',
-    'moverResposta', 'contratarPessoa', 'versaoBanco'];
+    'moverResposta', 'contratarPessoa', 'versaoBanco',
+    'pacotesPublicos', 'enviarPessoal', 'resumoPessoal', 'criarPedido', 'iniciarPagamento', 'statusPedido', 'relatorioPessoal',
+    'salvarParte2Pessoal', 'recuperarAcesso', 'confirmarRetorno',
+    'listarPedidos', 'atualizarPedido', 'listarCupons', 'salvarCupom', 'excluirCupom', 'listarPacotes', 'salvarPacote', 'resumoVendas'];
 
   if (typeof module !== 'undefined' && module.exports) module.exports = DISC_API;
   else root.DISC_API = DISC_API;

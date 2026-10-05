@@ -13,10 +13,11 @@ import { criarDb } from '../../supabase/funcoes-compartilhadas/supabase-adaptado
 
 const RAIZ = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const SITE = 'https://disc.gestaosemcaos.com.br';
+const VENDAS = ['pagamento', 'asaas-webhook', 'infinitepay-webhook'];
 const IMPORT_SUPABASE = "import { createClient } from 'jsr:@supabase/supabase-js@2';";
 
 test('gerados em dia: motores-gerado.js e dist/funcoes/<nome>/index.ts (rode npm run montar:funcoes)', () => {
-  assert.deepEqual(funcoes(), ['admin', 'clickup-webhook', 'disc-sync']);
+  assert.deepEqual(funcoes(), ['admin', 'asaas-webhook', 'clickup-webhook', 'disc-sync', 'infinitepay-webhook', 'pagamento']);
   for (const g of gerarTudo()) {
     assert.ok(existsSync(g.caminho), g.caminho);
     assert.equal(readFileSync(g.caminho, 'utf8'), g.conteudo, g.caminho + ' desatualizado: rode npm run montar:funcoes');
@@ -31,9 +32,10 @@ test('dist/funcoes: um arquivo autocontido por função (só o import jsr do sup
     const imports = txt.split('\n').filter((l) => /^\s*import\s/.test(l) || /^\s*export\s/.test(l));
     assert.deepEqual(imports, [IMPORT_SUPABASE], nome);
     assert.ok(!/from\s+['"]\.\.?\//.test(txt), nome + ' sem imports relativos');
-    assert.ok(txt.includes(motor.trim()), nome + ' embute js/relatorio-motor.js');
+    if (!VENDAS.includes(nome)) assert.ok(txt.includes(motor.trim()), nome + ' embute js/relatorio-motor.js');
+    else assert.ok(!txt.includes('DISC_RELATORIO'), nome + ' não precisa do motor');
     assert.ok(txt.includes('Deno.serve('), nome);
-    assert.ok(!/pk_[A-Za-z0-9]|sk-ant-|service_role\s*[:=]\s*['"]ey/.test(txt), nome + ' sem segredos');
+    assert.ok(!/pk_[A-Za-z0-9]|sk-ant-|\$aact_|\bre_[A-Za-z0-9]{20,}|service_role\s*[:=]\s*['"]ey/.test(txt), nome + ' sem segredos');
   }
 });
 
@@ -138,4 +140,70 @@ test('adaptador do banco: respostas do processo por processo_id ou código; rese
   await db.configGravar('k', 'v2');
   assert.equal(await db.configLer('k'), 'v2');
   assert.equal(await db.configLer('nada'), null);
+});
+
+test('ponta a ponta com dist/: pagamento (criar) -> asaas-webhook (pago) sobre supabase-js falso', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'funcoes-vendas-'));
+  const fetchOriginal = globalThis.fetch;
+  t.after(() => { rmSync(dir, { recursive: true, force: true }); globalThis.fetch = fetchOriginal; delete globalThis.Deno; delete globalThis.__supabaseFalso; });
+  const ID = '0b6f7f1e-8a7d-4c1b-9a50-2a8c7c1d0e01';
+  const TOKEN = 'c'.repeat(64);
+  const sb = criarSupabaseFalso({ tabelas: { pedidos: [{ id: ID, pacote: 'completo', valor_centavos: 2900, status: 'aguardando', metodo: '',
+    asaas_cobranca_id: null, pagamento: null, email: 'bia@x.com', nome: 'Bia Lima', token_acesso: TOKEN, verificado_em: null }], limites_vendas: [] } });
+  const vistos = [];
+  const fetchFalso = async (url, o) => {
+    vistos.push(String(url));
+    const r = (c) => new Response(JSON.stringify(c), { status: 200 });
+    if (String(url).endsWith('/customers')) return r({ id: 'cus_1' });
+    if (String(url).endsWith('/payments')) return r({ id: 'pay_1', invoiceUrl: 'https://sandbox.asaas.com/i/pay_1', status: 'PENDING' });
+    if (String(url).endsWith('/pixQrCode')) return r({ encodedImage: 'QR', payload: 'PIX', expirationDate: '2099-01-01 23:59:59' });
+    throw new Error('inesperado ' + url);
+  };
+  const ambiente = { supabase: sb, fetch: fetchFalso, env: { SUPABASE_URL: 'https://falso.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'service',
+    SITE_URL: SITE, ASAAS_API_KEY: 'k', ASAAS_WEBHOOK_TOKEN: 'w' } };
+  const pagamento = await carregarFuncao('pagamento', dir, ambiente);
+  const webhook = await carregarFuncao('asaas-webhook', dir, ambiente);
+  const c = await pagamento(new Request('https://x/', { method: 'POST', headers: { origin: SITE }, body: JSON.stringify({ acao: 'criar', pedidoId: ID, tokenAcesso: TOKEN }) }));
+  assert.deepEqual(await c.json(), { ok: true, provedor: 'asaas', pix: { qrBase64: 'QR', copiaECola: 'PIX', expira: '2099-01-01 23:59:59' },
+    cartaoUrl: 'https://sandbox.asaas.com/i/pay_1', valor: 2900, vencimento: c.ok ? sb.st.tabelas.pedidos[0].pagamento.vencimento : '' });
+  assert.ok(vistos.every((u) => u.startsWith('https://api-sandbox.asaas.com/v3/')), 'sandbox por padrão');
+  const ev = JSON.stringify({ event: 'PAYMENT_RECEIVED', payment: { id: 'pay_1', externalReference: ID, value: 29, billingType: 'PIX' } });
+  const w = await webhook(new Request('https://x/', { method: 'POST', headers: { 'asaas-access-token': 'w' }, body: ev }));
+  assert.equal(w.status, 200);
+  assert.equal(sb.st.tabelas.pedidos[0].status, 'pago');
+});
+
+test('ponta a ponta com dist/: pagamento (criar link InfinitePay) -> infinitepay-webhook (confere e marca pago)', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'funcoes-infinitepay-'));
+  const fetchOriginal = globalThis.fetch;
+  t.after(() => { rmSync(dir, { recursive: true, force: true }); globalThis.fetch = fetchOriginal; delete globalThis.Deno; delete globalThis.__supabaseFalso; });
+  const ID = '0b6f7f1e-8a7d-4c1b-9a50-2a8c7c1d0e03';
+  const TOKEN = 'd'.repeat(64);
+  const sb = criarSupabaseFalso({ tabelas: { pedidos: [{ id: ID, pacote: 'completo', valor_centavos: 2900, status: 'aguardando', metodo: '',
+    asaas_cobranca_id: null, pagamento: null, email: 'bia@x.com', nome: 'Bia Lima', token_acesso: TOKEN, verificado_em: null,
+    provedor: null, provedor_ref: null, checkout_url: null, provedor_dados: null }], limites_vendas: [] } });
+  let pago = false;
+  const vistos = [];
+  const fetchFalso = async (url, o) => {
+    vistos.push({ url: String(url), corpo: JSON.parse(o.body) });
+    const r = (c) => new Response(JSON.stringify(c), { status: 200 });
+    if (String(url) === 'https://api.checkout.infinitepay.io/links') return r({ url: 'https://checkout.infinitepay.io/notus/x' });
+    if (String(url) === 'https://api.checkout.infinitepay.io/payment_check') return r({ success: true, paid: pago, amount: 2900, paid_amount: 2900, capture_method: 'pix' });
+    throw new Error('inesperado ' + url);
+  };
+  const ambiente = { supabase: sb, fetch: fetchFalso, env: { SUPABASE_URL: 'https://falso.supabase.co', SUPABASE_SERVICE_ROLE_KEY: 'service',
+    SITE_URL: SITE, INFINITEPAY_HANDLE: 'notus', ASAAS_API_KEY: 'k' } };
+  const pagamento = await carregarFuncao('pagamento', dir, ambiente);
+  const webhook = await carregarFuncao('infinitepay-webhook', dir, ambiente);
+  const c = await pagamento(new Request('https://x/', { method: 'POST', headers: { origin: SITE }, body: JSON.stringify({ acao: 'criar', pedidoId: ID, tokenAcesso: TOKEN }) }));
+  assert.deepEqual(await c.json(), { ok: true, provedor: 'infinitepay', redirecionarUrl: 'https://checkout.infinitepay.io/notus/x', valor: 2900 });
+  assert.equal(vistos[0].corpo.items[0].price, 2900);
+  const corpo = JSON.stringify({ order_nsu: ID, transaction_nsu: 'TX1', invoice_slug: 'S1', paid_amount: 2900, capture_method: 'pix' });
+  const w1 = await webhook(new Request('https://x/', { method: 'POST', body: corpo }));
+  assert.equal(w1.status, 200);
+  assert.equal(sb.st.tabelas.pedidos[0].status, 'aguardando', 'sem confirmação do payment_check não libera');
+  pago = true;
+  const w2 = await webhook(new Request('https://x/', { method: 'POST', body: corpo }));
+  assert.deepEqual([w2.status, (await w2.json()).motivo], [200, 'pago']);
+  assert.equal(sb.st.tabelas.pedidos[0].status, 'pago');
 });

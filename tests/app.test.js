@@ -239,7 +239,7 @@ test('textosAvaliacao: sem link, seleção e equipe', () => {
   assert.equal(sel.mostrarVaga, true);
   assert.equal(sel.mostrarEmpresaAtual, true);
   assert.equal(sel.rotuloFuncao, 'Função atual ou última');
-  assert.equal(sel.escopo, 'apenas nesta avaliação da Clínica Exemplo, conduzida pela Notus');
+  assert.equal(sel.escopo, 'apenas nesta avaliação da Clínica Exemplo, conduzida pela Gestão sem Caos');
 
   const eq = A.textosAvaliacao({ codigo: 'EQP1', tipo: 'equipe', empresaNome: 'Clínica Exemplo' });
   assert.equal(eq.tipo, 'equipe');
@@ -555,4 +555,155 @@ test('foto no formulário: padrão opcional; obrigatória bloqueia; oculta não 
   const p = A.montarPayload({ id: 'abc123-f', nome: 'Ana Souza', telefone: '11999998888', idade: '30', consentimento: true, foto: FOTO_OK }, ordens);
   assert.equal(p.foto, FOTO_OK);
   assert.equal(A.montarPayload({ id: 'abc123-g', nome: 'Ana Souza', telefone: '11999998888', idade: '30', consentimento: true }, ordens).foto, '');
+});
+
+/* ---------------- Modo pessoal (venda B2C) ---------------- */
+const CK = require('../js/checkout.js');
+const MR = require('../js/meu-relatorio.js');
+const RP = require('../js/relatorio-pessoa.js');
+const DD = require('../js/disc-data.js');
+
+test('modoPessoalDaUrl: ?modo=pessoal, #pessoal, pacote pré-escolhido e #p2-<token>', () => {
+  assert.deepEqual(A.modoPessoalDaUrl('', ''), { pessoal: false, pacote: '', parte2Token: '', cupom: '' });
+  assert.deepEqual(A.modoPessoalDaUrl('?a=SEL1', ''), { pessoal: false, pacote: '', parte2Token: '', cupom: '' });
+  assert.deepEqual(A.modoPessoalDaUrl('?modo=pessoal', ''), { pessoal: true, pacote: '', parte2Token: '', cupom: '' });
+  assert.deepEqual(A.modoPessoalDaUrl('', '#pessoal'), { pessoal: true, pacote: '', parte2Token: '', cupom: '' });
+  assert.equal(A.modoPessoalDaUrl('?modo=pessoal&pacote=completo&cupom=lanca10&utm_source=ig', '').cupom, 'LANCA10');
+  assert.equal(A.modoPessoalDaUrl('?modo=pessoal&cupom=%3Cx%3E', '').cupom, '');
+  assert.equal(A.modoPessoalDaUrl('?modo=pessoal&pacote=completo_plus&utm_source=ig', '').pacote, 'completo_plus');
+  assert.equal(A.modoPessoalDaUrl('?modo=pessoal&pacote=gratis', '').pacote, '');
+  assert.equal(A.modoPessoalDaUrl('?pacote=completo', '').pessoal, false);
+  const t = 'a'.repeat(64);
+  assert.deepEqual(A.modoPessoalDaUrl('?modo=pessoal', '#p2-' + t), { pessoal: true, pacote: '', parte2Token: t, cupom: '' });
+  assert.equal(A.modoPessoalDaUrl('?modo=pessoal', '#p2-<x>').parte2Token, '');
+});
+
+test('validarIdentificacaoPessoal: nome, e-mail obrigatório, WhatsApp opcional e consentimento', () => {
+  const ok = { nome: 'Bruna Silva', email: 'bruna@exemplo.com', telefone: '', consentimento: true };
+  assert.deepEqual(A.validarIdentificacaoPessoal(ok), {});
+  assert.deepEqual(Object.keys(A.validarIdentificacaoPessoal({})).sort(), ['consentimento', 'email', 'nome']);
+  assert.match(A.validarIdentificacaoPessoal({ ...ok, email: 'bruna@' }).email, /Confira/);
+  assert.ok(A.validarIdentificacaoPessoal({ ...ok, telefone: '1199' }).telefone);
+  assert.deepEqual(A.validarIdentificacaoPessoal({ ...ok, telefone: '(11) 98765-4321' }), {});
+});
+
+test('montarPayloadPessoal: origem pessoal, sem idade/vaga/avaliação; telefone só se informado', () => {
+  const ordens = Array.from({ length: 25 }, () => ['D', 'I', 'S', 'C']);
+  const dados = { id: 'x1', nome: ' bruna  silva ', email: 'Bruna@Exemplo.com ', telefone: '', consentimento: true, inicio: '2026-10-05T10:00:00.000Z' };
+  const p = A.montarPayloadPessoal(dados, ordens, new Date('2026-10-05T10:10:00.000Z'));
+  assert.equal(p.origem, 'pessoal');
+  assert.equal(p.telefone, '');
+  assert.equal(p.email, 'Bruna@Exemplo.com');
+  assert.equal(p.duracaoSeg, 600);
+  assert.deepEqual(p.resultado, { percentuais: { D: 40, I: 30, S: 20, C: 10 }, codigo: 'DI' });
+  ['idade', 'vaga', 'avaliacao', 'empresa', 'foto'].forEach((k) => assert.ok(!(k in p), k));
+  assert.equal(A.montarPayloadPessoal({ ...dados, telefone: '11987654321' }, ordens).telefone, '5511987654321');
+});
+
+test('checkout: pacotes do servidor (ou o padrão), preço vigente, formato e links', () => {
+  const padrao = CK.normalizarPacotes(null);
+  assert.deepEqual(padrao.map((p) => p.chave), ['gratis', 'completo', 'completo_plus']);
+  const lista = CK.normalizarPacotes({ ok: true, pacotes: [
+    { chave: 'completo_plus', nome: 'C+', precoCentavos: 6900, precoLancamentoCentavos: 4900, lancamentoAte: '', valorCentavos: 4900, ordem: 3, descricao: { itens: ['x', 'y'] } },
+    { chave: 'completo', nome: 'C', preco_centavos: 3900, preco_lancamento_centavos: null, ordem: 2, descricao: '["a"]' },
+    { chave: 'velho', nome: 'V', precoCentavos: 100, ativo: false, ordem: 1 }
+  ] });
+  assert.deepEqual(lista.map((p) => p.chave), ['completo', 'completo_plus']);
+  assert.deepEqual(lista[1].itens, ['x', 'y']);
+  assert.deepEqual(lista[0].itens, ['a']);
+  assert.deepEqual(CK.precoVigente(lista[1]), { centavos: 4900, cheioCentavos: 6900, lancamento: true });
+  assert.deepEqual(CK.precoVigente(lista[0]), { centavos: 3900, cheioCentavos: 3900, lancamento: false });
+  const lanc = { precoCentavos: 3900, precoLancamentoCentavos: 2900, lancamentoAte: '2026-10-10' };
+  assert.equal(CK.precoVigente(lanc, new Date(2026, 9, 10)).centavos, 2900);
+  assert.equal(CK.precoVigente(lanc, new Date(2026, 9, 11)).centavos, 3900);
+  assert.equal(CK.formatarPreco(2900), 'R$ 29');
+  assert.equal(CK.formatarPreco(2990), 'R$ 29,90');
+  assert.equal(CK.formatarPreco(123405), 'R$ 1.234,05');
+  assert.equal(CK.formatarPreco(0), 'Grátis');
+  assert.equal(CK.linkRelatorio('https://site.com/disc/index.html?modo=pessoal#x', 'abc'), 'https://site.com/disc/meu-relatorio.html#t-abc');
+  assert.equal(CK.linkWhatsApp('oi', '11987654321'), 'https://wa.me/5511987654321?text=oi');
+  assert.equal(CK.linkWhatsApp('oi', ''), 'https://wa.me/?text=oi');
+  assert.ok(CK.cpfValido('529.982.247-25') && !CK.cpfValido('529.982.247-24') && !CK.cpfValido('111.111.111-11') && !CK.cpfValido('123'));
+  assert.ok(CK.liberado('pago') && CK.liberado('cortesia') && !CK.liberado('aguardando') && !CK.liberado('estornado'));
+});
+
+test('checkout: pedido, pagamento e pagamento ainda não configurado', () => {
+  assert.deepEqual(CK.resumoPedido({ ok: true, pedidoId: 'p1', tokenAcesso: 't1', valor: 0, gratuito: true, status: 'cortesia' }, 'completo'),
+    { pedidoId: 'p1', tokenAcesso: 't1', valorCentavos: 0, gratuito: true, status: 'cortesia', pacote: 'completo' });
+  const pg = CK.normalizarPagamento({ pix: { qrCodeBase64: 'iVBORw0KGgo=', copiaECola: '000201' }, invoiceUrl: 'https://asaas.com/i/1', vencimento: '2026-10-08' });
+  assert.deepEqual(pg, { provedor: 'asaas', redirecionarUrl: '', qr: 'data:image/png;base64,iVBORw0KGgo=', copiaECola: '000201', invoiceUrl: 'https://asaas.com/i/1', vencimento: '2026-10-08' });
+  assert.equal(CK.normalizarPagamento({ invoiceUrl: 'javascript:alert(1)', pix: { qr: '"><img>' } }).invoiceUrl, '');
+  assert.equal(CK.normalizarPagamento({ pix: { qr: '"><img>' } }).qr, '');
+  assert.ok(CK.pagamentoIndisponivel({ ok: false, erro: 'Pagamento ainda não configurado.' }));
+  assert.ok(CK.pagamentoIndisponivel(new Error('Pagamento ainda não configurado.')));
+  assert.ok(!CK.pagamentoIndisponivel(new Error('Cupom inválido ou expirado.')));
+  assert.ok(!CK.pagamentoIndisponivel({ ok: true }));
+});
+
+test('meu-relatorio: token da URL e dados de relatorioPessoal', () => {
+  const t = 'f'.repeat(64);
+  assert.equal(MR.tokenDaUrl('#t-' + t, ''), t);
+  assert.equal(MR.tokenDaUrl('', '?t=' + t), t);
+  assert.equal(MR.tokenDaUrl('#recuperar', ''), '');
+  const d = MR.dadosRelatorio({ ok: true, nome: 'Bruna', resultado: { percentuais: { D: 40, I: 30, S: 20, C: 10 }, codigo: 'DI' },
+    exigido: null, pacote: 'completo_plus', pacoteNome: 'Completo + Parte 2', precisaParte2: true });
+  assert.equal(d.primeiroNome, 'Bruna');
+  assert.equal(d.precisaParte2, true);
+  assert.equal(MR.dadosRelatorio({ ok: true, resultado: d.rel, exigido: '1234'.repeat(10), pacote: 'completo_plus' }).precisaParte2, false);
+  assert.equal(MR.dadosRelatorio({ ok: true }), null);
+});
+
+test('resumo grátis, prévia borrada e pacotes: só títulos e a 1ª frase do pago; um botão laranja', () => {
+  const rel = { percentuais: { D: 40, I: 30, S: 20, C: 10 }, codigo: 'DI' };
+  const s = RP.montarSimples(rel, 'Bruna', DD);
+  const d = RP.montar(rel, 'Bruna', DD);
+  const res = A.resumoGratisHtml(s);
+  assert.match(res, /Bruna, seu estilo é/);
+  assert.equal((res.match(/class="barra-linha rel-fator"/g) || []).length, 4);
+  assert.equal((res.match(/class="rel-item"/g) || []).length, 3);
+  const prev = A.previaPagaHtml(d);
+  d.travas.itens.forEach((it, k) => {
+    assert.ok(prev.includes(A.escapar(it.titulo)), it.titulo);
+    assert.ok(!prev.includes(A.escapar(it.acao)), 'ação paga não vai para a tela');
+    if (k > 0) assert.ok(!prev.includes(A.escapar(it.texto)));
+  });
+  assert.match(prev, /O que o relatório completo mostra/);
+  const pac = A.pacotesHtml(CK.normalizarPacotes(null), 'completo');
+  assert.equal((pac.match(/data-acao="comprar"/g) || []).length, 2);
+  assert.equal((pac.match(/botao--laranja/g) || []).length, 1);
+  assert.match(pac, /data-pacote="completo"[^>]*>\s*<span class="selo selo--laranja pacote-selo">Sua escolha/);
+  assert.match(pac, /<s class="pacote-cheio">R\$ 39<\/s><strong class="pacote-valor">R\$ 29<\/strong>/);
+});
+
+test('relatorioPessoaHtml: sem opções igual ao de antes; com opções inclui travas, mapa e plano de 90 dias', () => {
+  const rel = { percentuais: { D: 38, I: 30, S: 16, C: 16 }, codigo: 'DI' };
+  const base = RP.montar(rel, 'Ana', DD);
+  const h0 = A.relatorioPessoaHtml(base, '');
+  assert.ok(!/data-secao="travas"|data-secao="mapa"|data-secao="plano90"/.test(h0));
+  const d = RP.montar(rel, 'Ana', DD, { exigido: '1234'.repeat(10) });
+  const h = A.relatorioPessoaHtml(d, '', { travas: true, mapa: true, plano90: true });
+  assert.match(h, /data-secao="travas"/);
+  assert.match(h, /data-secao="mapa"/);
+  assert.match(h, /data-secao="plano90"/);
+  assert.match(h, /Para destravar/);
+  assert.deepEqual(A.posicaoMapa({ ritmo: 0, foco: 0 }), { x: 50, y: 50 });
+  assert.deepEqual(A.posicaoMapa({ ritmo: 60, foco: -60 }), { x: 94, y: 6 });
+});
+
+test('InfinitePay: redirecionarUrl no pagamento e volta com order_nsu em meu-relatorio', () => {
+  const pg = CK.normalizarPagamento({ ok: true, provedor: 'infinitepay', redirecionarUrl: 'https://checkout.infinitepay.io/x?y=1' });
+  assert.equal(pg.redirecionarUrl, 'https://checkout.infinitepay.io/x?y=1');
+  assert.equal(pg.provedor, 'infinitepay');
+  assert.equal(CK.normalizarPagamento({ redirecionarUrl: 'meu-relatorio.html?order_nsu=1#t-abc' }).redirecionarUrl, 'meu-relatorio.html?order_nsu=1#t-abc');
+  assert.equal(CK.normalizarPagamento({ redirecionarUrl: 'javascript:alert(1)' }).redirecionarUrl, '');
+  assert.equal(CK.normalizarPagamento({ pix: { copiaECola: '0002' } }).provedor, 'asaas');
+  assert.deepEqual(MR.retornoDaUrl('?order_nsu=9f1c-2&transaction_nsu=T1&slug=S1&capture_method=pix&receipt_url=https%3A%2F%2Fr.io%2F1'),
+    { pedidoId: '9f1c-2', transactionNsu: 'T1', slug: 'S1', metodo: 'pix', reciboUrl: 'https://r.io/1' });
+  assert.equal(MR.retornoDaUrl('?t=abc'), null);
+  assert.equal(MR.retornoDaUrl('?pedido=p-9', '#t-' + 'a'.repeat(64)).pedidoId, 'p-9');
+  const h = '#t-' + 'b'.repeat(64) + '?order_nsu=p-7&transaction_nsu=T9&slug=S';
+  assert.deepEqual([MR.retornoDaUrl('', h).pedidoId, MR.retornoDaUrl('', h).transactionNsu], ['p-7', 'T9']);
+  assert.equal(MR.tokenDaUrl(h, ''), 'b'.repeat(64));
+  assert.equal(MR.tokenDaUrl('#t-' + 'c'.repeat(64) + '&slug=x', ''), 'c'.repeat(64));
+  assert.equal(MR.retornoDaUrl('?order_nsu=%3Cx%3E'), null);
 });

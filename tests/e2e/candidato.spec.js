@@ -669,7 +669,7 @@ test.describe('Candidato: link de avaliação (API simulada)', () => {
     await expect(page.locator('#vaga')).toBeVisible();
     await expect(page.locator('label[for="funcao"]')).toContainText('Função atual ou última');
     await expect(page.locator('#empresa')).toBeVisible();
-    await expect(page.locator('.consentimento')).toContainText('apenas nesta avaliação da Clínica Exemplo, conduzida pela Notus');
+    await expect(page.locator('.consentimento')).toContainText('apenas nesta avaliação da Clínica Exemplo, conduzida pela Gestão sem Caos');
     await preencherIdentificacao(page, { nome: 'Rita Exemplo Seleção', telefone: '11987654321', vaga: 'Recepção' });
     await page.locator('#form-identificacao button[type="submit"]').click();
     const ordem = ['D', 'I', 'S', 'C'];
@@ -771,7 +771,7 @@ test.describe('Candidato: link de avaliação (API simulada)', () => {
     await expect(page.locator('#empresa')).toHaveCount(0);
     await expect(page.locator('label[for="funcao"]')).toContainText('Seu cargo/função');
     await expect(page.locator('.subtitulo').first()).toHaveText('Precisamos destes dados para vincular o resultado à avaliação da equipe.');
-    await expect(page.locator('.consentimento')).toContainText('na avaliação da equipe da Clínica Exemplo, conduzida pela Notus');
+    await expect(page.locator('.consentimento')).toContainText('na avaliação da equipe da Clínica Exemplo, conduzida pela Gestão sem Caos');
     await expect(page.locator('.consentimento')).toContainText('compartilhado com a empresa');
   });
 

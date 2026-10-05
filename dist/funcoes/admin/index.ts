@@ -930,7 +930,7 @@ function relBaseSite(baseUrl, siteUrl) {
 // ---------------------------------------------------------------------------
 
 const REL_IA_SISTEMA = [
-  'Você revisa textos de um relatório de processo seletivo escrito por uma consultoria de RH (Notus Agência)',
+  'Você revisa textos de um relatório de processo seletivo escrito por uma consultoria de RH (Gestão sem Caos)',
   'para a empresa contratante. Reescreva cada texto em português do Brasil simples, com tom de consultor,',
   'frases curtas e sem jargão técnico. Regras: mantenha exatamente os mesmos fatos, números, notas, nomes e',
   'conclusões; não invente nada; não acrescente recomendações novas; nunca mencione idade, sexo, estado civil,',

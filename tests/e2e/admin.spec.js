@@ -891,7 +891,9 @@ test.describe('Admin na prévia (API_URL "simulada")', () => {
     await expect(page.locator('#tela-painel')).toBeHidden();
 
     await entrar(page, 'admin@previa.com', 'previa123');
-    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'empresas', 'relatorios', 'usuarios', 'comparativo', 'importar']);
+    // A prévia mostra Vendas (depois de Relatórios) quando a API simulada tem a venda direta.
+    const temVendas = await page.evaluate(() => typeof window.DISC_API.listarPedidos === 'function');
+    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'empresas', 'relatorios'].concat(temVendas ? ['vendas'] : []).concat(['usuarios', 'comparativo', 'importar']));
 
     // Processo novo
     await page.locator('.aba[data-aba="processos"]').click();
@@ -1097,6 +1099,8 @@ const API_SUPABASE_FALSA = `
   var dona = { id: 'u1', nome: 'Dona do Sistema', email: 'dona@empresa.com', papel: 'admin' };
   window.DISC_API = Object.assign({}, window.DISC_API, {
     MODO: 'supabase',
+    // Sem a venda direta por padrão (o js/api.js legado tem o método só para recusar); API_VENDAS_FALSA acrescenta.
+    listarPedidos: undefined,
     configurado: function () { return true; },
     login: function (email, senha) {
       anotar('login', arguments);
@@ -2126,4 +2130,322 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await expect(page.locator('#faixa-banco-texto')).toHaveText(/^O banco de dados está desatualizado: faltam as migrações mais recentes\. Peça para aplicar/);
     expect(erros).toEqual([]);
   });
+});
+
+/* ---------- Rodada 5: venda direta (aba Vendas e origem "pessoal" em Participantes) ---------- */
+
+// Acrescenta ao DISC_API falso do Supabase a API de vendas (pedidos, cupons, pacotes, resumo) e respostas de origem 'pessoal'.
+const API_VENDAS_FALSA = `
+(function () {
+  var sb = window.__sb;
+  function ok(x) { return Promise.resolve(Object.assign({ ok: true }, x || {})); }
+  function anotar(nome, args) { sb.chamadas.push({ nome: nome, args: JSON.parse(JSON.stringify(Array.prototype.slice.call(args))) }); }
+  var agora = Date.now();
+  function ha(horas) { return new Date(agora - horas * 3600000).toISOString(); }
+  function resp(id, nome, tel, email, origem, respostas) {
+    return { id: id, nome: nome, telefone: tel, email: email, origem: origem, status: 'em_analise', respostas: respostas,
+      inicio: ha(30), fim: ha(29), duracaoSeg: 540, avaliacao: origem === 'pessoal' ? '' : 'SEL1', avaliacaoNome: origem === 'pessoal' ? '' : 'Vendedor 2026', recebidoEm: ha(29) };
+  }
+  sb.respostas = [
+    resp('r-ana', 'Ana Lima Prado', '5511911112222', 'ana.lima@gmail.com', 'pessoal', '4321'.repeat(25)),
+    resp('r-davi', 'Davi Souza', '5511933334444', 'davi@gmail.com', 'pessoal', '1234'.repeat(25)),
+    resp('r-caio', 'Caio Processo', '5511955556666', '', 'processo', '3412'.repeat(25))
+  ];
+  sb.pedidos = [
+    { id: 'ped-ana-0001', resposta_id: 'r-ana', pacote: 'completo', valor_centavos: 2900, status: 'pago', nome: 'Ana Lima Prado', email: 'ana.lima@gmail.com',
+      telefone: '5511911112222', criado_em: ha(0.5), pago_em: ha(0.4), metodo: 'pix', asaas_cobranca_id: 'pay_123abc' },
+    { id: 'ped-davi-002', resposta_id: 'r-davi', pacote: 'completo_plus', valor_centavos: 4900, status: 'aguardando', nome: 'Davi Souza', email: 'davi@gmail.com',
+      criado_em: ha(0.2), metodo: 'pix', faturaUrl: 'https://sandbox.asaas.com/i/davi123' },
+    { id: 'ped-bia-0003', resposta_id: 'r-bia', pacote: 'completo_plus', valor_centavos: 3920, status: 'pago', nome: 'Beatriz Nunes', email: 'bia@uol.com.br', cupom: 'LANC20',
+      criado_em: ha(50), pago_em: ha(50), metodo: 'cartao' },
+    { id: 'ped-eva-0004', resposta_id: 'r-eva', pacote: 'completo', valor_centavos: 0, status: 'cortesia', nome: 'Eva Reis', email: 'eva@gmail.com', cupom: 'PARCEIRO100',
+      criado_em: ha(80), pago_em: ha(80), metodo: 'cupom' }
+  ];
+  sb.cupons = [{ codigo: 'LANC20', tipo: 'percentual', valor: 20, usos_max: 100, usos: 1, valido_ate: '2026-12-31', ativo: true, pacotes: [] }];
+  sb.pacotes = [
+    { chave: 'gratis', nome: 'Resumo grátis', preco_centavos: 0, preco_lancamento_centavos: null, lancamento_ate: null, ativo: true, ordem: 0 },
+    { chave: 'completo', nome: 'Relatório completo', preco_centavos: 3900, preco_lancamento_centavos: 2900, lancamento_ate: '2099-12-31', ativo: true, ordem: 1 },
+    { chave: 'completo_plus', nome: 'Completo + Parte 2', preco_centavos: 6900, preco_lancamento_centavos: 4900, lancamento_ate: '2099-12-31', ativo: true, ordem: 2 }
+  ];
+  Object.assign(window.DISC_API, {
+    listar: function () { return ok({ itens: sb.respostas.slice() }); },
+    listarPedidos: function (t, filtros) { anotar('listarPedidos', arguments); return ok({ pedidos: sb.pedidos.slice() }); },
+    atualizarPedido: function (t, id, d) {
+      anotar('atualizarPedido', arguments);
+      var p = sb.pedidos.filter(function (x) { return x.id === id; })[0];
+      p.status = d.status;
+      if (d.status === 'estornado') p.reembolsado_em = new Date().toISOString();
+      return ok({ pedido: p });
+    },
+    listarCupons: function () { return ok({ cupons: sb.cupons.slice() }); },
+    salvarCupom: function (t, c) {
+      anotar('salvarCupom', arguments);
+      var x = sb.cupons.filter(function (y) { return y.codigo === c.codigo; })[0];
+      if (!x) { x = { usos: 0 }; sb.cupons.push(x); }
+      Object.assign(x, { codigo: c.codigo, tipo: c.tipo, valor: c.valor, usos_max: c.usosMax, valido_ate: c.validoAte, ativo: c.ativo, pacotes: c.pacotes });
+      return ok({ cupom: x });
+    },
+    excluirCupom: function (t, codigo) { anotar('excluirCupom', arguments); sb.cupons = sb.cupons.filter(function (c) { return c.codigo !== codigo; }); return ok(); },
+    listarPacotes: function () { return ok({ pacotes: sb.pacotes.slice() }); },
+    salvarPacote: function (t, p) {
+      anotar('salvarPacote', arguments);
+      var x = sb.pacotes.filter(function (y) { return y.chave === p.chave; })[0];
+      Object.assign(x, { nome: p.nome, preco_centavos: p.precoCentavos, preco_lancamento_centavos: p.precoLancamentoCentavos, lancamento_ate: p.lancamentoAte, ativo: p.ativo, ordem: p.ordem });
+      return ok({ pacote: x });
+    },
+    // Resumo do servidor: só a base da conversão (o resto o painel calcula dos pedidos).
+    resumoVendas: function (t, periodo) { anotar('resumoVendas', arguments); return ok({ periodo: periodo, resumos: 8, compras: 3, conversao: 0.375 }); }
+  });
+})();
+`;
+
+async function simularVendas(page) {
+  await simularSupabase(page);
+  await page.route('**/js/api-supabase.js', (route) => route.fulfill({ status: 200, contentType: 'text/javascript; charset=utf-8', body: API_SUPABASE_FALSA + API_VENDAS_FALSA }));
+}
+
+// Capturas da aba Vendas (1366×900): só quando CAPTURAS_VENDAS aponta uma pasta.
+async function capturarVendas(page, nome) {
+  if (!process.env.CAPTURAS_VENDAS) return;
+  await page.waitForTimeout(450);
+  // O aviso flutuante de outra ação não entra na captura.
+  if (nome !== 'cupons') await page.evaluate(() => { document.getElementById('aviso-geral').hidden = true; });
+  await page.screenshot({ path: require('node:path').join(process.env.CAPTURAS_VENDAS, 'painel-vendas-' + nome + '.png'), fullPage: true });
+}
+
+test.describe('Vendas (venda direta, API falsa)', () => {
+  test('aba Vendas: resumo, pedidos com filtro, reembolso com lembrete do Asaas, cortesia, cupons e pacotes', async ({ page, context }) => {
+    const erros = coletarErros(page);
+    await page.setViewportSize({ width: 1366, height: 900 });
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await simularVendas(page);
+    await page.goto('/admin.html');
+    await entrar(page, 'dona@empresa.com', 'senha-boa-1');
+    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'empresas', 'relatorios', 'vendas', 'usuarios', 'comparativo', 'importar']);
+
+    // Resumo: receita com centavos, vendas, ticket médio, aguardando, conversão e últimos pedidos
+    await page.locator('.aba[data-aba="vendas"]').click();
+    await expect(page.locator('#vd-subaba-resumo')).toHaveAttribute('aria-current', 'page');
+    await expect(page.locator('#vd-hoje')).toContainText('R$ 29,00');
+    await expect(page.locator('#vd-hoje')).toContainText('1 venda');
+    await expect(page.locator('#vd-semana')).toContainText('R$ 68,20');
+    await expect(page.locator('#vd-semana')).toContainText('2 vendas');
+    await expect(page.locator('#vd-ticket')).toContainText('R$ 34,10');
+    await expect(page.locator('#vd-aguardando .resumo__valor')).toHaveText('1');
+    await expect(page.locator('#vd-conversao .resumo__valor')).toHaveText('37,5%');
+    await expect(page.locator('#vd-conversao')).toContainText('3 compras de 8 resumos grátis no mês');
+    await expect(page.locator('#vd-ultimos > li')).toHaveCount(4);
+    await expect(page.locator('#vd-ultimos > li').first()).toHaveAttribute('data-id', 'ped-davi-002');
+    expect(await chamadasSb(page, 'resumoVendas')).toEqual([['tk-dona', 'mes']]);
+    await capturarVendas(page, 'resumo');
+
+    // Pedidos: filtros por situação, pacote, busca e período
+    await page.click('#vd-subaba-pedidos');
+    const linhas = page.locator('#vd-lista-pedidos > li[data-id]');
+    await expect(linhas).toHaveCount(4);
+    await expect(page.locator('#vd-contagem')).toHaveText('4 de 4 pedidos · R$ 68,20 pagos');
+    await escolher(page, '#vd-filtro-status', 'aguardando');
+    await expect(linhas).toHaveCount(1);
+    await escolher(page, '#vd-filtro-status', '');
+    await escolher(page, '#vd-filtro-pacote', 'completo_plus');
+    await expect(linhas).toHaveCount(2);
+    await escolher(page, '#vd-filtro-pacote', '');
+    await page.fill('#vd-busca', 'lanc20');
+    await expect(linhas).toHaveCount(1);
+    await expect(linhas.first()).toHaveAttribute('data-id', 'ped-bia-0003');
+    await page.fill('#vd-busca', '');
+    await escolher(page, '#vd-filtro-periodo', 'hoje');
+    await expect(linhas).toHaveCount(2);
+    await capturarVendas(page, 'pedidos');
+    await escolher(page, '#vd-filtro-periodo', '');
+
+    // Detalhe do pedido pago: orientação para recuperar o link (o painel não recebe o token) e reembolso com confirmação
+    await page.locator('#vd-lista-pedidos > li[data-id="ped-ana-0001"] button').click();
+    await expect(page.locator('#vista-vendas h2')).toHaveText('Ana Lima Prado');
+    await expect(page.locator('#vd-pedido-valor')).toHaveText('R$ 29,00');
+    await expect(page.locator('#vd-pedido-orientacao')).toContainText('ana.lima@gmail.com');
+    await expect(page.locator('#vd-pedido-recuperar')).toHaveText(/\/meu-relatorio\.html#recuperar$/);
+    await expect(page.locator('#btn-vd-cortesia')).toHaveCount(0);
+    await expect(page.locator('#btn-vd-cancelar')).toHaveCount(0);
+    await expect(page.locator('#btn-vd-whatsapp')).toHaveAttribute('href', /^https:\/\/wa\.me\/5511911112222\?text=/);
+    expect(await page.locator('#btn-vd-whatsapp').getAttribute('href')).toContain(encodeURIComponent('Gestão sem Caos'));
+    await page.click('#btn-vd-copiar-orientacao');
+    await expect(page.locator('#aviso-geral')).toHaveText('Mensagem copiada. Cole no WhatsApp ou no e-mail.');
+    const msg = await page.evaluate(() => navigator.clipboard.readText());
+    expect(msg).toContain('Olá, Ana!');
+    expect(msg).toContain('meu-relatorio.html#recuperar');
+    expect(msg).toContain('ana.lima@gmail.com');
+    expect(msg).not.toContain('Notus');
+    await expect(page.locator('#vd-pedido-resposta')).toContainText('Respondido em');
+    await capturarVendas(page, 'pedido');
+    await page.click('#btn-vd-reembolso');
+    await expect(page.locator('#confirmar')).toBeVisible();
+    await expect(page.locator('#vd-lembrete-asaas')).toContainText('devolva o dinheiro no Asaas');
+    await expect(page.locator('#vd-lembrete-asaas')).toContainText('pay_123abc');
+    await expect(page.locator('#vd-link-asaas')).toHaveAttribute('target', '_blank');
+    await capturarVendas(page, 'reembolso');
+    await page.click('#confirmar-cancelar');
+    expect(await chamadasSb(page, 'atualizarPedido')).toHaveLength(0);
+    await page.click('#btn-vd-reembolso');
+    await page.click('#confirmar-ok');
+    await expect(page.locator('#aviso-geral')).toContainText('Pedido marcado como reembolsado');
+    await expect(page.locator('#vd-pedido-dados .vd-status')).toHaveText('Reembolsado');
+    await expect(page.locator('#vd-pedido-sem-link')).toContainText('bloqueado');
+    await expect(page.locator('#btn-vd-reembolso')).toHaveCount(0);
+    await expect(page.locator('#btn-vd-cortesia')).toBeVisible();
+    expect(await chamadasSb(page, 'atualizarPedido')).toEqual([['tk-dona', 'ped-ana-0001', { status: 'estornado' }]]);
+
+    // Pedido aguardando: liberar como cortesia
+    await page.click('#btn-vd-voltar');
+    await page.locator('#vd-lista-pedidos > li[data-id="ped-davi-002"] button').click();
+    await expect(page.locator('#vd-pedido-sem-link')).toContainText('quando o pagamento for confirmado');
+    await expect(page.locator('#vd-link-fatura')).toHaveAttribute('href', 'https://sandbox.asaas.com/i/davi123');
+    await expect(page.locator('#btn-vd-cancelar')).toBeVisible();
+    await expect(page.locator('#btn-vd-reembolso')).toHaveCount(0);
+    await page.click('#btn-vd-cortesia');
+    await expect(page.locator('#confirmar-ok')).toHaveText('Liberar relatório');
+    await page.click('#confirmar-ok');
+    await expect(page.locator('#vd-pedido-dados .vd-status')).toHaveText('Cortesia');
+    await expect(page.locator('#vd-pedido-orientacao')).toContainText('davi@gmail.com');
+    await expect(page.locator('#btn-vd-cortesia')).toHaveCount(0);
+    expect((await chamadasSb(page, 'atualizarPedido'))[1]).toEqual(['tk-dona', 'ped-davi-002', { status: 'cortesia' }]);
+
+    // Cupons: criar (validação na janela), link da landing com o cupom, desativar
+    await page.click('#btn-vd-voltar');
+    await page.click('#vd-subaba-cupons');
+    await expect(page.locator('#vd-lista-cupons > li[data-codigo="LANC20"]')).toContainText('20% de desconto');
+    await page.click('#btn-novo-cupom');
+    await page.fill('#cup-codigo', 'com espaço');
+    await page.fill('#cup-valor', '20');
+    await page.click('#janela-ok');
+    await expect(page.locator('#janela-erro')).toContainText('O código precisa ter de 3 a 30');
+    await page.fill('#cup-codigo', 'amigo10');
+    await escolher(page, '#cup-tipo', 'valor');
+    await expect(page.locator('#cup-valor-rotulo')).toHaveText('Desconto em R$ (ex.: 10,00)');
+    await page.fill('#cup-valor', '10,50');
+    await page.fill('#cup-usos', '30');
+    await page.fill('#cup-validade', '2026-12-31');
+    await page.check('#cup-pac-completo');
+    await capturarVendas(page, 'cupom-novo');
+    await page.click('#janela-ok');
+    await expect(page.locator('#aviso-geral')).toHaveText('Cupom AMIGO10 criado.');
+    expect((await chamadasSb(page, 'salvarCupom'))[0]).toEqual(['tk-dona', { codigo: 'AMIGO10', tipo: 'valor', valor: 1050, usosMax: 30, validoAte: '2026-12-31', pacotes: ['completo'], ativo: true }]);
+    const amigo = page.locator('#vd-lista-cupons > li[data-codigo="AMIGO10"]');
+    await expect(amigo).toContainText('R$ 10,50 de desconto');
+    await expect(amigo).toContainText('0 de 30');
+    await expect(amigo).toContainText('Relatório completo');
+    await expect(amigo.locator('.vd-cupom__link')).toHaveText(/\/descubra\.html\?cupom=AMIGO10$/);
+    await amigo.locator('[data-acao="copiar-link"]').click();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(/\/descubra\.html\?cupom=AMIGO10$/);
+    await capturarVendas(page, 'cupons');
+    await page.locator('#vd-lista-cupons > li[data-codigo="LANC20"] [data-acao="desativar"]').click();
+    await expect(page.locator('#vd-lista-cupons > li[data-codigo="LANC20"]')).toHaveAttribute('data-ativo', 'nao');
+    expect((await chamadasSb(page, 'salvarCupom'))[1][1]).toMatchObject({ codigo: 'LANC20', ativo: false });
+    await amigo.locator('[data-acao="excluir"]').click();
+    await page.click('#confirmar-ok');
+    await expect(page.locator('#vd-lista-cupons > li[data-codigo="AMIGO10"]')).toHaveCount(0);
+
+    // Pacotes: preço, preço de lançamento e data de fim, ativo e ordem
+    await page.click('#vd-subaba-pacotes');
+    const completo = page.locator('#vd-lista-pacotes > li[data-chave="completo"]');
+    await expect(completo.locator('.vd-pacote__valor')).toHaveText('R$ 29,00');
+    await expect(completo.locator('.vd-pacote__antes')).toHaveText('R$ 39,00');
+    await completo.locator('[data-acao="editar"]').click();
+    await page.fill('#pac-preco', '44,90');
+    await page.fill('#pac-lancamento', '50');
+    await page.click('#janela-ok');
+    await expect(page.locator('#janela-erro')).toHaveText('O preço de lançamento precisa ser menor que o preço normal.');
+    await page.fill('#pac-lancamento', '34,90');
+    await page.fill('#pac-lancamento-ate', '2099-01-31');
+    await page.click('#janela-ok');
+    await expect(page.locator('#aviso-geral')).toHaveText('Pacote "Relatório completo" salvo.');
+    expect((await chamadasSb(page, 'salvarPacote'))[0]).toEqual(['tk-dona', { chave: 'completo', nome: 'Relatório completo', precoCentavos: 4490, precoLancamentoCentavos: 3490, lancamentoAte: '2099-01-31', ativo: true, ordem: 1 }]);
+    await expect(completo.locator('.vd-pacote__valor')).toHaveText('R$ 34,90');
+    await expect(completo.locator('.vd-pacote__antes')).toHaveText('R$ 44,90');
+    await expect(completo).toContainText('até 31/01/2099');
+    await page.locator('#vd-lista-pacotes > li[data-chave="completo_plus"] [data-acao="editar"]').click();
+    await page.uncheck('#pac-ativo');
+    await page.click('#janela-ok');
+    await expect(page.locator('#vd-lista-pacotes > li[data-chave="completo_plus"]')).toHaveAttribute('data-ativo', 'nao');
+    await capturarVendas(page, 'pacotes');
+
+    expect(await page.locator('#vista-vendas select').count()).toBe(0);
+    expect(erros).toEqual([]);
+  });
+
+  test('participantes: selo "Pessoal", filtro de origem e o pedido ligado no detalhe', async ({ page }) => {
+    const erros = coletarErros(page);
+    await page.setViewportSize({ width: 1366, height: 900 });
+    await simularVendas(page);
+    await page.goto('/admin.html');
+    await entrar(page, 'dona@empresa.com', 'senha-boa-1');
+    const cards = page.locator('#lista-candidatos > li');
+    await expect(cards).toHaveCount(3);
+    const ana = cards.filter({ hasText: 'Ana Lima Prado' });
+    await expect(ana.locator('.selo-pessoal')).toHaveText('Pessoal');
+    await expect(ana.locator('.card-origem')).toHaveText('Mapa pessoal (venda direta)');
+    await expect(cards.filter({ hasText: 'Caio Processo' }).locator('.selo-pessoal')).toHaveCount(0);
+    await escolher(page, '#filtro-origem', 'pessoal');
+    await expect(cards).toHaveCount(2);
+    await escolher(page, '#filtro-origem', 'processo');
+    await expect(cards).toHaveCount(1);
+    await escolher(page, '#filtro-origem', '');
+    await page.fill('#filtro-busca', 'davi@gmail');
+    await expect(cards).toHaveCount(1);
+    await page.fill('#filtro-busca', '');
+    await capturarVendas(page, 'participantes');
+
+    await ana.getByRole('button', { name: /Ver detalhes/ }).click();
+    const ped = page.locator('#det-pedido');
+    await expect(ped).toContainText('E-mail: ana.lima@gmail.com');
+    await expect(ped.locator('.det-pedido__linha')).toHaveCount(1);
+    await expect(ped).toContainText('Pago');
+    await expect(ped).toContainText('Relatório completo · R$ 29,00');
+    await capturarVendas(page, 'participante-detalhe');
+    await ped.locator('[data-acao="abrir-pedido"]').click();
+    await expect(page.locator('#vista-vendas')).toBeVisible();
+    await expect(page.locator('#vista-vendas h2')).toHaveText('Ana Lima Prado');
+    // De volta ao participante pelo pedido
+    await page.click('#btn-vd-ver-resposta');
+    await expect(page.locator('#vista-detalhe h2')).toHaveText('Ana Lima Prado');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#vista-vendas')).toBeVisible();
+
+    // Participante pessoal sem pedido pago fica com o aviso; quem veio de processo não tem o bloco
+    await page.locator('.aba[data-aba="lista"]').click();
+    await cards.filter({ hasText: 'Caio Processo' }).getByRole('button', { name: /Ver detalhes/ }).click();
+    await expect(page.locator('#det-pedido')).toHaveCount(0);
+    expect(erros).toEqual([]);
+  });
+
+  test('sem a API de vendas no servidor, a aba Vendas e o filtro de origem não aparecem', async ({ page }) => {
+    const erros = coletarErros(page);
+    await simularSupabase(page);
+    await page.goto('/admin.html');
+    await entrar(page, 'dona@empresa.com', 'senha-boa-1');
+    expect(await abasVisiveis(page)).not.toContain('vendas');
+    await expect(page.locator('#filtro-origem')).toHaveCount(0);
+    expect(erros).toEqual([]);
+  });
+});
+
+test('prévia (API simulada): aba Vendas abre as quatro subabas sem erro', async ({ page }) => {
+  const erros = coletarErros(page);
+  await page.setViewportSize({ width: 1366, height: 900 });
+  await configurar(page, { API_URL: 'simulada' });
+  await page.goto('/admin.html');
+  await entrar(page, 'admin@previa.com', 'previa123');
+  const temVendas = await page.evaluate(() => typeof window.DISC_API.listarPedidos === 'function');
+  test.skip(!temVendas, 'API simulada ainda sem a venda direta');
+  await page.locator('.aba[data-aba="vendas"]').click();
+  await expect(page.locator('#vd-hoje')).toContainText('R$');
+  await expect(page.locator('#vd-erro')).toHaveCount(0);
+  await page.click('#vd-subaba-pedidos');
+  await expect(page.locator('#vd-contagem')).toContainText('pedido');
+  await page.click('#vd-subaba-cupons');
+  await expect(page.locator('#vd-lista-cupons')).toBeVisible();
+  await page.click('#vd-subaba-pacotes');
+  await expect(page.locator('#vd-lista-pacotes > li')).toHaveCount(3);
+  await capturarVendas(page, 'previa-pacotes');
+  expect(erros).toEqual([]);
 });

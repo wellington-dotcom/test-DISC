@@ -50,13 +50,25 @@
  * cargo, area}) leva a pessoa para a empresa (ativa em outra = move) e aprova a resposta; salvarRelacoes(…, {topoIds})
  * guarda o topo do organograma na empresa (listarEquipe devolve topoIds); versaoBanco() -> a mais nova, nada faltando.
  *
+ * Venda direta (rodada 5, como a migração 20261011120000_vendas.sql; contrato em js/api-supabase.js): pacotesPublicos,
+ * enviarPessoal, resumoPessoal, criarPedido, iniciarPagamento, confirmarRetorno, statusPedido, relatorioPessoal, salvarParte2Pessoal, recuperarAcesso ({ok:true}, sem e-mail)
+ * e, no painel, listarPedidos/atualizarPedido/listarCupons/salvarCupom/excluirCupom/listarPacotes/salvarPacote/resumoVendas.
+ * iniciarPagamento: por padrão como a InfinitePay (migração 20261012120000_infinitepay.sql): {ok, provedor:'infinitepay',
+ * redirecionarUrl:'meu-relatorio.html?pedido=<id>&order_nsu=<id>&transaction_nsu=SIM&slug=SIM&capture_method=pix#t-<token>',
+ * valor, simulado:true} — "volta" direto como se a InfinitePay tivesse aprovado; confirmarRetorno(pedidoId, tokenAcesso,
+ * {transactionNsu, slug}) marca pago (com alguma referência) e devolve {ok, status}. Com criar({provedorPagamento:'asaas'})
+ * ou CONFIG.PAGAMENTO_PREVIA = 'asaas': Pix FICTÍCIO (QR de enfeite e copia-e-cola "PREVIA-NAO-PAGUE", cartaoUrl '',
+ * provedor:'asaas', simulado: true).
+ * Só na prévia: simularPagamento(pedidoId) -> {ok, status:'pago'} (DISC_API.simularPagamento). Cupons da prévia: PREVIA100
+ * (100%, libera sem pagar) e LANCA10 (10%). Os limites anti-abuso por e-mail não valem aqui.
+ *
  * No Node (testes): require('./js/api-simulada.js').criar({ armazenamento, scoring, latenciaMs: 0, semente: false }).
  * Opcional: { motor, fixture } para trocar o motor do relatório e os dados do processo de exemplo.
  */
 (function (root) {
   'use strict';
 
-  var VERSAO_BANCO = 20261010120000;                     // última migração (supabase/migrations)
+  var VERSAO_BANCO = 20261012120000;                     // última migração (supabase/migrations)
   var CHAVE_ARMAZENAMENTO = 'disc_planilha_simulada';     // respostas (mesma chave das versões anteriores)
   var CHAVES = {
     usuarios: 'disc_simulada_usuarios',
@@ -71,7 +83,10 @@
     sementeRelatorio: 'disc_simulada_semente_relatorio',
     sementeEquipe: 'disc_simulada_semente_equipe',
     sementeParte2: 'disc_simulada_semente_parte2',
-    sementeFotos: 'disc_simulada_semente_fotos'
+    sementeFotos: 'disc_simulada_semente_fotos',
+    pacotes: 'disc_simulada_pacotes',
+    cupons: 'disc_simulada_cupons',
+    pedidos: 'disc_simulada_pedidos'
   };
   var CHAVE_ADMIN = 'previa';
   var LATENCIA_MS = 400;
@@ -159,6 +174,31 @@
   var MSG_LINK_INATIVO = 'Este link de avaliação não está mais ativo.';
   var MSG_PARTE2 = 'Responda também a segunda parte do teste.';
   var MSG_LINK_INVALIDO = 'Link inválido ou avaliação encerrada. Fale com quem enviou o link.';
+  // Venda direta (B2C) — como a migração 20261011120000_vendas.sql.
+  var PACOTES_PADRAO = [
+    { chave: 'gratis', nome: 'Resumo grátis', precoCentavos: 0, precoLancamentoCentavos: null, lancamentoAte: '', ativo: true, ordem: 1,
+      descricao: { subtitulo: 'Seu perfil em uma frase', itens: ['Seu perfil em uma frase', 'O nome da sua combinação', 'Os 4 fatores com barras', '3 forças'] } },
+    { chave: 'completo', nome: 'Relatório completo', precoCentavos: 3900, precoLancamentoCentavos: 2900, lancamentoAte: '', ativo: true, ordem: 2,
+      descricao: { subtitulo: 'Entenda o que está te travando e como destravar', itens: ['Relatório completo do seu perfil',
+        'Régua de intensidade dos 4 fatores', 'O que está te travando — com 1 ação para cada ponto', 'Plano prático de 30, 60 e 90 dias',
+        'Versão para imprimir ou salvar em PDF', 'Acesso pelo link para sempre'] } },
+    { chave: 'completo_plus', nome: 'Completo + Parte 2', precoCentavos: 6900, precoLancamentoCentavos: 4900, lancamentoAte: '', ativo: true, ordem: 3,
+      descricao: { subtitulo: 'Tudo do completo + como o seu trabalho exige que você seja', itens: ['Tudo do Relatório completo',
+        'Parte 2: como o seu trabalho/rotina exige que você seja', 'Onde você está se esticando', 'Mapa ritmo × foco', 'Plano de 90 dias estendido'] } }
+  ];
+  // Cupons da prévia: PREVIA100 libera de graça; LANCA10 dá 10%.
+  var CUPONS_PREVIA = [
+    { codigo: 'PREVIA100', tipo: 'percentual', valor: 100, usosMax: null, usos: 0, validoAte: '', ativo: true, pacotes: [], descricao: 'Prévia: libera sem pagar' },
+    { codigo: 'LANCA10', tipo: 'percentual', valor: 10, usosMax: null, usos: 0, validoAte: '', ativo: true, pacotes: [], descricao: 'Prévia: 10% de desconto' }
+  ];
+  var FORM_PESSOAL = { campos: { idade: 'oculto', funcao: 'oculto', empresa: 'oculto', email: 'obrigatorio', cidade: 'oculto', foto: 'oculto' } };
+  var STATUS_PEDIDO = ['aguardando', 'pago', 'cortesia', 'estornado', 'cancelado'];
+  var PERIODOS_VENDAS = ['hoje', '7d', '30d', 'mes', 'tudo'];
+  var MSG_RESUMO_NAO_ENCONTRADO = 'Resultado não encontrado. Faça o teste de novo.';
+  var MSG_PEDIDO_NAO_ENCONTRADO = 'Pedido não encontrado.';
+  var MSG_LINK_RELATORIO = 'Link inválido. Confira o endereço ou use "Recuperar meu relatório".';
+  // QR de enfeite da prévia (PNG 116×116, NÃO é um Pix de verdade).
+  var QR_PREVIA = 'iVBORw0KGgoAAAANSUhEUgAAAHQAAAB0CAAAAABx8Un7AAABO0lEQVR42u3a3Q7CMAiG4d3/TeuRiTH8fFDBmbw909k9S0RasNfjB+MCBQVtoVcwXtffP2fNUe4DuouaX7rxvgep9wHdRZUAsuao9wG9D/oZRF4Agf4PGv3oR6MX9Bj1ErW7IBceDnQfzTZUWbL/+m4Q9AgtFUDO5nq0agNtodmmTL2WLgqga6iZnMVkESV7KXpBR9BsUrSxzgrmMHpBR1Cv4FWDq5XwQUfRqJmhNLCi4sndbIOOotaH3KK2EDThIg46iioFUidozNegK2ilKFKakOGCAbqCeniU6LPmpfsAoKtop+mhLBig+6jUSCw0KqVAAh1H1UBREkiragMdQZVNttJ8DP/AB70FqiR25fAF6L3QcGFODtYcndIBPULV5B0dTkzngq6h1Y2ZegD16HAFaBvdHKCgoKXxBAQBkEC4yhUxAAAAAElFTkSuQmCC';
 
   /* ---------- SHA-256 em JS puro (navegador e Node; síncrono) ---------- */
 
@@ -682,6 +722,8 @@
     var agora = typeof opcoes.agora === 'function' ? opcoes.agora : function () { return Date.now(); };
     var aleatorio = opcoes.aleatorio;
     var comSemente = opcoes.semente !== false;
+    // Meio de pagamento da prévia: 'infinitepay' (padrão, como em produção com INFINITEPAY_HANDLE) ou 'asaas' (Pix fictício).
+    var provedorPrevia = opcoes.provedorPagamento === 'asaas' ? 'asaas' : 'infinitepay';
     var memoria = {};             // usado quando o localStorage não está disponível
     var envios = {};              // limitador: janela -> quantidade (só nesta página, como o CacheService)
 
@@ -1174,7 +1216,8 @@
           .map(function (e) {
             return { de: String(e.de || ''), para: String(e.para || ''), deCodigo: String(e.deCodigo || ''),
               paraCodigo: String(e.paraCodigo || ''), em: String(e.em || '') };
-          })
+          }),
+        origem: l.origem === 'pessoal' ? 'pessoal' : 'processo'
       };
     }
 
@@ -2135,6 +2178,21 @@
       'usuarios.minhaFoto': { fn: function (u, c) { return acaoMinhaFoto(u, c.foto); } },
       'excluirTodos': { soAdmin: true, fn: function (u, c) { return acaoExcluirTodos(c.avaliacao); } },
       'empresas.listar': { soAdmin: true, fn: function () { return acaoEmpresasListar(); } },
+      'pedidos.listar': { soAdmin: true, fn: function (u, c) { return acaoPedidosListar(c.filtros); } },
+      'pedidos.atualizar': { soAdmin: true, fn: function (u, c) { return acaoPedidoAtualizar(c.id, c.campos); } },
+      'cupons.listar': { soAdmin: true, fn: function () { return { ok: true, cupons: cuponsSalvos().slice().reverse().map(cupomSaida) }; } },
+      'cupons.salvar': { soAdmin: true, fn: function (u, c) { return acaoCupomSalvar(c.cupom); } },
+      'cupons.excluir': { soAdmin: true, fn: function (u, c) { return acaoCupomExcluir(c.codigo); } },
+      'pacotes.listar': {
+        soAdmin: true,
+        fn: function () {
+          return { ok: true, pacotes: pacotesOrdenados().map(function (x) {
+            var o = pacoteSaida(x); o.ativo = x.ativo !== false; o.atualizadoEm = x.atualizadoEm || ''; return o;
+          }) };
+        }
+      },
+      'pacotes.salvar': { soAdmin: true, fn: function (u, c) { return acaoPacoteSalvar(c.pacote); } },
+      'vendas.resumo': { soAdmin: true, fn: function (u, c) { return acaoResumoVendas(c.periodo); } },
       'equipe.listar': { soAdmin: true, fn: function (u, c) { return acaoEquipeListar(c.empresaId); } },
       'colaboradores.salvar': { soAdmin: true, fn: function (u, c) { return acaoColaboradorSalvar(c.colaborador); } },
       'colaboradores.mover': { soAdmin: true, fn: function (u, c) { return acaoColaboradorMover(c.colaborador); } },
@@ -2190,12 +2248,442 @@
       if (acao === 'avaliacaoPublica') return acaoAvaliacaoPublica(corpo.codigo);
       if (acao === 'login') return acaoLogin(corpo.email, corpo.senha);
       if (acao === 'primeiroAcesso') return acaoPrimeiroAcesso(corpo);
+      if (acao === 'pacotes.publicos') return { ok: true, pacotes: pacotesOrdenados().filter(function (x) { return x.ativo !== false; }).map(pacoteSaida) };
+      if (acao === 'pessoal.enviar') return acaoEnviarPessoal(corpo.payload);
+      if (acao === 'pessoal.resumo') return acaoResumoPessoal(corpo.tokenResumo);
+      if (acao === 'pedido.criar') return acaoCriarPedido(corpo.tokenResumo, corpo.pacote, corpo.cupom);
+      if (acao === 'pagamento.iniciar') return acaoIniciarPagamento(corpo.pedidoId, corpo.tokenAcesso);
+      if (acao === 'pedido.status') return acaoStatusPedido(corpo.pedidoId, corpo.tokenAcesso);
+      if (acao === 'pagamento.confirmar') return acaoConfirmarRetorno(corpo.pedidoId, corpo.tokenAcesso, corpo.dados);
+      if (acao === 'pedido.simularPago') return acaoSimularPagamento(corpo.pedidoId);
+      if (acao === 'pessoal.relatorio') return acaoRelatorioPessoal(corpo.tokenAcesso);
+      if (acao === 'pessoal.parte2') return acaoSalvarParte2(corpo.tokenAcesso, corpo.exigido);
+      if (acao === 'acesso.recuperar') return acaoRecuperarAcesso(corpo.email);
       if (typeof acao !== 'string' || !Object.prototype.hasOwnProperty.call(ACOES_COM_SESSAO, acao)) return erro('Ação desconhecida.');
       var sessao = validarSessao(corpo.token);
       if (!sessao.ok) return sessao;
       var regra = ACOES_COM_SESSAO[acao];
       if (regra.soAdmin && sessao.usuario.papel !== 'admin') return erro(MSG_SEM_PERMISSAO);
       return regra.fn(sessao.usuario, corpo, sessao.token);
+    }
+
+    /* ----- venda direta (B2C): como a migração 20261011120000_vendas.sql + Edge Function "pagamento" ----- */
+    // Diferenças da prévia: o Pix é FICTÍCIO (QR de enfeite, "não pague"), o pedido só vira pago por
+    // simularPagamento(pedidoId) (botão "Simular pagamento aprovado"), recuperarAcesso responde {ok:true} sem mandar
+    // e-mail e os limites anti-abuso por e-mail/minuto não são aplicados.
+
+    function pacotesSalvos() {
+      var l = lerChave(CHAVES.pacotes, null);
+      if (!Array.isArray(l) || !l.length) { l = copiar(PACOTES_PADRAO); gravarChave(CHAVES.pacotes, l); }
+      return l.filter(function (p) { return p && typeof p === 'object'; });
+    }
+    function cuponsSalvos() {
+      var l = lerChave(CHAVES.cupons, null);
+      if (!Array.isArray(l)) {
+        l = comSemente ? copiar(CUPONS_PREVIA).map(function (c) { c.criadoEm = agoraIso(); return c; }) : [];
+        gravarChave(CHAVES.cupons, l);
+      }
+      return l.filter(function (c) { return c && typeof c === 'object'; });
+    }
+    function pedidosSalvos() { return lerLista(CHAVES.pedidos); }
+    function hojeBr() { return new Date(agora() - 3 * 3600000).toISOString().slice(0, 10); }
+    function precoHoje(p) {
+      var lanc = p.precoLancamentoCentavos;
+      if (lanc !== null && lanc !== undefined && (!p.lancamentoAte || p.lancamentoAte >= hojeBr())) return Number(lanc) || 0;
+      return Number(p.precoCentavos) || 0;
+    }
+    function pacoteSaida(p) {
+      var v = precoHoje(p);
+      return { chave: p.chave, nome: p.nome, precoCentavos: Number(p.precoCentavos) || 0,
+        precoLancamentoCentavos: p.precoLancamentoCentavos === null || p.precoLancamentoCentavos === undefined ? null : Number(p.precoLancamentoCentavos),
+        lancamentoAte: p.lancamentoAte || '', valorCentavos: v, emLancamento: v !== (Number(p.precoCentavos) || 0),
+        descricao: copiar(p.descricao || { subtitulo: '', itens: [] }), ordem: Number(p.ordem) || 0 };
+    }
+    function pacotesOrdenados() {
+      return pacotesSalvos().slice().sort(function (a, b) { return (a.ordem - b.ordem) || String(a.chave).localeCompare(String(b.chave)); });
+    }
+    function uuidAleatorio() {
+      var h = hexAleatorio(16);
+      return h.slice(0, 8) + '-' + h.slice(8, 12) + '-4' + h.slice(13, 16) + '-a' + h.slice(17, 20) + '-' + h.slice(20, 32);
+    }
+    function primeiroNome(n) { return String(n || '').trim().split(/\s+/)[0] || ''; }
+    function resultadoDaLinha(l) { return recalcular(String(l.respostas || '')); }
+    function pedidoSaida(p) {
+      return { id: p.id, respostaId: p.respostaId || '', pacote: p.pacote, valorCentavos: p.valorCentavos,
+        valorOriginalCentavos: p.valorOriginalCentavos || 0, cupom: p.cupom || '', status: p.status, metodo: p.metodo || '',
+        provedor: p.provedor || '', provedorRef: p.provedorRef || '',
+        asaasCobrancaId: p.asaasCobrancaId || '', faturaUrl: p.checkoutUrl || '', email: p.email || '', nome: p.nome || '',
+        criadoEm: p.criadoEm || '', pagoEm: p.pagoEm || '', reembolsadoEm: p.reembolsadoEm || '' };
+    }
+    function cupomSaida(c) {
+      return { codigo: c.codigo, tipo: c.tipo, valor: Number(c.valor) || 0, usosMax: c.usosMax == null ? null : Number(c.usosMax),
+        usos: Number(c.usos) || 0, validoAte: c.validoAte || '', ativo: c.ativo !== false, pacotes: (c.pacotes || []).slice(),
+        descricao: c.descricao || '', criadoEm: c.criadoEm || '' };
+    }
+    // Troca de status com as datas e o uso do cupom (gatilho pedidos_antes_gravar).
+    function mudarStatusPedido(p, status, metodo) {
+      var antes = p.status;
+      p.status = status;
+      if (metodo !== undefined) p.metodo = metodo;
+      if ((status === 'pago' || status === 'cortesia') && antes !== 'pago' && antes !== 'cortesia') {
+        var primeiraVez = !p.pagoEm;
+        if (!p.pagoEm) p.pagoEm = agoraIso();
+        if (p.cupom && primeiraVez) {
+          var cs = cuponsSalvos();
+          var c = buscarPor(cs, 'codigo', p.cupom);
+          if (c) { c.usos = (Number(c.usos) || 0) + 1; gravarChave(CHAVES.cupons, cs); }
+        }
+      }
+      if (status === 'estornado' && antes !== 'estornado' && !p.reembolsadoEm) p.reembolsadoEm = agoraIso();
+    }
+    function respostaPorToken(token) {
+      if (typeof token !== 'string' || !/^[0-9a-f]{64}$/.test(token)) return null;
+      var linhas = ler();
+      for (var i = 0; i < linhas.length; i++) if (linhas[i].origem === 'pessoal' && linhas[i].tokenResumo === token) return linhas[i];
+      return null;
+    }
+    function pedidoPorToken(token) {
+      if (typeof token !== 'string' || !/^[0-9a-f]{64}$/.test(token)) return null;
+      return buscarPor(pedidosSalvos(), 'tokenAcesso', token);
+    }
+
+    function acaoEnviarPessoal(bruto) {
+      if (!bruto || typeof bruto !== 'object' || Array.isArray(bruto)) return erro('Dados do teste ausentes.');
+      try { if (JSON.stringify(bruto).length > 20000) return erro('Requisição grande demais.'); } catch (e) { return erro('JSON inválido.'); }
+      var email = limparTexto(bruto.email, 120).toLowerCase();
+      if (!email) return erro('Informe o seu e-mail.');
+      if (!emailValido(email)) return erro('E-mail inválido.');
+      var tel = '';
+      if (String(bruto.telefone == null ? '' : bruto.telefone).trim()) {
+        tel = normalizarTelefone(bruto.telefone);
+        if (!tel) return erro('WhatsApp inválido. Informe DDD + número.');
+      }
+      var p = {};
+      for (var k in bruto) if (Object.prototype.hasOwnProperty.call(bruto, k)) p[k] = bruto[k];
+      delete p.avaliacao; delete p.idade; delete p.foto; delete p.extras;
+      p.telefone = tel || '11900000000';
+      p.email = email;
+      var v = validarPayload(p, FORM_PESSOAL);
+      if (!v.ok) return v;
+      var exigido = '';
+      if (typeof bruto.exigido === 'string' && bruto.exigido.trim()) {
+        exigido = bruto.exigido.trim();
+        if (!exigidoValido(exigido)) return erro('Respostas da segunda parte inválidas.');
+      }
+      var linhas = ler();
+      var i = indice(linhas, v.payload.id);
+      if (i !== -1) {
+        var ex = linhas[i];
+        if (ex.origem !== 'pessoal' || ex.email !== email || !ex.tokenResumo) return erro('Identificador do envio inválido.');
+        return { ok: true, duplicado: true, id: ex.id, protocolo: '', tokenResumo: ex.tokenResumo };
+      }
+      var linha = {};
+      for (var c in v.payload) if (Object.prototype.hasOwnProperty.call(v.payload, c)) linha[c] = v.payload[c];
+      linha.telefone = tel;
+      linha.idade = null; linha.funcao = ''; linha.empresa = ''; linha.cidade = ''; linha.extras = []; linha.avaliacao = '';
+      linha.empresaId = '';
+      linha.origem = 'pessoal';
+      linha.tokenResumo = hexAleatorio(32);
+      linha.recebidoEm = agoraIso();
+      linha.status = STATUS_PADRAO;
+      linha.observacoes = '';
+      linha.protocolo = '';
+      linha.foto = '';
+      if (exigido) linha.exigido = exigido;
+      if (tel) {
+        var lsP = pessoas();
+        var pessoa = pessoaDoEnvio(lsP, { telefone: tel, nome: linha.nome, email: email }, false, linha.recebidoEm);
+        linha.pessoaId = pessoa ? pessoa.id : '';
+        gravarPessoas(lsP);
+      } else {
+        linha.pessoaId = '';
+      }
+      linhas.push(linha);
+      gravar(linhas);
+      return { ok: true, id: linha.id, protocolo: '', tokenResumo: linha.tokenResumo };
+    }
+
+    function acaoResumoPessoal(token) {
+      var l = respostaPorToken(token);
+      if (!l) return erro(MSG_RESUMO_NAO_ENCONTRADO);
+      return { ok: true, nome: primeiroNome(l.nome), resultado: resultadoDaLinha(l), recebidoEm: l.recebidoEm || '', temParte2: exigidoValido(l.exigido) };
+    }
+
+    function acaoCriarPedido(token, chave, cupomBruto) {
+      var l = respostaPorToken(token);
+      if (!l) return erro(MSG_RESUMO_NAO_ENCONTRADO);
+      var pa = null;
+      pacotesSalvos().forEach(function (x) { if (x.chave === chave && x.ativo !== false) pa = x; });
+      if (!pa) return erro('Pacote indisponível. Escolha outro.');
+      var base = precoHoje(pa);
+      if (base <= 0) return erro('Este pacote é gratuito: o seu resumo já está liberado.');
+      var lista = pedidosSalvos();
+      var pago = lista.filter(function (p) { return p.respostaId === l.id && p.pacote === pa.chave && (p.status === 'pago' || p.status === 'cortesia'); }).pop();
+      if (pago) {
+        return { ok: true, pedidoId: pago.id, tokenAcesso: pago.tokenAcesso, valor: pago.valorCentavos, valorOriginal: pago.valorOriginalCentavos,
+          gratuito: pago.status === 'cortesia', status: pago.status, jaPago: true };
+      }
+      var cod = String(cupomBruto == null ? '' : cupomBruto).replace(/\s+/g, '').toUpperCase();
+      var valor = base;
+      if (cod) {
+        var c = buscarPor(cuponsSalvos(), 'codigo', cod);
+        if (!c || c.ativo === false || (c.validoAte && c.validoAte < hojeBr()) || (c.usosMax != null && (Number(c.usos) || 0) >= c.usosMax) ||
+            ((c.pacotes || []).length && (c.pacotes || []).indexOf(pa.chave) < 0)) {
+          return erro('Cupom inválido ou expirado.');
+        }
+        valor = c.tipo === 'percentual' ? Math.round(base * (100 - c.valor) / 100) : Math.max(0, base - c.valor);
+      } else {
+        cod = '';
+      }
+      var limite = agora() - 24 * 3600000;
+      var aberto = lista.filter(function (p) {
+        return p.respostaId === l.id && p.pacote === pa.chave && p.status === 'aguardando' && (p.cupom || '') === cod &&
+          p.valorCentavos === valor && Date.parse(p.criadoEm) > limite;
+      }).pop();
+      if (aberto && valor > 0) {
+        return { ok: true, pedidoId: aberto.id, tokenAcesso: aberto.tokenAcesso, valor: aberto.valorCentavos, valorOriginal: aberto.valorOriginalCentavos,
+          gratuito: false, status: 'aguardando' };
+      }
+      var novo = { id: uuidAleatorio(), respostaId: l.id, pacote: pa.chave, valorCentavos: valor, valorOriginalCentavos: base, cupom: cod,
+        status: 'aguardando', metodo: '', email: l.email || '', nome: l.nome || '', tokenAcesso: hexAleatorio(32), criadoEm: agoraIso(),
+        pagoEm: '', reembolsadoEm: '' };
+      if (valor === 0) mudarStatusPedido(novo, 'cortesia', 'cupom');
+      lista = pedidosSalvos();
+      lista.push(novo);
+      gravarChave(CHAVES.pedidos, lista);
+      return { ok: true, pedidoId: novo.id, tokenAcesso: novo.tokenAcesso, valor: valor, valorOriginal: base, gratuito: valor === 0, status: novo.status };
+    }
+
+    function pedidoDoCliente(id, token) {
+      var p = buscarPor(pedidosSalvos(), 'id', String(id || ''));
+      return p && typeof token === 'string' && iguaisSeguro(p.tokenAcesso, token) ? p : null;
+    }
+
+    function acaoIniciarPagamento(id, token) {
+      var p = pedidoDoCliente(id, token);
+      if (!p) return erro(MSG_PEDIDO_NAO_ENCONTRADO);
+      if (p.status === 'pago' || p.status === 'cortesia') return { ok: true, pago: true, status: p.status };
+      if (p.status !== 'aguardando') return erro('Este pedido não está mais aberto. Faça um novo pedido.');
+      var lista = pedidosSalvos();
+      var alvo = buscarPor(lista, 'id', p.id);
+      if (provedorPrevia === 'infinitepay') {
+        var url = 'meu-relatorio.html?pedido=' + encodeURIComponent(p.id) + '&order_nsu=' + encodeURIComponent(p.id) +
+          '&transaction_nsu=SIM&slug=SIM&capture_method=pix#t-' + p.tokenAcesso;
+        alvo.provedor = 'infinitepay';
+        alvo.checkoutUrl = url;
+        gravarChave(CHAVES.pedidos, lista);
+        return { ok: true, simulado: true, provedor: 'infinitepay', redirecionarUrl: url, valor: p.valorCentavos };
+      }
+      alvo.provedor = 'asaas';
+      gravarChave(CHAVES.pedidos, lista);
+      var venc = new Date(agora() - 3 * 3600000 + 86400000).toISOString().slice(0, 10);
+      return { ok: true, simulado: true, provedor: 'asaas', pix: { qrBase64: QR_PREVIA, copiaECola: 'PREVIA-NAO-PAGUE-' + p.id, expira: venc + ' 23:59:59' },
+        cartaoUrl: '', valor: p.valorCentavos, vencimento: venc };
+    }
+
+    function acaoStatusPedido(id, token) {
+      var p = pedidoDoCliente(id, token);
+      if (!p) return erro(MSG_PEDIDO_NAO_ENCONTRADO);
+      return { ok: true, status: p.status };
+    }
+
+    // Volta da InfinitePay (prévia): com alguma referência, o "payment_check" fictício aprova.
+    function acaoConfirmarRetorno(id, token, dados) {
+      var p = pedidoDoCliente(id, token);
+      if (!p) return erro(MSG_PEDIDO_NAO_ENCONTRADO);
+      var d = dados && typeof dados === 'object' ? dados : {};
+      var ref = function (v) { var x = String(v == null ? '' : v).trim(); return /^[A-Za-z0-9._:-]{1,120}$/.test(x) ? x : ''; };
+      var tx = ref(d.transactionNsu) || ref(d.slug);
+      if (p.status !== 'aguardando' || p.provedor !== 'infinitepay' || !tx) return { ok: true, status: p.status };
+      var lista = pedidosSalvos();
+      var alvo = buscarPor(lista, 'id', p.id);
+      mudarStatusPedido(alvo, 'pago', 'pix');
+      alvo.provedorRef = tx;
+      gravarChave(CHAVES.pedidos, lista);
+      return { ok: true, status: alvo.status };
+    }
+
+    function acaoSimularPagamento(id) {
+      var lista = pedidosSalvos();
+      var p = buscarPor(lista, 'id', String(id || ''));
+      if (!p) return erro(MSG_PEDIDO_NAO_ENCONTRADO);
+      if (p.status === 'aguardando' || p.status === 'cancelado') mudarStatusPedido(p, 'pago', 'pix');
+      gravarChave(CHAVES.pedidos, lista);
+      return { ok: true, status: p.status };
+    }
+
+    function acaoRelatorioPessoal(token) {
+      var p = pedidoPorToken(token);
+      if (!p) return erro(MSG_LINK_RELATORIO);
+      if (p.status === 'aguardando') return erro('Pagamento ainda não confirmado.', { status: p.status });
+      if (p.status === 'estornado') return erro('Esta compra foi estornada. O relatório não está mais disponível.', { status: p.status });
+      if (p.status !== 'pago' && p.status !== 'cortesia') return erro('Pedido cancelado.', { status: p.status });
+      var linhas = ler();
+      var i = indice(linhas, p.respostaId);
+      if (i === -1) return erro('As respostas deste relatório foram excluídas. Fale com o suporte.');
+      var l = linhas[i];
+      var ex = exigidoValido(l.exigido) ? l.exigido : '';
+      var pa = buscarPor(pacotesSalvos(), 'chave', p.pacote);
+      return { ok: true, nome: primeiroNome(l.nome), resultado: resultadoDaLinha(l), exigido: calcularExigido(ex), exigidoRespostas: ex,
+        pacote: p.pacote, pacoteNome: pa ? pa.nome : '', precisaParte2: p.pacote === 'completo_plus' && !ex, status: p.status };
+    }
+
+    function acaoSalvarParte2(token, exigidoBruto) {
+      var p = pedidoPorToken(token);
+      if (!p) return erro('Link inválido.');
+      if (p.status !== 'pago' && p.status !== 'cortesia') return erro('Pagamento ainda não confirmado.');
+      if (p.pacote !== 'completo_plus') return erro('A Parte 2 faz parte do pacote Completo + Parte 2.');
+      var ex = typeof exigidoBruto === 'string' ? exigidoBruto.replace(/\D/g, '') : '';
+      if (!exigidoValido(ex)) return erro('Responda todos os grupos da segunda parte.');
+      var linhas = ler();
+      var i = indice(linhas, p.respostaId);
+      if (i === -1) return erro('As respostas deste relatório foram excluídas. Fale com o suporte.');
+      if (exigidoValido(linhas[i].exigido) && linhas[i].exigido !== ex) return erro('A segunda parte já foi respondida.');
+      linhas[i].exigido = ex;
+      gravar(linhas);
+      return { ok: true, exigido: calcularExigido(ex), exigidoRespostas: ex };
+    }
+
+    function acaoRecuperarAcesso(emailBruto) {
+      var email = limparTexto(emailBruto, 120).toLowerCase();
+      if (!emailValido(email)) return erro('Informe um e-mail válido.');
+      return { ok: true };
+    }
+
+    // ----- painel -----
+    function acaoPedidosListar(f) {
+      f = f && typeof f === 'object' ? f : {};
+      var busca = normalizarNomeCampo(f.busca || '');
+      var lista = pedidosSalvos().filter(function (p) {
+        if (STATUS_PEDIDO.indexOf(f.status) >= 0 && p.status !== f.status) return false;
+        if (f.pacote && p.pacote !== f.pacote) return false;
+        var dia = new Date(Date.parse(p.criadoEm) - 3 * 3600000).toISOString().slice(0, 10);
+        if (f.de && dia < f.de) return false;
+        if (f.ate && dia > f.ate) return false;
+        if (busca && normalizarNomeCampo([p.nome, p.email, p.cupom, p.id].join(' ')).indexOf(busca) < 0) return false;
+        return true;
+      }).sort(function (a, b) { return String(b.criadoEm).localeCompare(String(a.criadoEm)); });
+      return { ok: true, pedidos: lista.slice(0, Math.max(1, Math.min(5000, Number(f.limite) || 500))).map(pedidoSaida) };
+    }
+
+    function acaoPedidoAtualizar(id, campos) {
+      var status = campos && typeof campos === 'object' ? campos.status : campos;
+      if (STATUS_PEDIDO.indexOf(status) < 0) return erro('Situação inválida.');
+      var lista = pedidosSalvos();
+      var p = buscarPor(lista, 'id', String(id || ''));
+      if (!p) return erro(MSG_PEDIDO_NAO_ENCONTRADO);
+      if (p.status === status) return { ok: true, pedido: pedidoSaida(p) };
+      var ok = (status === 'estornado' && (p.status === 'pago' || p.status === 'cortesia')) ||
+        (status === 'cortesia' && ['aguardando', 'cancelado', 'estornado'].indexOf(p.status) >= 0) ||
+        (status === 'pago' && ['aguardando', 'cancelado'].indexOf(p.status) >= 0) ||
+        (status === 'cancelado' && p.status === 'aguardando');
+      if (!ok) return erro('Não dá para mudar este pedido de "' + p.status + '" para "' + status + '".');
+      mudarStatusPedido(p, status, status === 'pago' || status === 'cortesia' ? 'manual' : undefined);
+      gravarChave(CHAVES.pedidos, lista);
+      return { ok: true, pedido: pedidoSaida(p) };
+    }
+
+    function acaoCupomSalvar(c) {
+      if (!c || typeof c !== 'object') return erro('Dados do cupom ausentes.');
+      var codigo = String(c.codigo == null ? '' : c.codigo).replace(/\s+/g, '').toUpperCase();
+      if (!/^[A-Z0-9_-]{3,30}$/.test(codigo)) return erro('Código do cupom: 3 a 30 letras, números, - ou _ (sem espaço).');
+      var tipo = c.tipo === 'valor' || c.tipo === 'percentual' ? c.tipo : '';
+      if (!tipo) return erro('Escolha o tipo do cupom: percentual ou valor.');
+      var valor = Math.round(Number(c.valor));
+      if (!isFinite(valor) || valor <= 0) return erro('Informe o desconto do cupom.');
+      if (tipo === 'percentual' && valor > 100) return erro('O desconto percentual vai de 1 a 100.');
+      var usosMax = c.usosMax === null || c.usosMax === undefined || c.usosMax === '' ? null : Math.round(Number(c.usosMax));
+      if (usosMax !== null && (!isFinite(usosMax) || usosMax < 1)) usosMax = null;
+      var validoAte = c.validoAte ? String(c.validoAte).slice(0, 10) : '';
+      if (validoAte && (!/^\d{4}-\d{2}-\d{2}$/.test(validoAte) || isNaN(Date.parse(validoAte)))) return erro('Data de validade inválida.');
+      var lista = cuponsSalvos();
+      var atual = buscarPor(lista, 'codigo', codigo);
+      if (!atual) { atual = { codigo: codigo, usos: 0, criadoEm: agoraIso() }; lista.push(atual); }
+      atual.tipo = tipo; atual.valor = valor; atual.usosMax = usosMax; atual.validoAte = validoAte; atual.ativo = c.ativo !== false;
+      atual.pacotes = (Array.isArray(c.pacotes) ? c.pacotes : []).map(String).filter(function (x) { return /^[a-z0-9_]{2,30}$/.test(x); });
+      atual.descricao = limparTexto(c.descricao, 200);
+      gravarChave(CHAVES.cupons, lista);
+      return { ok: true, cupom: cupomSaida(atual) };
+    }
+
+    function acaoCupomExcluir(codigoBruto) {
+      var codigo = String(codigoBruto == null ? '' : codigoBruto).replace(/\s+/g, '').toUpperCase();
+      var lista = cuponsSalvos();
+      var resto = lista.filter(function (c) { return c.codigo !== codigo; });
+      if (resto.length === lista.length) return erro('Cupom não encontrado.');
+      gravarChave(CHAVES.cupons, resto);
+      return { ok: true, codigo: codigo };
+    }
+
+    function acaoPacoteSalvar(d) {
+      if (!d || typeof d !== 'object') return erro('Dados do pacote ausentes.');
+      var lista = pacotesSalvos();
+      var p = buscarPor(lista, 'chave', String(d.chave || ''));
+      if (!p) return erro('Pacote não encontrado.');
+      var veio = function (k) { return Object.prototype.hasOwnProperty.call(d, k) && d[k] !== undefined; };
+      var mudou = false;
+      if (veio('nome')) { var n = limparTexto(d.nome, 80); if (!n) return erro('Informe o nome do pacote.'); p.nome = n; mudou = true; }
+      if (veio('precoCentavos')) {
+        var pr = Math.round(Number(d.precoCentavos));
+        if (!isFinite(pr) || pr < 0 || pr > 10000000) return erro('Preço inválido.');
+        p.precoCentavos = pr; mudou = true;
+      }
+      if (veio('precoLancamentoCentavos')) {
+        var lc = d.precoLancamentoCentavos === null || d.precoLancamentoCentavos === '' ? null : Math.round(Number(d.precoLancamentoCentavos));
+        if (lc !== null && (!isFinite(lc) || lc < 0 || lc > 10000000)) return erro('Preço de lançamento inválido.');
+        p.precoLancamentoCentavos = lc; mudou = true;
+      }
+      if (veio('lancamentoAte')) {
+        var la = d.lancamentoAte ? String(d.lancamentoAte).slice(0, 10) : '';
+        if (la && (!/^\d{4}-\d{2}-\d{2}$/.test(la) || isNaN(Date.parse(la)))) return erro('Data do fim do lançamento inválida.');
+        p.lancamentoAte = la; mudou = true;
+      }
+      if (veio('ativo')) { p.ativo = d.ativo !== false; mudou = true; }
+      if (veio('ordem')) { p.ordem = Math.max(-1000, Math.min(1000, Math.round(Number(d.ordem)) || 0)); mudou = true; }
+      if (veio('descricao')) {
+        var ds = d.descricao && typeof d.descricao === 'object' ? d.descricao : {};
+        p.descricao = { subtitulo: limparTexto(ds.subtitulo, 200),
+          itens: (Array.isArray(ds.itens) ? ds.itens : []).map(function (x) { return limparTexto(x, 200); }).filter(Boolean).slice(0, 20) };
+        mudou = true;
+      }
+      if (!mudou) return erro('Nada para salvar.');
+      p.atualizadoEm = agoraIso();
+      gravarChave(CHAVES.pacotes, lista);
+      var saida = pacoteSaida(p);
+      saida.ativo = p.ativo !== false;
+      saida.atualizadoEm = p.atualizadoEm;
+      return { ok: true, pacote: saida };
+    }
+
+    function acaoResumoVendas(periodo) {
+      var per = PERIODOS_VENDAS.indexOf(periodo) >= 0 ? periodo : '30d';
+      var hoje = hojeBr();
+      var inicioDia = Date.parse(hoje + 'T03:00:00Z');
+      var inicioMes = Date.parse(hoje.slice(0, 8) + '01T03:00:00Z');
+      var ini = { hoje: inicioDia, '7d': inicioDia - 6 * 86400000, '30d': inicioDia - 29 * 86400000, mes: inicioMes, tudo: -Infinity }[per];
+      var ps = pedidosSalvos();
+      var desde = function (d, t) { return d && Date.parse(d) >= t; };
+      var bloco = function (t) {
+        var x = ps.filter(function (p) { return p.status === 'pago' && desde(p.pagoEm, t); });
+        return { vendas: x.length, receitaCentavos: x.reduce(function (s, p) { return s + p.valorCentavos; }, 0) };
+      };
+      var periodoB = bloco(ini);
+      var resumos = ler().filter(function (l) { return l.origem === 'pessoal' && Date.parse(l.recebidoEm) >= ini; }).length;
+      var compradores = {};
+      ps.forEach(function (p) { if ((p.status === 'pago' || p.status === 'cortesia') && desde(p.pagoEm, ini)) compradores[p.respostaId || p.id] = true; });
+      var compras = Object.keys(compradores).length;
+      var porPacote = {};
+      ps.forEach(function (p) {
+        if (p.status !== 'pago' || !desde(p.pagoEm, ini)) return;
+        var b = porPacote[p.pacote] || (porPacote[p.pacote] = { pacote: p.pacote, vendas: 0, receitaCentavos: 0 });
+        b.vendas += 1; b.receitaCentavos += p.valorCentavos;
+      });
+      return { ok: true, periodo: per, hoje: bloco(inicioDia), mes: bloco(inicioMes), vendas: periodoB.vendas, receitaCentavos: periodoB.receitaCentavos,
+        cortesias: ps.filter(function (p) { return p.status === 'cortesia' && desde(p.pagoEm, ini); }).length,
+        estornos: ps.filter(function (p) { return p.status === 'estornado' && desde(p.reembolsadoEm, ini); }).length,
+        aguardando: ps.filter(function (p) { return p.status === 'aguardando' && desde(p.criadoEm, ini); }).length,
+        resumos: resumos, compras: compras, conversao: resumos ? Math.round(compras / resumos * 10000) / 10000 : 0,
+        porPacote: Object.keys(porPacote).sort().map(function (k) { return porPacote[k]; }) };
     }
 
     /* ----- semente da prévia ----- */
@@ -2582,13 +3070,17 @@
       PREVIA: PREVIA,
       processar: processar,
       ler: ler,
-      limpar: function () { gravar([]); gravarPessoas([]); gravarChave(CHAVES.vinculos, []); gravarChave(CHAVES.relacoes, []); },
+      limpar: function () {
+        gravar([]); gravarPessoas([]); gravarChave(CHAVES.vinculos, []); gravarChave(CHAVES.relacoes, []); gravarChave(CHAVES.pedidos, []);
+      },
       // Volta a prévia ao estado inicial (apaga tudo e recria a semente).
       reiniciar: function () {
         [CHAVE_ARMAZENAMENTO, CHAVES.usuarios, CHAVES.empresas, CHAVES.avaliacoes, CHAVES.sessoes, CHAVES.relatorios, CHAVES.pessoas,
-          CHAVES.vinculos, CHAVES.relacoes].forEach(function (k) {
+          CHAVES.vinculos, CHAVES.relacoes, CHAVES.pedidos].forEach(function (k) {
           gravarChave(k, k === CHAVES.sessoes ? {} : []);
         });
+        gravarChave(CHAVES.pacotes, null);
+        gravarChave(CHAVES.cupons, null);
         gravarChave(CHAVES.semente, 0);
         gravarChave(CHAVES.sementeRelatorio, 0);
         gravarChave(CHAVES.sementeEquipe, 0);
@@ -2600,6 +3092,44 @@
         exigir(payload, 'Nenhum resultado para enviar.');
         return chamar({ acao: 'enviar', payload: payload });
       }),
+      // --- venda direta (B2C): mesmo contrato do js/api-supabase.js ---
+      pacotesPublicos: seguro(function () { return chamar({ acao: 'pacotes.publicos' }); }),
+      enviarPessoal: seguro(function (payload) {
+        exigir(payload, 'Nenhum resultado para enviar.');
+        return chamar({ acao: 'pessoal.enviar', payload: payload });
+      }),
+      resumoPessoal: seguro(function (tokenResumo) { return chamar({ acao: 'pessoal.resumo', tokenResumo: String(tokenResumo || '') }); }),
+      criarPedido: seguro(function (tokenResumo, pacote, cupom) {
+        exigir(pacote, 'Escolha um pacote.');
+        return chamar({ acao: 'pedido.criar', tokenResumo: String(tokenResumo || ''), pacote: String(pacote), cupom: cupom == null ? '' : String(cupom) });
+      }),
+      iniciarPagamento: seguro(function (pedidoId, tokenAcesso) {
+        return chamar({ acao: 'pagamento.iniciar', pedidoId: String(pedidoId || ''), tokenAcesso: String(tokenAcesso || '') });
+      }),
+      confirmarRetorno: seguro(function (pedidoId, tokenAcesso, dados) {
+        return chamar({ acao: 'pagamento.confirmar', pedidoId: String(pedidoId || ''), tokenAcesso: String(tokenAcesso || ''),
+          dados: dados && typeof dados === 'object' ? { transactionNsu: dados.transactionNsu, slug: dados.slug } : {} });
+      }),
+      statusPedido: seguro(function (pedidoId, tokenAcesso) {
+        return chamar({ acao: 'pedido.status', pedidoId: String(pedidoId || ''), tokenAcesso: String(tokenAcesso || '') });
+      }),
+      simularPagamento: seguro(function (pedidoId) { return chamar({ acao: 'pedido.simularPago', pedidoId: String(pedidoId || '') }); }),
+      relatorioPessoal: seguro(function (tokenAcesso) { return chamar({ acao: 'pessoal.relatorio', tokenAcesso: String(tokenAcesso || '') }); }),
+      salvarParte2Pessoal: seguro(function (tokenAcesso, exigido) {
+        return chamar({ acao: 'pessoal.parte2', tokenAcesso: String(tokenAcesso || ''), exigido: exigido });
+      }),
+      recuperarAcesso: seguro(function (email) { return chamar({ acao: 'acesso.recuperar', email: email }); }),
+      listarPedidos: seguro(function (token, filtros) { return comSessao('pedidos.listar', token, { filtros: filtros || {} }); }),
+      atualizarPedido: seguro(function (token, id, campos) {
+        exigir(id, MSG_PEDIDO_NAO_ENCONTRADO);
+        return comSessao('pedidos.atualizar', token, { id: id, campos: campos || {} });
+      }),
+      listarCupons: seguro(function (token) { return comSessao('cupons.listar', token); }),
+      salvarCupom: seguro(function (token, cupom) { return comSessao('cupons.salvar', token, { cupom: cupom || {} }); }),
+      excluirCupom: seguro(function (token, codigo) { return comSessao('cupons.excluir', token, { codigo: codigo }); }),
+      listarPacotes: seguro(function (token) { return comSessao('pacotes.listar', token); }),
+      salvarPacote: seguro(function (token, pacote) { return comSessao('pacotes.salvar', token, { pacote: pacote || {} }); }),
+      resumoVendas: seguro(function (token, periodo) { return comSessao('vendas.resumo', token, { periodo: periodo }); }),
       avaliacaoPublica: seguro(function (codigo) {
         exigir(codigo, MSG_LINK_INVALIDO);
         return chamar({ acao: 'avaliacaoPublica', codigo: codigo });
@@ -2777,12 +3307,17 @@
     'relatorioMelhorarTextos', 'relatorioPublico',
     'listarEquipe', 'salvarColaborador', 'moverColaborador', 'desligarColaborador', 'salvarRelacoes',
     'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo', 'salvarMinhaFoto', 'removerFoto',
-    'moverResposta', 'contratarPessoa', 'versaoBanco'];
+    'moverResposta', 'contratarPessoa', 'versaoBanco',
+    'pacotesPublicos', 'enviarPessoal', 'resumoPessoal', 'criarPedido', 'iniciarPagamento', 'statusPedido', 'relatorioPessoal',
+    'salvarParte2Pessoal', 'recuperarAcesso', 'confirmarRetorno',
+    'listarPedidos', 'atualizarPedido', 'listarCupons', 'salvarCupom', 'excluirCupom', 'listarPacotes', 'salvarPacote', 'resumoVendas'];
 
   // Liga no lugar do DISC_API real quando CONFIG.API_URL === 'simulada' (o objeto continua o mesmo).
   function instalar(alvo, cfg, opcoes) {
     if (!alvo || !cfg || String(cfg.API_URL || '').trim() !== 'simulada') return null;
-    var sim = criar(opcoes);
+    var op = opcoes || {};
+    if (op.provedorPagamento === undefined && cfg.PAGAMENTO_PREVIA) op = Object.assign({}, op, { provedorPagamento: String(cfg.PAGAMENTO_PREVIA) });
+    var sim = criar(op);
     METODOS.forEach(function (m) { alvo[m] = sim[m]; });
     alvo.configurado = function () { return true; };
     alvo.simulada = true;
@@ -2790,6 +3325,7 @@
     alvo.PREVIA = PREVIA;
     alvo.limparSimulada = sim.limpar;
     alvo.reiniciarSimulada = sim.reiniciar;
+    alvo.simularPagamento = sim.simularPagamento; // só na prévia: botão "Simular pagamento aprovado"
     return sim;
   }
 

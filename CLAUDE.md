@@ -2,6 +2,11 @@
 
 Site estático (HTML/CSS/JS puro, sem build) + backend Google Apps Script. Contrato técnico: `docs/SPEC.md`.
 
+## Marca (quem é o dono do produto)
+- O sistema e o produto DISC são da **Gestão sem Caos** (consultoria). **Notus** é a agência de marketing que fez o design.
+- Em todo texto que cliente, candidato, colaborador ou contratante vê: "Gestão sem Caos". Nunca "Notus" / "Notus Agência" em tela ou relatório.
+- A paleta e os componentes abaixo continuam valendo (é o sistema visual); o logo da estrela é da Notus: não usar como logo da Gestão sem Caos (usar marca em texto até chegar o logo oficial).
+
 ## Visual — identidade Notus (obrigatório)
 Siga `docs/IDENTIDADE-VISUAL.md` à risca (identidade nova out/2026: laranja `#F34405` + azul-escuro `#13283F`, logo da estrela) e use as peças de `assets/notus.css` e `assets/icone.svg` (não crie cores/estilos fora dos tokens). A identidade antiga amarelo+preto foi substituída.
 Referência viva: `theROCCO-data/bi-isabella-eleuterio` (cópia: `wellington-dotcom/bi-isabella-eleuterio`, branch `ajuste/reestruturacao-visual`).

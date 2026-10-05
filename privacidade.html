@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Política de privacidade | Gestão sem Caos</title>
+  <meta name="description" content="Como a Gestão sem Caos trata os seus dados no Mapa DISC.">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#13283f">
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='18' fill='%2313283f'/%3E%3Ctext x='32' y='43' font-family='Arial,sans-serif' font-size='32' font-weight='700' text-anchor='middle' fill='%23ffffff'%3EG%3C/text%3E%3Ccircle cx='48' cy='18' r='6' fill='%23f34405'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="assets/notus.css">
+  <link rel="stylesheet" href="assets/landing.css">
+</head>
+<body class="landing">
+  <a class="pular" href="#conteudo">Pular para o conteúdo</a>
+  <header class="topo-landing vidro-cabecalho">
+    <div class="envoltorio topo-landing__interno">
+      <a class="marca-texto" href="descubra.html" aria-label="Gestão sem Caos, voltar para a página do Mapa DISC"><span class="marca-texto__nome">Gestão <b>sem Caos</b></span></a>
+      <a class="botao botao--claro" href="descubra.html">Voltar</a>
+    </div>
+  </header>
+  <main id="conteudo" class="legal" tabindex="-1">
+    <div class="envoltorio">
+      <article class="legal__papel">
+        <h1>Política de privacidade</h1>
+        <p class="legal__rascunho" role="note">Rascunho — revisar com advogado antes de publicar.</p>
+        <p class="legal__data">Mapa DISC · versão de outubro de 2026</p>
+
+        <h2>1. Quem cuida dos seus dados</h2>
+        <p>A controladora dos dados é <span data-empresa-legal>Gestão sem Caos (razão social e CNPJ a preencher)</span>. Esta política segue a Lei Geral de Proteção de Dados (LGPD, Lei 13.709/2018).</p>
+
+        <h2>2. Quais dados coletamos</h2>
+        <ul>
+          <li><strong>Identificação:</strong> nome, e-mail e, se você quiser, WhatsApp.</li>
+          <li><strong>Respostas do teste</strong> e o resultado calculado a partir delas.</li>
+          <li><strong>Compra:</strong> pacote, valor, situação do pagamento e cupom usado. Os dados do cartão ficam só com a empresa de pagamentos.</li>
+          <li><strong>Dados técnicos mínimos</strong> para segurança e prevenção de abuso (por exemplo, limites de envio).</li>
+        </ul>
+        <p>Não pedimos idade, documentos nem dados de saúde.</p>
+
+        <h2>3. Para que usamos</h2>
+        <ul>
+          <li>Gerar e entregar o seu resumo e o seu relatório (execução do serviço que você pediu).</li>
+          <li>Processar o pagamento, a garantia e o reembolso.</li>
+          <li>Enviar o link do relatório e, se você recuperar o acesso, o link de novo pelo e-mail.</li>
+          <li>Enviar comunicações sobre o Mapa DISC, só quando você autorizar; você pode sair a qualquer momento.</li>
+        </ul>
+
+        <h2>4. Com quem compartilhamos</h2>
+        <p><strong>Não vendemos seus dados e não compartilhamos o seu resultado com empresas ou empregadores.</strong> Usamos apenas prestadores necessários para o serviço funcionar, como hospedagem e banco de dados, processamento de pagamento e envio de e-mail, que tratam os dados em nosso nome e sob contrato.</p>
+
+        <h2>5. Por quanto tempo guardamos</h2>
+        <p>Enquanto o seu relatório estiver ativo ou até você pedir a exclusão. Dados de compra podem ser mantidos pelo prazo exigido por lei (obrigações fiscais).</p>
+
+        <h2>6. Seus direitos</h2>
+        <p>Você pode pedir, a qualquer momento: confirmação e acesso aos dados, correção, exclusão, informação sobre compartilhamento e revogação do consentimento. Fale com o suporte da Gestão sem Caos; respondemos em até 15 dias.</p>
+
+        <h2>7. Segurança</h2>
+        <p>Usamos conexão criptografada, acesso restrito e links de relatório difíceis de adivinhar. Mesmo assim, guarde o seu link com cuidado e não o publique.</p>
+
+        <h2>8. Mudanças</h2>
+        <p>Se esta política mudar, a nova versão fica nesta página, com a data de atualização.</p>
+      </article>
+    </div>
+  </main>
+  <footer class="rodape">
+    <div class="envoltorio">
+      <ul class="rodape__links">
+        <li><a href="descubra.html">Mapa DISC</a></li>
+        <li><a href="termos.html">Termos de uso</a></li>
+        <li><a href="privacidade.html">Privacidade</a></li>
+      </ul>
+      <p class="rodape__legal" id="empresa-legal">© 2026 Gestão sem Caos. Todos os direitos reservados.</p>
+    </div>
+  </footer>
+  <script src="js/config.js"></script>
+  <script>
+    (function () {
+      var cfg = window.CONFIG || {};
+      var legal = String(cfg.EMPRESA_LEGAL || '').trim();
+      var el = document.getElementById('empresa-legal');
+      if (el) el.textContent = '© ' + new Date().getFullYear() + ' ' + (legal || 'Gestão sem Caos') + '. Todos os direitos reservados.';
+      Array.prototype.forEach.call(document.querySelectorAll('[data-empresa-legal]'), function (n) { if (legal) n.textContent = legal; });
+    })();
+  </script>
+</body>
+</html>

@@ -243,6 +243,8 @@ test('recalcular calcula a confiabilidade (objeto ou texto JSON) e o selo do car
 
 test('abas e permissões: só o administrador usa o painel (gestor desativado nesta versão)', () => {
   assert.deepEqual(AD.abasDoPapel('admin', true), ['lista', 'processos', 'empresas', 'relatorios', 'usuarios', 'comparativo', 'importar']);
+  assert.deepEqual(AD.abasDoPapel('admin', true, true), ['lista', 'processos', 'empresas', 'relatorios', 'vendas', 'usuarios', 'comparativo', 'importar'], 'Vendas depois de Relatórios');
+  assert.deepEqual(AD.abasDoPapel('', false, true), ['lista', 'comparativo', 'importar'], 'sem servidor não há Vendas');
   assert.deepEqual(AD.abasDoPapel('gestor', true), [], 'gestor não vê nada');
   assert.deepEqual(AD.abasDoPapel('', true), []);
   assert.deepEqual(AD.abasDoPapel('', false), ['lista', 'comparativo', 'importar'], 'modo local, sem login');
@@ -864,4 +866,142 @@ test('aviso de banco desatualizado: lista o que falta; sem a função = mesmo av
   assert.match(AD.mensagemBanco({ ok: false, erro: 'function versao_banco does not exist' }), /^O banco de dados está desatualizado: faltam as migrações mais recentes\. Peça/);
   assert.match(AD.mensagemBanco(null), /desatualizado/);
   assert.match(AD.mensagemBanco({ ok: true, faltando: [], semFuncao: true }), /faltam as migrações mais recentes/);
+});
+
+/* ---------- Vendas ---------- */
+
+test('formatarReais: R$ com centavos no padrão pt-BR', () => {
+  assert.equal(AD.formatarReais(3900), 'R$ 39,00');
+  assert.equal(AD.formatarReais(2990), 'R$ 29,90');
+  assert.equal(AD.formatarReais(5), 'R$ 0,05');
+  assert.equal(AD.formatarReais(0), 'R$ 0,00');
+  assert.equal(AD.formatarReais(123456789), 'R$ 1.234.567,89');
+  assert.equal(AD.formatarReais(null), 'R$ 0,00');
+  assert.equal(AD.formatarReais(-1500), '-R$ 15,00');
+});
+
+test('centavosDeTexto aceita vírgula, ponto, milhar e R$', () => {
+  assert.equal(AD.centavosDeTexto('29,90'), 2990);
+  assert.equal(AD.centavosDeTexto('R$ 1.234,56'), 123456);
+  assert.equal(AD.centavosDeTexto('39'), 3900);
+  assert.equal(AD.centavosDeTexto('29.9'), 2990);
+  assert.equal(AD.centavosDeTexto('1.000'), 100000);
+  assert.equal(AD.centavosDeTexto(''), null);
+  assert.equal(AD.centavosDeTexto('abc'), null);
+  assert.equal(AD.centavosDeTexto('1,999'), null);
+});
+
+test('normalizarPedido aceita camelCase e colunas do banco', () => {
+  const a = AD.normalizarPedido({ id: 'p1', resposta_id: 'r1', pacote: 'completo', valor_centavos: 2900, status: 'pago', token_acesso: 'tok', criado_em: '2026-10-05T10:00:00Z', pago_em: '2026-10-05T10:01:00Z' });
+  assert.equal(a.respostaId, 'r1');
+  assert.equal(a.valorCentavos, 2900);
+  assert.equal(a.tokenAcesso, 'tok');
+  assert.equal(a.pagoEm, '2026-10-05T10:01:00Z');
+  const b = AD.normalizarPedido({ id: 'p2', respostaId: 'r2', valorCentavos: 4900, status: 'qualquer' });
+  assert.equal(b.status, 'aguardando', 'status desconhecido vira aguardando');
+  const c = AD.normalizarCupom({ codigo: 'lanc', tipo: 'percentual', valor: 20, usos_max: 50, valido_ate: '2026-12-31T00:00:00Z', pacotes: ['completo'] });
+  assert.deepEqual(c, { codigo: 'LANC', tipo: 'percentual', valor: 20, usosMax: 50, usos: 0, validoAte: '2026-12-31', ativo: true, pacotes: ['completo'] });
+  const k = AD.normalizarPacote({ chave: 'completo', nome: 'Relatório completo', preco_centavos: 3900, preco_lancamento_centavos: 2900, lancamento_ate: '2026-11-30', ativo: true, ordem: 1 });
+  assert.equal(k.precoLancamentoCentavos, 2900);
+  assert.equal(AD.normalizarPacote({ chave: 'x', preco_centavos: 100 }).precoLancamentoCentavos, null);
+});
+
+const AGORA = new Date(2026, 9, 15, 15, 0, 0); // 15/10/2026 15h (hora local)
+function iso(dia, hora) { return new Date(2026, 9, dia, hora || 10, 0, 0).toISOString(); }
+function pedidos() {
+  return [
+    { id: 'a1', respostaId: 'r1', pacote: 'completo', valorCentavos: 2900, status: 'pago', nome: 'Ana Lima', email: 'ana@x.com', criadoEm: iso(15), pagoEm: iso(15, 11) },
+    { id: 'b2', respostaId: 'r2', pacote: 'completo_plus', valorCentavos: 4900, status: 'pago', nome: 'Bruno', email: 'bruno@x.com', cupom: 'LANC', criadoEm: iso(12), pagoEm: iso(12) },
+    { id: 'c3', respostaId: 'r3', pacote: 'completo', valorCentavos: 2900, status: 'pago', nome: 'Célia', email: 'celia@x.com', criadoEm: iso(2), pagoEm: iso(2) },
+    { id: 'd4', respostaId: 'r4', pacote: 'completo', valorCentavos: 2900, status: 'aguardando', nome: 'Davi', email: 'davi@x.com', criadoEm: iso(15, 14) },
+    { id: 'e5', respostaId: 'r5', pacote: 'completo', valorCentavos: 0, status: 'cortesia', nome: 'Eva', email: 'eva@x.com', cupom: 'PARCEIRO', criadoEm: iso(10), pagoEm: iso(10) },
+    { id: 'f6', respostaId: 'r6', pacote: 'completo', valorCentavos: 2900, status: 'estornado', nome: 'Fábio', email: 'fabio@x.com', criadoEm: new Date(2026, 8, 28).toISOString(), pagoEm: new Date(2026, 8, 28).toISOString() }
+  ].map(AD.normalizarPedido);
+}
+
+test('resumoDosPedidos: vendas e receita (só pagos), ticket médio, aguardando, conversão e 10 últimos', () => {
+  const r = AD.resumoDosPedidos(pedidos(), AGORA, 20);
+  assert.deepEqual(r.hoje, { vendas: 1, receitaCentavos: 2900 });
+  assert.deepEqual(r.semana, { vendas: 2, receitaCentavos: 7800 });
+  assert.deepEqual(r.mes, { vendas: 3, receitaCentavos: 10700 });
+  assert.equal(r.ticketMedioCentavos, Math.round(10700 / 3));
+  assert.equal(r.aguardando, 1);
+  assert.equal(r.cortesias, 1);
+  assert.equal(r.compras, 4, 'pago + cortesia, por resposta');
+  assert.equal(r.conversao, 20, '4 de 20 resumos grátis');
+  assert.equal(r.ultimos[0].id, 'd4', 'mais recente primeiro');
+  assert.equal(r.ultimos.length, 6);
+  const muitos = Array.from({ length: 14 }, (_, i) => AD.normalizarPedido({ id: 'x' + i, criadoEm: iso(1 + i) }));
+  assert.equal(AD.resumoDosPedidos(muitos, AGORA).ultimos.length, 10);
+  assert.equal(AD.resumoDosPedidos([], AGORA, 0).conversao, null, 'sem resumo grátis não divide por zero');
+});
+
+test('juntarResumo: o que vem do servidor vale; o resto é calculado', () => {
+  const calc = AD.resumoDosPedidos(pedidos(), AGORA, 20);
+  const j = AD.juntarResumo({ hoje: { vendas: 5, receitaCentavos: 14500 }, gratis: 50, compras: 10 }, calc);
+  assert.deepEqual(j.hoje, { vendas: 5, receitaCentavos: 14500 });
+  assert.deepEqual(j.mes, calc.mes);
+  assert.equal(j.conversao, 20);
+  assert.equal(AD.juntarResumo({ conversao: 12.5 }, calc).conversao, 12.5);
+  // Formato do resumo_vendas (Supabase): resumos/compras e conversão como fração 0–1
+  const sv = AD.juntarResumo({ periodo: 'mes', hoje: { vendas: 2, receitaCentavos: 5800 }, resumos: 40, compras: 6, conversao: 0.15, cortesias: 3, aguardando: 4 }, calc);
+  assert.equal(sv.conversao, 15);
+  assert.equal(sv.gratis, 40);
+  assert.equal(sv.cortesias, 3);
+  assert.equal(sv.aguardando, 4);
+  assert.equal(sv.periodo, 'mes');
+  assert.equal(AD.juntarResumo({ conversao: 0.375 }, calc).conversao, 37.5);
+  assert.deepEqual(AD.juntarResumo(null, calc), calc);
+});
+
+test('filtrarPedidos: busca (sem acento), status, pacote e período', () => {
+  const l = pedidos();
+  assert.deepEqual(AD.filtrarPedidos(l, { busca: 'celia' }, AGORA).map((p) => p.id), ['c3']);
+  assert.deepEqual(AD.filtrarPedidos(l, { busca: 'lanc' }, AGORA).map((p) => p.id), ['b2'], 'busca pelo cupom');
+  assert.deepEqual(AD.filtrarPedidos(l, { status: 'pago' }, AGORA).map((p) => p.id), ['a1', 'b2', 'c3']);
+  assert.deepEqual(AD.filtrarPedidos(l, { pacote: 'completo_plus' }, AGORA).map((p) => p.id), ['b2']);
+  assert.deepEqual(AD.filtrarPedidos(l, { periodo: 'hoje' }, AGORA).map((p) => p.id), ['d4', 'a1']);
+  assert.deepEqual(AD.filtrarPedidos(l, { periodo: 'mes' }, AGORA).map((p) => p.id), ['d4', 'a1', 'b2', 'e5', 'c3']);
+  assert.equal(AD.filtrarPedidos(l, {}, AGORA).length, 6);
+});
+
+test('validarCupom e validarPacote', () => {
+  const ok = { codigo: 'LANCAMENTO', tipo: 'percentual', valor: 20, usosMax: null, validoAte: '', pacotes: [] };
+  assert.equal(AD.validarCupom(ok), '');
+  assert.match(AD.validarCupom({ ...ok, codigo: 'co d' }), /código/);
+  assert.match(AD.validarCupom({ ...ok, valor: 120 }), /1 a 100/);
+  assert.match(AD.validarCupom({ ...ok, valor: 0 }), /valor do desconto/);
+  assert.equal(AD.validarCupom({ ...ok, tipo: 'valor', valor: 1000 }), '');
+  assert.match(AD.validarCupom({ ...ok, usosMax: 0 }), /limite/);
+  const p = { nome: 'Relatório completo', precoCentavos: 3900, precoLancamentoCentavos: 2900, lancamentoAte: '2026-11-30', ordem: 1 };
+  assert.equal(AD.validarPacote(p), '');
+  assert.match(AD.validarPacote({ ...p, nome: ' ' }), /nome/);
+  assert.match(AD.validarPacote({ ...p, precoCentavos: null }), /preço/);
+  assert.match(AD.validarPacote({ ...p, precoLancamentoCentavos: 3900 }), /menor/);
+  assert.equal(AD.validarPacote({ ...p, precoLancamentoCentavos: null, lancamentoAte: '' }), '');
+});
+
+test('links de venda: landing com cupom, relatório comprado e mensagem de reenvio (Gestão sem Caos)', () => {
+  assert.equal(AD.linkLandingCupom('https://site.com/disc/admin.html#x', 'lanc 20'), 'https://site.com/disc/descubra.html?cupom=LANC%2020');
+  assert.equal(AD.linkLandingCupom('https://site.com/admin.html?a=1', 'LANC'), 'https://site.com/descubra.html?cupom=LANC');
+  const url = AD.linkMeuRelatorio('https://site.com/disc/admin.html', 'abc123');
+  assert.equal(url, 'https://site.com/disc/meu-relatorio.html#t-abc123');
+  const msg = AD.mensagemReenvio({ nome: 'Ana Lima' }, url);
+  assert.match(msg, /^Olá, Ana!/);
+  assert.ok(msg.includes(url));
+  assert.match(msg, /Gestão sem Caos/);
+  assert.doesNotMatch(msg, /Notus/);
+  const rec = AD.linkRecuperar('https://site.com/disc/admin.html#x');
+  assert.equal(rec, 'https://site.com/disc/meu-relatorio.html#recuperar');
+  const ori = AD.mensagemOrientacao({ nome: 'Davi Souza', email: 'davi@gmail.com' }, rec);
+  assert.match(ori, /^Olá, Davi!/);
+  assert.ok(ori.includes(rec) && ori.includes('davi@gmail.com') && ori.includes('Gestão sem Caos'));
+  assert.equal(AD.textoCupom({ tipo: 'percentual', valor: 20 }), '20% de desconto');
+  assert.equal(AD.textoCupom({ tipo: 'valor', valor: 1000 }), 'R$ 10,00 de desconto');
+});
+
+test('participantes: origem "pessoal" aparece como venda direta e o e-mail entra na busca', () => {
+  assert.equal(AD.textoOrigem({ origem: 'pessoal' }), 'Mapa pessoal (venda direta)');
+  assert.equal(AD.textoOrigem({ origem: 'processo' }), 'Link geral');
+  assert.equal(AD.correspondeBusca({ nome: 'Ana', email: 'ana.lima@gmail.com' }, 'lima@gmail'), true);
 });

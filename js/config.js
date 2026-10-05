@@ -19,6 +19,10 @@
  *                                   o candidato responde só esses primeiros grupos e os outros são
  *                                   preenchidos ao acaso.
  *                                   NÃO use no site real: o resultado com poucos grupos não vale como avaliação.
+ *   WHATSAPP_SUPORTE                Venda direta: WhatsApp do suporte (DDI+DDD, só dígitos, ex.: '5595999998888'). Aparece em
+ *                                   "Recuperar meu relatório" quando o e-mail automático não está configurado.
+ *   EMPRESA_LEGAL                   Venda direta: razão social e CNPJ mostrados no rodapé da página de venda e nos termos
+ *                                   (ex.: 'Gestão sem Caos Ltda — CNPJ 00.000.000/0001-00').
  *
  * As telas olham CONFIG.API_URL para saber se há servidor; por isso, no fim deste arquivo, BACKEND 'simulada'
  * vira API_URL 'simulada' e BACKEND 'supabase' vira API_URL = SUPABASE_URL (as chamadas vão pelo supabase-js).
@@ -32,7 +36,9 @@
     WHATSAPP_RECRUTADOR: '',
     EMPRESA: '',
     MOSTRAR_RESULTADO_AO_CANDIDATO: false,
-    GRUPOS_DEMONSTRACAO: 0   // NÃO use no site real: o resultado com poucos grupos não vale como avaliação.
+    GRUPOS_DEMONSTRACAO: 0,  // NÃO use no site real: o resultado com poucos grupos não vale como avaliação.
+    WHATSAPP_SUPORTE: '',
+    EMPRESA_LEGAL: ''
   };
   var backend = String(CONFIG.BACKEND || '').trim().toLowerCase();
   if (backend === 'simulada') CONFIG.API_URL = 'simulada';

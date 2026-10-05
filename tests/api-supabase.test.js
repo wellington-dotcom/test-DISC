@@ -30,7 +30,10 @@ function libFalsa(opcoes) {
       empresas: opcoes.empresas || [],
       vinculos: opcoes.vinculos || [],
       relacoes: opcoes.relacoes || [],
-      relatorios: opcoes.relatorios || []
+      relatorios: opcoes.relatorios || [],
+      pedidos: opcoes.pedidos || [],
+      cupons: opcoes.cupons || [],
+      pacotes: opcoes.pacotes || []
     },
     rpc: opcoes.rpc || {},
     funcoes: opcoes.funcoes || {},
@@ -72,6 +75,9 @@ function libFalsa(opcoes) {
       delete() { q.op = 'delete'; return b; },
       eq(c, v) { q.filtros.push((l) => l[c] === v); q.eqs = (q.eqs || []).concat([[c, v]]); return b; },
       neq(c, v) { q.filtros.push((l) => l[c] !== v); return b; },
+      gte(c, v) { q.filtros.push((l) => String(l[c]) >= String(v)); q.eqs = (q.eqs || []).concat([[c, '>=' + v]]); return b; },
+      lt(c, v) { q.filtros.push((l) => String(l[c]) < String(v)); q.eqs = (q.eqs || []).concat([[c, '<' + v]]); return b; },
+      upsert(d, o) { q.op = 'upsert'; q.dados = d; q.conflito = o && o.onConflict; return b; },
       order(c) { q.ordem = c; return b; },
       range(a, z) { q.intervalo = [a, z]; return b; },
       limit(n) { q.limite = n; return b; },
@@ -105,7 +111,11 @@ function libFalsa(opcoes) {
         q.tabela === 'relatorios' ? { token: 'f'.repeat(63) + linhas.length } : {}, q.dados);
       linhas.push(nova);
       res = [nova];
-    } else if (q.op === 'update') {
+    } else if (q.op === 'upsert') {
+      const atual = linhas.find((l) => l[q.conflito] === q.dados[q.conflito]);
+      if (atual) Object.assign(atual, q.dados); else linhas.push(Object.assign({ usos: 0, criado_em: '2026-10-05T12:00:00+00:00' }, q.dados));
+      res = [atual || linhas[linhas.length - 1]];
+        } else if (q.op === 'update') {
       res = linhas.filter(casa);
       res.forEach((l) => Object.assign(l, q.dados));
     } else {
@@ -412,7 +422,7 @@ test('listar: itens no formato do Code.gs (resultado recalculado, processo embut
     pessoa: { id: PESSOA, nome: 'João da Silva', telefone: '5511999998888', idade: 30, funcao: 'Recepcionista', empresa: 'Loja Centro',
       email: 'joao@x.com', cidade: 'Campinas', foto: '', atualizadoEm: '2026-10-01T12:10:02.500Z' },
     email: 'joao@x.com', cidade: 'Campinas', extras: [{ id: 'p1', pergunta: 'Pretensão?', resposta: 'R$ 3.000' }],
-    exigido: '', resultadoExigido: null, foto: '', historicoProcessos: []
+    exigido: '', resultadoExigido: null, foto: '', historicoProcessos: [], origem: 'processo'
   });
   assert.equal(antigo.pessoaId, '');
   assert.equal(antigo.pessoa, null);
@@ -995,28 +1005,38 @@ test('topoIds: salvarRelacoes manda p_opcoes só quando vem topoIds; listarEquip
 });
 
 test('versaoBanco: com a função devolve versão e faltando; sem ela sonda tabelas/colunas (banco antigo)', async () => {
-  const atual = await logado({ rpc: { versao_banco: () => ({ data: { ok: true, versao: 20261010120000, migracoes: [], faltando: [] }, error: null }) } });
-  assert.deepEqual(await atual.api.versaoBanco(), { ok: true, versao: 20261010120000, faltando: [] });
-  assert.equal(SB.VERSAO_ATUAL, 20261010120000);
-  assert.deepEqual(SB.MIGRACOES.map((m) => m.nome.slice(0, 8)), ['20261005', '20261006', '20261007', '20261008', '20261009', '20261010']);
-  assert.ok(fs.existsSync(path.join(__dirname, '..', 'supabase', 'migrations', SB.MIGRACOES[5].nome + '.sql')));
+  const atual = await logado({ rpc: { versao_banco: () => ({ data: { ok: true, versao: 20261012120000, migracoes: [], faltando: [] }, error: null }) } });
+  assert.deepEqual(await atual.api.versaoBanco(), { ok: true, versao: 20261012120000, faltando: [] });
+  assert.equal(SB.VERSAO_ATUAL, 20261012120000);
+  assert.deepEqual(SB.MIGRACOES.map((m) => m.nome.slice(0, 8)), ['20261005', '20261006', '20261007', '20261008', '20261009', '20261010', '20261011', '20261012']);
+  assert.ok(fs.existsSync(path.join(__dirname, '..', 'supabase', 'migrations', SB.MIGRACOES[7].nome + '.sql')));
   SB.MIGRACOES.forEach((m) => assert.ok(fs.existsSync(path.join(__dirname, '..', 'supabase', 'migrations', m.nome + '.sql')), m.nome));
 
   // Banco em produção sem a 20261008 e a 20261009 (e sem a 20261010): versao_banco não existe (PGRST202).
-  const velho = await logado({ faltando: ['respostas.exigido', 'respostas.foto', 'respostas.historico_processos'] });
+  const velho = await logado({ faltando: ['respostas.exigido', 'respostas.foto', 'respostas.historico_processos', 'pedidos'] });
   const v = await velho.api.versaoBanco();
   assert.deepEqual(v, { ok: true, versao: 20261007120000, semFuncao: true,
-    faltando: ['20261008120000_parte2', '20261009120000_fotos', '20261010120000_mover_versao'] });
+    faltando: ['20261008120000_parte2', '20261009120000_fotos', '20261010120000_mover_versao', '20261011120000_vendas',
+      '20261012120000_infinitepay'] });
   const sondas = velho.e.chamadas.filter((c) => c.tabela && c.tabela !== 'admins' && c.op === 'select');
   assert.deepEqual(sondas.map((c) => c.tabela + '.' + c.colunas),
-    ['pessoas.id', 'empresas.id', 'respostas.exigido', 'respostas.foto', 'respostas.historico_processos']);
+    ['pessoas.id', 'empresas.id', 'respostas.exigido', 'respostas.foto', 'respostas.historico_processos', 'pedidos.id',
+      'pedidos.provedor_dados']);
 
   // Muito antigo: sem pessoas/empresas.
-  const muito = await logado({ faltando: ['pessoas', 'empresas', 'respostas.exigido', 'respostas.foto', 'respostas.historico_processos'] });
+  const muito = await logado({ faltando: ['pessoas', 'empresas', 'respostas.exigido', 'respostas.foto', 'respostas.historico_processos', 'pedidos'] });
   assert.deepEqual((await muito.api.versaoBanco()).faltando, SB.MIGRACOES.slice(1).map((m) => m.nome));
   // Com a 20261009 aplicada mas sem a 20261010: só ela falta.
-  const quase = await logado({ faltando: ['respostas.historico_processos'] });
-  assert.deepEqual(await quase.api.versaoBanco(), { ok: true, versao: 20261009120000, semFuncao: true, faltando: ['20261010120000_mover_versao'] });
+  const quase = await logado({ faltando: ['respostas.historico_processos', 'pedidos'] });
+  assert.deepEqual(await quase.api.versaoBanco(), { ok: true, versao: 20261009120000, semFuncao: true,
+    faltando: ['20261010120000_mover_versao', '20261011120000_vendas', '20261012120000_infinitepay'] });
+  // Com a função versao_banco (20261010) mas sem a 20261011: a função antiga responde a versão dela.
+  const semVendas = await logado({ rpc: { versao_banco: () => ({ data: { ok: true, versao: 20261010120000, migracoes: [], faltando: [] }, error: null }) } });
+  assert.deepEqual(await semVendas.api.versaoBanco(), { ok: true, versao: 20261010120000,
+    faltando: ['20261011120000_vendas', '20261012120000_infinitepay'] });
+  // Com a 20261011 mas sem a 20261012 (InfinitePay).
+  const semIP = await logado({ rpc: { versao_banco: () => ({ data: { ok: true, versao: 20261011120000, migracoes: [], faltando: [] }, error: null }) } });
+  assert.deepEqual(await semIP.api.versaoBanco(), { ok: true, versao: 20261011120000, faltando: ['20261012120000_infinitepay'] });
   // Sem rede: mensagem de conexão.
   quase.e.falhaRede = true;
   await assert.rejects(quase.api.versaoBanco(), /Não foi possível conectar/);
@@ -1033,4 +1053,180 @@ test('api.js (legado) e simulada: moverResposta, contratarPessoa e versaoBanco',
     await assert.rejects(API[m]('token', {}), (err) => err.message === 'Disponível só com o servidor Supabase.', m);
   }
   assert.ok(API.METODOS.includes('versaoBanco') && SB.METODOS.includes('contratarPessoa'));
+});
+
+// ---------------------------------------------------------------------------
+// Venda direta (B2C) — contrato usado pelas telas do cliente e pelo painel
+// ---------------------------------------------------------------------------
+
+const TK = 'a'.repeat(64);
+const TA = 'b'.repeat(64);
+const PED = '44444444-4444-4444-8444-444444444444';
+const EXIG = '1234'.repeat(10);
+const ok = (data) => ({ data, error: null });
+
+test('vendas: métodos novos existem no Supabase, na simulada e no legado (que recusa)', async () => {
+  const novos = ['pacotesPublicos', 'enviarPessoal', 'resumoPessoal', 'criarPedido', 'iniciarPagamento', 'statusPedido', 'relatorioPessoal',
+    'salvarParte2Pessoal', 'recuperarAcesso', 'confirmarRetorno', 'listarPedidos', 'atualizarPedido', 'listarCupons', 'salvarCupom',
+    'excluirCupom', 'listarPacotes', 'salvarPacote', 'resumoVendas'];
+  const { api } = nova();
+  const SIM = require('../js/api-simulada.js');
+  for (const m of novos) {
+    assert.ok(API.METODOS.includes(m), 'js/api.js METODOS: ' + m);
+    assert.ok(SB.METODOS.includes(m), 'api-supabase METODOS: ' + m);
+    assert.ok(SIM.METODOS.includes(m), 'api-simulada METODOS: ' + m);
+    assert.equal(typeof api[m], 'function', m);
+    await assert.rejects(API[m](), /Disponível só com o servidor Supabase\./, 'legado: ' + m);
+  }
+});
+
+test('vendas públicas: RPCs com os nomes/argumentos certos e respostas normalizadas', async () => {
+  const { api, e } = nova({ rpc: {
+    pacotes_publicos: () => ok({ ok: true, pacotes: [{ chave: 'completo', nome: 'Relatório completo', precoCentavos: 3900, precoLancamentoCentavos: 2900,
+      lancamentoAte: '', valorCentavos: 2900, emLancamento: true, descricao: { subtitulo: 'S', itens: ['a', '', 'b'] }, ordem: 2 }] }),
+    enviar_resposta_pessoal: (a) => ok({ ok: true, id: a.p_payload.id, protocolo: '', tokenResumo: TK }),
+    resumo_pessoal: () => ok({ ok: true, nome: 'Bia', resultado: { percentuais: { D: 40, I: 30, S: 20, C: 10 }, codigo: 'DI' }, recebidoEm: '2026-10-05T12:00:00+00:00', temParte2: false }),
+    criar_pedido: (a) => ok(a.p_cupom === 'RUIM' ? { ok: false, erro: 'Cupom inválido ou expirado.' }
+      : { ok: true, pedidoId: PED, tokenAcesso: TA, valor: a.p_cupom ? 0 : 2900, valorOriginal: 2900, gratuito: !!a.p_cupom, status: a.p_cupom ? 'cortesia' : 'aguardando' }),
+    relatorio_pessoal: (a) => ok(a.p_token === TA
+      ? { ok: true, nome: 'Bia', resultado: { percentuais: { D: 40, I: 30, S: 20, C: 10 }, codigo: 'DI' }, exigido: EXIG, pacote: 'completo_plus',
+        pacoteNome: 'Completo + Parte 2', precisaParte2: false, status: 'pago' }
+      : { ok: false, erro: 'Pagamento ainda não confirmado.', status: 'aguardando' }),
+    salvar_parte2_pessoal: () => ok({ ok: true, exigido: EXIG })
+  } });
+  const pc = await api.pacotesPublicos();
+  assert.deepEqual(pc.pacotes[0].descricao, { subtitulo: 'S', itens: ['a', 'b'] });
+  assert.equal(pc.pacotes[0].valorCentavos, 2900);
+  const env = await api.enviarPessoal(payloadValido({ email: 'bia@x.com' }));
+  assert.deepEqual(env, { ok: true, id: 'lx1abc-teste01', protocolo: '', tokenResumo: TK });
+  assert.equal(e.chamadas.find((c) => c.rpc === 'enviar_resposta_pessoal').args.p_payload.email, 'bia@x.com');
+  assert.equal(e.invocacoes.length, 0, 'envio pessoal não chama o disc-sync (ClickUp)');
+  assert.equal((await api.resumoPessoal(TK)).nome, 'Bia');
+  await assert.rejects(api.resumoPessoal('curto'), /Resultado não encontrado/);
+  const p = await api.criarPedido(TK, 'completo', '');
+  assert.deepEqual(p, { ok: true, pedidoId: PED, tokenAcesso: TA, valor: 2900, valorOriginal: 2900, gratuito: false, status: 'aguardando' });
+  assert.equal(e.chamadas.filter((c) => c.rpc === 'criar_pedido').pop().args.p_cupom, null);
+  assert.equal((await api.criarPedido(TK, 'completo', ' lanca 100 ')).gratuito, true);
+  assert.equal(e.chamadas.filter((c) => c.rpc === 'criar_pedido').pop().args.p_cupom, 'LANCA100');
+  await assert.rejects(api.criarPedido(TK, 'completo', 'ruim'), /Cupom inválido ou expirado/);
+  const rel = await api.relatorioPessoal(TA);
+  assert.deepEqual(rel.exigido, SB.calcularExigido(EXIG));
+  assert.equal(rel.exigidoRespostas, EXIG);
+  await assert.rejects(api.relatorioPessoal('c'.repeat(64)), (err) => err.message === 'Pagamento ainda não confirmado.' && err.resposta.status === 'aguardando');
+  await assert.rejects(api.salvarParte2Pessoal(TA, '123'), /Responda todos os grupos/);
+  assert.deepEqual((await api.salvarParte2Pessoal(TA, EXIG)).exigido, SB.calcularExigido(EXIG));
+});
+
+test('vendas: iniciarPagamento/statusPedido/recuperarAcesso pela Edge Function "pagamento" (e os casos não configurado)', async () => {
+  let modo = 'ok';
+  const resposta = (body) => {
+    if (modo === 'ausente') return { data: null, error: { name: 'FunctionsHttpError', context: { status: 404, json: async () => ({}) } } };
+    if (modo === 'rede') return { data: null, error: { name: 'FunctionsFetchError', message: 'Failed to fetch' } };
+    if (body.acao === 'criar') {
+      if (modo === 'semChave') return { data: { ok: false, erro: 'Pagamento ainda não configurado.' }, error: null };
+      if (modo === 'cpf') return { data: { ok: false, erro: 'Informe o seu CPF para pagar.', precisaCpf: true }, error: null };
+      if (modo === 'infinitepay') return { data: { ok: true, provedor: 'infinitepay', redirecionarUrl: 'https://checkout.infinitepay.io/notus/x', valor: 2900 }, error: null };
+      if (modo === 'urlRuim') return { data: { ok: true, provedor: 'infinitepay', redirecionarUrl: 'javascript:alert(1)', valor: 2900 }, error: null };
+      return { data: { ok: true, pix: { qrBase64: 'QR', copiaECola: 'PIX', expira: 'X' }, cartaoUrl: 'https://asaas/i/1', valor: 2900, vencimento: '2026-10-06' }, error: null };
+    }
+    if (body.acao === 'confirmar') {
+      if (body.tokenAcesso !== TA) return { data: { ok: false, erro: 'Pedido não encontrado.' }, error: null };
+      return { data: { ok: true, status: body.transactionNsu ? 'pago' : 'aguardando' }, error: null };
+    }
+    if (body.acao === 'status') return { data: body.tokenAcesso === TA ? { ok: true, status: 'pago' } : { ok: false, erro: 'Pedido não encontrado.' }, error: null };
+    if (body.acao === 'recuperar') {
+      if (modo === 'semEmail') return { data: { ok: false, erro: 'O envio por e-mail ainda não está configurado. Fale com o suporte.' }, error: null };
+      return { data: { ok: true }, error: null };
+    }
+    return { data: { ok: false, erro: '?' }, error: null };
+  };
+  const { api, e } = nova({ funcoes: { pagamento: resposta }, rpc: { status_pedido: () => ok({ ok: true, status: 'aguardando' }) } });
+  const r = await api.iniciarPagamento(PED, TA, { cpf: '529.982.247-25' });
+  assert.deepEqual(r, { ok: true, provedor: 'asaas', pix: { qrBase64: 'QR', copiaECola: 'PIX', expira: 'X' }, cartaoUrl: 'https://asaas/i/1', valor: 2900, vencimento: '2026-10-06' });
+  assert.deepEqual(e.invocacoes[0].body, { acao: 'criar', pedidoId: PED, tokenAcesso: TA, cpf: '529.982.247-25' });
+  modo = 'semChave';
+  assert.deepEqual(await api.iniciarPagamento(PED, TA), { ok: false, erro: 'Pagamento ainda não configurado.', naoConfigurado: true });
+  modo = 'ausente';
+  assert.deepEqual(await api.iniciarPagamento(PED, TA), { ok: false, erro: 'Pagamento ainda não configurado.', naoConfigurado: true });
+  modo = 'cpf';
+  assert.deepEqual(await api.iniciarPagamento(PED, TA), { ok: false, erro: 'Informe o seu CPF para pagar.', precisaCpf: true });
+
+  modo = 'infinitepay';
+  assert.deepEqual(await api.iniciarPagamento(PED, TA), { ok: true, provedor: 'infinitepay', redirecionarUrl: 'https://checkout.infinitepay.io/notus/x', valor: 2900 });
+  modo = 'urlRuim';
+  await assert.rejects(api.iniciarPagamento(PED, TA), /Não foi possível gerar o pagamento/);
+
+  modo = 'ok';
+  assert.deepEqual(await api.confirmarRetorno(PED, TA, { transactionNsu: 'TX1', slug: 'S1' }), { ok: true, status: 'pago' });
+  assert.deepEqual(e.invocacoes[e.invocacoes.length - 1].body, { acao: 'confirmar', pedidoId: PED, tokenAcesso: TA, transactionNsu: 'TX1', slug: 'S1' });
+  assert.deepEqual(await api.confirmarRetorno(PED, TA, { transactionNsu: '<script>', slug: 'a b' }), { ok: true, status: 'aguardando' });
+  assert.deepEqual(e.invocacoes[e.invocacoes.length - 1].body, { acao: 'confirmar', pedidoId: PED, tokenAcesso: TA, transactionNsu: '', slug: '' });
+  await assert.rejects(api.confirmarRetorno(PED, 'd'.repeat(64), { transactionNsu: 'TX1' }), /Pedido não encontrado/);
+  modo = 'ausente';
+  assert.deepEqual(await api.confirmarRetorno(PED, TA, { transactionNsu: 'TX1' }), { ok: true, status: 'aguardando' }, 'sem a função, lê do banco');
+
+  modo = 'ok';
+  assert.deepEqual(await api.statusPedido(PED, TA), { ok: true, status: 'pago' });
+  await assert.rejects(api.statusPedido(PED, 'd'.repeat(64)), /Pedido não encontrado/);
+  modo = 'rede';
+  assert.deepEqual(await api.statusPedido(PED, TA), { ok: true, status: 'aguardando' }, 'sem a função, lê do banco');
+  assert.deepEqual(e.chamadas.filter((c) => c.rpc === 'status_pedido').pop().args, { p_pedido: PED, p_token: TA });
+
+  modo = 'ok';
+  assert.deepEqual(await api.recuperarAcesso(' Bia@X.com '), { ok: true });
+  assert.deepEqual(e.invocacoes.pop().body, { acao: 'recuperar', email: 'bia@x.com' });
+  modo = 'semEmail';
+  assert.deepEqual(await api.recuperarAcesso('bia@x.com'),
+    { ok: false, erro: 'O envio por e-mail ainda não está configurado. Fale com o suporte.', naoConfigurado: true });
+  await assert.rejects(api.recuperarAcesso('nada'), /e-mail válido/);
+});
+
+test('vendas no painel: pedidos, cupons, pacotes e resumo (tabelas com RLS e RPCs de admin)', async () => {
+  const x = await logado({
+    pedidos: [
+      { id: PED, resposta_id: 'r1', pacote: 'completo', valor_centavos: 2900, valor_original_centavos: 2900, cupom: null, status: 'pago', metodo: 'pix',
+        asaas_cobranca_id: 'pay_1', pagamento: { cartaoUrl: 'https://asaas/i/1' }, email: 'bia@x.com', nome: 'Bia Souza', token_acesso: TA,
+        criado_em: '2026-10-05T12:00:00+00:00', pago_em: '2026-10-05T12:01:00+00:00', reembolsado_em: null }
+    ],
+    pacotes: [{ chave: 'completo', nome: 'Relatório completo', preco_centavos: 3900, preco_lancamento_centavos: 2900, lancamento_ate: null, ativo: true, ordem: 2,
+      descricao: { subtitulo: 'S', itens: ['a'] }, atualizado_em: '2026-10-05T12:00:00+00:00' }],
+    rpc: {
+      atualizar_pedido: (a) => ok({ ok: true, pedido: { id: a.p_id, status: a.p_status, pacote: 'completo', valorCentavos: 2900, email: 'bia@x.com' } }),
+      resumo_vendas: (a) => ok({ ok: true, periodo: a.p_periodo, hoje: { vendas: 1, receitaCentavos: 2900 }, mes: { vendas: 1, receitaCentavos: 2900 },
+        vendas: 1, receitaCentavos: 2900, cortesias: 0, estornos: 0, aguardando: 0, resumos: 4, compras: 1, conversao: 0.25, porPacote: [] })
+    }
+  });
+  const { api, T, e } = x;
+  const l = await api.listarPedidos(T, { status: 'pago', de: '2026-10-01', busca: 'bia' });
+  assert.equal(l.pedidos.length, 1);
+  assert.deepEqual([l.pedidos[0].faturaUrl, l.pedidos[0].valorCentavos, l.pedidos[0].cupom, l.pedidos[0].provedor, l.pedidos[0].provedorRef],
+    ['https://asaas/i/1', 2900, '', 'asaas', '']);
+  assert.ok(!('token_acesso' in l.pedidos[0]) && !('tokenAcesso' in l.pedidos[0]), 'o painel não recebe o token do cliente');
+  assert.deepEqual(e.chamadas.filter((c) => c.tabela === 'pedidos').pop().eqs, [['status', 'pago'], ['criado_em', '>=2026-10-01T03:00:00Z']]);
+  assert.equal((await api.listarPedidos(T, { busca: 'ninguem' })).pedidos.length, 0);
+  assert.equal((await api.atualizarPedido(T, PED, { status: 'estornado' })).pedido.status, 'estornado');
+  await assert.rejects(api.atualizarPedido(T, PED, { status: 'qualquer' }), /Situação inválida/);
+
+  await assert.rejects(api.salvarCupom(T, { codigo: 'a b', tipo: 'percentual', valor: 10 }), /Código do cupom/);
+  await assert.rejects(api.salvarCupom(T, { codigo: 'MUITO', tipo: 'percentual', valor: 150 }), /de 1 a 100/);
+  const c = await api.salvarCupom(T, { codigo: 'lanca-10', tipo: 'percentual', valor: 10, pacotes: ['completo', 'X Y'], validoAte: '2026-12-31' });
+  assert.deepEqual([c.cupom.codigo, c.cupom.pacotes, c.cupom.validoAte, c.cupom.usos], ['LANCA-10', ['completo'], '2026-12-31', 0]);
+  assert.equal((await api.listarCupons(T)).cupons.length, 1);
+  assert.deepEqual(await api.excluirCupom(T, 'lanca-10'), { ok: true, codigo: 'LANCA-10' });
+  await assert.rejects(api.excluirCupom(T, 'LANCA-10'), /Cupom não encontrado/);
+
+  const pk = await api.listarPacotes(T);
+  assert.deepEqual([pk.pacotes[0].valorCentavos, pk.pacotes[0].emLancamento, pk.pacotes[0].lancamentoAte], [2900, true, '']);
+  const s = await api.salvarPacote(T, { chave: 'completo', precoLancamentoCentavos: null, nome: '  Completo  ' });
+  assert.deepEqual([s.pacote.nome, s.pacote.valorCentavos, s.pacote.emLancamento], ['Completo', 3900, false]);
+  assert.deepEqual(e.chamadas.filter((q) => q.tabela === 'pacotes' && q.op === 'update').pop().dados, { nome: 'Completo', preco_lancamento_centavos: null });
+  await assert.rejects(api.salvarPacote(T, { chave: 'completo', precoCentavos: -1 }), /Preço inválido/);
+  await assert.rejects(api.salvarPacote(T, { chave: 'completo' }), /Nada para salvar/);
+
+  const v = await api.resumoVendas(T, 'semana');
+  assert.equal(v.periodo, '30d', 'período desconhecido vira 30d');
+  assert.equal(v.conversao, 0.25);
+  // Sem sessão: pede login.
+  const anon = nova();
+  await assert.rejects(anon.api.listarPedidos('', {}), (err) => err.sessaoExpirada === true);
 });

@@ -378,6 +378,123 @@
     }
   };
 
+  /* ------------------------------------------------------------------ O que está te travando (rodada 5)
+   * Junta, em linguagem de desenvolvimento, o que costuma segurar a pessoa: a força principal quando passa do ponto
+   * (e a segunda, se for alta), o fator que quase não aparece, o esforço de adaptação (com a Parte 2) e o jeito de
+   * reagir sob pressão. Cada item traz UMA ação prática. Nada de rótulo, diagnóstico ou promessa. */
+  var TRAVA_EXCESSO = {
+    D: { titulo: 'Querer resolver tudo do seu jeito e na sua hora',
+      texto: 'Dominância é o que mais aparece no seu jeito. A mesma energia que destrava decisões pode fazer você atropelar o tempo dos outros e carregar sozinho o que poderia ser dividido.',
+      acao: 'Nesta semana, antes de decidir algo que afeta outras pessoas, pergunte a opinião de uma delas e espere a resposta.' },
+    I: { titulo: 'Começar muita coisa e terminar pouca',
+      texto: 'Influência é o que mais aparece no seu jeito. O entusiasmo abre portas, mas pode espalhar a sua atenção e deixar compromissos pela metade.',
+      acao: 'Escolha uma tarefa já iniciada e só abra outra quando ela estiver concluída.' },
+    S: { titulo: 'Adiar conversas e mudanças necessárias',
+      texto: 'Estabilidade é o que mais aparece no seu jeito. A calma que acolhe as pessoas pode virar silêncio diante do que incomoda e resistência ao que é novo.',
+      acao: 'Escolha um incômodo pequeno e fale sobre ele em até dois dias, com calma (por escrito, se preferir).' },
+    C: { titulo: 'Esperar o momento perfeito',
+      texto: 'Conformidade é o que mais aparece no seu jeito. O cuidado com a qualidade pode virar perfeccionismo e adiar entregas e decisões que já estavam boas.',
+      acao: 'Na próxima tarefa, escreva antes o que é "bom o suficiente" e entregue quando chegar lá.' }
+  };
+  // Segundo fator também alto: o mesmo padrão, dito de outro jeito.
+  var TRAVA_EXCESSO_SEC = {
+    D: { titulo: 'Pressa para ver resultado', texto: 'A sua Dominância também é alta. A vontade de ver as coisas andando pode virar impaciência com quem tem outro ritmo.',
+      acao: 'Quando sentir pressa, pergunte "em que pé você está?" antes de cobrar.' },
+    I: { titulo: 'Dizer sim para tudo', texto: 'A sua Influência também é alta. A vontade de agradar e participar pode encher a sua agenda de compromissos que não são prioridade.',
+      acao: 'Antes de aceitar um novo pedido, confira a agenda e responda só no dia seguinte.' },
+    S: { titulo: 'Colocar as suas prioridades por último', texto: 'A sua Estabilidade também é alta. Ajudar sempre pode deixar o que é importante para você sempre para depois.',
+      acao: 'Treine a frase "agora não consigo, posso depois de tal hora" uma vez nesta semana.' },
+    C: { titulo: 'Analisar demais antes de agir', texto: 'A sua Conformidade também é alta. Buscar mais uma informação pode virar um jeito de adiar a decisão.',
+      acao: 'Defina um prazo para pesquisar e decida com o que tiver em mãos quando ele acabar.' }
+  };
+  var TRAVA_FALTA = {
+    D: { titulo: 'Demorar a se posicionar', texto: 'Dominância aparece pouco no seu jeito. Em momentos que pedem uma resposta firme, você pode esperar demais pelos outros e deixar decisões paradas.',
+      acao: 'Escolha uma decisão pequena desta semana e assuma por inteiro, com prazo marcado.' },
+    I: { titulo: 'Deixar o seu trabalho invisível', texto: 'Influência aparece pouco no seu jeito. Você pode fazer um bom trabalho e, ainda assim, não ser lembrado, porque falar de si e criar contatos não sai naturalmente.',
+      acao: 'Uma vez por semana, conte a alguém um resultado seu em duas frases.' },
+    S: { titulo: 'Perder o fôlego no meio do caminho', texto: 'Estabilidade aparece pouco no seu jeito. Rotinas longas e tarefas repetidas cansam rápido, e projetos podem ficar sem acompanhamento até o fim.',
+      acao: 'Marque na agenda um horário fixo por semana para revisar o que está em andamento.' },
+    C: { titulo: 'Deixar passar detalhes importantes', texto: 'Conformidade aparece pouco no seu jeito. A pressa de seguir em frente pode deixar erros pequenos passarem e virar retrabalho depois.',
+      acao: 'Antes de entregar algo importante, confira uma lista curta de três itens.' }
+  };
+  var TRAVA_PRESSAO = {
+    D: 'Quando o dia aperta, o seu jeito tende a ficar mais exigente e impaciente, e as pessoas podem se fechar justo quando você precisa delas.',
+    I: 'Quando o dia aperta, você tende a falar mais e prometer além do que cabe, e os detalhes ficam para trás.',
+    S: 'Quando o dia aperta, você tende a se fechar, guardar o que sente e travar diante de mudanças de última hora.',
+    C: 'Quando o dia aperta, você tende a ficar mais crítico e exigente com os detalhes, e a conversa pode soar fria.'
+  };
+  var TRAVA_PRESSAO_ACAO = {
+    D: 'Na próxima situação tensa, troque a primeira ordem por uma pergunta: "como podemos resolver isso?".',
+    I: 'Antes de uma conversa difícil, escreva os fatos em três tópicos e fale a partir deles.',
+    S: 'Conte a alguém de confiança, ainda nesta semana, o que está pesando no momento.',
+    C: 'Releia mensagens importantes antes de enviar e comece reconhecendo o que está bom.'
+  };
+  // Esforço de adaptação: o trabalho pede MAIS de um fator (ação por fator).
+  var TRAVA_ADAPTACAO_ACAO = {
+    D: 'Prepare as conversas firmes com antecedência e guarde as decisões rápidas para quando realmente forem necessárias.',
+    I: 'Agrupe conversas e apresentações em blocos do dia e proteja um tempo de silêncio para recuperar a energia.',
+    S: 'Crie uma pequena rotina fixa no dia para dar conta da parte do trabalho que pede paciência e repetição.',
+    C: 'Use modelos e listas prontas nas tarefas de detalhe, para não gastar energia decidindo como fazer a cada vez.'
+  };
+
+  function travas(b, est) {
+    var p = b.r.percentuais, pri = b.pri, sec = b.sec, perfis = b.perfis, itens = [];
+    var IN = modulo('DISC_INTENSIDADE', './disc-intensidade.js');
+    function faixa(l) { return IN ? IN.faixa(p[l]) : (p[l] >= 29 ? 'alta' : p[l] < 22 ? 'baixa' : 'media'); }
+    function alta(l) { var f = faixa(l); return f === 'alta' || f === 'muito_alta'; }
+    function baixa(l) { var f = faixa(l); return f === 'baixa' || f === 'muito_baixa'; }
+    function item(t, tipo, letra) { return { titulo: t.titulo, texto: t.texto, acao: t.acao, tipo: tipo, letra: letra }; }
+    if (est && est.maisCobrado && perfis[est.maisCobrado]) {
+      var nm = perfis[est.maisCobrado].nome;
+      itens.push({ titulo: 'Gastar energia para ser quem o trabalho pede', tipo: 'adaptacao', letra: est.maisCobrado,
+        texto: 'Na Parte 2, o seu trabalho pede mais ' + nm + ' do que é natural para você. Sustentar isso todos os dias consome energia e pode explicar parte do cansaço.',
+        acao: TRAVA_ADAPTACAO_ACAO[est.maisCobrado] });
+    } else if (est && est.menosUsado && perfis[est.menosUsado]) {
+      itens.push({ titulo: 'Deixar uma força sua sem uso', tipo: 'adaptacao', letra: est.menosUsado,
+        texto: 'Na Parte 2, o seu trabalho pede menos ' + perfis[est.menosUsado].nome + ' do que você tem. Uma força pouco usada costuma virar desânimo com o tempo.',
+        acao: 'Procure uma tarefa ou projeto, mesmo pequeno, em que essa força apareça toda semana.' });
+    }
+    itens.push(item(TRAVA_EXCESSO[pri], 'excesso', pri));
+    if (alta(sec)) itens.push(item(TRAVA_EXCESSO_SEC[sec], 'excesso', sec));
+    var menor = null;
+    LETRAS.forEach(function (l) { if (l !== pri && l !== sec && baixa(l) && (menor === null || p[l] < p[menor])) menor = l; });
+    if (menor) itens.push(item(TRAVA_FALTA[menor], 'falta', menor));
+    itens.push({ titulo: 'Sob pressão, o seu jeito passa do ponto', texto: TRAVA_PRESSAO[pri], acao: TRAVA_PRESSAO_ACAO[pri], tipo: 'pressao', letra: pri });
+    return {
+      id: 'travas',
+      titulo: 'O que está te travando',
+      intro: 'Não são defeitos nem rótulos: são padrões do seu estilo que costumam segurar o seu desenvolvimento. Cada um vem com uma ação prática para começar já.',
+      itens: itens
+    };
+  }
+
+  // Completo + Parte 2: plano de 90 dias pensando no que o trabalho pede (só com o exigido).
+  var PLANO90_PERCEBER = 'Por duas semanas, anote os momentos em que o trabalho mais pediu de você e dê uma nota de 1 a 5 para a energia que cada um gastou.';
+  var PLANO90_CONVERSAR = 'Leve para uma conversa com quem coordena o seu trabalho o que você descobriu: o que pode ser dividido, o que pode ganhar método e o que você quer continuar desenvolvendo.';
+  var PLANO90_SEMANAL = {
+    D: 'Reserve um momento da semana para um desafio com resultado visível, mesmo fora do trabalho: é o que repõe a sua energia.',
+    I: 'Reserve um momento da semana para estar com pessoas de quem você gosta, sem pauta: é o que repõe a sua energia.',
+    S: 'Proteja um momento da semana sem imprevistos, com uma rotina que você controla: é o que repõe a sua energia.',
+    C: 'Proteja um momento da semana para um trabalho de concentração, sem interrupções: é o que repõe a sua energia.'
+  };
+  function plano90(b, est) {
+    if (!est) return null;
+    var alvo = est.maisCobrado || est.menosUsado || b.pri;
+    var ajuste = est.maisCobrado ? TRAVA_ADAPTACAO_ACAO[est.maisCobrado]
+      : 'Combine com você mesmo uma forma de usar mais ' + b.perfis[alvo].nome + ' no dia a dia, mesmo em tarefas pequenas.';
+    return {
+      id: 'plano90',
+      titulo: 'Seu plano de 90 dias no trabalho',
+      intro: 'Um caminho em três etapas para reduzir o esforço de adaptação sem deixar de ser quem você é.',
+      itens: [
+        { prazo: 'Dias 1 a 30', titulo: 'Perceber', texto: PLANO90_PERCEBER },
+        { prazo: 'Dias 31 a 60', titulo: 'Ajustar', texto: ajuste },
+        { prazo: 'Dias 61 a 90', titulo: 'Conversar', texto: PLANO90_CONVERSAR },
+        { prazo: 'Toda semana', titulo: 'Recuperar energia', texto: PLANO90_SEMANAL[b.pri] }
+      ]
+    };
+  }
+
   var AVISO_SIMPLES = 'O DISC descreve estilo de comportamento, não certo ou errado. Todas as pessoas têm um pouco dos quatro fatores.';
 
   var AVISO = 'O DISC descreve o seu estilo de comportamento: como você costuma agir, se comunicar e trabalhar. ' +
@@ -572,6 +689,9 @@
    *     'mudancas', 'estilo_comunicacao', 'organizacao', 'necessidades', 'desmotiva', 'valoriza',
    *     'esticando' (só com opcoes.exigido e DISC_EXIGIDO carregado; + indice, faixa, porFator, maisCobrado, menosUsado, exigido)
    *   esticando: a mesma seção 'esticando' ou null.
+   *   travas (rodada 5): { id: 'travas', titulo: 'O que está te travando', intro,
+   *     itens: [{ titulo, texto, acao, tipo: 'adaptacao'|'excesso'|'falta'|'pressao', letra }] } (2 a 5 itens)
+   *   plano90 (rodada 5, só com opcoes.exigido): { id: 'plano90', titulo, intro, itens: [{ prazo, titulo, texto }] } | null
    * opcoes.exigido: string de 40 dígitos (Parte 2) ou { percentuais, codigo }.
    * 'combinacao' e 'intensidade' só aparecem se os módulos estiverem carregados (no navegador, inclua os scripts antes).
    */
@@ -637,6 +757,8 @@
       ],
       aprofundamento: extras,
       esticando: est ? JSON.parse(JSON.stringify(est)) : null,
+      travas: travas(b, est),
+      plano90: plano90(b, est),
       aviso: AVISO
     };
   }

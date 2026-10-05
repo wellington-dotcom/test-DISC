@@ -857,6 +857,50 @@
 .gerado__titulo { font-size: var(--t-corpo); overflow-wrap: anywhere; }
 @media (prefers-reduced-motion: reduce) { .subaba, .assist-modelo { transition: none; } }
 
+/* ---------- Vendas (venda direta): resumo, pedidos, cupons e pacotes — painel é para computador ---------- */
+.vd-resumo { margin-bottom: 12px; }
+#vd-resumo-2 { margin-bottom: 20px; }
+@media (min-width: 900px) { #vd-resumo-2 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.vd-cartao { min-height: 112px; }
+.vd-cartao__valor { font-size: var(--t-numero); font-weight: 700; line-height: 1.1; letter-spacing: -.01em; }
+.vd-ultimos-caixa .gestao-linha { margin-bottom: 8px; }
+.vd-linhas { list-style: none; margin: 0; padding: 0; display: grid; }
+ul.vd-linhas.caixa { padding-top: 8px; padding-bottom: 8px; }
+.vd-linha + .vd-linha { border-top: 1px solid var(--linha); }
+.vd-linha__abrir {
+  display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 1.4fr) 132px 104px 172px; align-items: center; gap: 16px;
+  width: 100%; padding: 14px 8px; border: 0; border-radius: var(--raio-campo); background: none;
+  font: inherit; color: var(--tinta); text-align: left; cursor: pointer; transition: background .15s;
+}
+.vd-linha__abrir:hover { background: var(--nevoa); }
+.vd-linha__quem { display: grid; gap: 2px; min-width: 0; }
+.vd-linha__nome, .vd-linha__email, .vd-linha__pacote { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vd-linha__valor { text-align: right; font-size: var(--t-corpo); }
+.vd-linha .vd-status { justify-self: end; }
+.vd-pedido-grade { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+.vd-pedido-lado { display: grid; gap: 12px; }
+#vd-pedido-acesso .av-link { margin: 12px 0; }
+#vd-pedido-resposta .botao { margin-top: 12px; }
+.vd-lembrete { display: grid; gap: 6px; margin: 4px 0 8px; text-align: left; }
+.vd-link { color: var(--notus-forte); font-weight: 600; text-underline-offset: 3px; }
+.vd-cupons, .vd-pacotes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (min-width: 1200px) { .gestao-lista.vd-pacotes { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.vd-cupom__codigo { font-size: var(--t-indicador); letter-spacing: .02em; }
+.vd-cupom--inativo { opacity: .7; }
+.vd-cupom__link { margin: 0; }
+.vd-pacote__preco { display: flex; align-items: baseline; gap: 10px; margin: 0; }
+.vd-pacote__valor { font-size: var(--t-numero); font-weight: 700; color: var(--tinta); }
+.vd-pacote__antes { font-size: var(--t-corpo); }
+.vd-form-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.vd-pacotes-campo { border: 0; margin: 0; padding: 0; display: grid; gap: 10px; }
+.vd-pacotes-campo legend { padding: 0; margin-bottom: 4px; }
+.selo-pessoal { letter-spacing: .02em; }
+.det-pedido { grid-column: 1 / -1; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--linha); display: grid; gap: 8px; }
+.det-pedido__titulo { font-size: var(--t-corpo); margin: 0; }
+.det-pedido__linha { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 0; }
+.det-pedido__linha .link-botao { flex: none; font-size: var(--t-rotulo); color: var(--notus-forte); }
+@media (prefers-reduced-motion: reduce) { .vd-linha__abrir { transition: none; } }
+
 /* ---------- Impressão: branco, sem botões, cores das barras mantidas ---------- */
 @media print {
   @page { margin: 14mm; }

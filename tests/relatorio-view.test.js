@@ -63,8 +63,8 @@ test('montarHtml desenha todas as seções do relatório do motor', () => {
   for (const id of ['capa', 'indice', 'sumario', 'atracao', 'tecnica', 'disc', 'ranking', 'encerramento', 'rodape']) {
     assert.match(html, new RegExp('data-secao="' + id + '"'), 'seção ' + id);
   }
-  assert.match(html, /Notus <em>Agência<\/em>/);
-  assert.match(html, /assets\/icone\.svg/);
+  assert.match(html, /Gestão <em>sem Caos<\/em>/);
+  assert.ok(!/assets\/icone\.svg/.test(html), 'sem o logo da Notus no documento');
   assert.ok(html.includes(V.esc(rel.processo.consultor)), 'consultor no documento');
   assert.ok(html.includes(V.esc(rel.sumario.recomendacao.nome)), 'líder no documento');
   assert.ok(html.includes(V.numero(rel.sumario.recomendacao.score)), 'score com vírgula');
@@ -228,7 +228,7 @@ test('modelo pessoa: documento de desenvolvimento, acolhedor', () => {
   assert.match(html, /Olá, Carla\./);
   assert.ok(html.includes(V.esc(d.frase)));
   for (const s of d.secoes) assert.ok(html.includes(V.esc(s.titulo)));
-  assert.ok(!/empresa|vaga|aderência/i.test(html.replace(/Notus <em>Agência<\/em>/g, '')), 'sem linguagem de seleção');
+  assert.ok(!/empresa|vaga|aderência/i.test(html.replace(/Gestão <em>sem Caos<\/em>/g, '')), 'sem linguagem de seleção');
 });
 
 test('modelos novos: escape (XSS), modelo desconhecido e campos sensíveis ignorados', () => {

@@ -223,8 +223,8 @@
     return '<section class="capa" id="capa" data-secao="capa" aria-label="Capa">' +
       '<div class="capa__grade" aria-hidden="true"></div>' +
       '<header class="capa__topo">' +
-        '<span class="marca-doc"><img class="marca-doc__logo" src="assets/icone.svg" alt="" width="32" height="32">' +
-        '<span class="marca-doc__nome">Notus <em>Agência</em></span></span>' +
+        '<span class="marca-doc">' +
+        '<span class="marca-doc__nome">Gestão <em>sem Caos</em></span></span>' +
         '<span class="capa__meta"><span>Relatório do processo</span>' + (p.cidade ? '<span>' + esc(p.cidade) + '</span>' : '') + '</span>' +
       '</header>' +
       '<div class="capa__miolo">' +
@@ -235,7 +235,7 @@
       '</div>' +
       '<footer class="capa__rodape">' +
         '<div><div class="capa__rod-rotulo">Cliente</div><div class="capa__rod-valor">' + esc(p.empresa || '—') + (p.contratante ? '<br>' + esc(p.contratante) : '') + '</div></div>' +
-        '<div><div class="capa__rod-rotulo">Consultoria</div><div class="capa__rod-valor">Notus Agência' + (p.consultor ? '<br>' + esc(p.consultor) : '') + '</div></div>' +
+        '<div><div class="capa__rod-rotulo">Consultoria</div><div class="capa__rod-valor">Gestão sem Caos' + (p.consultor ? '<br>' + esc(p.consultor) : '') + '</div></div>' +
         '<div><div class="capa__rod-rotulo">Período</div><div class="capa__rod-valor">' + esc(periodo(p.periodo) || '—') + (rel.geradoEm ? '<br>Emitido em ' + esc(data(rel.geradoEm)) : '') + '</div></div>' +
         '<div class="capa__rod-lider"><div class="capa__rod-rotulo">Líder preliminar</div>' + lider + '</div>' +
       '</footer>' +
@@ -273,7 +273,7 @@
     var p = rel.processo || {};
     var corte = rel.config && rel.config.corte;
     var h = '';
-    var lede = 'Este relatório consolida o processo seletivo conduzido pela Notus Agência para ' + (p.empresa || 'o cliente') +
+    var lede = 'Este relatório consolida o processo seletivo conduzido pela Gestão sem Caos para ' + (p.empresa || 'o cliente') +
       ': da atração de ' + numeroCurto(ctx.total) + ' candidatos à avaliação de ' + numeroCurto(ctx.linhas.length) + ' finalistas, com ' +
       ctx.etapasFeitas + (ctx.etapasFeitas === 1 ? ' etapa técnica' : ' etapas técnicas') + ' e a análise comportamental DISC.' +
       (ctx.pendente ? ' ' + (ctx.etapasPendentes.length === 1 ? 'A etapa ' : 'As etapas ') + ctx.etapasPendentes.join(', ') + (ctx.etapasPendentes.length === 1 ? ' ainda não foi aplicada.' : ' ainda não foram aplicadas.') : '');
@@ -562,8 +562,8 @@
       }).join('') + '</ol>';
     }
     h += '<div class="assina"><div class="assina__linha" aria-hidden="true"></div>' +
-      '<div class="assina__nome">' + esc(p.consultor || 'Notus Agência') + '</div>' +
-      '<div class="assina__papel">Consultoria · Notus Agência</div>' +
+      '<div class="assina__nome">' + esc(p.consultor || 'Gestão sem Caos') + '</div>' +
+      '<div class="assina__papel">Consultoria · Gestão sem Caos</div>' +
       (rel.geradoEm ? '<div class="assina__data">' + esc(data(rel.geradoEm)) + '</div>' : '') + '</div>';
     return '<section class="secao secao--escura" id="' + s.id + '" data-secao="' + s.id + '" aria-labelledby="' + s.id + '-tit">' +
       '<h2 class="visualmente-oculto" id="' + s.id + '-tit">' + esc(s.n + ' · ' + s.titulo) + '</h2>' +
@@ -573,7 +573,7 @@
   function rodape(rel) {
     var p = rel.processo || {};
     return '<footer class="rodape-doc" data-secao="rodape">' +
-      '<span class="marca-doc"><img class="marca-doc__logo" src="assets/icone.svg" alt="" width="28" height="28"><span class="marca-doc__nome">Notus <em>Agência</em></span></span>' +
+      '<span class="marca-doc"><span class="marca-doc__nome">Gestão <em>sem Caos</em></span></span>' +
       '<span class="rodape-doc__meta">' + esc([p.consultor ? 'Consultor: ' + p.consultor : '', p.empresa, p.vaga].filter(Boolean).join(' · ')) +
       '<br>Documento confidencial, para uso do contratante. Sem dados de contato dos candidatos.</span></footer>';
   }
@@ -659,8 +659,8 @@
     return '<section class="capa capa--modelo" id="capa" data-secao="capa" aria-label="Capa">' +
       '<div class="capa__grade" aria-hidden="true"></div>' +
       '<header class="capa__topo">' +
-        '<span class="marca-doc"><img class="marca-doc__logo" src="assets/icone.svg" alt="" width="32" height="32">' +
-        '<span class="marca-doc__nome">Notus <em>Agência</em></span></span>' +
+        '<span class="marca-doc">' +
+        '<span class="marca-doc__nome">Gestão <em>sem Caos</em></span></span>' +
         '<span class="capa__meta"><span>' + esc(c.meta) + '</span></span>' +
       '</header>' +
       '<div class="capa__miolo">' +
@@ -688,14 +688,14 @@
       '<h2 class="visualmente-oculto" id="' + s.id + '-tit">' + esc(s.n + ' · ' + s.titulo) + '</h2>' +
       '<div class="pagina pagina--escura">' + cabecalhoPagina(s, cab, true) + corpo +
       '<div class="assina"><div class="assina__linha" aria-hidden="true"></div>' +
-      '<div class="assina__nome">' + esc(assinatura || 'Notus Agência') + '</div>' +
-      '<div class="assina__papel">Consultoria · Notus Agência</div>' +
+      '<div class="assina__nome">' + esc(assinatura || 'Gestão sem Caos') + '</div>' +
+      '<div class="assina__papel">Consultoria · Gestão sem Caos</div>' +
       (data_ ? '<div class="assina__data">' + esc(data(data_)) + '</div>' : '') + '</div></div></section>';
   }
 
   function rodapeModelo(meta, nota) {
     return '<footer class="rodape-doc" data-secao="rodape">' +
-      '<span class="marca-doc"><img class="marca-doc__logo" src="assets/icone.svg" alt="" width="28" height="28"><span class="marca-doc__nome">Notus <em>Agência</em></span></span>' +
+      '<span class="marca-doc"><span class="marca-doc__nome">Gestão <em>sem Caos</em></span></span>' +
       '<span class="rodape-doc__meta">' + esc(meta.filter(Boolean).join(' · ')) + '<br>' + esc(nota) + '</span></footer>';
   }
 
@@ -980,7 +980,7 @@
       ],
       rodape: [
         { rotulo: 'Empresa', linhas: [emp.nome || '—', emp.cidade] },
-        { rotulo: 'Consultoria', linhas: ['Notus Agência', d.consultor] },
+        { rotulo: 'Consultoria', linhas: ['Gestão sem Caos', d.consultor] },
         { rotulo: 'Emitido em', linhas: [data(d.geradoEm) || '—'] },
         { rotulo: 'Equilíbrio', linhas: [eqb.rotulo || '—'] }
       ]
@@ -1303,7 +1303,7 @@
       rodape: [
         { rotulo: 'Para', linhas: [p.nome] },
         { rotulo: 'Seu estilo', linhas: [codigoSeguro(p.codigo) + (cb ? ' · ' + cb : pri.nome ? ' · ' + pri.nome + (sec2.nome ? ' e ' + sec2.nome : '') : '')] },
-        { rotulo: 'Consultoria', linhas: ['Notus Agência', d.consultor] },
+        { rotulo: 'Consultoria', linhas: ['Gestão sem Caos', d.consultor] },
         { rotulo: 'Emitido em', linhas: [data(d.geradoEm) || '—'] }
       ]
     });
@@ -1445,7 +1445,7 @@
   }
 
   function erroHtml(msg) {
-    return '<div class="doc-erro" role="alert"><img class="marca-doc__logo" src="assets/icone.svg" alt="" width="44" height="44">' +
+    return '<div class="doc-erro" role="alert">' +
       '<h1 class="doc-erro__tit">' + esc(msg) + '</h1><p>Confira o link recebido ou fale com a consultoria.</p></div>';
   }
 
@@ -1486,7 +1486,7 @@
       el.setAttribute('data-estado', 'pronto');
       if (rel.modelo && rel.modelo !== 'processo') {
         el.setAttribute('data-modelo', String(rel.modelo).replace(/[^a-z]/g, ''));
-        doc.title = 'Relatório · ' + (rel.titulo || 'Notus Agência');
+        doc.title = 'Relatório · ' + (rel.titulo || 'Gestão sem Caos');
         return;
       }
       var p = rel.processo || {};
