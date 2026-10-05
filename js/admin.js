@@ -14,9 +14,12 @@
     reprovado: 'Reprovado',
     invalido: 'Inválido'
   };
-  // Cores do gráfico na identidade Notus: D preto, I amarelo, S cinza claro, C hachurado escuro (padrão em <defs>).
-  var CORES = { D: '#131313', I: '#ffda00', S: '#cfcec8', C: 'url(#disc-hachura-escura)' };
-  var TINTA_SOBRE = { D: '#ffffff', I: '#131313', S: '#131313', C: '#ffffff' };
+  // Cores do gráfico SVG = tokens de assets/notus.css (--disc-D/--tinta, --disc-I/--ambar,
+  // --disc-S/--ardosia-clara, --disc-C/--ardosia, --trilho, --suave). Se mudar lá, mude aqui (tests/admin.test.js confere).
+  var CORES = {
+    D: '#13283f', I: '#ff9f40', S: '#8a97ab', C: '#324e73',
+    trilho: '#e9ecef', texto: '#13283f', suave: '#6b7586'
+  };
   var NOMES = { D: 'Dominância', I: 'Influência', S: 'Estabilidade', C: 'Conformidade' };
   var CHAVE_SESSAO = 'disc_admin_chave';
   var CHAVE_LOCAL = 'disc_admin_registros';
@@ -191,7 +194,8 @@
     validarImportado: validarImportado,
     gerarCsv: gerarCsv,
     resumoEquipe: resumoEquipe,
-    guiaComoTexto: guiaComoTexto
+    guiaComoTexto: guiaComoTexto,
+    CORES: CORES
   };
 
   if (typeof module !== 'undefined' && module.exports) { module.exports = util; return; }
@@ -202,7 +206,7 @@
 
   var CONFIG = root.CONFIG || { API_URL: '', EMPRESA: '' };
   var MODO_API = !!(CONFIG.API_URL && String(CONFIG.API_URL).trim());
-  var estado = { chave: '', registros: [], abertoId: null, aba: 'lista' };
+  var estado = { chave: '', registros: [], abertoId: null, aba: 'lista', listaMostrada: false };
 
   function $(id) { return document.getElementById(id); }
 
@@ -342,9 +346,9 @@
       var entrada = opcoes.exigir ? el('input', { classe: 'entrada', id: 'confirmar-texto', autocomplete: 'off', 'aria-label': 'Digite ' + opcoes.exigir + ' para confirmar' }) : null;
       var btnOk = el('button', { type: 'button', classe: 'botao botao--perigo', id: 'confirmar-ok', texto: opcoes.botao || 'Excluir' });
       var btnCancelar = el('button', { type: 'button', classe: 'botao botao--claro', id: 'confirmar-cancelar', texto: 'Cancelar' });
-      var caixa = el('div', { classe: 'caixa caixa--ampla confirmar__caixa surgir', role: 'alertdialog', 'aria-modal': 'true', 'aria-labelledby': 'confirmar-titulo', 'aria-describedby': 'confirmar-desc' }, [
+      var caixa = el('div', { classe: 'caixa caixa--ampla vidro-janela confirmar__caixa surgir', role: 'alertdialog', 'aria-modal': 'true', 'aria-labelledby': 'confirmar-titulo', 'aria-describedby': 'confirmar-desc' }, [
         el('h2', { id: 'confirmar-titulo', classe: 'confirmar__titulo', texto: opcoes.titulo }),
-        el('p', { id: 'confirmar-desc', classe: 'texto-medio', texto: opcoes.texto }),
+        el('p', { id: 'confirmar-desc', classe: 'texto-medio t-corpo', texto: opcoes.texto }),
         entrada ? el('label', { classe: 'campo', for: 'confirmar-texto' }, [el('span', { classe: 'campo__rotulo', texto: 'Digite ' + opcoes.exigir + ' para confirmar' }), entrada]) : null,
         el('div', { classe: 'confirmar__acoes' }, [btnCancelar, btnOk])
       ]);
@@ -396,6 +400,7 @@
 
   /* ---------- Componentes ---------- */
 
+  // Status como selo: aprovado verde, reprovado vermelho, em análise cinza, inválido só contorno.
   var CLASSE_STATUS = { aprovado: 'selo--verde', reprovado: 'selo--vermelho', em_analise: '', invalido: 'status--invalido' };
 
   function badgePerfil(r) {
@@ -422,7 +427,7 @@
     LETRAS.forEach(function (l) {
       wrap.appendChild(el('div', { classe: 'mini-linha' }, [
         el('span', { classe: 'mini-letra', texto: l }),
-        el('span', { classe: 'mini-trilho hachura-clara' }, el('span', { classe: 'mini-barra disc-' + l, estilo: { width: Math.min(100, (p[l] / 40) * 100) + '%' } })),
+        el('span', { classe: 'mini-trilho trilho' }, el('span', { classe: 'mini-barra disc-' + l, estilo: { width: Math.min(100, (p[l] / 40) * 100) + '%' } })),
         el('span', { classe: 'mini-valor', texto: p[l] + '%' })
       ]));
     });
@@ -464,7 +469,7 @@
         el('span', { texto: o.rotulo }), icone(ICONE_CHECK, 'escolha__check')
       ]);
     });
-    var menu = el('ul', { role: 'listbox', id: id + '-lista', classe: 'escolha__menu', tabindex: '-1', hidden: true,
+    var menu = el('ul', { role: 'listbox', id: id + '-lista', classe: 'escolha__menu vidro-janela', tabindex: '-1', hidden: true,
       'aria-label': cfg.rotulo }, opcoes);
     var caixa = el('div', { classe: 'escolha' + (cfg.classe ? ' ' + cfg.classe : '') }, [botao, menu]);
 
@@ -537,14 +542,8 @@
     escolhas.forEach(function (x) { if (!x.caixa.contains(e.target)) x.fechar(false); });
   });
 
-  // Gráfico de barras DISC em SVG (sem bibliotecas): trilho hachurado claro até 40%,
-  // preenchimento na cor da letra (C hachurado escuro) e letra sempre escrita.
-  function padraoHachura(id, fundo, listra) {
-    var p = svg('pattern', { id: id, width: 10, height: 10, patternUnits: 'userSpaceOnUse', patternTransform: 'rotate(45)' });
-    p.appendChild(svg('path', { d: 'M0 0H10V10H0Z', fill: fundo }));
-    p.appendChild(svg('path', { d: 'M0 0H5V10H0Z', fill: listra }));
-    return p;
-  }
+  // Gráfico de barras DISC em SVG (sem bibliotecas): trilho liso cinza-claro até 40%,
+  // barra na cor da letra, percentual em negrito logo acima da barra, letra e total embaixo.
   function pilula(x, y, w, h) {
     var r = Math.min(w / 2, h / 2);
     return 'M' + (x + r) + ' ' + y + 'H' + (x + w - r) + 'A' + r + ' ' + r + ' 0 0 1 ' + (x + w) + ' ' + (y + r) +
@@ -553,29 +552,27 @@
       'V' + (y + r) + 'A' + r + ' ' + r + ' 0 0 1 ' + (x + r) + ' ' + y + 'Z';
   }
   function graficoDisc(calc) {
-    var W = 360, H = 252, topo = 12, base = 192, larg = 60, x0 = 18;
+    var W = 360, H = 270, topo = 34, base = 206, larg = 56, x0 = 22;
     var gap = (W - 2 * x0 - 4 * larg) / 3;
     var maxV = 40;
+    var hTotal = base - topo;
     var s = svg('svg', { viewBox: '0 0 ' + W + ' ' + H, class: 'grafico', role: 'img',
       'aria-label': 'Gráfico DISC: D ' + calc.percentuais.D + '%, I ' + calc.percentuais.I + '%, S ' + calc.percentuais.S + '%, C ' + calc.percentuais.C + '%' });
-    var defs = svg('defs', {});
-    defs.appendChild(padraoHachura('disc-hachura-clara', '#f4f4f2', '#e3e2dc'));
-    defs.appendChild(padraoHachura('disc-hachura-escura', '#1c1c1c', '#3d3d3d'));
-    s.appendChild(defs);
     LETRAS.forEach(function (l, i) {
       var v = calc.percentuais[l];
-      var hTotal = base - topo;
-      var h = Math.max(larg * 0.75, (Math.min(v, maxV) / maxV) * hTotal);
+      var h = Math.max(24, (Math.min(v, maxV) / maxV) * hTotal);
       var x = x0 + i * (larg + gap);
-      s.appendChild(svg('path', { d: pilula(x, topo, larg, hTotal), fill: 'url(#disc-hachura-clara)', class: 'trilho' }));
-      s.appendChild(svg('rect', { x: x, y: base - h, width: larg, height: h, rx: larg / 2, fill: CORES[l], class: 'barra barra-' + l }));
-      var tv = svg('text', { x: x + larg / 2, y: base - h + 30, 'text-anchor': 'middle', class: 'valor', fill: TINTA_SOBRE[l] });
+      s.appendChild(svg('path', { d: pilula(x, topo, larg, hTotal), fill: CORES.trilho, class: 'trilho-svg' }));
+      s.appendChild(svg('rect', { x: x, y: base - h, width: larg, height: h, rx: Math.min(larg / 2, h / 2), fill: CORES[l], class: 'barra barra-' + l }));
+      // percentual acima da barra: dentro do trilho quando sobra espaço, logo acima dele quando a barra está cheia
+      var yValor = Math.max(base - h - 10, topo - 10);
+      var tv = svg('text', { x: x + larg / 2, y: yValor, 'text-anchor': 'middle', class: 'valor', fill: CORES.texto });
       tv.textContent = String(v).replace('.', ',') + '%';
       s.appendChild(tv);
-      var tl = svg('text', { x: x + larg / 2, y: base + 30, 'text-anchor': 'middle', class: 'letra' });
+      var tl = svg('text', { x: x + larg / 2, y: base + 30, 'text-anchor': 'middle', class: 'letra', fill: CORES.texto });
       tl.textContent = l;
       s.appendChild(tl);
-      var tt = svg('text', { x: x + larg / 2, y: base + 50, 'text-anchor': 'middle', class: 'eixo' });
+      var tt = svg('text', { x: x + larg / 2, y: base + 50, 'text-anchor': 'middle', class: 'eixo', fill: CORES.suave });
       tt.textContent = 'total ' + calc.totais[l];
       s.appendChild(tt);
     });
@@ -590,16 +587,17 @@
     ]);
   }
 
-  function blocoPerfil(letra, papel, preta) {
+  function blocoPerfil(letra, papel, primario) {
     var DATA = dep('DISC_DATA');
     var p = DATA && DATA.perfis && DATA.perfis[letra];
     if (!p) return null;
-    return el('section', { classe: 'perfil-card caixa caixa--ampla surgir ' + (preta ? 'caixa--preta' : 'perfil-card--branca') + ' perfil-' + letra }, [
+    // Primário em card suave (azul bem claro), secundário em card branco: nada de bloco de cor sólida.
+    return el('section', { classe: 'perfil-card caixa surgir ' + (primario ? 'caixa--suave perfil-card--primario' : 'perfil-card--secundario') + ' perfil-' + letra }, [
       el('header', { classe: 'perfil-card__topo' }, [
         letraDisc(letra, 'perfil-card__letra'),
         el('div', null, [
           el('p', { classe: 'perfil-card__papel', texto: papel }),
-          el('h3', { classe: 'perfil-card__nome', texto: p.nome })
+          el('h3', { classe: 'perfil-card__nome seminegrito', texto: p.nome })
         ])
       ]),
       el('div', { classe: 'grade-listas' }, [
@@ -638,22 +636,22 @@
     });
   }
 
-  // Cartões de resumo no padrão da tela inicial do BI: o 1º preto, um amarelo, os demais brancos.
-  function renderizarResumo() {
+  // Cartões de resumo no padrão do Início do BI: todos brancos; "Aprovados" em destaque (número em laranja).
+  function renderizarResumo(animar) {
     var box = $('resumo-lista');
     limpar(box);
     var regs = estado.registros;
     var conta = function (f) { return regs.filter(f).length; };
     var cartoes = [
-      { rotulo: 'Candidatos', valor: regs.length, estilo: 'caixa--preta' },
-      { rotulo: 'Aprovados', valor: conta(function (r) { return !r.invalido && r.status === 'aprovado'; }), estilo: 'caixa--amarela' },
+      { rotulo: 'Candidatos', valor: regs.length, estilo: '' },
+      { rotulo: 'Aprovados', valor: conta(function (r) { return !r.invalido && r.status === 'aprovado'; }), estilo: 'caixa--destaque' },
       { rotulo: 'Em análise', valor: conta(function (r) { return !r.invalido && r.status === 'em_analise'; }), estilo: '' },
       { rotulo: 'Reprovados', valor: conta(function (r) { return !r.invalido && r.status === 'reprovado'; }), estilo: '' }
     ];
     cartoes.forEach(function (c, i) {
-      box.appendChild(el('div', { classe: 'caixa resumo__cartao surgir ' + c.estilo, estilo: { 'animation-delay': (i * 40) + 'ms' } }, [
+      box.appendChild(el('div', { classe: 'caixa caixa--compacta resumo__cartao ' + c.estilo + (animar ? ' surgir' : ''), estilo: animar ? { 'animation-delay': (i * 40) + 'ms' } : null }, [
         el('span', { classe: 'resumo__rotulo', texto: c.rotulo }),
-        el('span', { classe: 'resumo__valor', texto: String(c.valor) })
+        el('span', { classe: 'resumo__valor t-numero-grande valor-destaque', texto: String(c.valor) })
       ]));
     });
   }
@@ -661,7 +659,10 @@
   function renderizarLista() {
     var ul = $('lista-candidatos');
     limpar(ul);
-    renderizarResumo();
+    // Só anima na primeira vez: filtrar ou buscar não faz os cartões piscarem nem pularem.
+    var animar = !estado.listaMostrada;
+    estado.listaMostrada = true;
+    renderizarResumo(animar);
     var itens = filtrados();
     var total = estado.registros.length;
     $('contagem').textContent = total === 0
@@ -671,7 +672,7 @@
       var meta = [linkTelefone(r)];
       if (r.vaga) meta.push(el('span', { texto: r.vaga }));
       meta.push(el('span', { classe: 'texto-suave', texto: formatarData(r.fim || r.recebidoEm) }));
-      ul.appendChild(el('li', { classe: 'card surgir' + (r.invalido ? ' card-invalido' : ''), estilo: { 'animation-delay': Math.min(i, 8) * 30 + 'ms' } }, [
+      ul.appendChild(el('li', { classe: 'card caixa' + (animar ? ' surgir' : '') + (r.invalido ? ' card-invalido' : ''), estilo: animar ? { 'animation-delay': Math.min(i, 8) * 30 + 'ms' } : null }, [
         el('div', { classe: 'card-topo' }, [
           r.calc ? letraDisc(r.calc.primario, 'card-letra') : el('span', { classe: 'letra-disc card-letra card-letra--vazia', 'aria-hidden': 'true', texto: '?' }),
           el('button', { type: 'button', classe: 'card-nome', texto: r.nome || '(sem nome)',
@@ -736,7 +737,8 @@
     art.appendChild(el('header', { classe: 'cabecalho det-cabecalho' }, [
       el('div', { classe: 'cabecalho__texto-area' }, [
         el('p', { classe: 'det-relatorio so-imprimir', texto: 'Relatório DISC' + (CONFIG.EMPRESA ? ' — ' + CONFIG.EMPRESA : '') }),
-        el('h2', { classe: 'cabecalho__titulo', texto: r.nome || '(sem nome)' }),
+        el('p', { classe: 'sobretitulo nao-imprimir', texto: 'Processo seletivo · Candidato' }),
+        el('h2', { classe: 'cabecalho__titulo t-pagina seminegrito', texto: r.nome || '(sem nome)' }),
         sub ? el('p', { classe: 'cabecalho__texto', texto: sub }) : null
       ]),
       el('div', { classe: 'cabecalho__acoes nao-imprimir' }, [
@@ -745,7 +747,7 @@
           copiarTexto(guiaComoTexto(guia, r)).then(function () { avisar('Guia copiado para a área de transferência.', 'ok'); },
             function () { avisar('Não foi possível copiar automaticamente.', 'erro'); });
         } }) : null,
-        el('button', { type: 'button', classe: 'botao botao--preto', texto: 'Imprimir / salvar PDF', onclick: function () { root.print(); } })
+        el('button', { type: 'button', classe: 'botao botao--principal', texto: 'Imprimir / salvar PDF', onclick: function () { root.print(); } })
       ])
     ]));
 
@@ -758,7 +760,7 @@
         el('div', null, [el('dt', { texto: 'Concluído em' }), el('dd', { texto: formatarData(r.fim || r.recebidoEm) })]),
         el('div', null, [el('dt', { texto: 'Duração' }), el('dd', { texto: formatarDuracao(r.duracaoSeg) })]),
         el('div', null, [el('dt', { texto: 'Perfil' }), el('dd', { classe: 'det-perfil' }, [badgePerfil(r), r.calc ? ' ' + NOMES[r.calc.primario] + ' / ' + NOMES[r.calc.secundario] : ''])]),
-        el('div', null, [el('dt', { texto: 'Status' }), el('dd', null, badgeStatus(r))])
+        el('div', null, [el('dt', { texto: 'Status' }), el('dd', { id: 'det-status-selo' }, badgeStatus(r))])
       ])
     ]);
 
@@ -773,12 +775,15 @@
       var novo = selStatus.value;
       atualizarCampos(r.id, { status: novo }).then(function () {
         avisar('Status atualizado para "' + STATUS[novo] + '".', 'ok');
-        renderizarDetalhe(); renderizarLista(); renderizarComparativo();
+        // Atualiza só o selo: o detalhe não é redesenhado, então nada sai do lugar.
+        var selo = $('det-status-selo');
+        if (selo) { limpar(selo); selo.appendChild(badgeStatus(r)); }
+        renderizarLista(); renderizarComparativo();
       }).catch(function (e) { avisar(e.message, 'erro'); escStatus.definir(r.status); });
     });
     var taObs = el('textarea', { id: 'det-obs', classe: 'entrada', rows: 3, maxlength: 2000, placeholder: 'Anotações sobre a entrevista, disponibilidade…' });
     taObs.value = r.observacoes || '';
-    var btnObs = el('button', { type: 'button', classe: 'botao botao--preto', texto: 'Salvar observações' });
+    var btnObs = el('button', { type: 'button', classe: 'botao botao--principal', texto: 'Salvar observações' });
     btnObs.addEventListener('click', function () {
       btnObs.disabled = true;
       atualizarCampos(r.id, { observacoes: taObs.value }).then(function () {
@@ -810,7 +815,7 @@
     }
 
     // Gráfico + lateral (dados e avaliação)
-    var grafico = el('section', { classe: 'caixa caixa--ampla det-grafico surgir' }, [
+    var grafico = el('section', { classe: 'caixa det-grafico surgir' }, [
       el('header', { classe: 'det-grafico__topo' }, [
         el('h3', { classe: 'caixa__titulo', texto: 'Resultado DISC' }),
         badgePerfil(r)
@@ -821,17 +826,18 @@
     art.appendChild(el('div', { classe: 'det-grade' }, [grafico, el('div', { classe: 'det-lado' }, [dados, gestao])]));
     art.appendChild(el('section', { classe: 'so-imprimir det-obs-impressa' }, [el('h3', { texto: 'Observações' }), obsImpressa]));
 
-    // Características: primário em caixa preta, secundário em caixa branca
+    // Características: primário em card suave, secundário em card branco
     art.appendChild(el('div', { classe: 'det-perfis' }, [
       blocoPerfil(r.calc.primario, 'Perfil primário', true),
       blocoPerfil(r.calc.secundario, 'Perfil secundário', false)
     ]));
 
-    // Guia: resumo em caixa amarela, seções numa caixa branca ampla
+    // Guia: resumo em card de vidro (o único da tela), seções num card branco amplo
     if (guia) {
       art.appendChild(el('section', { classe: 'guia' }, [
-        el('div', { classe: 'caixa caixa--amarela caixa--ampla guia-topo surgir' }, [
-          el('h3', { classe: 'guia-titulo', texto: guia.titulo || 'Guia para a Liderança' }),
+        el('div', { classe: 'caixa caixa--vidro guia-topo surgir' }, [
+          el('p', { classe: 'sobretitulo', texto: 'Para quem vai liderar' }),
+          el('h3', { classe: 'guia-titulo seminegrito', texto: guia.titulo || 'Guia para a Liderança' }),
           guia.resumo ? el('p', { classe: 'guia-resumo', texto: guia.resumo }) : null
         ]),
         el('div', { classe: 'caixa caixa--ampla guia-corpo surgir' }, [
@@ -850,11 +856,10 @@
 
   /* ---------- Comparativo ---------- */
 
-  // Cartões empilhados (padrão do BI): 1º preto, 2º amarelo, demais brancos.
+  // Cartões empilhados (padrão do BI): 1º em azul suave com o número em laranja, demais brancos com contorno.
   function cartoesEmpilhados(itens) {
     return el('ol', { classe: 'empilhados' }, itens.map(function (it, i) {
-      var tom = i === 0 ? 'empilhado--preto' : i === 1 ? 'empilhado--amarelo' : 'empilhado--branco';
-      return el('li', { classe: 'empilhado ' + tom + (i === itens.length - 1 ? ' empilhado--ultimo' : ''), estilo: { 'z-index': String(i + 1) } }, [
+      return el('li', { classe: 'empilhado' + (i === 0 ? ' empilhado--primeiro' : '') + (i === itens.length - 1 ? ' empilhado--ultimo' : ''), estilo: { 'z-index': String(i + 1) } }, [
         it.sigla,
         el('div', { classe: 'empilhado__meio' }, [
           it.titulo,
@@ -873,10 +878,13 @@
     limpar(box);
     var aprovados = estado.registros.filter(function (r) { return !r.invalido && r.status === 'aprovado'; });
     var res = resumoEquipe(aprovados);
-    var cab = el('div', { classe: 'cabecalho__texto-area' }, [el('h2', { classe: 'cabecalho__titulo', texto: 'Comparativo dos aprovados' })]);
+    var cab = el('div', { classe: 'cabecalho__texto-area' }, [
+      el('p', { classe: 'sobretitulo', texto: 'Processo seletivo' }),
+      el('h2', { classe: 'cabecalho__titulo t-pagina seminegrito', texto: 'Comparativo dos aprovados' })
+    ]);
     box.appendChild(el('div', { classe: 'cabecalho' }, cab));
     if (!res.total) {
-      box.appendChild(el('div', { classe: 'caixa caixa--ampla vazio surgir' }, [
+      box.appendChild(el('div', { classe: 'caixa vazio surgir' }, [
         el('p', { classe: 'vazio__texto', texto: 'Nenhum candidato aprovado ainda. Marque candidatos como "Aprovado" no detalhe para ver o comparativo da equipe.' })
       ]));
       return;
@@ -885,13 +893,13 @@
 
     // Distribuição por perfil primário, do mais frequente ao menos frequente
     var ordem = LETRAS.slice().sort(function (a, b) { return res.primarios[b] - res.primarios[a] || LETRAS.indexOf(a) - LETRAS.indexOf(b); });
-    var distrib = el('section', { classe: 'caixa caixa--ampla comp-distrib surgir' }, [
+    var distrib = el('section', { classe: 'caixa comp-distrib surgir' }, [
       el('h3', { classe: 'caixa__titulo', texto: 'Distribuição por perfil primário' }),
       cartoesEmpilhados(ordem.map(function (l) {
         var pct = Math.round((res.primarios[l] / res.total) * 100);
         return {
           sigla: letraDisc(l, 'empilhado__sigla'),
-          titulo: el('span', { classe: 'empilhado__titulo', texto: l + ' — ' + NOMES[l] }),
+          titulo: el('span', { classe: 'empilhado__titulo', texto: NOMES[l] }),
           sub: 'média ' + String(res.media[l]).replace('.', ',') + '%',
           direita: String(res.primarios[l]),
           subDireita: pct + '% da equipe'
@@ -899,14 +907,14 @@
       }))
     ]);
 
-    // Média da equipe em barras (trilho hachurado até 40%)
-    var medias = el('section', { classe: 'caixa caixa--ampla comp-medias surgir' }, [
+    // Média da equipe em barras (trilho liso até 40%)
+    var medias = el('section', { classe: 'caixa comp-medias surgir' }, [
       el('h3', { classe: 'caixa__titulo', texto: 'Média da equipe' }),
       el('div', { classe: 'barras-media', role: 'img', 'aria-label': 'Média da equipe: ' + LETRAS.map(function (l) { return l + ' ' + res.media[l] + '%'; }).join(', ') },
         LETRAS.map(function (l) {
           return el('div', { classe: 'barra-media' }, [
             letraDisc(l, 'barra-media__letra'),
-            el('span', { classe: 'barra-media__trilho hachura-clara' }, el('span', { classe: 'barra-media__cheia disc-' + l, estilo: { width: Math.max(8, Math.min(100, (res.media[l] / 40) * 100)) + '%' } })),
+            el('span', { classe: 'barra-media__trilho trilho' }, el('span', { classe: 'barra-media__cheia disc-' + l, estilo: { width: Math.max(8, Math.min(100, (res.media[l] / 40) * 100)) + '%' } })),
             el('span', { classe: 'barra-media__valor', texto: String(res.media[l]).replace('.', ',') + '%' })
           ]);
         }))

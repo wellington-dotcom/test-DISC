@@ -1,6 +1,6 @@
 'use strict';
 const { test, expect } = require('@playwright/test');
-const { API_FALSA, coletarErros, configurar, simularApi, responderGrupo, preencherIdentificacao, fazerTesteCompleto } = require('./util.js');
+const { API_FALSA, coletarErros, configurar, simularApi, ordemNaTela, responderGrupo, preencherIdentificacao, fazerTesteCompleto } = require('./util.js');
 
 const DADOS = { nome: 'Maria Conceição Ávila', telefone: '11987654321', vaga: 'Atendimento' };
 
@@ -40,29 +40,25 @@ test.describe('Candidato (celular, sem API)', () => {
     await page.check('#consentimento');
     await enviar.click();
 
-    // Grupo 1: botão "Avançar" só habilita com o grupo completo; "refazer" limpa.
+    // Grupo 1: 4 cartões, "Avançar" desabilitado até a pessoa ordenar; sem "Refazer grupo".
     await expect(page.locator('.progresso-topo')).toContainText('Grupo 1 de 25');
-    await expect(page.locator('.palavra')).toHaveCount(4);
+    await expect(page.locator('.cartao')).toHaveCount(4);
     await expect(page.locator('[data-acao="proximo"]')).toBeDisabled();
-    await page.locator('.palavra[data-letra="C"]').click();
-    await expect(page.locator('.palavra[data-letra="C"]')).toHaveAttribute('aria-pressed', 'true');
-    await page.locator('[data-acao="refazer"]').click();
-    await expect(page.locator('.palavra.escolhida')).toHaveCount(0);
+    await expect(page.locator('[data-acao="refazer"]')).toHaveCount(0);
 
     const ordem = ['S', 'C', 'I', 'D'];
     for (let i = 0; i < 12; i++) {
       await expect(page.locator('.progresso-topo')).toContainText('Grupo ' + (i + 1) + ' de 25');
       await responderGrupo(page, ordem);
       if (i === 0) {
-        await expect(page.locator('.palavra[data-letra="S"] .selo-num')).toHaveText('4');
-        await expect(page.locator('.palavra[data-letra="D"] .selo-num')).toHaveText('1');
+        expect(await ordemNaTela(page)).toEqual(ordem);
         await expect(page.locator('[data-acao="proximo"]')).toBeEnabled();
       }
       await page.locator('[data-acao="proximo"]').click();
     }
 
     // A ordem das palavras é embaralhada (não é sempre D, I, S, C).
-    const ordemTela = await page.locator('.palavra').evaluateAll((els) => els.map((e) => e.getAttribute('data-letra')).join(''));
+    const ordemTela = await page.locator('.cartao').evaluateAll((els) => els.map((e) => e.getAttribute('data-letra')).join(''));
     expect(ordemTela.split('').sort().join('')).toBe('CDIS');
 
     // Recarrega no meio: deve oferecer "Continuar de onde parei" e voltar ao grupo 13.
@@ -70,7 +66,7 @@ test.describe('Candidato (celular, sem API)', () => {
     await expect(page.locator('[data-acao="continuar"]')).toBeVisible();
     await page.locator('[data-acao="continuar"]').click();
     await expect(page.locator('.progresso-topo')).toContainText('Grupo 13 de 25');
-    const ordemDepois = await page.locator('.palavra').evaluateAll((els) => els.map((e) => e.getAttribute('data-letra')).join(''));
+    const ordemDepois = await page.locator('.cartao').evaluateAll((els) => els.map((e) => e.getAttribute('data-letra')).join(''));
     expect(ordemDepois).toBe(ordemTela);
 
     for (let i = 12; i < 25; i++) {
@@ -228,5 +224,147 @@ test.describe('Candidato: telefone e textos', () => {
     await expect(page.locator('[data-acao="comecar"]')).toBeVisible();
     expect(await page.evaluate(() => localStorage.getItem('disc_progresso_v1'))).toBeNull();
     expect(await page.evaluate(() => localStorage.getItem('disc_concluido_v1'))).toBeNull();
+  });
+});
+
+test.describe('Candidato: lista ordenável dos grupos', () => {
+  async function irParaGrupo1(page) {
+    await page.goto('/index.html');
+    await page.locator('[data-acao="comecar"]').click();
+    await preencherIdentificacao(page, DADOS);
+    await page.locator('#form-identificacao button[type="submit"]').click();
+    await expect(page.locator('.progresso-topo')).toContainText('Grupo 1 de 25');
+    await expect(page.locator('.cartao')).toHaveCount(4);
+  }
+
+  async function arrastar(page, letra, posicaoDestino) {
+    const cartao = page.locator('.cartao[data-letra="' + letra + '"]');
+    const caixa = await cartao.boundingBox();
+    const lista = await page.locator('.cartoes').boundingBox();
+    const passo = (lista.height - caixa.height) / 3;
+    const x = caixa.x + caixa.width / 2 - 40;      // longe dos botões ▲/▼
+    const y = caixa.y + caixa.height / 2;
+    const yDestino = lista.y + caixa.height / 2 + posicaoDestino * passo;
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x, y + (yDestino - y) / 2, { steps: 6 });
+    await page.mouse.move(x, yDestino, { steps: 6 });
+    await page.mouse.up();
+  }
+
+  test('Avançar só libera depois de mexer; "Esta ordem está certa" libera sem mexer', async ({ page }) => {
+    const erros = coletarErros(page);
+    await irParaGrupo1(page);
+    const proximo = page.locator('[data-acao="proximo"]');
+    await expect(proximo).toBeDisabled();
+    await expect(page.locator('#dica-avancar')).toHaveText('Arraste as palavras para ordenar');
+    const inicial = await ordemNaTela(page);
+    await page.locator('[data-acao="confirmar-ordem"]').click();
+    await expect(proximo).toBeEnabled();
+    await expect(page.locator('[data-acao="confirmar-ordem"]')).toHaveCount(0);
+    expect(await ordemNaTela(page)).toEqual(inicial);
+    // Ordem e marcação ficam no progresso salvo
+    const salvo = await page.evaluate(() => JSON.parse(localStorage.getItem('disc_progresso_v1')));
+    expect(salvo.ordens[0]).toEqual(inicial);
+    expect(salvo.respondidos[0]).toBe(true);
+    // Grupo 2 começa bloqueado de novo
+    await proximo.click();
+    await expect(page.locator('.progresso-topo')).toContainText('Grupo 2 de 25');
+    await expect(proximo).toBeDisabled();
+    expect(erros).toEqual([]);
+  });
+
+  test('botões ▲/▼ e teclado reordenam (topo e base desabilitados nas pontas)', async ({ page }) => {
+    const erros = coletarErros(page);
+    await irParaGrupo1(page);
+    const inicial = await ordemNaTela(page);
+    await expect(page.locator('.cartao').first().locator('[data-mover="-1"]')).toBeDisabled();
+    await expect(page.locator('.cartao').last().locator('[data-mover="1"]')).toBeDisabled();
+    // ▲ no último: troca com o terceiro
+    await page.locator('.cartao[data-letra="' + inicial[3] + '"] [data-mover="-1"]').click();
+    expect(await ordemNaTela(page)).toEqual([inicial[0], inicial[1], inicial[3], inicial[2]]);
+    await expect(page.locator('[data-acao="proximo"]')).toBeEnabled();
+    await expect(page.locator('#aviso')).toContainText('posição 3 de 4');
+    // ▼ no primeiro
+    await page.locator('.cartao[data-letra="' + inicial[0] + '"] [data-mover="1"]').click();
+    expect(await ordemNaTela(page)).toEqual([inicial[1], inicial[0], inicial[3], inicial[2]]);
+    // Teclado: foco no cartão, seta para cima leva ao topo
+    await page.locator('.cartao[data-letra="' + inicial[3] + '"]').focus();
+    await page.keyboard.press('ArrowUp');
+    await page.keyboard.press('ArrowUp');
+    expect(await ordemNaTela(page)).toEqual([inicial[3], inicial[1], inicial[0], inicial[2]]);
+    await expect(page.locator('.cartao[data-letra="' + inicial[3] + '"]')).toBeFocused();
+    await expect(page.locator('#aviso')).toContainText('posição 1 de 4');
+    expect(erros).toEqual([]);
+  });
+
+  test('arrastar com o mouse reordena', async ({ page }) => {
+    const erros = coletarErros(page);
+    await irParaGrupo1(page);
+    const inicial = await ordemNaTela(page);
+    await arrastar(page, inicial[3], 0);   // de baixo para o topo
+    await expect.poll(() => ordemNaTela(page)).toEqual([inicial[3], inicial[0], inicial[1], inicial[2]]);
+    await expect(page.locator('[data-acao="proximo"]')).toBeEnabled();
+    await arrastar(page, inicial[3], 2);   // do topo para a posição 2
+    await expect.poll(() => ordemNaTela(page)).toEqual([inicial[0], inicial[1], inicial[3], inicial[2]]);
+    // Depois de soltar, cada cartão encaixa na sua linha
+    await page.waitForTimeout(400);
+    const tops = await page.locator('.cartao').evaluateAll((els) => els.map((e) => Math.round(e.getBoundingClientRect().top)));
+    for (let k = 1; k < 4; k++) expect(tops[k]).toBeGreaterThan(tops[k - 1]);
+    expect(erros).toEqual([]);
+  });
+
+  test('Voltar/Avançar não mudam de lugar ao mexer nem entre grupos; resultado bate com a ordem', async ({ page }) => {
+    const erros = coletarErros(page);
+    await irParaGrupo1(page);
+    const caixas = async () => [
+      await page.locator('[data-acao="anterior"]').boundingBox(),
+      await page.locator('[data-acao="proximo"]').boundingBox(),
+      await page.locator('.cartoes').boundingBox()
+    ];
+    const antes = await caixas();
+    const inicial = await ordemNaTela(page);
+    await page.locator('.cartao[data-letra="' + inicial[2] + '"] [data-mover="-1"]').click();
+    await page.waitForTimeout(300);
+    const depois = await caixas();
+    expect(depois).toEqual(antes);
+
+    const ordem = ['I', 'C', 'D', 'S'];
+    await responderGrupo(page, ordem);
+    await page.locator('[data-acao="proximo"]').click();
+    await expect(page.locator('.progresso-topo')).toContainText('Grupo 2 de 25');
+    await page.waitForTimeout(300);
+    const grupo2 = await caixas();
+    expect(grupo2[0]).toEqual(antes[0]);
+    expect(grupo2[1]).toEqual(antes[1]);
+
+    // Voltar ao grupo 1 mostra a ordem salva
+    await page.locator('[data-acao="anterior"]').click();
+    await expect(page.locator('.progresso-topo')).toContainText('Grupo 1 de 25');
+    expect(await ordemNaTela(page)).toEqual(ordem);
+    await expect(page.locator('[data-acao="proximo"]')).toBeEnabled();
+    await page.locator('[data-acao="proximo"]').click();
+
+    for (let i = 1; i < 25; i++) {
+      await expect(page.locator('.progresso-topo')).toContainText('Grupo ' + (i + 1) + ' de 25');
+      await responderGrupo(page, ordem);
+      await page.locator('[data-acao="proximo"]').click();
+    }
+    await expect(page.locator('h1')).toHaveText('Revise suas respostas');
+    // Revisão mostra 4 → 1 e "Alterar" volta ao grupo
+    await expect(page.locator('.revisao-item').first().locator('.revisao-ordem li')).toHaveCount(4);
+    await expect(page.locator('.revisao-item').first().locator('.mini-nota')).toHaveText(['4', '3', '2', '1']);
+    await page.locator('[data-acao="editar-grupo"][data-grupo="3"]').click();
+    await expect(page.locator('.progresso-topo')).toContainText('Grupo 4 de 25');
+    expect(await ordemNaTela(page)).toEqual(ordem);
+    await page.locator('[data-acao="proximo"]').click();
+    await expect(page.locator('h1')).toHaveText('Revise suas respostas');
+
+    await page.locator('[data-acao="enviar"]').click();
+    const codigo = await page.locator('textarea#codigo').inputValue();
+    const payload = await page.evaluate((c) => window.DISC_CODEC.decode(c), codigo);
+    expect(payload.respostas).toBe('2413'.repeat(25)); // D=2, I=4, S=1, C=3
+    expect(payload.resultado.codigo).toBe('IC');
+    expect(erros).toEqual([]);
   });
 });

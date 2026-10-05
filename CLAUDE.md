@@ -3,8 +3,8 @@
 Site estático (HTML/CSS/JS puro, sem build) + backend Google Apps Script. Contrato técnico: `docs/SPEC.md`.
 
 ## Visual — identidade Notus (obrigatório)
-Siga `docs/IDENTIDADE-VISUAL.md` à risca e use as peças de `assets/notus.css` (não crie cores/estilos fora dos tokens).
-Referência viva: repositório `wellington-dotcom/bi-isabella-eleuterio`.
+Siga `docs/IDENTIDADE-VISUAL.md` à risca (identidade nova out/2026: laranja `#F34405` + azul-escuro `#13283F`, logo da estrela) e use as peças de `assets/notus.css` e `assets/icone.svg` (não crie cores/estilos fora dos tokens). A identidade antiga amarelo+preto foi substituída.
+Referência viva: `theROCCO-data/bi-isabella-eleuterio` (cópia: `wellington-dotcom/bi-isabella-eleuterio`, branch `ajuste/reestruturacao-visual`).
 
 ## Fluxo de trabalho com o dono do projeto
 - Mudanças visuais: publicar primeiro uma **prévia (artefato)** para ele ver; **só fazer push depois que ele aprovar**.

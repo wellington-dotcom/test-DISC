@@ -30,16 +30,40 @@ test('validarTelefone / limpar / formatar / salvar', () => {
   assert.equal(A.telefoneParaSalvar('(11) 99999-8888'), '5511999998888');
 });
 
-test('escolher: 3 toques preenchem a quarta palavra com 1', () => {
-  let s = [];
-  s = A.escolher(s, 'S');
-  s = A.escolher(s, 'S'); // repetido não muda
-  assert.deepEqual(s, ['S']);
-  s = A.escolher(s, 'C');
-  s = A.escolher(s, 'D');
-  assert.deepEqual(s, ['S', 'C', 'D', 'I']);
-  assert.deepEqual(A.selecaoParaGrupo(s), { S: 4, C: 3, D: 2, I: 1 });
-  assert.equal(A.selecaoParaGrupo(['D']), null);
+test('ordemParaGrupo: topo recebe 4, base recebe 1', () => {
+  assert.deepEqual(A.ordemParaGrupo(['S', 'C', 'D', 'I']), { S: 4, C: 3, D: 2, I: 1 });
+  assert.equal(A.ordemParaGrupo(['D']), null);
+  assert.equal(A.ordemParaGrupo(['D', 'D', 'S', 'C']), null, 'letra repetida');
+  assert.equal(A.ordemParaGrupo(null), null);
+  assert.equal(A.ordemValida(['C', 'S', 'I', 'D']), true);
+  assert.equal(A.ordemValida(['C', 'S', 'I', 'X']), false);
+});
+
+test('mover: reposiciona sem alterar a lista original', () => {
+  const o = ['D', 'I', 'S', 'C'];
+  assert.deepEqual(A.mover(o, 3, 0), ['C', 'D', 'I', 'S']);
+  assert.deepEqual(A.mover(o, 0, 2), ['I', 'S', 'D', 'C']);
+  assert.deepEqual(A.mover(o, 1, 2), ['D', 'S', 'I', 'C']);
+  assert.deepEqual(A.mover(o, 2, 2), o);
+  assert.deepEqual(A.mover(o, 0, -5), o, 'limita no topo');
+  assert.deepEqual(A.mover(o, 1, 99), ['D', 'S', 'C', 'I'], 'limita na base');
+  assert.deepEqual(A.mover(o, 7, 0), o, 'origem inválida');
+  assert.deepEqual(o, ['D', 'I', 'S', 'C']);
+});
+
+test('migrarProgresso: converte o formato antigo e valida o novo', () => {
+  const antigo = { nome: 'Ana Lima', grupo: 2, selecoes: [['S', 'C', 'I', 'D'], ['D'], []] };
+  const m = A.migrarProgresso(antigo);
+  assert.equal(m.selecoes, undefined);
+  assert.equal(m.nome, 'Ana Lima');
+  assert.equal(m.ordens.length, 25);
+  assert.deepEqual(m.ordens[0], ['S', 'C', 'I', 'D']);
+  assert.equal(m.respondidos[0], true);
+  assert.equal(m.ordens[1], null);
+  assert.equal(m.respondidos[1], false);
+  const novo = A.migrarProgresso({ ordens: [['D', 'I', 'S', 'C'], ['C', 'S', 'I', 'D']], respondidos: [false, true] });
+  assert.deepEqual(novo.respondidos.slice(0, 3), [false, true, false]);
+  assert.deepEqual(novo.ordens[0], ['D', 'I', 'S', 'C'], 'ordem mexida mas não confirmada fica guardada');
 });
 
 test('gerarPermutacoes: 25 permutações das 4 letras', () => {

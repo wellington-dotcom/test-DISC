@@ -57,7 +57,7 @@ O admin e o backend **recalculam** o resultado a partir de `respostas` (nunca co
 ## Regras do teste (iguais à planilha)
 
 - Em cada grupo o candidato ordena as 4 palavras: 4 = mais me identifica … 1 = menos me identifica. Sem repetição.
-- UX: toque na palavra que mais combina (recebe 4), depois na próxima (3), na próxima (2); a última recebe 1 automaticamente. Botão "refazer grupo".
+- UX: as 4 palavras ficam numa lista ordenável com 4 posições FIXAS (4 = mais me identifica no topo … 1 = menos me identifica embaixo). A pessoa **arrasta** (toque ou mouse) ou usa os botões ▲/▼ (e teclado) para mover; nada pula de lugar sozinho e os botões de navegação nunca mudam de posição. O grupo só conta como respondido depois que a pessoa mexe na ordem ou toca em "Esta ordem está certa" (evita aceitar a ordem inicial sem pensar).
 - A ordem das 4 palavras dentro de cada grupo é **embaralhada** por candidato (na planilha o D é sempre o primeiro, o que deixa o teste manipulável). A pontuação continua mapeada pela letra.
 - Total por letra = soma (25..100); percentual = total / 2.5 (soma 100).
 - Perfil = letra com maior total (primário) + segunda maior (secundário).
@@ -92,4 +92,4 @@ Colunas da aba `Respostas`: `id, recebidoEm, nome, telefone, vaga, inicio, fim, 
 
 ## Visual
 
-pt-BR, mobile-first (375px), acessível (labels, foco visível, contraste AA). **Identidade visual Notus**: seguir `docs/IDENTIDADE-VISUAL.md` e usar `assets/notus.css` (tema claro, como o BI; sem modo escuro automático). Cores DISC: D preto `#131313`, I amarelo `#ffda00`, S cinza `#cfcec8`, C hachurado escuro (classes `.disc-D/I/S/C`). Sem dependências externas (sem CDN) — a fonte Plus Jakarta Sans fica em `assets/fonts`.
+pt-BR, mobile-first (375px), acessível (labels, foco visível, contraste AA). **Identidade visual Notus (out/2026)**: seguir `docs/IDENTIDADE-VISUAL.md` e usar `assets/notus.css` + `assets/icone.svg` (tema claro, como o BI). Cores DISC: D `#13283f`, I `#ff9f40`, S `#8a97ab`, C `#324e73` (classes `.disc-D/I/S/C`). Sem dependências externas (sem CDN) — a fonte Plus Jakarta Sans fica em `assets/fonts`.

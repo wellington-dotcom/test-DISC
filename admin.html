@@ -5,50 +5,49 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <meta name="color-scheme" content="light">
-  <meta name="theme-color" content="#f4f4f2">
+  <meta name="theme-color" content="#f2f2f2">
   <title>Painel DISC</title>
+  <link rel="icon" href="assets/icone.svg" type="image/svg+xml">
   <link rel="stylesheet" href="assets/notus.css">
   <link rel="stylesheet" href="assets/admin.css">
 </head>
 <body>
   <a class="pular" href="#conteudo">Pular para o conteúdo</a>
 
-  <header class="topo nao-imprimir">
+  <header class="topo vidro-cabecalho nao-imprimir">
     <div class="topo__dentro">
-      <span class="marca" aria-hidden="true"></span>
-      <h1 class="topo__titulo">Painel DISC <span class="topo__empresa" id="nome-empresa"></span></h1>
+      <img class="logo" src="assets/icone.svg" alt="" width="36" height="36">
+      <p class="topo__titulo"><span class="seminegrito">Painel DISC</span> <span class="topo__empresa" id="nome-empresa"></span></p>
       <span class="selo topo__modo" id="modo-indicador"></span>
       <button type="button" class="botao botao--claro botao--pequeno" id="btn-sair" hidden>Sair</button>
     </div>
   </header>
 
   <main id="conteudo" class="conteudo" tabindex="-1">
-    <!-- Login (modo com API): metade amarela com brilho, metade preta com o formulário -->
+    <!-- Login (modo com API): metade laranja com brilho e o logo, metade azul-escura com o campo -->
     <section id="tela-login" class="login" hidden aria-labelledby="titulo-login">
-      <div class="login__amarela">
-        <span class="login__brilho login__brilho--1" aria-hidden="true"></span>
-        <span class="login__brilho login__brilho--2" aria-hidden="true"></span>
-        <span class="marca marca--preta login__marca" aria-hidden="true"></span>
+      <div class="login__laranja moldura-laranja">
+        <img class="logo logo--grande" src="assets/icone.svg" alt="" width="44" height="44">
         <div class="login__chamada">
           <div class="login__frase">
             <p class="login__titulo">Seleção não é sorte, é leitura.</p>
             <p class="login__apoio">O perfil de cada candidato calculado na hora, com um guia prático para quem vai liderar.</p>
           </div>
           <ol class="login__passos" aria-label="Como funciona">
-            <li class="login__passo login__passo--preto"><span class="login__num">1</span><span>O candidato faz o teste</span></li>
+            <li class="login__passo login__passo--noite"><span class="login__num">1</span><span>O candidato faz o teste</span></li>
             <li class="login__passo"><span class="login__num">2</span><span>O perfil DISC sai pronto</span></li>
             <li class="login__passo"><span class="login__num">3</span><span>Você decide com o guia</span></li>
           </ol>
         </div>
       </div>
-      <div class="login__preta area-preta">
+      <div class="login__noite moldura-noite">
         <form id="form-login" class="login__form" novalidate>
-          <h2 id="titulo-login" class="login__h2">Acesso do recrutador</h2>
+          <h1 id="titulo-login" class="login__h">Acesso do recrutador</h1>
           <p class="login__texto">Informe a chave de administrador configurada no Google Apps Script.</p>
           <label class="login__rotulo" for="campo-chave">Chave de acesso</label>
           <input id="campo-chave" class="entrada" type="password" autocomplete="current-password" placeholder="Sua chave" required>
           <p class="login__erro" id="erro-login" role="alert" hidden></p>
-          <button type="submit" class="login__botao" id="btn-entrar">Entrar</button>
+          <button type="submit" class="botao botao--branco botao--grande botao--bloco login__botao" id="btn-entrar">Entrar</button>
           <p class="login__nota">Não tem a chave? Fale com quem configurou o sistema.</p>
         </form>
       </div>
@@ -62,18 +61,20 @@
         <button type="button" class="aba" data-aba="importar" id="aba-importar" hidden>Importar códigos</button>
       </nav>
 
+      <!-- Aviso flutuante: não empurra nada da página -->
       <p class="aviso aviso-geral" id="aviso-geral" role="status" aria-live="polite" hidden></p>
 
       <!-- Lista -->
       <div id="vista-lista" class="vista nao-imprimir">
         <div class="cabecalho">
           <div class="cabecalho__texto-area">
-            <h2 class="cabecalho__titulo">Candidatos</h2>
+            <p class="sobretitulo">Processo seletivo</p>
+            <h2 class="cabecalho__titulo t-pagina seminegrito">Candidatos</h2>
             <p class="cabecalho__texto" id="contagem" aria-live="polite"></p>
           </div>
           <div class="cabecalho__acoes">
             <button type="button" class="botao botao--claro" id="btn-atualizar">Atualizar</button>
-            <button type="button" class="botao botao--preto" id="btn-csv">Exportar CSV</button>
+            <button type="button" class="botao botao--principal" id="btn-csv">Exportar CSV</button>
             <button type="button" class="botao botao--perigo" id="btn-excluir-todos">Excluir todos</button>
           </div>
         </div>
@@ -102,17 +103,18 @@
       <div id="vista-importar" class="vista nao-imprimir" hidden>
         <div class="cabecalho">
           <div class="cabecalho__texto-area">
-            <h2 class="cabecalho__titulo">Importar códigos de resultado</h2>
+            <p class="sobretitulo">Processo seletivo</p>
+            <h2 class="cabecalho__titulo t-pagina seminegrito">Importar códigos de resultado</h2>
             <p class="cabecalho__texto">Cole aqui o código (ou a mensagem inteira do WhatsApp) que o candidato enviou. Pode colar vários de uma vez, um por linha. <span id="destino-importacao">Os dados ficam salvos somente neste navegador.</span></p>
           </div>
         </div>
-        <div class="caixa caixa--ampla importar surgir">
+        <div class="caixa importar surgir">
           <label class="campo">
             <span class="campo__rotulo">Códigos</span>
-            <textarea id="campo-codigos" class="entrada importar__codigos" rows="8" spellcheck="false" placeholder="DISC1.eyJ2Ijox..."></textarea>
+            <textarea id="campo-codigos" class="entrada entrada--principal importar__codigos" rows="8" spellcheck="false" placeholder="DISC1.eyJ2Ijox..."></textarea>
           </label>
           <div class="importar__rodape">
-            <button type="button" class="botao botao--preto botao--grande" id="btn-importar">Importar</button>
+            <button type="button" class="botao botao--principal botao--grande" id="btn-importar">Importar</button>
             <div id="resultado-importacao" class="importar__resultado" role="status" aria-live="polite"></div>
           </div>
         </div>

@@ -44,12 +44,29 @@ async function simularApi(page, handler) {
   return chamadas;
 }
 
-// Responde um grupo tocando as letras na ordem dada (a última recebe 1 automaticamente).
+// Ordem das letras na tela, de cima (posição 4) para baixo (posição 1).
+async function ordemNaTela(page) {
+  return page.locator('.cartoes .cartao').evaluateAll((els) => els.map((e) => e.getAttribute('data-letra')));
+}
+
+// Responde um grupo deixando as palavras na ordem dada (letras da posição 4 até a 1).
+// Usa os botões ▲ (Subir); se a ordem inicial já for a pedida, toca em "Esta ordem está certa".
 async function responderGrupo(page, ordem) {
-  for (const letra of ordem.slice(0, 3)) {
-    await page.locator('.palavra[data-letra="' + letra + '"]').click();
+  await expect(page.locator('.cartoes .cartao')).toHaveCount(4);
+  let mexeu = false;
+  for (let k = 0; k < ordem.length; k++) {
+    const atual = await ordemNaTela(page);
+    let j = atual.indexOf(ordem[k]);
+    while (j > k) {
+      await page.locator('.cartao[data-letra="' + ordem[k] + '"] [data-mover="-1"]').click();
+      j--;
+      mexeu = true;
+    }
   }
-  await expect(page.locator('.palavra.escolhida')).toHaveCount(4);
+  expect(await ordemNaTela(page)).toEqual(ordem);
+  const confirmar = page.locator('[data-acao="confirmar-ordem"]');
+  if (!mexeu && await confirmar.count()) await confirmar.click();
+  await expect(page.locator('[data-acao="proximo"]')).toBeEnabled();
 }
 
 async function preencherIdentificacao(page, dados) {
@@ -74,4 +91,4 @@ async function fazerTesteCompleto(page, dados, ordem) {
   await expect(page.locator('h1')).toHaveText('Revise suas respostas');
 }
 
-module.exports = { API_FALSA, coletarErros, configurar, simularApi, responderGrupo, preencherIdentificacao, fazerTesteCompleto };
+module.exports = { API_FALSA, coletarErros, configurar, simularApi, ordemNaTela, responderGrupo, preencherIdentificacao, fazerTesteCompleto };

@@ -67,3 +67,33 @@ test('validarImportado exige consentimento e as mesmas regras do backend', () =>
   assert.equal(AD.validarImportado(payloadValido({ nome: 'Ωμέγα Αλφα' })), '');
   assert.match(AD.validarImportado({ id: 'x' }), /incompletos/);
 });
+
+test('cores do gráfico batem com os tokens de notus.css', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'assets', 'notus.css'), 'utf8');
+  const token = (nome) => {
+    const m = css.match(new RegExp('--' + nome + ':\\s*(#[0-9a-fA-F]{6})'));
+    assert.ok(m, 'token --' + nome + ' não encontrado');
+    return m[1].toLowerCase();
+  };
+  assert.equal(AD.CORES.D, token('tinta'));
+  assert.equal(AD.CORES.I, token('ambar'));
+  assert.equal(AD.CORES.S, token('ardosia-clara'));
+  assert.equal(AD.CORES.C, token('ardosia'));
+  assert.equal(AD.CORES.trilho, token('trilho'));
+  assert.equal(AD.CORES.suave, token('suave'));
+});
+
+test('painel não usa a identidade antiga (amarelo/preto, hachuras) nem cor/tamanho solto', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const ler = (f) => fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
+  const fontes = ler('admin.html') + ler('assets/admin.css') + ler('js/admin.js');
+  assert.doesNotMatch(fontes, /botao--preto|botao--amarelo|caixa--preta|caixa--amarela|caixa--gradiente|hachura|selo--amarelo|selo--preto|class="marca|#ffda00|#131313/i);
+  const css = ler('assets/admin.css').replace(/\/\*[\s\S]*?\*\//g, '');
+  const semRoot = css.replace(/:root\s*\{[^}]*\}/, '');
+  assert.doesNotMatch(semRoot, /#[0-9a-fA-F]{3,8}\b/, 'cor solta fora do :root');
+  assert.doesNotMatch(css, /font-size:\s*\d/, 'tamanho de fonte fora da escala --t-*');
+  assert.doesNotMatch(css, /font-weight:\s*(?!400|600|700)\d/, 'peso fora de 400/600/700');
+});

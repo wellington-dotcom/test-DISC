@@ -1,7 +1,8 @@
 /*
- * Identidade visual Notus — base compartilhada (tokens + peças).
- * Mesma linguagem do BI da Clínica Isabella Eleutério (frontend/src/index.css, ui.tsx, caixas.tsx).
- * Regras completas em docs/IDENTIDADE-VISUAL.md. Não invente cores fora destes tokens.
+ * Identidade visual Notus (nova, out/2026) — base compartilhada: tokens + peças.
+ * Fonte da verdade: BI da Clínica Isabella Eleutério, branch ajuste/reestruturacao-visual
+ * (frontend/src/index.css, lib/cores.ts, componentes/ui.tsx, caixas.tsx, Logo.tsx, paginas/Login.tsx).
+ * Regras completas em docs/IDENTIDADE-VISUAL.md. Cor e tamanho de fonte só por estes tokens.
  */
 
 @font-face {
@@ -22,34 +23,55 @@
 }
 
 :root {
-  /* Paleta Notus: branco dominante, amarelo e preto só em pontos de destaque */
-  --fundo: #f4f4f2;
+  /* Paleta da marca (só estas) */
+  --notus: #f34405;        /* laranja principal: "olhe aqui" (destaque, selecionado, número em foco). Nunca série de gráfico. */
+  --laranja: #f2762e;      /* laranja médio */
+  --ambar: #ff9f40;        /* âmbar: 2ª série (preenchimento); texto de destaque sobre azul-escuro */
+  --ardosia: #324e73;      /* azul acinzentado */
+  --tinta: #13283f;        /* azul-escuro: texto, botão principal, moldura (login, menu) */
+  --preto: #141414;
+  --fundo: #f2f2f2;        /* fundo da página; cards brancos */
   --branco: #ffffff;
-  --tinta: #131313;
-  --notus: #ffda00;
-  --notus-escuro: #5c4a00;   /* texto sobre amarelo */
-  --linha: #e8e7e2;
-  --suave: #888780;
-  --medio: #5f5e5a;
-  --preto-2: #1c1c1c;        /* campos em área preta */
+
+  /* Tons funcionais (permitidos) */
+  --notus-forte: #c43803;  /* laranja para TEXTO pequeno sobre claro (5,4:1) */
+  --sobre-notus: #141414;  /* texto sobre o laranja */
+  --ardosia-clara: #8a97ab;
+  --ardosia-media: #5d7699;
+  --cinza-claro: #c5ccd6;
+  --nevoa: #eaeef4;        /* fundo suave de card */
+  --linha: #e2e6ec;
+  --suave: #6b7586;        /* rótulos e textos descritivos */
+  --medio: #46546a;
+  --trilho: #e9ecef;       /* o que falta numa barra: liso, sem listras */
   --erro: #dc2626;
   --erro-fundo: #fef2f2;
   --ok: #047857;
   --ok-fundo: #ecfdf5;
 
+  /* Escala de fontes (só estas) */
+  --t-eixo: 11px;          /* selos, eixos, legendas */
+  --t-nota: 12px;          /* dicas, notas */
+  --t-rotulo: 13px;        /* rótulos, botões, tabelas */
+  --t-corpo: 15px;         /* texto corrido, itens, título de card (seminegrito) */
+  --t-titulo: 18px;        /* título de seção e de janela */
+  --t-indicador: 24px;
+  --t-pagina: 28px;        /* título da página */
+  --t-numero: 32px;
+  --t-numero-grande: 44px;
+  --t-campo: 16px;         /* campos no celular (evita zoom do iPhone) */
+
   --raio-caixa: 24px;
   --raio-campo: 12px;
   --raio-pilula: 999px;
-
   --fonte: 'Plus Jakarta Sans Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --sombra-menu: 0 12px 40px rgba(0, 0, 0, .12);
   --curva: cubic-bezier(.2, .7, .2, 1);
 
-  /* Cores DISC dentro da identidade (mesma lógica do anel do BI: preto, amarelo, cinza, hachura) */
+  /* Séries DISC = ordem da paleta de preenchimento do BI (sem o laranja principal) */
   --disc-D: var(--tinta);
-  --disc-I: var(--notus);
-  --disc-S: #cfcec8;
-  --disc-C: repeating-linear-gradient(135deg, #3d3d3d 0 5px, #1c1c1c 5px 10px);
+  --disc-I: var(--ambar);
+  --disc-S: var(--ardosia-clara);
+  --disc-C: var(--ardosia);
 }
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -59,142 +81,154 @@ body {
   background: var(--fundo);
   color: var(--tinta);
   font-family: var(--fonte);
-  font-size: 15px;
+  font-size: var(--t-corpo);
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
 }
-/* Títulos: peso normal, letra apertada — o BI não usa negrito pesado */
-h1, h2, h3, h4 { font-weight: 500; letter-spacing: -0.02em; line-height: 1.15; margin: 0; }
+/* Três pesos: 400, 600 (títulos de card), 700 (números de destaque) */
+h1, h2, h3, h4 { font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; margin: 0; text-wrap: balance; }
 p { margin: 0; }
 a { color: inherit; text-underline-offset: 3px; }
-:focus-visible { outline: 2px solid var(--tinta); outline-offset: 2px; }
-.area-preta :focus-visible, .caixa--preta :focus-visible { outline-color: var(--notus); }
+:focus-visible { outline: 2px solid var(--notus); outline-offset: 2px; }
+table, ul, ol, .tabular { font-variant-numeric: tabular-nums; }
 
-/* ---------- Caixas ---------- */
-.caixa {
-  position: relative;
-  overflow: hidden;
-  background: var(--branco);
-  color: var(--tinta);
-  border-radius: var(--raio-caixa);
-  padding: 20px;
-}
-.caixa--compacta { padding: 14px; }
+/* Escala como classe */
+.t-eixo { font-size: var(--t-eixo); } .t-nota { font-size: var(--t-nota); } .t-rotulo { font-size: var(--t-rotulo); }
+.t-corpo { font-size: var(--t-corpo); } .t-titulo { font-size: var(--t-titulo); } .t-indicador { font-size: var(--t-indicador); }
+.t-pagina { font-size: var(--t-pagina); letter-spacing: -0.02em; } .t-numero { font-size: var(--t-numero); font-weight: 700; letter-spacing: -0.02em; }
+.t-numero-grande { font-size: var(--t-numero-grande); font-weight: 700; letter-spacing: -0.03em; line-height: 1; }
+.seminegrito { font-weight: 600; } .negrito { font-weight: 700; }
+.texto-suave { color: var(--suave); } .texto-medio { color: var(--medio); } .texto-destaque { color: var(--notus-forte); }
+/* Sobretítulo (como o "sobre" do Cabecalho do BI) */
+.sobretitulo { font-size: var(--t-nota); font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--notus-forte); }
+
+/* ---------- Cards (minimalistas: nada de bloco de cor sólida em área de informação) ---------- */
+.caixa { position: relative; overflow: hidden; background: var(--branco); color: var(--tinta); border-radius: var(--raio-caixa); padding: 24px; }
+@media (min-width: 640px) { .caixa { padding: 28px; } }
+.caixa--compacta { padding: 16px; }
+@media (min-width: 640px) { .caixa--compacta { padding: 20px; } }
 .caixa--ampla { padding: 28px; }
-.caixa--preta { background: var(--tinta); color: #fff; }
-.caixa--amarela { background: var(--notus); color: var(--tinta); }
-/* Gradiente: brilho amarelo sobre preto — SÓ UM POR TELA */
-.caixa--gradiente { background: #0b0b0b; color: #fff; }
-.caixa--gradiente::before {
-  content: '';
-  position: absolute;
-  left: 50%; bottom: -160px;
-  width: 560px; height: 300px;
-  transform: translateX(-50%);
-  border-radius: 50%;
-  filter: blur(48px);
-  background: radial-gradient(circle, rgba(255,218,0,.55) 0%, rgba(255,218,0,.18) 40%, rgba(11,11,11,0) 70%);
-  pointer-events: none;
+@media (min-width: 640px) { .caixa--ampla { padding: 36px; } }
+.caixa--suave { background: var(--nevoa); }                                               /* "Azul suave" */
+.caixa--destaque { background: var(--branco); box-shadow: inset 0 0 0 1px rgba(243, 68, 5, .25); } /* número em laranja */
+.caixa--destaque .valor-destaque { color: var(--notus); }
+/* "Vidro": brilho quente discreto — SÓ UM POR TELA */
+.caixa--vidro {
+  background: linear-gradient(150deg, rgba(255,255,255,.92), rgba(255,255,255,.62));
+  -webkit-backdrop-filter: blur(24px) saturate(160%); backdrop-filter: blur(24px) saturate(160%);
+  border: 1px solid rgba(255,255,255,.9);
+  box-shadow: 0 18px 40px -22px rgba(19,40,63,.28);
 }
-.caixa--gradiente > * { position: relative; }
-.caixa__titulo { font-size: 15px; font-weight: 500; margin-bottom: 12px; }
+.caixa--vidro::before {
+  content: ''; position: absolute; right: -120px; top: -140px; width: 420px; height: 320px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(255,159,64,.28) 0%, rgba(243,68,5,.08) 45%, rgba(243,68,5,0) 70%);
+  filter: blur(30px); pointer-events: none;
+}
+.caixa--vidro > * { position: relative; }
+.caixa__titulo { font-size: var(--t-corpo); font-weight: 600; margin-bottom: 12px; }
+
+/* Moldura (login, entrada, menu): azul-escuro + laranja são permitidos aqui — é moldura, não informação */
+.moldura-noite { background: var(--tinta); color: #fff; }
+.moldura-laranja { position: relative; overflow: hidden; background: var(--notus); color: var(--sobre-notus); }
+.moldura-laranja::before, .moldura-laranja::after { content: ''; position: absolute; border-radius: 50%; filter: blur(48px); pointer-events: none; }
+.moldura-laranja::before { left: -160px; top: -160px; width: 720px; height: 620px; background: radial-gradient(circle, rgba(255,226,214,.85) 0%, rgba(255,159,64,.35) 40%, rgba(243,68,5,0) 70%); }
+.moldura-laranja::after { right: -190px; bottom: -180px; width: 640px; height: 560px; background: radial-gradient(circle, rgba(243,68,5,.55) 0%, rgba(243,68,5,0) 70%); }
+.moldura-laranja > * { position: relative; z-index: 1; }
 
 /* ---------- Botões (pílula) ---------- */
 .botao {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
-  min-height: 40px;
-  padding: 8px 18px;
-  border-radius: var(--raio-pilula);
-  border: 1px solid transparent;
-  font: inherit; font-size: 14px; font-weight: 500;
-  cursor: pointer;
-  text-decoration: none;
+  min-height: 40px; padding: 8px 18px;
+  border-radius: var(--raio-pilula); border: 1px solid transparent;
+  font: inherit; font-size: var(--t-rotulo); font-weight: 600;
+  cursor: pointer; text-decoration: none; white-space: nowrap;
   transition: background-color .15s, border-color .15s, filter .15s, opacity .15s;
   -webkit-tap-highlight-color: transparent;
 }
 .botao:disabled { opacity: .5; cursor: not-allowed; }
-.botao--preto { background: var(--tinta); color: #fff; }
-.botao--preto:hover:not(:disabled) { background: #000; }
-.botao--amarelo { background: var(--notus); color: var(--tinta); }
-.botao--amarelo:hover:not(:disabled) { filter: brightness(.95); }
+.botao--principal { background: var(--tinta); color: #fff; }                          /* = "preto" do BI */
+.botao--principal:hover:not(:disabled) { background: #0c1a2a; }
+.botao--laranja { background: var(--notus); color: var(--sobre-notus); }              /* destaque: um por tela */
+.botao--laranja:hover:not(:disabled) { filter: brightness(.95); }
 .botao--claro { background: var(--branco); color: var(--tinta); border-color: var(--linha); }
-.botao--claro:hover:not(:disabled) { border-color: rgba(19,19,19,.3); }
-.botao--branco { background: #fff; color: var(--tinta); }          /* em área preta */
+.botao--claro:hover:not(:disabled) { border-color: rgba(19,40,63,.3); }
+.botao--contorno { background: var(--branco); color: var(--notus-forte); border-color: rgba(243,68,5,.35); }
+.botao--contorno:hover:not(:disabled) { background: rgba(243,68,5,.06); border-color: rgba(243,68,5,.6); }
+.botao--branco { background: #fff; color: var(--tinta); }                             /* sobre moldura azul-escura */
 .botao--perigo { background: var(--branco); color: var(--erro); border-color: #fecaca; }
 .botao--perigo:hover:not(:disabled) { background: var(--erro-fundo); }
-.botao--link { background: none; border: 0; color: var(--medio); padding: 8px 4px; min-height: 0; text-decoration: underline; }
-.botao--grande { min-height: 48px; padding: 12px 24px; font-size: 15px; }
+.botao--link { background: none; border: 0; color: var(--medio); padding: 8px 4px; min-height: 0; text-decoration: underline; font-weight: 400; }
+.botao--grande { min-height: 48px; padding: 12px 24px; font-size: var(--t-corpo); }
 .botao--bloco { width: 100%; }
+.botao--icone { width: 40px; padding: 0; }
 .giro { width: 14px; height: 14px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: girar .7s linear infinite; }
 @keyframes girar { to { transform: rotate(360deg); } }
 
 /* ---------- Campos ---------- */
 .campo { display: block; }
-.campo__rotulo { display: block; font-size: 13px; margin-bottom: 6px; }
-.campo__ajuda { display: block; font-size: 12px; color: var(--suave); margin-top: 4px; }
-.campo__erro { display: block; font-size: 13px; color: var(--erro); margin-top: 6px; }
+.campo__rotulo { display: block; font-size: var(--t-rotulo); margin-bottom: 6px; }
+.campo__ajuda { display: block; font-size: var(--t-eixo); color: var(--suave); margin-top: 4px; }
+.campo__erro { display: block; font-size: var(--t-rotulo); color: var(--erro); margin-top: 6px; }
 .entrada {
-  width: 100%;
-  font: inherit;
-  font-size: 16px;              /* 16px no celular evita zoom do iPhone */
-  color: var(--tinta);
-  background: var(--branco);
-  border: 1px solid var(--linha);
-  border-radius: var(--raio-campo);
-  padding: 11px 14px;
-  outline: none;
-  transition: border-color .15s;
+  width: 100%; font: inherit; font-size: var(--t-campo); color: var(--tinta);
+  background: var(--branco); border: 1px solid var(--linha); border-radius: var(--raio-campo);
+  padding: 11px 14px; outline: none; transition: border-color .15s;
 }
-.entrada::placeholder { color: rgba(136,135,128,.7); }
-.entrada:focus { border-color: rgba(19,19,19,.4); }
+.entrada::placeholder { color: rgba(107,117,134,.7); }
+.entrada:focus { border-color: rgba(19,40,63,.4); }
+.entrada--principal { border-color: rgba(243,68,5,.45); }       /* campo principal guiado pelo laranja */
 .entrada[aria-invalid="true"] { border-color: var(--erro); }
 textarea.entrada { resize: vertical; min-height: 96px; }
-@media (min-width: 640px) { .entrada { font-size: 14px; } }
-/* Campo em área preta (como o login do BI) */
-.area-preta .entrada, .caixa--preta .entrada { background: var(--preto-2); color: #fff; border-color: transparent; }
-.area-preta .entrada:focus, .caixa--preta .entrada:focus { border-color: rgba(255,255,255,.25); }
-.area-preta .entrada::placeholder, .caixa--preta .entrada::placeholder { color: rgba(255,255,255,.3); }
+@media (min-width: 640px) { .entrada { font-size: var(--t-corpo); } }
+.moldura-noite .entrada { background: rgba(255,255,255,.06); color: #fff; border-color: transparent; }
+.moldura-noite .entrada:focus { border-color: rgba(255,255,255,.25); }
+.moldura-noite .entrada::placeholder { color: rgba(255,255,255,.3); }
 
-/* Checkbox no padrão (quadrado arredondado preto) */
-.marcar { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; cursor: pointer; }
-.marcar input { appearance: none; -webkit-appearance: none; flex: none; width: 20px; height: 20px; margin: 1px 0 0; border: 1.5px solid var(--suave); border-radius: 6px; background: var(--branco); cursor: pointer; display: grid; place-content: center; }
-.marcar input:checked { background: var(--tinta); border-color: var(--tinta); }
-.marcar input:checked::after { content: ''; width: 10px; height: 6px; border: 2px solid var(--notus); border-top: 0; border-right: 0; transform: rotate(-45deg) translate(1px, -1px); }
+.marcar { display: flex; gap: 10px; align-items: flex-start; font-size: var(--t-corpo); cursor: pointer; }
+.marcar input { appearance: none; -webkit-appearance: none; flex: none; width: 20px; height: 20px; margin: 1px 0 0; border: 1.5px solid var(--ardosia-clara); border-radius: 6px; background: var(--branco); cursor: pointer; display: grid; place-content: center; }
+.marcar input:checked { background: var(--notus); border-color: var(--notus); }
+.marcar input:checked::after { content: ''; width: 10px; height: 6px; border: 2px solid #fff; border-top: 0; border-right: 0; transform: rotate(-45deg) translate(1px, -1px); }
 
-/* ---------- Selos, avisos ---------- */
-.selo { display: inline-flex; align-items: center; gap: 4px; border-radius: var(--raio-pilula); padding: 2px 10px; font-size: 12px; white-space: nowrap; background: var(--fundo); color: var(--medio); }
-.selo--amarelo { background: var(--notus); color: var(--tinta); }
-.selo--preto { background: var(--tinta); color: #fff; }
+/* ---------- Selos e avisos ---------- */
+.selo { display: inline-flex; align-items: center; gap: 4px; border-radius: var(--raio-pilula); padding: 2px 10px; font-size: var(--t-eixo); white-space: nowrap; background: var(--fundo); color: var(--medio); }
+.selo--laranja { background: var(--notus); color: var(--sobre-notus); }
+.selo--noite { background: var(--tinta); color: #fff; }
 .selo--verde { background: var(--ok-fundo); color: var(--ok); }
 .selo--vermelho { background: var(--erro-fundo); color: var(--erro); }
-.aviso { border-radius: 16px; padding: 12px 16px; font-size: 14px; background: var(--fundo); color: var(--medio); }
+.aviso { border-radius: 16px; padding: 12px 16px; font-size: var(--t-rotulo); background: var(--fundo); color: var(--medio); }
 .aviso--erro { background: var(--erro-fundo); color: #b91c1c; }
 .aviso--ok { background: var(--ok-fundo); color: #065f46; }
 
-/* ---------- Letras DISC ---------- */
+/* ---------- DISC ---------- */
 .disc-D { background: var(--disc-D); color: #fff; }
-.disc-I { background: var(--disc-I); color: var(--tinta); }
-.disc-S { background: var(--disc-S); color: var(--tinta); }
+.disc-I { background: var(--disc-I); color: var(--preto); }
+.disc-S { background: var(--disc-S); color: var(--preto); }
 .disc-C { background: var(--disc-C); color: #fff; }
-.letra-disc { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; font-size: 13px; font-weight: 600; flex: none; }
+.letra-disc { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 50%; font-size: var(--t-rotulo); font-weight: 700; flex: none; }
 
-/* Trilho de barra no padrão da barra de meta: o que falta hachurado */
-.hachura-clara { background: repeating-linear-gradient(135deg, #e3e2dc 0 5px, #f4f4f2 5px 10px); }
-.hachura-escura { background: repeating-linear-gradient(135deg, #3d3d3d 0 5px, #1c1c1c 5px 10px); }
+/* Trilho (o que falta): cinza claro liso; dentro de card suave, branco */
+.trilho { background-color: var(--trilho); }
+.caixa--suave .trilho { background-color: #fff; }
 
-/* Vidro: segue o tom da caixa onde está (nunca brilho atrás) */
-.vidro-escuro { background: linear-gradient(145deg, rgba(60,60,60,.55), rgba(19,19,19,.7)); backdrop-filter: blur(6px) saturate(120%); -webkit-backdrop-filter: blur(6px) saturate(120%); border: 1px solid rgba(255,255,255,.14); }
-.vidro-claro { background: linear-gradient(145deg, rgba(255,255,255,.7), rgba(255,255,255,.35)); backdrop-filter: blur(6px) saturate(120%); -webkit-backdrop-filter: blur(6px) saturate(120%); border: 1px solid rgba(19,19,19,.08); }
+/* Vidro */
+.vidro-claro { background: linear-gradient(145deg, rgba(255,255,255,.7), rgba(255,255,255,.35)); -webkit-backdrop-filter: blur(6px) saturate(120%); backdrop-filter: blur(6px) saturate(120%); border: 1px solid rgba(19,40,63,.08); }
+.vidro-escuro { background: linear-gradient(145deg, rgba(50,78,115,.6), rgba(19,40,63,.72)); -webkit-backdrop-filter: blur(6px) saturate(120%); backdrop-filter: blur(6px) saturate(120%); border: 1px solid rgba(255,255,255,.16); }
+.vidro-cabecalho { background: rgba(255,255,255,.55); -webkit-backdrop-filter: blur(16px) saturate(150%); backdrop-filter: blur(16px) saturate(150%); border-bottom: 1px solid rgba(255,255,255,.7); box-shadow: 0 1px 0 rgba(19,40,63,.06); }
+/* Janela por cima de dado: quase opaca */
+.vidro-janela { background: linear-gradient(160deg, rgba(255,255,255,.97), rgba(246,247,249,.96)); -webkit-backdrop-filter: blur(22px) saturate(160%); backdrop-filter: blur(22px) saturate(160%); border: 1px solid rgba(255,255,255,.65); box-shadow: 0 30px 80px rgba(19,40,63,.30), inset 0 1px 0 rgba(255,255,255,.8); }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .vidro-janela { background: rgba(250,251,252,.98); }
+  .vidro-cabecalho { background: rgba(255,255,255,.96); }
+}
 
-/* Marca: quadradinho (preto sobre amarelo / amarelo sobre preto), como o favicon e o login do BI */
-.marca { display: inline-block; width: 32px; height: 32px; border-radius: 10px; background: var(--notus); flex: none; }
-.marca--preta { background: var(--tinta); }
+/* ---------- Logo (estrela com seta) ----------
+   Use o arquivo assets/icone.svg (desenho original, não recolorir nem distorcer):
+   <img class="logo" src="assets/icone.svg" alt="" width="36" height="36"> */
+.logo { display: block; width: 36px; height: 36px; flex: none; }
+.logo--grande { width: 44px; height: 44px; }
 
-/* Entrada suave */
 @keyframes surgir { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .surgir { animation: surgir .45s var(--curva) both; }
 @media (prefers-reduced-motion: reduce) { .surgir, .giro { animation: none; } * { transition: none !important; } }
 
-.texto-suave { color: var(--suave); }
-.texto-medio { color: var(--medio); }
 .visualmente-oculto { position: absolute !important; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }

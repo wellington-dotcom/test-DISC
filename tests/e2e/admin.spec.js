@@ -79,6 +79,11 @@ test.describe('Admin sem API (importar código)', () => {
     await expect(det.locator('h2')).toHaveText('Carla Nogueira Dias');
     await expect(det.locator('svg.grafico')).toBeVisible();
     await expect(det.locator('svg.grafico rect')).toHaveCount(4);
+    // Identidade nova: trilho liso (sem padrões hachurados) e cores dos tokens DISC
+    await expect(det.locator('svg.grafico pattern')).toHaveCount(0);
+    await expect(det.locator('svg.grafico rect.barra-D')).toHaveAttribute('fill', '#13283f');
+    await expect(det.locator('.perfil-card.caixa--suave')).toHaveCount(1);
+    await expect(det.locator('.caixa--vidro')).toHaveCount(1);
     await expect(det.locator('svg.grafico')).toHaveAttribute('aria-label', /D 40%, I 30%, S 20%, C 10%/);
     await expect(det.locator('.perfil-card')).toHaveCount(2);
 
@@ -98,6 +103,7 @@ test.describe('Admin sem API (importar código)', () => {
     await page.locator('.aba[data-aba="comparativo"]').click();
     await expect(page.locator('#vista-comparativo')).toContainText('1 aprovado.');
     await expect(page.locator('#vista-comparativo .empilhados')).toBeVisible();
+    await expect(page.locator('#resumo-lista .caixa--destaque')).toContainText('1');
 
     // Persistência local após recarregar
     await page.reload();

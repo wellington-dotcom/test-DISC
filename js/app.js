@@ -148,28 +148,52 @@
     return out;
   }
 
-  // selecao: letras na ordem em que foram tocadas (4, 3, 2, 1). Retorna {D,I,S,C} ou null.
-  function selecaoParaGrupo(selecao) {
-    if (!selecao || selecao.length !== 4) return null;
+  // Uma ordem válida tem as 4 letras, cada uma uma vez (posição 0 = topo = nota 4).
+  function ordemValida(ordem) {
+    if (!Array.isArray(ordem) || ordem.length !== 4) return false;
+    return LETRAS.every(function (l) { return ordem.indexOf(l) !== -1; });
+  }
+
+  // ordem: letras de cima para baixo (topo = 4 "mais me identifica" … base = 1). Retorna {D,I,S,C} ou null.
+  function ordemParaGrupo(ordem) {
+    if (!ordemValida(ordem)) return null;
     var g = {};
-    selecao.forEach(function (letra, idx) { g[letra] = 4 - idx; });
+    ordem.forEach(function (letra, idx) { g[letra] = 4 - idx; });
     return g;
   }
 
-  // Ao escolher a 3ª palavra, a última recebe 1 automaticamente.
-  function escolher(selecao, letra) {
-    var s = (selecao || []).slice();
-    if (s.indexOf(letra) !== -1 || s.length >= 4) return s;
-    s.push(letra);
-    if (s.length === 3) {
-      var resto = LETRAS.filter(function (l) { return s.indexOf(l) === -1; });
-      if (resto.length === 1) s.push(resto[0]);
-    }
-    return s;
+  // Move o item da posição `de` para a posição `para` (índices de cima para baixo). Não altera a lista original.
+  function mover(ordem, de, para) {
+    var a = (ordem || []).slice();
+    if (de < 0 || de >= a.length) return a;
+    var destino = Math.max(0, Math.min(a.length - 1, para));
+    if (destino === de) return a;
+    var item = a.splice(de, 1)[0];
+    a.splice(destino, 0, item);
+    return a;
   }
 
-  function montarPayload(dados, selecoes, agora) {
-    var respostas = selecoes.map(selecaoParaGrupo);
+  // Converte o progresso salvo (inclusive o formato antigo, de "tocar em ordem") para {ordens, respondidos}.
+  function migrarProgresso(p) {
+    if (!p || typeof p !== 'object') return p;
+    var out = {};
+    for (var k in p) if (Object.prototype.hasOwnProperty.call(p, k) && k !== 'selecoes') out[k] = p[k];
+    var ordens = [], respondidos = [];
+    var antigas = Array.isArray(p.selecoes) ? p.selecoes : [];
+    for (var i = 0; i < TOTAL; i++) {
+      var o = Array.isArray(p.ordens) ? p.ordens[i] : antigas[i];
+      var ok = ordemValida(o);
+      ordens.push(ok ? o.slice() : null);
+      var marcado = Array.isArray(p.ordens) ? !!(Array.isArray(p.respondidos) && p.respondidos[i]) : ok;
+      respondidos.push(ok && marcado);
+    }
+    out.ordens = ordens;
+    out.respondidos = respondidos;
+    return out;
+  }
+
+  function montarPayload(dados, ordens, agora) {
+    var respostas = ordens.map(ordemParaGrupo);
     var scoring = root.DISC_SCORING || (typeof require === 'function' ? require('./scoring.js') : null);
     var res = scoring.calcular(respostas);
     var fim = agora || new Date();
@@ -221,8 +245,10 @@
     gerarId: gerarId,
     embaralhar: embaralhar,
     gerarPermutacoes: gerarPermutacoes,
-    escolher: escolher,
-    selecaoParaGrupo: selecaoParaGrupo,
+    ordemValida: ordemValida,
+    ordemParaGrupo: ordemParaGrupo,
+    mover: mover,
+    migrarProgresso: migrarProgresso,
     montarPayload: montarPayload,
     escapar: escapar,
     perguntaDoGrupo: perguntaDoGrupo,
@@ -249,6 +275,7 @@
   var app, aviso;
   var estado;
   var envio = { carregando: false, erro: '' };
+  var arraste = null;   // arraste em andamento na lista de palavras
 
   function estadoInicial() {
     return {
@@ -260,7 +287,8 @@
       consentimento: false,
       inicio: '',
       permutacoes: null,
-      selecoes: [],
+      ordens: [],
+      respondidos: [],
       grupo: 0,
       voltarParaRevisao: false
     };
@@ -301,12 +329,14 @@
   }
 
   function progressoValido(p) {
-    return p && typeof p === 'object' && Array.isArray(p.selecoes) &&
-      (!p.permutacoes || (Array.isArray(p.permutacoes) && p.permutacoes.length === TOTAL));
+    return !!(p && typeof p === 'object' && (Array.isArray(p.ordens) || Array.isArray(p.selecoes)) &&
+      (!p.permutacoes || (Array.isArray(p.permutacoes) && p.permutacoes.length === TOTAL)));
   }
 
   function temProgresso(p) {
-    return progressoValido(p) && (p.nome || p.selecoes.some(function (s) { return s && s.length; }));
+    if (!progressoValido(p)) return false;
+    var m = migrarProgresso(p);
+    return !!(m.nome || m.respondidos.some(Boolean));
   }
 
   function anunciar(msg) {
@@ -325,9 +355,16 @@
     return CONFIG.EMPRESA ? String(CONFIG.EMPRESA) : '';
   }
 
+  // Ordem atual das palavras do grupo (a salva ou, se ainda não mexeu, o embaralhamento do candidato).
+  function ordemDoGrupo(i) {
+    var o = estado.ordens[i];
+    if (ordemValida(o)) return o.slice();
+    var p = estado.permutacoes && estado.permutacoes[i];
+    return ordemValida(p) ? p.slice() : LETRAS.slice();
+  }
+
   function grupoCompleto(i) {
-    var s = estado.selecoes[i];
-    return !!(s && s.length === 4);
+    return !!(estado.respondidos[i] && ordemValida(estado.ordens[i]));
   }
 
   function gruposRespondidos() {
@@ -345,6 +382,7 @@
 
   function render(focar) {
     var html;
+    arraste = null;
     switch (estado.etapa) {
       case 'identificacao': html = telaIdentificacao(); break;
       case 'teste': html = telaGrupo(); break;
@@ -354,7 +392,7 @@
       default: html = telaBoasVindas();
     }
     app.innerHTML = html;
-    // Largura da página depende da tela (boas-vindas é mais larga, como o login do BI).
+    // Layout da página depende da tela (boas-vindas é mais larga, como o login do BI).
     try { document.body.setAttribute('data-etapa', estado.etapa || 'boasvindas'); } catch (e) { /* ignora */ }
     ligarEventos();
     if (focar) {
@@ -367,57 +405,60 @@
     }
   }
 
-  // Passos do processo, em cartões numerados (1º preto, demais brancos), como no login do BI.
-  var PASSOS = ['Seus dados', 'Ordene 25 grupos de palavras', 'Pronto, ~10 minutos'];
+  function logo(classe) {
+    var tam = classe === 'logo--grande' ? 44 : 36;
+    return '<img class="logo' + (classe ? ' ' + classe : '') + '" src="assets/icone.svg" alt="" width="' + tam + '" height="' + tam + '">';
+  }
+
+  // Passos do processo em mini-cartões numerados (1º azul-escuro, demais brancos), como no login do BI.
+  var PASSOS = ['Seus dados', 'Ordene 25 grupos de palavras', 'Pronto, cerca de 10 minutos'];
 
   function telaBoasVindas() {
     var salvo = lerStorage(CHAVE_PROGRESSO);
     var continuar = temProgresso(salvo);
     var empresa = nomeEmpresa();
     var passos = PASSOS.map(function (t, k) {
-      return '<li class="passo' + (k === 0 ? ' passo--preto' : '') + '"><span class="passo-num" aria-hidden="true">' + (k + 1) + '</span><span class="passo-texto">' + t + '</span></li>';
+      return '<li class="passo' + (k === 0 ? ' passo--noite' : '') + '"><span class="passo-num" aria-hidden="true">' + (k + 1) + '</span><span class="passo-texto">' + t + '</span></li>';
     }).join('');
     return '' +
-      '<section class="entrada-tela surgir" aria-labelledby="titulo">' +
-        '<div class="entrada-amarela">' +
-          '<span class="brilho brilho--claro" aria-hidden="true"></span>' +
-          '<span class="brilho brilho--escuro" aria-hidden="true"></span>' +
-          '<span class="marca marca--preta" aria-hidden="true"></span>' +
-          '<div class="entrada-corpo">' +
-            '<p class="sobretitulo">' + (empresa ? 'Processo seletivo · ' + escapar(empresa) : 'Processo seletivo') + '</p>' +
-            '<h1 id="titulo">Teste de Perfil Comportamental DISC</h1>' +
+      '<section class="boasvindas surgir" aria-labelledby="titulo">' +
+        '<div class="boasvindas-laranja moldura-laranja">' +
+          logo('logo--grande') +
+          '<div class="boasvindas-corpo">' +
+            '<p class="boasvindas-sobre">' + (empresa ? 'Processo seletivo · ' + escapar(empresa) : 'Processo seletivo') + '</p>' +
+            '<h1 id="titulo" class="boasvindas-titulo">Teste de Perfil Comportamental DISC</h1>' +
             '<p class="frase-impacto">Conhecer seu jeito de trabalhar é o primeiro passo.</p>' +
             '<ol class="passos" aria-label="Como funciona">' + passos + '</ol>' +
           '</div>' +
         '</div>' +
-        '<div class="entrada-preta area-preta">' +
-          '<p class="destaque">Este teste ajuda a entender como você costuma agir, se comunicar e trabalhar em equipe.</p>' +
+        '<div class="boasvindas-noite moldura-noite">' +
+          '<p class="boasvindas-destaque">Este teste ajuda a entender como você costuma agir, se comunicar e trabalhar em equipe.</p>' +
           '<ul class="lista-info">' +
             '<li><strong>Leva cerca de 10 minutos.</strong> Faça com calma, em um lugar tranquilo.</li>' +
-            '<li><strong>São 25 grupos de 4 palavras.</strong> Em cada grupo, toque primeiro na palavra que <em>mais</em> combina com você, depois na próxima, e assim por diante.</li>' +
+            '<li><strong>São 25 grupos de 4 palavras.</strong> Em cada grupo, arraste as palavras para colocar no topo a que <em>mais</em> combina com você e embaixo a que <em>menos</em> combina.</li>' +
             '<li><strong>Não há respostas certas ou erradas.</strong> Responda pensando em como você realmente é, e não em como gostaria de ser.</li>' +
             '<li>Seu progresso fica salvo neste aparelho por até 7 dias caso a página seja fechada, e é apagado ao concluir.</li>' +
           '</ul>' +
           (continuar
             ? '<div class="acoes acoes-coluna">' +
-                '<button type="button" class="botao botao--amarelo botao--grande" data-acao="continuar">Continuar de onde parei</button>' +
-                '<button type="button" class="botao botao--contorno botao--grande" data-acao="recomecar">Começar do zero</button>' +
+                '<button type="button" class="botao botao--laranja botao--grande" data-acao="continuar">Continuar de onde parei</button>' +
+                '<button type="button" class="botao botao--sobre-noite botao--grande" data-acao="recomecar">Começar do zero</button>' +
               '</div>'
-            : '<div class="acoes acoes-coluna"><button type="button" class="botao botao--amarelo botao--grande" data-acao="comecar">Começar</button></div>') +
+            : '<div class="acoes acoes-coluna"><button type="button" class="botao botao--laranja botao--grande" data-acao="comecar">Começar</button></div>') +
         '</div>' +
       '</section>';
   }
 
   function telaIdentificacao() {
     return '' +
-      '<section class="caixa caixa--ampla surgir" aria-labelledby="titulo">' +
-        '<p class="selo etapa">Etapa 1 de 3</p>' +
+      '<section class="caixa surgir" aria-labelledby="titulo">' +
+        '<p class="sobretitulo etapa">Etapa 1 de 3</p>' +
         '<h1 id="titulo" class="titulo-pagina">Sua identificação</h1>' +
-        '<p class="texto-medio subtitulo">Precisamos destes dados para vincular o resultado à sua candidatura.</p>' +
+        '<p class="subtitulo">Precisamos destes dados para vincular o resultado à sua candidatura.</p>' +
         '<form id="form-identificacao" class="formulario" novalidate>' +
           '<div class="campo">' +
             '<label class="campo__rotulo" for="nome">Nome completo <span class="obrigatorio" aria-hidden="true">*</span></label>' +
-            '<input class="entrada" id="nome" name="nome" type="text" autocomplete="name" autocapitalize="words" required maxlength="120" ' +
+            '<input class="entrada entrada--principal" id="nome" name="nome" type="text" autocomplete="name" autocapitalize="words" required maxlength="120" ' +
               'aria-describedby="erro-nome" value="' + escapar(estado.nome) + '">' +
             '<p class="campo__erro erro" id="erro-nome" role="alert"></p>' +
           '</div>' +
@@ -443,7 +484,7 @@
           '</div>' +
           '<div class="acoes">' +
             '<button type="button" class="botao botao--claro botao--grande" data-acao="voltar-inicio">Voltar</button>' +
-            '<button type="submit" class="botao botao--preto botao--grande">' + (estado.voltarParaRevisao ? 'Salvar e voltar à revisão' : 'Iniciar teste') + '</button>' +
+            '<button type="submit" class="botao botao--principal botao--grande">' + (estado.voltarParaRevisao ? 'Salvar e voltar à revisão' : 'Iniciar teste') + '</button>' +
           '</div>' +
         '</form>' +
       '</section>';
@@ -451,81 +492,105 @@
 
   function textoRotulo(n) { return ROTULOS[n] || ''; }
 
+  // Barra de progresso no padrão BarraMeta do BI: feito em azul-escuro, trilho liso, bolinha de vidro.
+  function progressoHtml(i, completo) {
+    var feitos = i + (completo ? 1 : 0);
+    var pct = Math.round((feitos / TOTAL) * 100);
+    var visivel = Math.max(pct, 8);
+    return '' +
+      '<div class="progresso">' +
+        '<div class="progresso-topo">' +
+          '<span class="progresso-texto">Grupo <strong class="progresso-num">' + (i + 1) + '</strong> de ' + TOTAL + '</span>' +
+          '<span class="progresso-pct texto-suave">' + pct + '%</span>' +
+        '</div>' +
+        '<div class="progresso-barra" role="progressbar" aria-label="Progresso do teste" aria-valuemin="0" aria-valuemax="' + TOTAL + '" aria-valuenow="' + feitos + '" aria-valuetext="Grupo ' + (i + 1) + ' de ' + TOTAL + '">' +
+          '<span class="progresso-trilho trilho"></span>' +
+          '<span class="progresso-feito" style="width:' + visivel + '%"></span>' +
+          '<span class="progresso-ponto vidro-claro" style="left:clamp(22px, ' + (visivel - 0.5) + '%, calc(100% - 22px))"></span>' +
+        '</div>' +
+      '</div>';
+  }
+
+  var ICONE_ALCA = '<svg viewBox="0 0 12 20" width="12" height="20" aria-hidden="true" focusable="false">' +
+    '<circle cx="3" cy="4" r="1.6"/><circle cx="9" cy="4" r="1.6"/><circle cx="3" cy="10" r="1.6"/>' +
+    '<circle cx="9" cy="10" r="1.6"/><circle cx="3" cy="16" r="1.6"/><circle cx="9" cy="16" r="1.6"/></svg>';
+  var ICONE_CIMA = '<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false"><path d="M6 2.5 11 9.5H1z"/></svg>';
+  var ICONE_BAIXO = '<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false"><path d="M6 9.5 1 2.5h10z"/></svg>';
+
+  function descricaoPosicao(k) {
+    var nota = 4 - k;
+    return 'posição ' + (k + 1) + ' de 4' + (nota === 4 || nota === 1 ? ', ' + textoRotulo(nota).toLowerCase() : '');
+  }
+
+  function cartaoHtml(i, g, letra, k) {
+    var texto = escapar(palavraDoGrupo(i, g, letra));
+    return '' +
+      '<li class="cartao" data-letra="' + letra + '" tabindex="0" style="--pos:' + k + '" aria-describedby="ajuda-teclado">' +
+        '<span class="cartao-alca" aria-hidden="true">' + ICONE_ALCA + '</span>' +
+        '<span class="cartao-texto">' + texto + '<span class="visualmente-oculto cartao-pos">, ' + descricaoPosicao(k) + '</span></span>' +
+        '<span class="cartao-setas">' +
+          '<button type="button" class="seta" data-mover="-1" aria-label="Subir ' + texto + '"' + (k === 0 ? ' disabled' : '') + '>' + ICONE_CIMA + '</button>' +
+          '<button type="button" class="seta" data-mover="1" aria-label="Descer ' + texto + '"' + (k === 3 ? ' disabled' : '') + '>' + ICONE_BAIXO + '</button>' +
+        '</span>' +
+      '</li>';
+  }
+
+  function confirmarHtml(completo) {
+    return completo
+      ? '<p class="confirmado"><span class="confirmado-icone" aria-hidden="true">✓</span> Ordem registrada</p>'
+      : '<button type="button" class="botao botao--contorno" data-acao="confirmar-ordem">Esta ordem está certa</button>';
+  }
+
+  function dicaHtml(completo) {
+    return completo ? 'Tudo certo. Toque em Avançar quando quiser.' : 'Arraste as palavras para ordenar';
+  }
+
   function telaGrupo() {
     var i = estado.grupo;
     var g = DATA.grupos[i];
-    var ordem = estado.permutacoes[i];
-    var sel = estado.selecoes[i] || [];
-    var completo = sel.length === 4;
-    var pct = Math.round(((i + (completo ? 1 : 0)) / TOTAL) * 100);
-    var visivel = Math.max(pct, 8);
-    var proxima = 4 - sel.length;
-    var instrucao = completo
-      ? 'Pronto! Confira a ordem e avance.'
-      : 'Toque na palavra que <strong>' + (sel.length === 0 ? 'mais' : 'mais, entre as restantes,') + '</strong> combina com você (' + proxima + ' · ' + textoRotulo(proxima) + ').';
-
-    function botaoPalavra(letra) {
-      var pos = sel.indexOf(letra);
-      var nota = pos === -1 ? 0 : 4 - pos;
-      var escolhida = nota > 0;
-      var texto = escapar(palavraDoGrupo(i, g, letra));
-      return '' +
-        '<li>' +
-          '<button type="button" class="palavra' + (escolhida ? ' escolhida nota-' + nota : '') + '" data-letra="' + letra + '"' +
-            ' aria-pressed="' + (escolhida ? 'true' : 'false') + '"' +
-            (escolhida ? ' aria-label="' + texto + ': ' + nota + ', ' + textoRotulo(nota) + '"' : '') +
-            (completo && !escolhida ? ' disabled' : '') + '>' +
-            '<span class="palavra-corpo">' +
-              '<span class="palavra-texto">' + texto + '</span>' +
-              (escolhida ? '<span class="selo-rotulo" aria-hidden="true">' + textoRotulo(nota) + '</span>' : '') +
-            '</span>' +
-            (escolhida
-              ? '<span class="selo-num" aria-hidden="true">' + nota + '</span>'
-              : '<span class="selo-vazio" aria-hidden="true"></span>') +
-          '</button>' +
-        '</li>';
-    }
-
-    // Escolhidas formam a pilha (4 → 1); as restantes ficam abaixo, na ordem embaralhada.
-    var pilha = sel.map(botaoPalavra).join('');
-    var restantes = ordem.filter(function (l) { return sel.indexOf(l) === -1; }).map(botaoPalavra).join('');
-
+    var ordem = ordemDoGrupo(i);
+    var completo = grupoCompleto(i);
     var ultimo = i === TOTAL - 1;
+    var posicoes = [4, 3, 2, 1].map(function (n) {
+      var texto = n === 4 ? 'Mais me identifica' : (n === 1 ? 'Menos me identifica' : '');
+      return '<li class="posicao' + (n === 4 ? ' posicao--topo' : '') + '">' +
+        '<span class="posicao-num">' + n + '</span>' +
+        (texto ? '<span class="posicao-texto">' + texto + '</span>' : '') +
+      '</li>';
+    }).join('');
+    var cartoes = ordem.map(function (l, k) { return cartaoHtml(i, g, l, k); }).join('');
     return '' +
-      '<section class="caixa caixa--ampla tela-grupo" aria-labelledby="titulo">' +
-        '<div class="progresso">' +
-          '<div class="progresso-topo"><span>Grupo ' + (i + 1) + ' de ' + TOTAL + '</span><span class="texto-suave">' + pct + '%</span></div>' +
-          '<div class="progresso-barra" role="progressbar" aria-label="Progresso do teste" aria-valuemin="0" aria-valuemax="' + TOTAL + '" aria-valuenow="' + (i + (completo ? 1 : 0)) + '" aria-valuetext="Grupo ' + (i + 1) + ' de ' + TOTAL + '">' +
-            '<span class="progresso-trilho hachura-clara"></span>' +
-            '<span class="progresso-feito" style="width:' + visivel + '%"></span>' +
-            '<span class="progresso-ponto vidro-claro" style="left:' + (visivel - 0.5) + '%"><i></i><i></i><i></i></span>' +
-          '</div>' +
-        '</div>' +
+      '<section class="caixa tela-grupo" aria-labelledby="titulo">' +
+        progressoHtml(i, completo) +
         '<h1 id="titulo" class="titulo-grupo">' + escapar(perguntaDoGrupo(i, g)) + '</h1>' +
-        '<p class="instrucao" id="instrucao">' + instrucao + '</p>' +
-        (pilha ? '<ol class="pilha" aria-label="Sua ordem">' + pilha + '</ol>' : '') +
-        (restantes ? '<ul class="palavras" aria-describedby="instrucao">' + restantes + '</ul>' : '') +
-        '<div class="acoes-grupo">' +
-          '<button type="button" class="botao botao--link" data-acao="refazer"' + (sel.length ? '' : ' disabled') + '>↺ Refazer grupo</button>' +
+        '<p class="instrucao" id="instrucao">No topo, a palavra que <strong>mais</strong> combina com você; embaixo, a que <strong>menos</strong> combina.</p>' +
+        '<p class="visualmente-oculto" id="ajuda-teclado">Use as setas para cima e para baixo do teclado, ou os botões Subir e Descer, para mudar a posição.</p>' +
+        '<div class="ordenar">' +
+          '<ol class="posicoes" aria-hidden="true">' + posicoes + '</ol>' +
+          '<ol class="cartoes" aria-label="Palavras, da que mais à que menos combina com você" aria-describedby="instrucao">' + cartoes + '</ol>' +
         '</div>' +
-        '<div class="acoes">' +
-          '<button type="button" class="botao botao--claro botao--grande" data-acao="anterior">Voltar</button>' +
-          '<button type="button" class="botao botao--preto botao--grande" data-acao="proximo"' + (completo ? '' : ' disabled') + '>' +
-            (estado.voltarParaRevisao || ultimo ? 'Revisar respostas' : 'Avançar') +
-          '</button>' +
+        '<div class="confirmar" id="confirmar">' + confirmarHtml(completo) + '</div>' +
+        '<div class="barra-nav">' +
+          '<p class="barra-dica" id="dica-avancar">' + dicaHtml(completo) + '</p>' +
+          '<div class="barra-botoes">' +
+            '<button type="button" class="botao botao--claro botao--grande" data-acao="anterior">Voltar</button>' +
+            '<button type="button" class="botao botao--principal botao--grande" data-acao="proximo" aria-describedby="dica-avancar"' + (completo ? '' : ' disabled') + '>' +
+              (estado.voltarParaRevisao || ultimo ? 'Revisar respostas' : 'Avançar') +
+            '</button>' +
+          '</div>' +
         '</div>' +
       '</section>';
   }
 
   function telaRevisao() {
     var linhas = DATA.grupos.map(function (g, i) {
-      var sel = estado.selecoes[i] || [];
-      var completo = sel.length === 4;
+      var completo = grupoCompleto(i);
+      var ordem = estado.ordens[i];
       var conteudo = completo
-        ? '<ol class="revisao-ordem">' + sel.map(function (l, k) {
-            return '<li><span class="mini-nota nota-' + (4 - k) + '" aria-hidden="true">' + (4 - k) + '</span> ' + escapar(palavraDoGrupo(i, g, l)) + '</li>';
+        ? '<ol class="revisao-ordem">' + ordem.map(function (l, k) {
+            return '<li><span class="mini-nota' + (k === 0 ? ' mini-nota--topo' : '') + '" aria-hidden="true">' + (4 - k) + '</span> ' + escapar(palavraDoGrupo(i, g, l)) + '</li>';
           }).join('') + '</ol>'
-        : '<p class="erro-inline">Grupo incompleto</p>';
+        : '<p class="erro-inline">Grupo ainda não ordenado</p>';
       return '' +
         '<li class="revisao-item' + (completo ? '' : ' incompleto') + '">' +
           '<div class="revisao-cab">' +
@@ -538,8 +603,8 @@
     }).join('');
     var faltando = TOTAL - gruposRespondidos();
     return '' +
-      '<section class="caixa caixa--ampla surgir" aria-labelledby="titulo">' +
-        '<p class="selo etapa">Etapa 3 de 3</p>' +
+      '<section class="caixa surgir" aria-labelledby="titulo">' +
+        '<p class="sobretitulo etapa">Etapa 3 de 3</p>' +
         '<h1 id="titulo" class="titulo-pagina">Revise suas respostas</h1>' +
         '<div class="resumo-dados">' +
           '<dl>' +
@@ -549,13 +614,13 @@
           '</dl>' +
           '<button type="button" class="botao botao--link botao--pequeno" data-acao="editar-dados">Alterar dados</button>' +
         '</div>' +
-        '<p class="texto-medio">Em cada grupo, a ordem vai do <strong>4 (mais me identifica)</strong> ao <strong>1 (menos me identifica)</strong>. Se quiser, altere algum grupo antes de enviar.</p>' +
+        '<p class="subtitulo">Em cada grupo, a ordem vai do <strong>4 (mais me identifica)</strong> ao <strong>1 (menos me identifica)</strong>. Se quiser, altere algum grupo antes de enviar.</p>' +
         '<ol class="revisao-lista">' + linhas + '</ol>' +
         (envio.erro ? '<div class="aviso aviso--erro alerta" role="alert">' + escapar(envio.erro) + '</div>' : '') +
         (faltando ? '<p class="campo__erro erro" role="alert">Faltam ' + faltando + ' grupo(s) para concluir.</p>' : '') +
         '<div class="acoes">' +
           '<button type="button" class="botao botao--claro botao--grande" data-acao="voltar-teste">Voltar</button>' +
-          '<button type="button" class="botao botao--preto botao--grande" data-acao="enviar"' + (faltando ? ' disabled' : '') + '>Enviar respostas</button>' +
+          '<button type="button" class="botao botao--principal botao--grande" data-acao="enviar"' + (faltando ? ' disabled' : '') + '>Enviar respostas</button>' +
         '</div>' +
       '</section>';
   }
@@ -563,19 +628,19 @@
   function telaEnvio() {
     if (envio.carregando || !envio.erro) {
       return '' +
-        '<section class="caixa caixa--ampla centro surgir" aria-labelledby="titulo" aria-busy="true">' +
+        '<section class="caixa centro surgir" aria-labelledby="titulo" aria-busy="true">' +
           '<div class="giro giro--grande" aria-hidden="true"></div>' +
           '<h1 id="titulo" class="titulo-pagina">Enviando suas respostas…</h1>' +
-          '<p class="texto-medio">Isso leva só alguns segundos. Não feche esta página.</p>' +
+          '<p class="subtitulo">Isso leva só alguns segundos. Não feche esta página.</p>' +
         '</section>';
     }
     return '' +
-      '<section class="caixa caixa--ampla surgir" aria-labelledby="titulo">' +
+      '<section class="caixa surgir" aria-labelledby="titulo">' +
         '<h1 id="titulo" class="titulo-pagina">Não foi possível enviar</h1>' +
         '<div class="aviso aviso--erro alerta" role="alert">' + escapar(envio.erro) + '</div>' +
-        '<p class="texto-medio">Suas respostas continuam salvas neste aparelho. Você pode tentar de novo ou gerar um código de resultado para enviar ao recrutador.</p>' +
+        '<p class="subtitulo">Suas respostas continuam salvas neste aparelho. Você pode tentar de novo ou gerar um código de resultado para enviar ao recrutador.</p>' +
         '<div class="acoes acoes-coluna">' +
-          '<button type="button" class="botao botao--preto botao--grande" data-acao="retentar">Tentar novamente</button>' +
+          '<button type="button" class="botao botao--principal botao--grande" data-acao="retentar">Tentar novamente</button>' +
           '<button type="button" class="botao botao--claro botao--grande" data-acao="usar-codigo">Gerar código de resultado</button>' +
           '<button type="button" class="botao botao--link" data-acao="voltar-revisao">Voltar à revisão</button>' +
         '</div>' +
@@ -594,15 +659,15 @@
         '<li class="barra-linha">' +
           '<span class="letra-disc disc-' + l + ' barra-letra">' + l + '</span>' +
           '<span class="barra-nome">' + escapar(perfil.nome) + '</span>' +
-          '<span class="barra-trilho hachura-clara" aria-hidden="true"><span class="barra-valor disc-' + l + '" style="width:' + Math.max(4, Math.min(100, (v / 40) * 100)) + '%"></span></span>' +
+          '<span class="barra-trilho trilho" aria-hidden="true"><span class="barra-valor disc-' + l + '" style="width:' + Math.max(4, Math.min(100, (v / 40) * 100)) + '%"></span></span>' +
           '<span class="barra-pct">' + String(v).replace('.', ',') + '%</span>' +
         '</li>';
     }).join('');
     var pontos = (p.positivos || []).slice(0, 6).map(function (t) { return '<li class="selo">' + escapar(t) + '</li>'; }).join('');
     return '' +
-      '<section class="caixa caixa--ampla perfil surgir" aria-labelledby="titulo-perfil">' +
+      '<section class="caixa perfil surgir" aria-labelledby="titulo-perfil">' +
         '<h2 id="titulo-perfil" class="caixa__titulo">Seu perfil predominante</h2>' +
-        '<p class="perfil-titulo"><span class="letra-disc disc-' + res.primario + ' badge">' + res.primario + '</span> ' +
+        '<p class="perfil-titulo"><span class="letra-disc disc-' + res.primario + '">' + res.primario + '</span> ' +
           '<span>' + escapar(p.rotulo) + ' <span class="perfil-sub">(' + escapar(p.nome) + '), com traços de ' + escapar(s.rotulo) + '</span></span></p>' +
         '<ul class="barras">' + barras + '</ul>' +
         (pontos ? '<h3 class="perfil-h3">Pontos fortes</h3><ul class="tags">' + pontos + '</ul>' : '') +
@@ -629,9 +694,10 @@
         '<p class="rodape-nota">Seus dados serão usados apenas neste processo seletivo e excluídos ao final.</p>' +
         '<button type="button" class="botao botao--link" data-acao="novo-teste">Iniciar um novo teste neste aparelho</button>' +
       '</div>';
+    // O único card "vidro" da tela.
     function agradecimento(texto) {
       return '' +
-        '<section class="caixa caixa--gradiente caixa--ampla agradecimento surgir" aria-labelledby="titulo">' +
+        '<section class="caixa caixa--vidro agradecimento surgir" aria-labelledby="titulo">' +
           '<div class="icone-ok" aria-hidden="true">✓</div>' +
           '<h1 id="titulo" class="titulo-pagina">' + titulo + '</h1>' +
           '<p class="destaque">' + texto + '</p>' +
@@ -656,15 +722,15 @@
         agradecimento('Você concluiu o teste. Para finalizar, envie o código abaixo ao recrutador' +
           (semContato ? ' pelo mesmo canal (WhatsApp ou e-mail) em que você recebeu o link deste teste.' : '.')) +
         (CONFIG.MOSTRAR_RESULTADO_AO_CANDIDATO ? blocoPerfil(payload) : '') +
-        '<section class="caixa caixa--ampla codigo-bloco surgir" aria-label="Código de resultado">' +
+        '<section class="caixa codigo-bloco surgir" aria-label="Código de resultado">' +
           '<label class="caixa__titulo" for="codigo">Código de resultado</label>' +
           '<p class="campo__ajuda dica" id="dica-codigo">' +
             'Copie o código e envie ao recrutador' + (wa ? ', ou use o botão do WhatsApp.' : '.') +
             ' Por segurança, ele deixa de aparecer quando esta aba for fechada.</p>' +
           '<textarea id="codigo" class="entrada codigo" readonly rows="4" aria-describedby="dica-codigo" spellcheck="false">' + escapar(codigo) + '</textarea>' +
           '<div class="acoes acoes-coluna">' +
-            (wa ? '<a class="botao botao--amarelo botao--grande btn-whatsapp" href="' + escapar(wa) + '" target="_blank" rel="noopener noreferrer">Enviar pelo WhatsApp</a>' : '') +
-            '<button type="button" class="botao ' + (wa ? 'botao--claro' : 'botao--preto') + ' botao--grande" data-acao="copiar">Copiar código</button>' +
+            (wa ? '<a class="botao botao--laranja botao--grande btn-whatsapp" href="' + escapar(wa) + '" target="_blank" rel="noopener noreferrer">Enviar pelo WhatsApp</a>' : '') +
+            '<button type="button" class="botao ' + (wa ? 'botao--claro' : 'botao--principal') + ' botao--grande" data-acao="copiar">Copiar código</button>' +
           '</div>' +
           '<p class="sucesso" id="copiado" role="status" aria-live="polite"></p>' +
         '</section>' +
@@ -696,6 +762,11 @@
           salvar();
         });
       });
+    }
+    var lista = app.querySelector('.cartoes');
+    if (lista) {
+      lista.addEventListener('pointerdown', aoPressionar);
+      lista.addEventListener('keydown', aoTeclar);
     }
   }
 
@@ -744,8 +815,9 @@
     var alvo = ev.target.closest('button, a[data-acao]');
     if (!alvo || !app.contains(alvo) || alvo.disabled) return;
 
-    if (alvo.classList.contains('palavra')) {
-      tocarPalavra(alvo.getAttribute('data-letra'));
+    if (alvo.hasAttribute('data-mover')) {
+      var cartao = alvo.closest('.cartao');
+      if (cartao) moverPorPasso(cartao.getAttribute('data-letra'), Number(alvo.getAttribute('data-mover')), alvo);
       return;
     }
     var acao = alvo.getAttribute('data-acao');
@@ -757,8 +829,8 @@
         irPara('identificacao');
         break;
       case 'continuar':
-        estado = lerStorage(CHAVE_PROGRESSO) || estadoInicial();
-        if (!progressoValido(estado)) estado = estadoInicial();
+        var salvo = lerStorage(CHAVE_PROGRESSO);
+        estado = progressoValido(salvo) ? migrarProgresso(salvo) : estadoInicial();
         if (estado.etapa === 'boasvindas' || estado.etapa === 'concluido') estado.etapa = 'identificacao';
         if (estado.etapa === 'enviando') estado.etapa = 'revisao';
         if (estado.etapa === 'teste' && !estado.permutacoes) estado.etapa = 'identificacao';
@@ -774,12 +846,11 @@
         estado.voltarParaRevisao = false;
         irPara('boasvindas');
         break;
-      case 'refazer':
-        estado.selecoes[estado.grupo] = [];
-        salvar();
-        render(false);
-        focarPrimeiraPalavra();
-        anunciar('Grupo reiniciado. Escolha novamente a palavra que mais combina com você.');
+      case 'confirmar-ordem':
+        marcarRespondido(ordemNaTela(), true);
+        var prox = app.querySelector('[data-acao="proximo"]');
+        if (prox) prox.focus();
+        anunciar('Ordem registrada. Você já pode avançar.');
         break;
       case 'anterior':
         if (estado.voltarParaRevisao) { estado.voltarParaRevisao = false; irPara('revisao'); }
@@ -818,7 +889,7 @@
         concluir();
         break;
       case 'usar-codigo':
-        finalizar(montarPayload(estado, estado.selecoes), false);
+        finalizar(montarPayload(estado, estado.ordens), false);
         break;
       case 'voltar-revisao':
         envio = { carregando: false, erro: '' };
@@ -852,31 +923,224 @@
     estado.consentimento = form.querySelector('#consentimento').checked;
   }
 
-  function focarPrimeiraPalavra() {
-    var b = app.querySelector('.palavra:not(.escolhida)') || app.querySelector('.palavra');
-    if (b) b.focus();
+  /* ------------------- Lista ordenável (grupos) -------------------- */
+
+  function cartoesNaTela() {
+    var lista = app.querySelector('.cartoes');
+    return lista ? Array.prototype.slice.call(lista.querySelectorAll('.cartao')) : [];
   }
 
-  function tocarPalavra(letra) {
+  function ordemNaTela() {
+    return cartoesNaTela().map(function (c) { return c.getAttribute('data-letra'); });
+  }
+
+  // Grava a ordem, marca o grupo como respondido e atualiza só o que muda (nada é redesenhado).
+  function marcarRespondido(ordem, respondido) {
     var i = estado.grupo;
-    var antes = estado.selecoes[i] || [];
-    if (antes.indexOf(letra) !== -1 || antes.length >= 4) return;
-    var depois = escolher(antes, letra);
-    estado.selecoes[i] = depois;
+    estado.ordens[i] = ordem.slice();
+    if (respondido) estado.respondidos[i] = true;
     salvar();
-    render(false);
-    var g = DATA.grupos[i];
-    var nota = 4 - depois.indexOf(letra);
-    var msg = palavraDoGrupo(i, g, letra) + ': ' + nota + ', ' + textoRotulo(nota) + '.';
-    if (depois.length === 4) {
-      var ultima = depois[3];
-      msg += ' ' + palavraDoGrupo(i, g, ultima) + ' recebeu 1, ' + textoRotulo(1) + '. Grupo completo.';
-      var prox = app.querySelector('[data-acao="proximo"]');
-      if (prox) prox.focus();
-    } else {
-      focarPrimeiraPalavra();
+    atualizarControles();
+  }
+
+  function atualizarControles() {
+    var i = estado.grupo;
+    var completo = grupoCompleto(i);
+    var prox = app.querySelector('[data-acao="proximo"]');
+    if (prox) prox.disabled = !completo;
+    var dica = app.querySelector('#dica-avancar');
+    if (dica) dica.textContent = dicaHtml(completo);
+    var conf = app.querySelector('#confirmar');
+    var querConfirmado = completo ? '.confirmado' : '[data-acao="confirmar-ordem"]';
+    if (conf && !conf.querySelector(querConfirmado)) conf.innerHTML = confirmarHtml(completo);
+    // Barra de progresso (anima a largura; não redesenha a tela)
+    var feitos = i + (completo ? 1 : 0);
+    var pct = Math.round((feitos / TOTAL) * 100);
+    var visivel = Math.max(pct, 8);
+    var barra = app.querySelector('.progresso-barra');
+    if (barra) {
+      barra.setAttribute('aria-valuenow', String(feitos));
+      var feito = barra.querySelector('.progresso-feito');
+      var ponto = barra.querySelector('.progresso-ponto');
+      if (feito) feito.style.width = visivel + '%';
+      if (ponto) ponto.style.left = 'clamp(22px, ' + (visivel - 0.5) + '%, calc(100% - 22px))';
     }
-    anunciar(msg);
+    var pctEl = app.querySelector('.progresso-pct');
+    if (pctEl) pctEl.textContent = pct + '%';
+  }
+
+  // Aplica uma nova ordem com animação FLIP: mede onde cada cartão está, reorganiza e anima até o novo lugar.
+  function aplicarOrdem(nova) {
+    var lista = app.querySelector('.cartoes');
+    if (!lista) return;
+    var cartoes = cartoesNaTela();
+    var foco = document.activeElement;
+    var antes = {};
+    cartoes.forEach(function (c) { antes[c.getAttribute('data-letra')] = c.getBoundingClientRect().top; });
+    nova.forEach(function (letra, k) {
+      var c = lista.querySelector('.cartao[data-letra="' + letra + '"]');
+      if (!c) return;
+      lista.appendChild(c);                 // ordem no DOM = ordem visual (leitor de tela e Tab)
+      c.style.setProperty('--pos', String(k));
+      c.style.transform = '';
+      c.classList.remove('arrastando');
+      var pos = c.querySelector('.cartao-pos');
+      if (pos) pos.textContent = ', ' + descricaoPosicao(k);
+      var cima = c.querySelector('[data-mover="-1"]');
+      var baixo = c.querySelector('[data-mover="1"]');
+      if (cima) cima.disabled = k === 0;
+      if (baixo) baixo.disabled = k === nova.length - 1;
+    });
+    lista.classList.remove('ordenando');
+    // FLIP: inverte (volta visualmente ao lugar antigo sem transição) e depois solta a transição.
+    var mexidos = [];
+    cartoesNaTela().forEach(function (c) {
+      var delta = antes[c.getAttribute('data-letra')] - c.getBoundingClientRect().top;
+      if (Math.abs(delta) < 0.5) return;
+      c.style.transition = 'none';
+      c.style.transform = 'translateY(calc(var(--pos) * var(--passo) + ' + delta + 'px))';
+      mexidos.push(c);
+    });
+    if (mexidos.length) {
+      void lista.offsetHeight;   // força o navegador a registrar a posição invertida
+      mexidos.forEach(function (c) { c.style.transition = ''; c.style.transform = ''; });
+    }
+    // Mantém o foco onde estava (mover no DOM tira o foco do elemento).
+    if (foco && lista.contains(foco)) {
+      if (foco.disabled) {
+        var irmao = foco.parentNode && foco.parentNode.querySelector('.seta:not(:disabled)');
+        foco = irmao || foco.closest('.cartao');
+      }
+      if (document.activeElement !== foco) {
+        try { foco.focus({ preventScroll: true }); } catch (e) { foco.focus(); }
+      }
+    }
+  }
+
+  function anunciarPosicao(letra, ordem) {
+    var i = estado.grupo;
+    var k = ordem.indexOf(letra);
+    anunciar(palavraDoGrupo(i, DATA.grupos[i], letra) + ' agora está na ' + descricaoPosicao(k) + '.');
+  }
+
+  function moverPorPasso(letra, delta, origem) {
+    var ordem = ordemNaTela();
+    var de = ordem.indexOf(letra);
+    var para = de + delta;
+    if (de === -1 || para < 0 || para > 3) return;
+    var nova = mover(ordem, de, para);
+    aplicarOrdem(nova);
+    marcarRespondido(nova, true);
+    anunciarPosicao(letra, nova);
+    if (origem && origem.disabled) {
+      var c = app.querySelector('.cartao[data-letra="' + letra + '"]');
+      var outra = c && c.querySelector('.seta:not(:disabled)');
+      if (outra) outra.focus();
+    }
+  }
+
+  function aoTeclar(ev) {
+    var cartao = ev.target.closest && ev.target.closest('.cartao');
+    if (!cartao || ev.target !== cartao) return;
+    var letra = cartao.getAttribute('data-letra');
+    var ordem = ordemNaTela();
+    var de = ordem.indexOf(letra);
+    var para = de;
+    if (ev.key === 'ArrowUp') para = de - 1;
+    else if (ev.key === 'ArrowDown') para = de + 1;
+    else if (ev.key === 'Home') para = 0;
+    else if (ev.key === 'End') para = 3;
+    else return;
+    ev.preventDefault();
+    para = Math.max(0, Math.min(3, para));
+    if (para === de) return;
+    var nova = mover(ordem, de, para);
+    aplicarOrdem(nova);
+    marcarRespondido(nova, true);
+    anunciarPosicao(letra, nova);
+  }
+
+  function lerPasso(lista) {
+    var v = parseFloat(root.getComputedStyle(lista).getPropertyValue('--passo'));
+    if (v > 0) return v;
+    var c = lista.querySelector('.cartao');
+    return c ? c.offsetHeight + 8 : 72;
+  }
+
+  // Arrastar com Pointer Events (dedo e mouse). O cartão segue o ponteiro; os outros deslizam para abrir espaço.
+  function aoPressionar(ev) {
+    if (arraste) return;
+    if (ev.pointerType === 'mouse' && ev.button !== 0) return;
+    if (ev.target.closest('button')) return;           // ▲/▼ têm o próprio clique
+    var cartao = ev.target.closest('.cartao');
+    var lista = app.querySelector('.cartoes');
+    if (!cartao || !lista) return;
+    var ordem = ordemNaTela();
+    var letra = cartao.getAttribute('data-letra');
+    arraste = {
+      cartao: cartao, lista: lista, letra: letra, ordem: ordem,
+      de: ordem.indexOf(letra), para: ordem.indexOf(letra),
+      y0: ev.clientY, passo: lerPasso(lista), ativo: false, id: ev.pointerId
+    };
+    try { cartao.setPointerCapture(ev.pointerId); } catch (e) { /* ignora */ }
+    cartao.addEventListener('pointermove', aoArrastar);
+    cartao.addEventListener('pointerup', aoSoltar);
+    cartao.addEventListener('pointercancel', aoCancelar);
+  }
+
+  function aoArrastar(ev) {
+    var a = arraste;
+    if (!a || ev.pointerId !== a.id) return;
+    var dy = ev.clientY - a.y0;
+    if (!a.ativo) {
+      if (Math.abs(dy) < 6) return;
+      a.ativo = true;
+      a.cartao.classList.add('arrastando');
+      a.lista.classList.add('ordenando');
+    }
+    ev.preventDefault();
+    var max = (a.ordem.length - 1) * a.passo;
+    var y = Math.max(-a.passo * 0.3, Math.min(max + a.passo * 0.3, a.de * a.passo + dy));
+    a.cartao.style.transform = 'translateY(' + y + 'px)';
+    var para = Math.max(0, Math.min(a.ordem.length - 1, Math.round(y / a.passo)));
+    if (para !== a.para) {
+      a.para = para;
+      var provisoria = mover(a.ordem, a.de, para);
+      provisoria.forEach(function (l, k) {
+        if (l === a.letra) return;
+        var c = a.lista.querySelector('.cartao[data-letra="' + l + '"]');
+        if (c) c.style.setProperty('--pos', String(k));
+      });
+    }
+  }
+
+  function encerrarArraste() {
+    var a = arraste;
+    arraste = null;
+    if (!a) return null;
+    a.cartao.removeEventListener('pointermove', aoArrastar);
+    a.cartao.removeEventListener('pointerup', aoSoltar);
+    a.cartao.removeEventListener('pointercancel', aoCancelar);
+    try { a.cartao.releasePointerCapture(a.id); } catch (e) { /* ignora */ }
+    return a;
+  }
+
+  function aoSoltar(ev) {
+    if (!arraste || ev.pointerId !== arraste.id) return;
+    var a = encerrarArraste();
+    if (!a.ativo) return;   // foi só um toque: nada muda
+    var nova = mover(a.ordem, a.de, a.para);
+    aplicarOrdem(nova);     // encaixa na posição com animação
+    if (a.para !== a.de) {
+      marcarRespondido(nova, true);
+      anunciarPosicao(a.letra, nova);
+    }
+  }
+
+  function aoCancelar(ev) {
+    if (!arraste || ev.pointerId !== arraste.id) return;
+    var a = encerrarArraste();
+    if (a.ativo) aplicarOrdem(a.ordem);
   }
 
   function finalizar(payload, enviado) {
@@ -899,7 +1163,7 @@
     if (primeiroIncompleto() !== -1) { irPara('revisao'); return; }
     var payload;
     try {
-      payload = montarPayload(estado, estado.selecoes);
+      payload = montarPayload(estado, estado.ordens);
     } catch (e) {
       envio = { carregando: false, erro: 'Encontramos um problema nas respostas. Revise os grupos e tente novamente.' };
       irPara('revisao');
@@ -950,7 +1214,7 @@
     aviso = document.getElementById('aviso');
     if (!app) return;
     if (!DATA || !root.DISC_SCORING || !root.DISC_CODEC) {
-      app.innerHTML = '<section class="caixa caixa--ampla"><h1 class="titulo-pagina">Não foi possível carregar o teste</h1><p class="texto-medio">Atualize a página. Se o problema continuar, avise o recrutador.</p></section>';
+      app.innerHTML = '<section class="caixa"><h1 class="titulo-pagina">Não foi possível carregar o teste</h1><p class="subtitulo">Atualize a página. Se o problema continuar, avise o recrutador.</p></section>';
       return;
     }
     var empresa = nomeEmpresa();
