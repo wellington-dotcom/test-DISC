@@ -26,6 +26,10 @@ const MIGRACAO_PESSOAS = fs.readFileSync(path.join(RAIZ, 'supabase', 'migrations
 // A 3ª migração (empresas/equipes) tem testes próprios em tests/supabase/empresas.test.js; aqui ela é
 // aplicada logo depois da 2ª para os testes de segurança e do seed valerem sobre o banco completo.
 const MIGRACAO_EQUIPES = fs.readFileSync(path.join(RAIZ, 'supabase', 'migrations', '20261007120000_empresas_equipes.sql'), 'utf8');
+// A 4ª (Parte 2: perfil exigido) tem testes próprios em tests/supabase/parte2.test.js; aplicada em seguida.
+const MIGRACAO_PARTE2 = fs.readFileSync(path.join(RAIZ, 'supabase', 'migrations', '20261008120000_parte2.sql'), 'utf8');
+// A 5ª (fotos) tem testes próprios em tests/supabase/fotos.test.js; aplicada em seguida (o seed usa a foto).
+const MIGRACAO_FOTOS = fs.readFileSync(path.join(RAIZ, 'supabase', 'migrations', '20261009120000_fotos.sql'), 'utf8');
 const TABELAS = ['admins', 'configuracoes', 'empresas', 'pessoas', 'processos', 'relacoes', 'relatorios', 'respostas', 'vinculos'];
 // Campos que a migração nova acrescenta ao payload (o Code.gs, legado, não tem): com o formulário padrão
 // eles vêm vazios e o resto do payload continua igual ao do Code.gs.
@@ -198,6 +202,8 @@ test('migração nova sobre dados antigos: idempotente, cria pessoas agrupando p
   await db.query(MIGRACAO_PESSOAS);
   await db.query(MIGRACAO_EQUIPES);
   await db.query(MIGRACAO_EQUIPES);
+  await db.query(MIGRACAO_PARTE2);
+  await db.query(MIGRACAO_FOTOS);
   const t = await db.query(`select tablename, rowsecurity from pg_tables where schemaname = 'public' order by 1`);
   assert.deepEqual(t.rows.map((r) => r.tablename), TABELAS);
   assert.ok(t.rows.every((r) => r.rowsecurity), 'RLS ligado em todas as tabelas');
@@ -242,9 +248,24 @@ test('seed da prévia (opcional) roda duas vezes e cria SEL1/EQP1/ATD1, a mesma 
   assert.deepEqual(n.rows[0], { n: 9, p: 8 });
   const ana = (await db.query(`select p.* from public.pessoas p join public.respostas r on r.pessoa_id = p.id where r.id = 'previa-exemplo-05'`)).rows[0];
   assert.equal(ana.email, 'ana.exemplo@exemplo.com');
+  // Fotos (avatares fictícios): 5 fichas com foto, 4 respostas com foto, todas no formato aceito.
+  const fotos = (await db.query(`select (select count(*)::int from public.pessoas where foto is not null) p,
+    (select count(*)::int from public.respostas where id like 'previa-%' and foto is not null) r,
+    (select max(char_length(foto)) from public.pessoas) m`)).rows[0];
+  assert.deepEqual([fotos.p, fotos.r], [5, 4]);
+  assert.ok(fotos.m <= 40000);
+  assert.ok(ana.foto.startsWith('data:image/jpeg;base64,/9j/'));
   assert.equal((await db.query(`select pessoa_id from public.respostas where id = 'previa-exemplo-01'`)).rows[0].pessoa_id, ana.id);
   const atd = await rpc('anon', null, 'avaliacao_publica', ['ATD1']);
   assert.equal(atd.formulario.campos.email, 'obrigatorio');
+  // Parte 2: EQP1 ligada; quem respondeu por ele tem o perfil exigido (válido, gravado também no payload).
+  assert.equal(atd.formulario.parte2, 'desligada');
+  assert.equal((await rpc('anon', null, 'avaliacao_publica', ['EQP1'])).formulario.parte2, 'ligada');
+  const ex = (await db.query(`select id, exigido, payload ->> 'exigido' as no_payload, disc_interno.exigido_valido(exigido) as ok
+    from public.respostas where id like 'previa-%' order by id`)).rows;
+  assert.deepEqual(ex.filter((x) => x.exigido).map((x) => x.id),
+    ['previa-exemplo-03', 'previa-exemplo-04', 'previa-exemplo-06', 'previa-exemplo-07', 'previa-exemplo-08', 'previa-exemplo-09']);
+  assert.ok(ex.filter((x) => x.exigido).every((x) => x.ok && x.no_payload === x.exigido));
   assert.equal(atd.formulario.perguntas.length, 1);
   // Equipe: 7 ativos (1 sem teste), 1 desligado, organograma de 3 níveis; SEL1 e EQP1 ligados à empresa.
   const EMP = '5eed0000-0000-4000-8000-000000000001';
@@ -305,7 +326,7 @@ test('anon só executa as 3 funções públicas', async () => {
     where n.nspname = 'public' and has_function_privilege('authenticated', p.oid, 'execute') order by 1`);
   assert.deepEqual(g.rows.map((x) => x.proname),
     ['avaliacao_publica', 'e_admin', 'enviar_resposta', 'garantir_primeiro_admin', 'mover_colaborador', 'relatorio_publico',
-      'salvar_colaborador', 'salvar_relacoes']);
+      'remover_foto', 'salvar_colaborador', 'salvar_minha_foto', 'salvar_relacoes']);
   assert.equal((await db.query(`select has_schema_privilege('anon', 'disc_interno', 'usage') v`)).rows[0].v, false);
   assert.equal((await db.query(`select has_schema_privilege('authenticated', 'disc_interno', 'usage') v`)).rows[0].v, false);
 });
@@ -468,7 +489,7 @@ test('avaliacao_publica: só processos ativos; código normalizado; erro igual a
   const r = await rpc('anon', null, 'avaliacao_publica', [' pub1 ']);
   assert.equal(r.ok, true);
   const esperado = { codigo: 'PUB1', nome: 'Seleção Recepção', tipo: 'selecao', empresaNome: 'Clínica Exemplo', mostrarResultado: true,
-    formulario: { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto' }, perguntas: [] } };
+    formulario: { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto', foto: 'opcional' }, perguntas: [], parte2: 'desligada' } };
   assert.deepEqual(r.avaliacao, esperado);
   for (const k of Object.keys(esperado)) assert.deepEqual(r[k], esperado[k]);
   assert.equal(JSON.stringify(r).includes('901'), false, 'não expõe a lista do ClickUp');
@@ -622,7 +643,7 @@ test('enviar_resposta valida tudo como o Code.gs (mesmas mensagens e mesma limpe
   // E pela RPC de verdade, com a mesma mensagem.
   const r = await rpc('anon', null, 'enviar_resposta', [JSON.stringify(payload({ telefone: '123' }))]);
   assert.deepEqual(r, { ok: false, erro: 'Telefone inválido. Informe DDD + número.' });
-  const grande = await rpc('anon', null, 'enviar_resposta', [JSON.stringify(payload({ vaga: 'x'.repeat(21000) }))]);
+  const grande = await rpc('anon', null, 'enviar_resposta', [JSON.stringify(payload({ vaga: 'x'.repeat(81000) }))]);
   assert.deepEqual(grande, { ok: false, erro: 'Requisição grande demais.' });
   assert.deepEqual(await rpc('anon', null, 'enviar_resposta', [null]), { ok: false, erro: 'Dados do teste ausentes.' });
 });
@@ -784,7 +805,9 @@ test('segurança: não-admin não se promove a admin nem chama funções interna
   const intruso = '44444444-4444-4444-8444-444444444444';
   assert.deepEqual(await rpc('authenticated', intruso, 'garantir_primeiro_admin'), { ok: true, admin: false });
   await rejeita(logado(intruso, `insert into public.admins (user_id, nome) values ($1, 'x')`, [intruso]), /row-level security/);
-  assert.equal((await logado(intruso, `update public.admins set user_id = $1`, [intruso])).rowCount, 0);
+  // Desde a migração de fotos o painel só muda o nome dos admins (privilégio por coluna).
+  await rejeita(logado(intruso, `update public.admins set user_id = $1`, [intruso]), /permission denied/);
+  assert.equal((await logado(intruso, `update public.admins set nome = 'x'`)).rowCount, 0);
   assert.equal((await logado(intruso, `delete from public.admins`)).rowCount, 0);
   await rejeita(logado(intruso, `select disc_interno.gerar_protocolo()`), /permission denied/);
   await rejeita(logado(intruso, `truncate public.respostas`), /permission denied/);
@@ -851,7 +874,7 @@ test('segurança: relatorio_publico nunca devolve rascunho, nem por token pareci
 // Formulário do processo e pessoas (migração 20261006120000_pessoas_formulario.sql)
 // ---------------------------------------------------------------------------
 
-const FORM_PADRAO = { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto' }, perguntas: [] };
+const FORM_PADRAO = { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto', foto: 'opcional' }, perguntas: [], parte2: 'desligada' };
 
 test('processos: formulário normalizado ao gravar e pergunta sensível recusada', async () => {
   exigirBanco();
@@ -878,14 +901,15 @@ test('processos: formulário normalizado ao gravar e pergunta sensível recusada
     ]
   })]);
   assert.deepEqual(r.rows[0].config.formulario, {
-    campos: { idade: 'oculto', funcao: 'opcional', empresa: 'opcional', email: 'obrigatorio', cidade: 'opcional' },
+    campos: { idade: 'oculto', funcao: 'opcional', empresa: 'opcional', email: 'obrigatorio', cidade: 'opcional', foto: 'opcional' },
     perguntas: [
       { id: 'p1', texto: 'Qual sua pretensão salarial?', obrigatoria: true },
       { id: 'p2', texto: 'Tem disponibilidade aos sábados?', obrigatoria: false },
       { id: 'p3', texto: 'Como soube da vaga?', obrigatoria: false },
       { id: 'carro', texto: 'Tem carro próprio?', obrigatoria: false },
       { id: 'p4', texto: 'Pergunta seis aqui?', obrigatoria: false }
-    ]
+    ],
+    parte2: 'desligada'
   });
   // Formulário inválido vira o padrão; processo sem formulário não ganha a chave (dados antigos intocados).
   const ruim = await logado(U.dono, `insert into public.processos (nome, config) values ('Ruim', $1) returning id, config`, [cfg('x')]);
@@ -1031,7 +1055,9 @@ test('rodar a migração antiga de novo depois da nova não perde a ligação co
   assert.equal(l.telefone, '5511933332222');
   await db.query(MIGRACAO_PESSOAS);
   await db.query(MIGRACAO_EQUIPES);
-  assert.ok((await rpc('anon', null, 'avaliacao_publica', ['PUB1'])).formulario);
+  await db.query(MIGRACAO_PARTE2);
+  await db.query(MIGRACAO_FOTOS);
+  assert.equal((await rpc('anon', null, 'avaliacao_publica', ['PUB1'])).formulario.parte2, 'desligada');
   await limparRespostas();
   assert.equal((await db.query(`select count(*)::int n from public.pessoas`)).rows[0].n, 0);
 });

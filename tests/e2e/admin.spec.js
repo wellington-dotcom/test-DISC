@@ -494,7 +494,7 @@ test.describe('Admin com API (servidor simulado por page.route)', () => {
       ],
       bonus: [{ id: 'perfil_presencial', nome: 'Perfil presencial', campo: 'Perfil presencial', regra: { tipo: 'mapa', pontos: { 4: 10, 5: 15 } } }],
       corte: 70, faixaAvaliar: 55, statusFinalistas: ['finalista', 'aprovado'], permitirAntecedentes: false,
-      formulario: { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto' }, perguntas: [] }
+      formulario: { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto', foto: 'opcional' }, perguntas: [], parte2: 'desligada' }
     });
 
     // Página do processo: link do teste e geração do rascunho
@@ -599,6 +599,22 @@ test.describe('Admin com API (servidor simulado por page.route)', () => {
     await escolher(page, '#proc-campo-email', 'obrigatorio');
     await escolher(page, '#proc-campo-cidade', 'opcional');
 
+    // Segunda parte do teste: pílula desligada para seleção; ao CRIAR segue o tipo (equipe liga) até alguém mexer nela
+    const p2 = page.locator('#proc-parte2');
+    await expect(p2).toHaveAttribute('role', 'switch');
+    await expect(p2).toHaveAttribute('aria-checked', 'false');
+    await escolher(page, '#proc-tipo', 'equipe');
+    await expect(p2).toHaveAttribute('aria-checked', 'true');
+    await expect(page.locator('#proc-parte2-nota')).toContainText('10');
+    await escolher(page, '#proc-tipo', 'selecao');
+    await expect(p2).toHaveAttribute('aria-checked', 'false');
+    await p2.click();
+    await expect(p2).toHaveAttribute('aria-checked', 'true');
+    await p2.click();
+    await escolher(page, '#proc-tipo', 'equipe');
+    await expect(p2).toHaveAttribute('aria-checked', 'false');
+    await escolher(page, '#proc-tipo', 'selecao');
+
     // Perguntas extras: até 5; sensível é recusada (aviso na hora e no salvar)
     for (let i = 0; i < 5; i++) await page.click('#btn-add-pergunta');
     await expect(page.locator('#proc-perguntas > li')).toHaveCount(5);
@@ -619,12 +635,14 @@ test.describe('Admin com API (servidor simulado por page.route)', () => {
     await expect(page.locator('#aviso-geral')).toContainText('Processo criado');
     const salvo = chamadas.find((c) => c.corpo.acao === 'processos.salvar').corpo.processo;
     expect(salvo.config.formulario).toEqual({
-      campos: { idade: 'oculto', funcao: 'opcional', empresa: 'opcional', email: 'obrigatorio', cidade: 'opcional' },
+      campos: { idade: 'oculto', funcao: 'opcional', empresa: 'opcional', email: 'obrigatorio', cidade: 'opcional', foto: 'opcional' },
       perguntas: [
         { id: 'p1', texto: 'Qual sua pretensão salarial?', obrigatoria: true },
         { id: 'p2', texto: 'Tem disponibilidade aos sábados?', obrigatoria: false }
-      ]
+      ],
+      parte2: 'desligada'
     });
+    await expect(page.locator('#proc-parte2-resumo')).toHaveAttribute('data-parte2', 'desligada');
 
     // Página do processo: resumo do que é perguntado
     const resumo = page.locator('#proc-formulario');
@@ -640,6 +658,17 @@ test.describe('Admin com API (servidor simulado por page.route)', () => {
     await expect(page.locator('#proc-campo-idade')).toHaveAttribute('value', 'oculto');
     await expect(page.locator('#pergunta-texto-1')).toHaveValue('Tem disponibilidade aos sábados?');
     await expect(page.locator('#pergunta-obrig-0')).toBeChecked();
+    // Editar não muda a Parte 2 sozinho (nem trocando o tipo); ligar à mão salva 'ligada' e aparece no resumo
+    await expect(p2).toHaveAttribute('aria-checked', 'false');
+    await escolher(page, '#proc-tipo', 'equipe');
+    await expect(p2).toHaveAttribute('aria-checked', 'false');
+    await p2.click();
+    await page.click('#btn-salvar-processo');
+    await expect(page.locator('#aviso-geral')).toContainText('Processo salvo');
+    const editado = chamadas.filter((c) => c.corpo.acao === 'processos.salvar').pop().corpo.processo;
+    expect(editado.config.formulario.parte2).toBe('ligada');
+    await expect(page.locator('#proc-parte2-resumo')).toContainText('Ligada');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
     expect(erros).toEqual([]);
   });
 
@@ -1088,6 +1117,11 @@ const API_SUPABASE_FALSA = `
     listar: function () { return ok({ itens: [] }); },
     processosListar: function () { return ok({ processos: [] }); },
     listarUsuarios: function () { return ok({ usuarios: sb.usuarios.slice() }); },
+    salvarMinhaFoto: function (token, foto) {
+      anotar('salvarMinhaFoto', arguments);
+      dona.foto = foto; sb.usuarios[0].foto = foto;
+      return ok({ foto: foto });
+    },
     listarEmpresas: function () { return ok({ empresas: [] }); },
     clickupStatus: function () { return ok({ configurado: false }); },
     convidarUsuario: function (token, dados) {
@@ -1277,9 +1311,11 @@ const API_EMPRESAS_FALSA = `
   var sb = window.__sb;
   sb.empresas = []; sb.vinculos = []; sb.relacoes = {}; sb.relatorios = []; sb.processos = [];
   sb.pessoas = {
-    'p-bruno': { nome: 'Bruno Lima Costa', telefone: '5511977776666', resultado: { percentuais: { D: 15, I: 25, S: 40, C: 20 }, codigo: 'SI' } },
+    'p-bruno': { nome: 'Bruno Lima Costa', telefone: '5511977776666', resultado: { percentuais: { D: 15, I: 25, S: 40, C: 20 }, codigo: 'SI' },
+      exigido: { percentuais: { D: 34, I: 30, S: 16, C: 20 }, codigo: 'DI' } },
     'p-diego': { nome: 'Diego Rocha', telefone: '5511955554444', resultado: { percentuais: { D: 40, I: 30, S: 20, C: 10 }, codigo: 'DI' } }
   };
+  sb.fotoBruno = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==';
   var seq = 0;
   function id(p) { seq++; return p + seq; }
   function ok(x) { return Promise.resolve(Object.assign({ ok: true }, x || {})); }
@@ -1288,7 +1324,7 @@ const API_EMPRESAS_FALSA = `
   function colab(v) {
     var p = sb.pessoas[v.pessoaId];
     return { vinculoId: v.id, pessoaId: v.pessoaId, nome: p.nome, telefone: p.telefone, cargo: v.cargo, area: v.area, status: v.status,
-      inicio: v.inicio, fim: v.fim, resultado: p.resultado || null, respondidoEm: p.resultado ? '2026-10-01T12:00:00Z' : null };
+      inicio: v.inicio, fim: v.fim, resultado: p.resultado || null, exigido: p.exigido || null, respondidoEm: p.resultado ? '2026-10-01T12:00:00Z' : null };
   }
   function tirarRelacoes(eid, pid) { sb.relacoes[eid] = (sb.relacoes[eid] || []).filter(function (r) { return r.de !== pid && r.para !== pid; }); }
   var resp = function (pid, nome, tel, respostas) {
@@ -1296,7 +1332,11 @@ const API_EMPRESAS_FALSA = `
       inicio: '2026-10-01T12:00:00.000Z', fim: '2026-10-01T12:09:30.000Z', duracaoSeg: 570, avaliacao: 'SEL1', recebidoEm: '2026-10-01T12:10:00.000Z' };
   };
   Object.assign(window.DISC_API, {
-    listar: function () { return ok({ itens: [resp('p-bruno', 'Bruno Lima Costa', '5511977776666', '1234'.repeat(25)), resp('p-diego', 'Diego Rocha', '5511955554444', '4321'.repeat(25))] }); },
+    listar: function () {
+      // Bruno respondeu a Parte 2 (exigido de 40 dígitos: D mais alto); Diego não
+      var bruno = Object.assign(resp('p-bruno', 'Bruno Lima Costa', '5511977776666', '1234'.repeat(25)), { exigido: '4321'.repeat(10), resultadoExigido: null, foto: sb.fotoBruno });
+      return ok({ itens: [bruno, resp('p-diego', 'Diego Rocha', '5511955554444', '4321'.repeat(25))] });
+    },
     processosListar: function () { return ok({ processos: sb.processos.slice() }); },
     processosSalvar: function (t, p) {
       anotar('processosSalvar', arguments);
@@ -1306,6 +1346,11 @@ const API_EMPRESAS_FALSA = `
     },
     relatoriosListar: function () { return ok({ relatorios: [] }); },
     clickupListas: function () { return ok({ listas: [] }); },
+    removerFoto: function (t, rid) {
+      anotar('removerFoto', arguments);
+      if (rid === 'r-p-bruno') sb.fotoBruno = '';
+      return ok({ id: rid, removidas: 1 });
+    },
     listarEmpresas: function () {
       return ok({ empresas: sb.empresas.map(function (e) { return Object.assign({}, e, { colaboradores: ativos(e.id).length }); }) });
     },
@@ -1456,11 +1501,17 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     // Organograma (desenho do relatório num quadro) e mapa de compatibilidade
     const org = page.locator('#emp-organograma');
     await expect(org).toBeVisible();
-    await expect(org.locator('.org .org__filhos .org-cartao')).toContainText(['Bruno L.']);
-    await expect(org.locator('.org')).toContainText('Ana S.');
-    await expect(org.locator('.org-cartao', { hasText: 'Bruno L.' }).locator('.org-cartao__letra')).toHaveClass(/disc-fundo-S/);
+    await expect(org.locator('.orgd-no[data-pessoa="' + idAna + '"] .orgd-filhos .orgd-cartao[data-pessoa="p-bruno"]')).toHaveCount(1);
+    await expect(org.locator('#emp-org-sem .orgd-cartao[data-pessoa="' + idCarla + '"]')).toHaveCount(1);
+    await expect(org.locator('.orgd-cartao[data-pessoa="p-bruno"] .avatar__letra')).toHaveClass(/disc-fundo-S/);
     await expect(page.locator('#emp-compat')).toContainText('Harmonia da equipe');
     await expect(page.locator('#emp-pares > li')).toHaveCount(2);
+
+    // Mapa ritmo × foco com quem tem teste e esforço de adaptação de quem respondeu a Parte 2 (só o Bruno)
+    await expect(page.locator('#emp-mapa svg')).toHaveCount(1);
+    await expect(page.locator('#emp-esforco > li')).toHaveCount(1);
+    await expect(page.locator('#emp-esforco > li[data-pessoa="p-bruno"] .esforco-selo')).toHaveText(/^Esforço /);
+    await expect(bruno.locator('.colab-card__esforco')).toContainText('índice');
 
     // Relatório da equipe com o encaixe de um candidato (Diego, de um processo)
     await page.click('#btn-relatorio-equipe');
@@ -1500,6 +1551,18 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     expect(lidSalvo.dados.lider).toBeTruthy();
     await page.click('#btn-voltar-relatorio');
 
+    // Relatório da pessoa: completo por padrão; "Simples" troca a prévia e é o que se publica
+    await bruno.locator('[data-acao="relatorio-pessoa"]').click();
+    await expect(page.locator('#btn-rel-completo')).toHaveAttribute('aria-pressed', 'true');
+    await page.click('#btn-rel-simples');
+    await expect(page.locator('#btn-rel-simples')).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.locator('#rel-modelo-previa')).toBeVisible();
+    await page.click('#btn-rel-publicar');
+    const pesSalvo = (await chamadasSb(page, 'salvarRelatorioModelo')).pop()[1];
+    expect(pesSalvo).toMatchObject({ modelo: 'pessoa', pessoaId: 'p-bruno', publicar: true });
+    expect(pesSalvo.dados.variante).toBe('simples');
+    await page.click('#btn-voltar-relatorio');
+
     // Mover a Carla para a Filial Norte: some da lista e vai para o histórico
     await page.locator('#lista-colaboradores > li[data-nome="Carla Dias"] [data-acao="mover"]').click();
     await page.click('#janela-ok');
@@ -1529,6 +1592,20 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await page.locator('.aba[data-aba="lista"]').click();
     await page.locator('#lista-candidatos > li', { hasText: 'Bruno Lima Costa' }).getByRole('button', { name: /Ver detalhes/ }).click();
     await expect(page.locator('#det-vinculo')).toContainText('Colaborador(a) de Loja Modelo');
+    // Natural × exigido, índice de esforço e mapa (Bruno respondeu a Parte 2; Diego não)
+    await expect(page.locator('#det-parte2')).toBeVisible();
+    // Foto enviada na resposta: aparece no detalhe e o admin pode removê-la (LGPD)
+    await expect(page.locator('.det-avatar img')).toHaveCount(1);
+    await page.click('#btn-remover-foto');
+    await page.click('#confirmar-ok');
+    await expect(page.locator('#aviso-geral')).toHaveText('Foto removida.');
+    expect((await chamadasSb(page, 'removerFoto')).pop().slice(1)).toEqual(['r-p-bruno']);
+    await expect(page.locator('.det-avatar img')).toHaveCount(0);
+    await expect(page.locator('#btn-remover-foto')).toHaveCount(0);
+    await expect(page.locator('#det-natural-exigido > li')).toHaveCount(4);
+    await expect(page.locator('#det-esforco-indice')).toHaveText(/^\d+$/);
+    await expect(page.locator('#det-esforco .esforco-selo')).toHaveText(/^Esforço /);
+    await expect(page.locator('#det-mapa svg')).toHaveCount(1);
     await expect(page.locator('#btn-det-como-liderar')).toBeVisible();
     await page.click('#btn-det-rel-pessoa');
     await expect(page.locator('#rel-modelo-previa')).toBeVisible();
@@ -1537,8 +1614,153 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await page.keyboard.press('Escape');
     await page.locator('#lista-candidatos > li', { hasText: 'Diego Rocha' }).getByRole('button', { name: /Ver detalhes/ }).click();
     await expect(page.locator('#det-vinculo')).toHaveText('Sem vínculo ativo com empresa cadastrada.');
+    await expect(page.locator('#det-parte2')).toHaveCount(0);
     await expect(page.locator('#btn-det-como-liderar')).toHaveCount(0);
 
+    expect(erros.filter((e) => !/Blocked script execution in 'about:srcdoc'/.test(e))).toEqual([]);
+  });
+
+  test('organograma de arrastar: soltar sobre um cartão vira liderado, ciclo recusado, Topo, Sem posição e "Mover para…"', async ({ page }) => {
+    const erros = coletarErros(page);
+    await simularEmpresas(page);
+    await page.goto('/admin.html');
+    await entrar(page, 'dona@empresa.com', 'senha-boa-1');
+    await page.locator('.aba[data-aba="empresas"]').click();
+    await page.click('#btn-nova-empresa');
+    await page.fill('#emp-nome', 'Loja Modelo');
+    await page.click('#janela-ok');
+    for (const [nome, tel] of [['Ana Souza', '11988881111'], ['Carla Dias', '11977770000']]) {
+      await page.click('#btn-add-colaborador');
+      await page.fill('#colab-nome', nome);
+      await page.fill('#colab-telefone', tel);
+      await page.click('#janela-ok');
+    }
+    await page.click('#btn-add-colaborador');
+    await escolherBusca(page, 'colab-pessoa', 'Bruno');
+    await page.click('#janela-ok');
+    await expect(page.locator('#lista-colaboradores > li')).toHaveCount(3);
+    const id = async (nome) => page.locator('#lista-colaboradores > li[data-nome="' + nome + '"]').getAttribute('data-pessoa');
+    const idAna = await id('Ana Souza'), idCarla = await id('Carla Dias');
+    // Todos começam em "Sem posição"
+    await expect(page.locator('#emp-org-sem .orgd-cartao')).toHaveCount(3);
+    await expect(page.locator('#emp-org-arvore')).toHaveCount(0);
+
+    async function arrastar(de, para) {
+      await page.locator('#emp-organograma').evaluate((n) => n.scrollIntoView({ block: 'start' }));
+      // Espera a animação do redesenho (FLIP) terminar antes de medir os cartões
+      await page.waitForFunction(() => ![...document.querySelectorAll('.orgd-cartao')].some((n) => n.style.transform || n.style.transition));
+      const a = await page.locator(de).first().boundingBox();
+      const b = await page.locator(para).first().boundingBox();
+      await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
+      await page.mouse.down();
+      await page.mouse.move(a.x + a.width / 2 + 10, a.y + a.height / 2 + 10, { steps: 3 });
+      await expect(page.locator('.orgd-fantasma')).toHaveCount(1);
+      await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 12 });
+      await page.mouse.up();
+    }
+    const cartao = (pid) => '.orgd-cartao[data-pessoa="' + pid + '"] .orgd-nome';
+    const salvas = async () => (await chamadasSb(page, 'salvarRelacoes')).map((c) => c[2]);
+
+    // Ana no Topo; Bruno e Carla sobre a Ana (liderados); salva uma vez só depois de parar (debounce)
+    await arrastar(cartao(idAna), '#emp-org-topo');
+    await expect(page.locator('#emp-org-arvore > .orgd-no[data-pessoa="' + idAna + '"]')).toHaveCount(1);
+    await arrastar(cartao('p-bruno'), cartao(idAna));
+    await arrastar(cartao(idCarla), cartao(idAna));
+    await expect(page.locator('#emp-org-status')).toHaveText('Salvo');
+    let rels = (await salvas()).pop();
+    expect(rels).toEqual([{ de: idAna, para: 'p-bruno', tipo: 'lidera' }, { de: idAna, para: idCarla, tipo: 'lidera' }]);
+    await expect(page.locator('.orgd-no[data-pessoa="' + idAna + '"] > .orgd-filhos > .orgd-no')).toHaveCount(2);
+    await expect(page.locator('#emp-org-sem .orgd-cartao')).toHaveCount(0);
+    // A compatibilidade e os cartões acompanham
+    await expect(page.locator('#lista-colaboradores > li[data-nome="Bruno Lima Costa"] .colab-card__ligacoes')).toContainText('Líder: Ana Souza');
+
+    // Carla passa para baixo do Bruno (troca de líder)
+    await arrastar(cartao(idCarla), cartao('p-bruno'));
+    await expect(page.locator('.orgd-no[data-pessoa="p-bruno"] .orgd-cartao[data-pessoa="' + idCarla + '"]')).toHaveCount(1);
+    // Ciclo: Ana sobre a Carla (liderada indireta dela) é recusado com aviso na página
+    await arrastar(cartao(idAna), cartao(idCarla));
+    await expect(page.locator('#emp-org-aviso')).toContainText('Não dá para colocar Ana Souza abaixo de Carla Dias');
+    await expect(page.locator('#emp-org-status')).toHaveText('Salvo');
+    rels = (await salvas()).pop();
+    expect(rels).toContainEqual({ de: 'p-bruno', para: idCarla, tipo: 'lidera' });
+    expect(rels.filter((r) => r.para === idAna)).toEqual([]);
+
+    // "Mover para…" (sem arrastar, por teclado): Bruno para "Sem posição" — Carla, liderada dele, sobe para o Topo
+    await page.locator('.orgd-cartao[data-pessoa="p-bruno"] [data-acao="mover-org"]').focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#janela-mover-org')).toBeVisible();
+    // Opções não incluem a própria pessoa nem quem ela lidera
+    await page.click('#org-destino');
+    await expect(page.locator('#org-destino-lista [role="option"][data-valor="' + idAna + '"]')).toHaveCount(1);
+    await expect(page.locator('#org-destino-lista [role="option"][data-valor="' + idCarla + '"]')).toHaveCount(0);
+    await expect(page.locator('#org-destino-lista [role="option"][data-valor="p-bruno"]')).toHaveCount(0);
+    await page.fill('#org-destino-busca', 'Sem posição');
+    await page.locator('#org-destino-lista [role="option"]', { hasText: 'Sem posição' }).first().click();
+    await page.click('#janela-ok');
+    await expect(page.locator('#emp-org-sem .orgd-cartao[data-pessoa="p-bruno"]')).toHaveCount(1);
+    await expect(page.locator('#emp-org-arvore > .orgd-no[data-pessoa="' + idCarla + '"]')).toHaveCount(1);
+    await expect(page.locator('#emp-org-status')).toHaveText('Salvo');
+    rels = (await salvas()).pop();
+    expect(rels).toEqual([]);
+    expect(erros.filter((e) => !/Blocked script execution in 'about:srcdoc'/.test(e))).toEqual([]);
+  });
+
+  test('"Minha foto": envia pelo menu (reduzida para JPEG), aparece no topo e na aba Usuários; celular 375px no organograma', async ({ page }) => {
+    const erros = coletarErros(page);
+    await page.setViewportSize({ width: 375, height: 800 });
+    await simularEmpresas(page);
+    await page.goto('/admin.html');
+    await entrar(page, 'dona@empresa.com', 'senha-boa-1');
+    await expect(page.locator('#usuario-inicial img')).toHaveCount(0);
+    await page.click('#btn-usuario');
+    await page.click('#btn-minha-foto');
+    await expect(page.locator('#janela-minha-foto')).toBeVisible();
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAEElEQVR4nGP47MIKRwzEcQAQshPB9DJ7EQAAAABJRU5ErkJggg==', 'base64');
+    await page.setInputFiles('#minha-foto-arquivo', { name: 'eu.png', mimeType: 'image/png', buffer: png });
+    await expect(page.locator('#minha-foto-status')).toContainText('Foto pronta');
+    await expect(page.locator('#minha-foto-previa img')).toHaveCount(1);
+    await page.click('#janela-ok');
+    await expect(page.locator('#aviso-geral')).toHaveText('Foto salva.');
+    const foto = (await chamadasSb(page, 'salvarMinhaFoto'))[0][1];
+    expect(foto).toMatch(/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/);
+    expect(foto.length).toBeLessThanOrEqual(40000);
+    await expect(page.locator('#usuario-inicial img')).toHaveCount(1);
+    await page.locator('.aba[data-aba="usuarios"]').click();
+    await expect(page.locator('#lista-usuarios li[data-email="dona@empresa.com"] .avatar img')).toHaveCount(1);
+    await expect(page.locator('#lista-usuarios li[data-email="pendente@empresa.com"] .avatar__iniciais')).toHaveText('CP');
+    // Remover
+    await page.click('#btn-usuario');
+    await page.click('#btn-minha-foto');
+    await page.click('#btn-minha-foto-remover');
+    await page.click('#janela-ok');
+    await expect(page.locator('#aviso-geral')).toHaveText('Foto removida.');
+    expect((await chamadasSb(page, 'salvarMinhaFoto'))[1][1]).toBe('');
+    await expect(page.locator('#usuario-inicial img')).toHaveCount(0);
+
+    // Organograma no celular: faixa "Sem posição" acima, sem rolagem lateral; "Mover para…" coloca no Topo
+    await page.locator('.aba[data-aba="empresas"]').click();
+    await page.click('#btn-nova-empresa');
+    await page.fill('#emp-nome', 'Loja Modelo');
+    await page.click('#janela-ok');
+    for (const [nome, tel] of [['Maria Eduarda Albuquerque Figueiredo', '11988881111'], ['Ana Souza', '11977770000']]) {
+      await page.click('#btn-add-colaborador');
+      await page.fill('#colab-nome', nome);
+      await page.fill('#colab-telefone', tel);
+      await page.fill('#colab-cargo', 'Coordenadora de atendimento ao cliente');
+      await page.click('#janela-ok');
+    }
+    await expect(page.locator('#emp-org-sem .orgd-cartao')).toHaveCount(2);
+    expect(await semRolagemLateral(page)).toBe(true);
+    const semY = (await page.locator('#emp-org-sem').boundingBox()).y;
+    const topoY = (await page.locator('#emp-org-topo').boundingBox()).y;
+    expect(semY).toBeLessThan(topoY);
+    await page.locator('#emp-org-sem .orgd-cartao[data-nome="Ana Souza"] [data-acao="mover-org"]').click();
+    await escolherBusca(page, 'org-destino', 'Topo');
+    await page.click('#janela-ok');
+    await expect(page.locator('#emp-org-arvore .orgd-cartao[data-nome="Ana Souza"]')).toHaveCount(1);
+    expect(await semRolagemLateral(page)).toBe(true);
+    const alca = await page.locator('.orgd-alca').first().evaluate((n) => getComputedStyle(n).touchAction);
+    expect(alca).toBe('none');
     expect(erros.filter((e) => !/Blocked script execution in 'about:srcdoc'/.test(e))).toEqual([]);
   });
 
@@ -1626,13 +1848,62 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await expect(page.locator('#lista-colaboradores > li').first()).toBeVisible();
     const n = await page.locator('#lista-colaboradores > li').count();
     await expect(page.locator('#vista-empresas .emp-secao__titulo')).toHaveText('Colaboradores ativos (' + n + ')');
-    await expect(page.locator('#emp-organograma .org, #emp-organograma .orgf-arvore')).toHaveCount(1);
+    await expect(page.locator('#emp-organograma .orgd-cartao')).toHaveCount(n);
     await expect(page.locator('#emp-compat')).toContainText('Harmonia da equipe');
     await page.click('#btn-relatorio-equipe');
     await page.click('#janela-ok');
     await expect(page.locator('#rel-modelo-previa')).toBeVisible();
     await page.click('#btn-rel-publicar');
     await expect(page.locator('#rel-modelo-link')).toContainText('relatorio.html');
+    expect(erros.filter((e) => !/Blocked script execution in 'about:srcdoc'/.test(e))).toEqual([]);
+  });
+
+  test('prévia (API simulada, celular 375px): Parte 2 ligada no processo da equipe, mapa ritmo × foco, esforço e detail natural × exigido', async ({ page }) => {
+    const erros = coletarErros(page);
+    await page.setViewportSize({ width: 375, height: 800 });
+    await configurar(page, { API_URL: 'simulada' });
+    await page.goto('/admin.html');
+    await entrar(page, 'admin@previa.com', 'previa123');
+
+    // Contagens do seed (não números fixos): colaboradores e quantos têm a Parte 2
+    await page.locator('.aba[data-aba="empresas"]').click();
+    const card = page.locator('#lista-empresas > li').first();
+    await card.locator('[data-acao="abrir"]').click();
+    await expect(page.locator('#lista-colaboradores > li').first()).toBeVisible();
+    const comTeste = await page.locator('#lista-colaboradores > li .colab-card__codigo').count();
+    const comEsforco = await page.locator('#lista-colaboradores > li .colab-card__esforco').count();
+    expect(comEsforco).toBeGreaterThan(0);
+    await expect(page.locator('#emp-mapa svg')).toHaveCount(1);
+    await expect(page.locator('#emp-esforco > li')).toHaveCount(comEsforco);
+    expect(comTeste).toBeGreaterThanOrEqual(comEsforco);
+    // Do maior para o menor esforço
+    const indices = await page.locator('#emp-esforco .esforco-item__indice').allTextContents();
+    expect(indices.map(Number)).toEqual(indices.map(Number).slice().sort((a, b) => b - a));
+    expect(await semRolagemLateral(page)).toBe(true);
+
+    // Processo da equipe: resumo "Segunda parte do teste: Ligada"
+    await page.locator('#emp-link').getByRole('button', { name: 'Abrir o processo' }).click();
+    await expect(page.locator('#proc-parte2-resumo')).toHaveAttribute('data-parte2', 'ligada');
+    await expect(page.locator('#proc-parte2-resumo')).toContainText('Ligada');
+    expect(await semRolagemLateral(page)).toBe(true);
+
+    // Detalhe de uma resposta com a Parte 2
+    await page.locator('.aba[data-aba="lista"]').click();
+    const linhas = page.locator('#lista-candidatos > li');
+    await expect(linhas.first()).toBeVisible();
+    const n = await linhas.count();
+    let achou = false;
+    for (let i = 0; i < n && !achou; i++) {
+      await linhas.nth(i).getByRole('button', { name: /Ver detalhes/ }).click();
+      await expect(page.locator('#vista-detalhe h2')).toBeVisible();
+      if (await page.locator('#det-parte2').count()) achou = true;
+      else await page.keyboard.press('Escape');
+    }
+    expect(achou).toBe(true);
+    await expect(page.locator('#det-natural-exigido > li')).toHaveCount(4);
+    await expect(page.locator('#det-esforco-indice')).toHaveText(/^\d+$/);
+    await expect(page.locator('#det-mapa svg')).toHaveCount(1);
+    expect(await semRolagemLateral(page)).toBe(true);
     expect(erros.filter((e) => !/Blocked script execution in 'about:srcdoc'/.test(e))).toEqual([]);
   });
 });

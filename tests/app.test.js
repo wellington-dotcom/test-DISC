@@ -349,7 +349,7 @@ test('deveMostrarDemo: só no primeiro grupo e até ser vista', () => {
 });
 
 test('normalizarFormulario: padrão, modos válidos, perguntas (texto, id, sensível, máximo 5)', () => {
-  const padrao = { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto' }, perguntas: [] };
+  const padrao = { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto', foto: 'opcional' }, perguntas: [], parte2: 'desligada' };
   assert.deepEqual(A.normalizarFormulario(undefined), padrao);
   assert.deepEqual(A.normalizarFormulario('lixo'), padrao);
   assert.deepEqual(A.normalizarFormulario({ campos: { idade: 'talvez', email: 'obrigatorio' } }).campos,
@@ -392,7 +392,7 @@ test('validarCamposFormulario e camposDoPayload seguem o formulário', () => {
 
   const c = A.camposDoPayload({ idade: '', funcao: 'Caixa', empresa: '  Loja  Azul ', email: ' ana@loja.com.br ', cidade: 'Campinas',
     extras: { p1: '  R$ 2 mil ', p2: '', p9: 'não existe' } }, form);
-  assert.deepEqual(c, { idade: null, funcao: '', empresa: 'Loja Azul', email: 'ana@loja.com.br', cidade: 'Campinas',
+  assert.deepEqual(c, { idade: null, funcao: '', empresa: 'Loja Azul', email: 'ana@loja.com.br', cidade: 'Campinas', foto: '',
     extras: [{ id: 'p1', pergunta: 'Qual sua pretensão?', resposta: 'R$ 2 mil' }] });
   assert.equal(A.limparResposta('x'.repeat(600)).length, 500);
   // Ocultos não vão, mesmo com valor salvo
@@ -431,4 +431,128 @@ test('etapaRetomada: sem revisão; progresso antigo cai num destino válido', ()
   assert.equal(A.etapaRetomada({ etapa: 'confirmacao', confTela: 2, ordens, respondidos: todos }, 25, true).confTela, 2);
   // Modo demonstração: só os N primeiros contam
   assert.equal(A.etapaRetomada({ etapa: 'revisao', ordens, respondidos: faltando }, 3, true).etapa, 'confirmacao');
+});
+
+/* ---------------- Parte 2 (perfil exigido pelo trabalho) ---------------- */
+
+test('Parte 2: normalizarFormulario guarda parte2 (só "ligada" liga) e parte2Ligada', () => {
+  assert.equal(A.normalizarFormulario({ parte2: 'ligada' }).parte2, 'ligada');
+  assert.equal(A.normalizarFormulario({ parte2: 'sim' }).parte2, 'desligada');
+  assert.equal(A.normalizarFormulario({ parte2: true }).parte2, 'desligada');
+  assert.equal(A.normalizarFormulario(undefined).parte2, 'desligada');
+  assert.equal(A.formularioEfetivo({ parte2: 'ligada' }, 'equipe').parte2, 'ligada');
+  assert.equal(A.parte2Ligada({ parte2: 'ligada' }), true);
+  assert.equal(A.parte2Ligada({ parte2: 'desligada' }), false);
+  assert.equal(A.parte2Ligada(null), false);
+  assert.deepEqual(A.GRUPOS_PARTE2, [0, 2, 5, 7, 10, 12, 15, 17, 20, 22]);
+  assert.equal(A.PERGUNTAS_PARTE2.length, 10);
+  assert.ok(A.PERGUNTAS_PARTE2.every((t) => /trabalho/.test(t)));
+});
+
+test('Parte 2: exigidoDasOrdens gera 40 dígitos (D,I,S,C por grupo; topo = 4) e "" se faltar grupo', () => {
+  const ordens = Array.from({ length: 10 }, (_, k) => (k % 2 ? ['C', 'S', 'I', 'D'] : ['D', 'I', 'S', 'C']));
+  const ex = A.exigidoDasOrdens(ordens);
+  assert.match(ex, /^[1-4]{40}$/);
+  assert.equal(ex.slice(0, 8), '4321' + '1234');
+  for (let g = 0; g < 10; g++) assert.deepEqual(ex.slice(g * 4, g * 4 + 4).split('').sort().join(''), '1234');
+  const falta = ordens.slice(); falta[9] = null;
+  assert.equal(A.exigidoDasOrdens(falta), '');
+  assert.equal(A.exigidoDasOrdens(ordens.slice(0, 9)), '');
+  assert.equal(A.exigidoDasOrdens(null), '');
+  const perm = A.gerarPermutacoes2(prng(5));
+  assert.equal(perm.length, 10);
+  assert.ok(perm.every(A.ordemValida));
+});
+
+test('Parte 2: montarPayload leva exigido só com parte2 ligada (e recusa Parte 2 incompleta)', () => {
+  const ordens = Array.from({ length: 25 }, () => ['D', 'I', 'S', 'C']);
+  const ordens2 = Array.from({ length: 10 }, () => ['S', 'C', 'D', 'I']);
+  const dados = { id: 'abc123-p2', nome: 'Ana Souza', telefone: '11999998888', idade: '30', consentimento: true, ordens2 };
+  const com = A.montarPayload(dados, ordens, null, { parte2: 'ligada' });
+  assert.equal(com.exigido, '2143'.repeat(10));
+  assert.match(com.exigido, /^[1-4]{40}$/);
+  assert.equal(com.respostas.length, 100);
+  const sem = A.montarPayload(dados, ordens, null, { parte2: 'desligada' });
+  assert.equal('exigido' in sem, false);
+  assert.equal('exigido' in A.montarPayload(dados, ordens), false);
+  const incompleta = Object.assign({}, dados, { ordens2: ordens2.slice(0, 9) });
+  assert.throws(() => A.montarPayload(incompleta, ordens, null, { parte2: 'ligada' }), /segunda parte/i);
+});
+
+test('Parte 2: migrarProgresso normaliza ordens2/respondidos2/grupo2', () => {
+  const m = A.migrarProgresso({ ordens: [], respondidos: [], ordens2: [['D', 'I', 'S', 'C'], ['X'], ['C', 'S', 'I', 'D']], respondidos2: [true, true, false], grupo2: 2 });
+  assert.equal(m.ordens2.length, 10);
+  assert.equal(m.respondidos2.length, 10);
+  assert.deepEqual(m.respondidos2.slice(0, 3), [true, false, false]);
+  assert.equal(m.ordens2[1], null);
+  assert.equal(m.grupo2, 2);
+  assert.equal(A.migrarProgresso({ ordens: [], grupo2: 40 }).grupo2, 0);
+  const antigo = A.migrarProgresso({ ordens: [], respondidos: [] });
+  assert.ok(antigo.respondidos2.every((r) => r === false));
+});
+
+test('Parte 2: modo demonstração reduz a Parte 2 e completa o resto ao acaso', () => {
+  assert.equal(A.gruposParte2DoTeste({}), 10);
+  assert.equal(A.gruposParte2DoTeste({ GRUPOS_DEMONSTRACAO: 3 }), 3);
+  assert.equal(A.gruposParte2DoTeste({ GRUPOS_DEMONSTRACAO: 20 }), 10);
+  const c = A.completarGruposDemonstracao([['D', 'I', 'S', 'C']], [true], 3, prng(11), 10);
+  assert.equal(c.ordens.length, 10);
+  assert.deepEqual(c.ordens[0], ['D', 'I', 'S', 'C']);
+  assert.deepEqual(c.preenchidos, [3, 4, 5, 6, 7, 8, 9]);
+  assert.ok(c.ordens.slice(3).every(A.ordemValida));
+});
+
+test('Parte 2: etapaRetomada passa pela transição e retoma no meio da Parte 2', () => {
+  const ordens = Array.from({ length: 25 }, () => ['D', 'I', 'S', 'C']);
+  const todos = Array.from({ length: 25 }, () => true);
+  const perm2 = Array.from({ length: 10 }, () => ['D', 'I', 'S', 'C']);
+  const base = { ordens, respondidos: todos, permutacoes: ordens };
+  // Sem p2: igual a antes
+  assert.deepEqual(A.etapaRetomada(Object.assign({ etapa: 'confirmacao' }, base), 25, true), { etapa: 'confirmacao', grupo: 0, confTela: 1 });
+  // Parte 1 completa, Parte 2 não começada: transição
+  assert.equal(A.etapaRetomada(Object.assign({ etapa: 'confirmacao' }, base), 25, true, { n: 10 }).etapa, 'parte2-intro');
+  // Parou no grupo 4 da Parte 2 (0..3 respondidos)
+  const meio = Object.assign({ etapa: 'parte2', grupo2: 4, permutacoes2: perm2, ordens2: perm2.slice(0, 4), respondidos2: [true, true, true, true] }, base);
+  assert.deepEqual(A.etapaRetomada(meio, 25, true, { n: 10 }), { etapa: 'parte2', grupo: 0, confTela: 1, grupo2: 4 });
+  // Etapa antiga (enviando) com a Parte 2 pela metade: primeiro grupo que falta
+  assert.equal(A.etapaRetomada(Object.assign({}, meio, { etapa: 'enviando' }), 25, true, { n: 10 }).grupo2, 4);
+  // Parte 2 completa: confirmação
+  const completa = Object.assign({}, meio, { etapa: 'confirmacao', ordens2: perm2, respondidos2: perm2.map(() => true) });
+  assert.equal(A.etapaRetomada(completa, 25, true, { n: 10 }).etapa, 'confirmacao');
+  // Parte 1 incompleta: continua na parte 1
+  const falta = todos.slice(); falta[3] = false;
+  assert.deepEqual(A.etapaRetomada(Object.assign({}, meio, { respondidos: falta }), 25, true, { n: 10 }), { etapa: 'teste', grupo: 3, confTela: 1, grupo2: 4 });
+  // Modo demonstração: só os N2 primeiros da Parte 2 contam
+  assert.equal(A.etapaRetomada(Object.assign({}, meio, { etapa: 'confirmacao' }), 25, true, { n: 3 }).etapa, 'confirmacao');
+});
+
+/* ---------------- Foto ---------------- */
+const FOTO_OK = 'data:image/jpeg;base64,' + 'A'.repeat(200) + '==';
+
+test('fotoValida: só data URL JPEG em base64 e até 40 000 caracteres', () => {
+  assert.equal(A.fotoValida(FOTO_OK), true);
+  assert.equal(A.fotoValida('data:image/png;base64,AAAA'), false);
+  assert.equal(A.fotoValida('https://exemplo.com/foto.jpg'), false);
+  assert.equal(A.fotoValida('data:image/jpeg;base64,AA AA'), false);
+  assert.equal(A.fotoValida('data:image/jpeg;base64,' + 'A'.repeat(40000)), false);
+  assert.equal(A.fotoValida(''), false);
+  assert.equal(A.fotoValida(null), false);
+  assert.deepEqual(A.recorteCentro(400, 300), { sx: 50, sy: 0, lado: 300 });
+  assert.deepEqual(A.recorteCentro(300, 500), { sx: 0, sy: 100, lado: 300 });
+});
+
+test('foto no formulário: padrão opcional; obrigatória bloqueia; oculta não vai no payload', () => {
+  assert.equal(A.normalizarFormulario(undefined).campos.foto, 'opcional');
+  assert.equal(A.validarCamposFormulario({ idade: '30' }, undefined).foto, undefined);
+  const obrig = { campos: { idade: 'oculto', foto: 'obrigatorio' } };
+  assert.equal(A.validarCamposFormulario({}, obrig).foto, 'Envie uma foto.');
+  assert.equal(A.validarCamposFormulario({ foto: 'data:image/png;base64,AAAA' }, obrig).foto, 'Envie uma foto.');
+  assert.deepEqual(A.validarCamposFormulario({ foto: FOTO_OK }, obrig), {});
+  assert.equal(A.camposDoPayload({ foto: FOTO_OK }, obrig).foto, FOTO_OK);
+  assert.equal(A.camposDoPayload({ foto: FOTO_OK }, { campos: { foto: 'oculto' } }).foto, '');
+  assert.equal(A.camposDoPayload({ foto: 'lixo' }, undefined).foto, '');
+  const ordens = Array.from({ length: 25 }, () => ['D', 'I', 'S', 'C']);
+  const p = A.montarPayload({ id: 'abc123-f', nome: 'Ana Souza', telefone: '11999998888', idade: '30', consentimento: true, foto: FOTO_OK }, ordens);
+  assert.equal(p.foto, FOTO_OK);
+  assert.equal(A.montarPayload({ id: 'abc123-g', nome: 'Ana Souza', telefone: '11999998888', idade: '30', consentimento: true }, ordens).foto, '');
 });

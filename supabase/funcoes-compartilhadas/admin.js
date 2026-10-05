@@ -206,7 +206,8 @@ function usuarioDaLista(admin, u, eu) {
     criadoEm: admin.criado_em || u.created_at || '',
     ultimoAcesso: u.last_sign_in_at || '',
     convitePendente: !!(u.invited_at && !u.last_sign_in_at),
-    voce: String(admin.user_id) === String(eu)
+    voce: String(admin.user_id) === String(eu),
+    foto: typeof admin.foto === 'string' && admin.foto.length <= 40000 && /^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/=]+$/.test(admin.foto) ? admin.foto : ''
   };
 }
 

@@ -37,7 +37,7 @@
  *   Pública:   relatorioPublico(relatorioToken) -> {relatorio} (só relatório publicado)
  *   Só Supabase (aqui rejeitam com "Disponível só com o servidor Supabase."): listarEquipe, salvarColaborador,
  *              moverColaborador, desligarColaborador, salvarRelacoes, salvarRelatorioModelo, listarRelatoriosModelo,
- *              excluirRelatorioModelo (contrato em js/api-supabase.js e docs/SPEC.md).
+ *              excluirRelatorioModelo, salvarMinhaFoto, removerFoto (contrato em js/api-supabase.js e docs/SPEC.md).
  *   Utilitários: protocoloValido, normalizarProtocolo, normalizarCodigoAvaliacao, codigoAvaliacaoDaUrl.
  */
 (function (root) {
@@ -300,6 +300,8 @@
     salvarRelatorioModelo: soSupabase,
     listarRelatoriosModelo: soSupabase,
     excluirRelatorioModelo: soSupabase,
+    salvarMinhaFoto: soSupabase,
+    removerFoto: soSupabase,
 
     // --- pública: página do relatório para o contratante ---
     relatorioPublico: seguro(function (relatorioToken) {
@@ -317,7 +319,7 @@
     'relatorioRascunho', 'relatorioSalvar', 'relatorioPublicar', 'relatorioDespublicar', 'relatoriosListar',
     'relatorioMelhorarTextos', 'relatorioPublico',
     'listarEquipe', 'salvarColaborador', 'moverColaborador', 'desligarColaborador', 'salvarRelacoes',
-    'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo'];
+    'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo', 'salvarMinhaFoto', 'removerFoto'];
 
   if (typeof module !== 'undefined' && module.exports) module.exports = DISC_API;
   else root.DISC_API = DISC_API;

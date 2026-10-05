@@ -137,3 +137,85 @@ test('textos dos motivos sem termos proibidos e pontos sempre entre 0 e 100', ()
     r.motivos.forEach((m) => assert.ok(!PROIBIDOS.test(m), m));
   });
 });
+
+// ---- Rodada 3: novos sinais ----
+function respDe(grupos) {
+  // grupos: lista de [letras em ordem de preferência, quantidade]
+  const out = [];
+  grupos.forEach(([ordem, n]) => {
+    for (let i = 0; i < n; i++) {
+      const g = {};
+      ordem.forEach((l, j) => { g[l] = 4 - j; });
+      out.push(g);
+    }
+  });
+  return S.compactar(out);
+}
+
+test('perfil achatado também quando todos os fatores ficam entre 20% e 30% (um só alerta)', () => {
+  // 9 grupos I>D>C>S e 16 grupos S>C>D>I => D 23,6 · I 20,8 · S 29,2 · C 26,4 (amplitude 8,4: só a regra 20–30 pega)
+  const resp = respDe([[['I', 'D', 'C', 'S'], 9], [['S', 'C', 'D', 'I'], 16]]);
+  const r = C.avaliar(resp, validacao({ pares: [['S', 'D'], ['C', 'I'], ['S', 'I']], escolhas: ['S', 'C', 'S'] }));
+  const p = S.calcular(S.descompactar(resp)).percentuais;
+  assert.ok(['D', 'I', 'S', 'C'].every((l) => p[l] >= 20 && p[l] <= 30), JSON.stringify(p));
+  assert.ok(r.detalhes.amplitude >= 8);
+  assert.equal(r.detalhes.achatado, true);
+  assert.equal(r.detalhes.alertasLeves.filter((m) => /pouco definido/.test(m)).length, 1);
+  assert.equal(C.avaliar(RESP, validacao()).detalhes.achatado, false);
+});
+
+test('fatores opostos altos (D e S, I e C) => alerta leve para conversar, não de fraude', () => {
+  // D>S>I>C e S>D>C>I alternados => D 35, S 35, I 15, C 15
+  const ds = respDe([[['D', 'S', 'I', 'C'], 13], [['S', 'D', 'C', 'I'], 12]]);
+  const r = C.avaliar(ds, validacao({ pares: [['D', 'C'], ['S', 'I'], ['D', 'I']], escolhas: ['D', 'S', 'D'] }));
+  assert.deepEqual(r.detalhes.opostos, ['DS']);
+  const msg = r.detalhes.alertasLeves.find((m) => /opostos/.test(m));
+  assert.ok(msg, 'sem alerta de opostos');
+  assert.match(msg, /conversar/);
+  assert.ok(!/fraude|mentir|falso|engan/i.test(msg));
+  assert.ok(!PROIBIDOS.test(msg), msg);
+  assert.deepEqual(r.detalhes.alertasFortes, []);
+  assert.equal(r.nivel, 'alta'); // um leve só não derruba o selo
+  // I e C
+  const ic = respDe([[['I', 'C', 'D', 'S'], 13], [['C', 'I', 'S', 'D'], 12]]);
+  assert.deepEqual(C.avaliar(ic, validacao()).detalhes.opostos, ['IC']);
+  // perfil comum não acusa
+  assert.deepEqual(C.avaliar(RESP, validacao()).detalhes.opostos, []);
+});
+
+test('tempo total: < 4 min ou > 30 min => alerta leve; fonte opcoes > validacao > soma dos grupos', () => {
+  const base = C.avaliar(RESP, validacao(), { duracaoSeg: 600 });
+  assert.equal(base.detalhes.tempo, null);
+  assert.equal(base.detalhes.duracaoSeg, 600);
+  assert.equal(base.detalhes.tempoFonte, 'payload');
+
+  const curto = C.avaliar(RESP, validacao(), { duracaoSeg: 180 });
+  assert.equal(curto.detalhes.tempo, 'curto');
+  assert.ok(curto.detalhes.alertasLeves.some((m) => /cerca de 3 minutos/.test(m)));
+  assert.ok(curto.pontos < base.pontos);
+
+  const longo = C.avaliar(RESP, validacao({ duracaoSeg: 2400 }));
+  assert.equal(longo.detalhes.tempoFonte, 'validacao');
+  assert.equal(longo.detalhes.tempo, 'longo');
+  assert.ok(longo.detalhes.alertasLeves.some((m) => /40 minutos/.test(m) && /interrup/.test(m)));
+
+  // sem duração explícita: soma dos 25 grupos (só vale para o limite inferior)
+  const soma = C.avaliar(RESP, validacao({ gruposSeg: Array(25).fill(5) }));
+  assert.equal(soma.detalhes.tempoFonte, 'grupos');
+  assert.equal(soma.detalhes.duracaoSeg, 125);
+  assert.equal(soma.detalhes.tempo, 'curto');
+  assert.equal(C.avaliar(RESP, validacao({ gruposSeg: Array(25).fill(100) })).detalhes.tempo, null);
+
+  // demonstração ignora o tempo; sem nenhum dado de tempo, nada muda
+  assert.equal(C.avaliar(RESP, validacao({ demonstracao: true }), { duracaoSeg: 30 }).detalhes.tempo, null);
+  const semTempo = C.avaliar(RESP, validacao({ gruposSeg: [] }));
+  assert.equal(semTempo.detalhes.duracaoSeg, null);
+  assert.equal(semTempo.detalhes.tempo, null);
+});
+
+test('novos sinais somam ao selo: dois leves novos derrubam de alta para média', () => {
+  const ds = respDe([[['D', 'S', 'I', 'C'], 13], [['S', 'D', 'C', 'I'], 12]]);
+  const v = validacao({ pares: [['D', 'C'], ['S', 'I'], ['D', 'I']], escolhas: ['D', 'S', 'D'] });
+  assert.equal(C.avaliar(ds, v, { duracaoSeg: 600 }).nivel, 'alta');
+  assert.equal(C.avaliar(ds, v, { duracaoSeg: 120 }).nivel, 'media');
+});

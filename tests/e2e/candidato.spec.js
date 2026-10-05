@@ -1,6 +1,6 @@
 'use strict';
 const { test, expect } = require('@playwright/test');
-const { API_FALSA, coletarErros, configurar, simularApi, ordemNaTela, responderGrupo, preencherIdentificacao, responderConfirmacao, fazerTesteCompleto } = require('./util.js');
+const { API_FALSA, coletarErros, configurar, simularApi, ordemNaTela, responderGrupo, preencherIdentificacao, responderConfirmacao, responderParte2, fazerTesteCompleto } = require('./util.js');
 
 const DADOS = { nome: 'Maria Conceição Ávila', telefone: '11987654321', vaga: 'Atendimento' };
 
@@ -734,12 +734,15 @@ test.describe('Candidato: link de avaliação (API simulada)', () => {
     await expect(rel.locator('.rel-com')).toHaveCount(3);
     await expect(rel.locator('.rel-com[data-letra="I"]')).toHaveCount(0);
     // Nunca o guia de liderança, a confiabilidade, nem vaga/função/aderência
-    await expect(rel).not.toContainText(/lideran|confiabilidade|aderência|vaga|Vendedor/i);
+    await expect(rel).not.toContainText(/Guia para a Liderança|confiabilidade|aderência|\bvaga\b|Vendedor/i);
     await expect(page.locator('.rodape-nota')).toHaveText('Seu resultado fica no cadastro da equipe da empresa e é compartilhado com ela. Você pode pedir a exclusão a qualquer momento.');
     // Na aba fica só percentuais + código + primeiro nome (sem telefone)
     const sessao = await page.evaluate(() => sessionStorage.getItem('disc_concluido_v1'));
     expect(sessao).not.toContain('98765');
-    expect(JSON.parse(sessao).relatorio).toEqual({ percentuais: { D: 20, I: 40, S: 30, C: 10 }, codigo: 'IS' });
+    // EQP1 tem a Parte 2 ligada: também o perfil exigido já calculado (nunca as respostas de 40 dígitos)
+    expect(JSON.parse(sessao).relatorio).toEqual({ percentuais: { D: 20, I: 40, S: 30, C: 10 }, codigo: 'IS',
+      exigido: { percentuais: { D: 20, I: 40, S: 30, C: 10 }, codigo: 'IS' } });
+    expect(sessao).not.toMatch(/[1-4]{40}/);
     await page.reload();
     await expect(page.locator('.relatorio-candidato .rel-fator')).toHaveCount(4);
     await expect(page.locator('.relatorio-candidato .rel-titulo')).toContainText('Caio');
@@ -970,7 +973,7 @@ test.describe('Candidato: formulário do processo, fim sem revisão e relatório
     await expect(page.locator('#form-identificacao')).not.toContainText('filhos');
     await expect(page.locator('#extra-p1')).toHaveAttribute('maxlength', '500');
     await expect(page.locator('.consentimento')).not.toContainText('a idade é usada');
-    await expect(page.locator('.consentimento')).toContainText('nome, telefone, e-mail, cidade, experiência e respostas do teste e das perguntas do processo');
+    await expect(page.locator('.consentimento')).toContainText('nome, telefone, e-mail, cidade, foto, experiência e respostas do teste e das perguntas do processo');
 
     // Obrigatórios vazios bloqueiam
     await page.fill('#nome', 'Bruna Formulário Teste');
@@ -1025,9 +1028,16 @@ test.describe('Candidato: formulário do processo, fim sem revisão e relatório
     await expect(rel.locator('.rel-fator .rel-pct')).toHaveText(['30%', '10%', '20%', '40%']);
     await expect(rel.locator('.rel-fator .letra-disc')).toHaveText(['D', 'I', 'S', 'C']);
     await expect(rel.locator('.rel-titulo')).toHaveText('Bruna, seu estilo é Cauteloso, com traços de Dominante');
-    await expect(rel.locator('.rel-secao')).toHaveCount(5);
-    await expect(rel.locator('.rel-secao-titulo')).toHaveText(['Seus pontos fortes e como usá-los mais', 'Pontos de atenção',
+    // As 5 seções de sempre e, depois, o aprofundamento (combinação, régua, aprendizado, decisão...). Sem Parte 2: sem "esticando".
+    const titulos = await rel.locator('.rel-secao-titulo').allTextContents();
+    expect(titulos.slice(0, 5)).toEqual(['Seus pontos fortes e como usá-los mais', 'Pontos de atenção',
       'Como você reage sob pressão', 'Como se comunicar melhor com cada perfil', 'Seu plano de desenvolvimento']);
+    expect(titulos).toContain('Como você aprende');
+    expect(titulos).toContain('Como você decide');
+    expect(titulos).toContain('Régua de intensidade');
+    await expect(rel.locator('.rel-secao[data-secao="esticando"]')).toHaveCount(0);
+    await expect(rel.locator('.rel-combinacao-nome')).not.toHaveText('');
+    await expect(rel.locator('.rel-fator .rel-fator-faixa')).toHaveCount(4);
     await expect(rel.locator('.rel-com')).toHaveCount(3);
     const prazos = await rel.locator('.rel-prazo').allTextContents();
     expect(prazos.length).toBeGreaterThanOrEqual(3);
@@ -1091,6 +1101,330 @@ test.describe('Candidato: formulário do processo, fim sem revisão e relatório
     await expect(page.locator('h1')).not.toHaveText('Revise suas respostas');
     await salvarRevisao(6);
     await expect(page.locator('.progresso-topo')).toContainText('Grupo 7 de 25');
+    expect(erros).toEqual([]);
+  });
+});
+
+test.describe('Candidato: Parte 2 (perfil exigido pelo trabalho)', () => {
+  const NATURAL = ['D', 'I', 'S', 'C'];
+  const TRABALHO = ['C', 'S', 'I', 'D'];
+
+  async function linkParte2(page, parte2, extra) {
+    await configurar(page, Object.assign({ API_URL: API_FALSA }, extra || {}));
+    return simularApi(page, (corpo) => {
+      if (corpo.acao === 'avaliacaoPublica') {
+        return { ok: true, avaliacao: { codigo: 'EQX1', nome: 'Equipe', tipo: 'equipe', empresaNome: 'Loja Teste', mostrarResultado: true,
+          formulario: { campos: { idade: 'oculto' }, perguntas: [], parte2 } } };
+      }
+      return { ok: true, id: corpo.payload && corpo.payload.id, protocolo: '72P' };
+    });
+  }
+
+  async function iniciar(page, nome) {
+    await page.goto('/index.html?a=EQX1');
+    await page.locator('[data-acao="comecar"]').click();
+    await preencherIdentificacao(page, { nome, telefone: '11987654321' });
+    await page.locator('#form-identificacao button[type="submit"]').click();
+  }
+
+  async function semRolagemLateral(page) {
+    const l = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
+    expect(l[0]).toBeLessThanOrEqual(l[1]);
+  }
+
+  test('com a Parte 2: transição, 10 grupos, barra das duas partes, payload com exigido e "Onde você está se esticando"', async ({ page }) => {
+    const erros = coletarErros(page);
+    await page.setViewportSize({ width: 375, height: 667 });
+    const chamadas = await linkParte2(page, 'ligada');
+    await page.goto('/index.html?a=EQX1');
+    await expect(page.locator('.lista-info')).toContainText('Depois, uma segunda parte mais curta.');
+    await page.locator('[data-acao="comecar"]').click();
+    await preencherIdentificacao(page, { nome: 'Lia Parte Dois', telefone: '11987654321' });
+    await page.locator('#form-identificacao button[type="submit"]').click();
+    const barra = page.locator('.progresso-barra');
+    let caixaProximo1 = null;
+    for (let i = 0; i < 25; i++) {
+      await expect(page.locator('.progresso-topo')).toContainText('Parte 1 · Grupo ' + (i + 1) + ' de 25');
+      await responderGrupo(page, NATURAL);
+      if (i === 0) caixaProximo1 = await page.locator('[data-acao="proximo"]').boundingBox();
+      if (i === 24) await expect(page.locator('[data-acao="proximo"]')).toHaveText('Avançar');
+      await page.locator('[data-acao="proximo"]').click();
+    }
+    // Transição
+    await expect(page.locator('h1')).toHaveText('Agora pense no seu trabalho');
+    await expect(page.locator('.tela-parte2')).toContainText('Como o seu trabalho exige que você seja? Não é como você gostaria de ser.');
+    await expect(barra).toHaveAttribute('aria-valuemax', '37');
+    await expect(barra).toHaveAttribute('aria-valuenow', '25');
+    await semRolagemLateral(page);
+    // Voltar leva ao último grupo da parte 1
+    await page.locator('[data-acao="parte2-voltar"]').click();
+    await expect(page.locator('.progresso-topo')).toContainText('Parte 1 · Grupo 25 de 25');
+    await page.locator('[data-acao="proximo"]').click();
+    await page.locator('[data-acao="parte2-comecar"]').click();
+
+    const grupos = await page.evaluate(() => window.DISC_EXIGIDO.GRUPOS);
+    for (let k = 0; k < 10; k++) {
+      await expect(page.locator('.progresso-topo')).toContainText('Parte 2 · Grupo ' + (k + 1) + ' de 10');
+      await expect(page.locator('.selo-parte2')).toBeVisible();
+      await expect(page.locator('.regua-texto--mais')).toHaveText('MAIS o trabalho pede');
+      await expect(page.locator('h1')).toContainText('trabalho');
+      // As palavras são as do grupo correspondente de DISC_DATA
+      const esperadas = await page.evaluate((g) => ['D', 'I', 'S', 'C'].map((l) => window.DISC_DATA.grupos[g][l]).sort(), grupos[k]);
+      const naTela = (await page.locator('.cartoes .cartao .cartao-texto').evaluateAll((els) => els.map((e) => e.firstChild.textContent))).sort();
+      expect(naTela).toEqual(esperadas);
+      if (k === 0) {
+        await expect(page.locator('[data-acao="proximo"]')).toBeDisabled();
+        await expect(barra).toHaveAttribute('aria-valuenow', '25');
+        // Nada pula de lugar: o Avançar fica no mesmo lugar da parte 1, e cabe na tela de 375x667
+        const caixa = await page.locator('[data-acao="proximo"]').boundingBox();
+        expect(Math.abs(caixa.y - caixaProximo1.y)).toBeLessThan(1);
+        expect(Math.abs(caixa.x - caixaProximo1.x)).toBeLessThan(1);
+        const ultimoCartao = await page.locator('.cartoes .cartao').nth(3).boundingBox();
+        expect(ultimoCartao.y + ultimoCartao.height).toBeLessThanOrEqual(caixa.y);
+        await semRolagemLateral(page);
+      }
+      await responderGrupo(page, TRABALHO);
+      await expect(barra).toHaveAttribute('aria-valuenow', String(25 + k + 1));
+      await page.locator('[data-acao="proximo"]').click();
+    }
+    await responderConfirmacao(page);
+    await expect(barra).toHaveAttribute('aria-valuenow', '37');
+    await page.locator('[data-acao="enviar"]').click();
+    await expect(page.locator('h1')).toHaveText('Obrigado, Lia!');
+
+    const p = chamadas.find((c) => c.corpo.acao === 'enviar').corpo.payload;
+    expect(p.respostas).toBe('4321'.repeat(25));
+    expect(p.exigido).toMatch(/^[1-4]{40}$/);
+    expect(p.exigido).toBe('1234'.repeat(10));
+    expect(await page.evaluate((e) => window.DISC_EXIGIDO.validar(e), p.exigido)).toBe(true);
+    expect(p.validacao.gruposSeg).toHaveLength(25);
+
+    // Relatório: "Onde você está se esticando" logo depois do resumo (natural DI × trabalho CS)
+    const rel = page.locator('.relatorio-candidato');
+    const est = rel.locator('.rel-secao[data-secao="esticando"]');
+    await expect(est).toBeVisible();
+    await expect(est.locator('h2')).toHaveText('Onde você está se esticando');
+    await expect(est).toHaveAttribute('data-faixa', 'muito_alta');
+    await expect(est.locator('.estica-indice-num .t-numero')).toHaveText('40');
+    await expect(est.locator('.estica-fator')).toHaveCount(4);
+    await expect(est.locator('.estica-fator[data-letra="C"] .estica-delta')).toHaveText('+30');
+    await expect(est.locator('.rel-item').first()).toBeVisible();
+    expect(await rel.locator('.rel-secao').first().getAttribute('data-secao')).toBe('esticando');
+    await expect(rel.locator('.rel-combinacao-nome')).not.toHaveText('');
+    await semRolagemLateral(page);
+    const sessao = await page.evaluate(() => sessionStorage.getItem('disc_concluido_v1'));
+    expect(JSON.parse(sessao).relatorio.exigido).toEqual({ percentuais: { D: 10, I: 20, S: 30, C: 40 }, codigo: 'CS' });
+    expect(sessao).not.toMatch(/[1-4]{40}/);
+    await page.reload();
+    await expect(page.locator('.rel-secao[data-secao="esticando"]')).toBeVisible();
+    expect(erros).toEqual([]);
+  });
+
+  test('sem a Parte 2 (desligada): direto para a confirmação e payload sem exigido', async ({ page }) => {
+    const erros = coletarErros(page);
+    const chamadas = await linkParte2(page, 'desligada');
+    await page.goto('/index.html?a=EQX1');
+    await expect(page.locator('.lista-info')).not.toContainText('segunda parte');
+    await iniciar(page, 'Rui Sem Parte');
+    for (let i = 0; i < 25; i++) {
+      await expect(page.locator('.progresso-topo')).toHaveText(new RegExp('^Grupo ' + (i + 1) + ' de 25'));
+      await responderGrupo(page, NATURAL);
+      await page.locator('[data-acao="proximo"]').click();
+    }
+    await expect(page.locator('[data-acao="parte2-comecar"]')).toHaveCount(0);
+    await expect(page.locator('.progresso-barra')).toHaveAttribute('aria-valuemax', '27');
+    await responderConfirmacao(page);
+    await page.locator('[data-acao="enviar"]').click();
+    await expect(page.locator('h1')).toHaveText('Obrigado, Rui!');
+    const p = chamadas.find((c) => c.corpo.acao === 'enviar').corpo.payload;
+    expect('exigido' in p).toBe(false);
+    await expect(page.locator('.rel-secao[data-secao="esticando"]')).toHaveCount(0);
+    expect(erros).toEqual([]);
+  });
+
+  test('retoma o progresso no meio da Parte 2 depois de recarregar', async ({ page }) => {
+    const erros = coletarErros(page);
+    const chamadas = await linkParte2(page, 'ligada');
+    await iniciar(page, 'Ana Retoma Parte');
+    for (let i = 0; i < 25; i++) {
+      await responderGrupo(page, NATURAL);
+      await page.locator('[data-acao="proximo"]').click();
+    }
+    await page.locator('[data-acao="parte2-comecar"]').click();
+    for (let k = 0; k < 4; k++) {
+      await responderGrupo(page, TRABALHO);
+      await page.locator('[data-acao="proximo"]').click();
+    }
+    // Mexe no 5º sem avançar
+    await expect(page.locator('.progresso-topo')).toContainText('Parte 2 · Grupo 5 de 10');
+    const salvo = await page.evaluate(() => JSON.parse(localStorage.getItem('disc_progresso_v1')));
+    expect(salvo.etapa).toBe('parte2');
+    expect(salvo.grupo2).toBe(4);
+    expect(salvo.respondidos2.filter(Boolean)).toHaveLength(4);
+    expect(salvo.permutacoes2).toHaveLength(10);
+    await page.reload();
+    await page.locator('[data-acao="continuar"]').click();
+    await expect(page.locator('.progresso-topo')).toContainText('Parte 2 · Grupo 5 de 10');
+    await expect(page.locator('.progresso-barra')).toHaveAttribute('aria-valuenow', '29');
+    // Os grupos já respondidos continuam como estavam
+    await page.locator('[data-acao="anterior"]').click();
+    await expect(page.locator('.progresso-topo')).toContainText('Parte 2 · Grupo 4 de 10');
+    expect(await ordemNaTela(page)).toEqual(TRABALHO);
+    await expect(page.locator('.confirmado')).toBeVisible();
+    await page.locator('[data-acao="proximo"]').click();
+    for (let k = 4; k < 10; k++) {
+      await expect(page.locator('.progresso-topo')).toContainText('Parte 2 · Grupo ' + (k + 1) + ' de 10');
+      await responderGrupo(page, TRABALHO);
+      await page.locator('[data-acao="proximo"]').click();
+    }
+    await responderConfirmacao(page);
+    await page.locator('[data-acao="enviar"]').click();
+    await expect(page.locator('h1')).toHaveText('Obrigado, Ana!');
+    expect(chamadas.find((c) => c.corpo.acao === 'enviar').corpo.payload.exigido).toBe('1234'.repeat(10));
+    expect(erros).toEqual([]);
+  });
+
+  test('modo demonstração: Parte 2 também reduzida; o resto é completado ao acaso e o exigido vai com os 10', async ({ page }) => {
+    const erros = coletarErros(page);
+    const chamadas = await linkParte2(page, 'ligada', { GRUPOS_DEMONSTRACAO: 2 });
+    await iniciar(page, 'Davi Demo Parte');
+    for (let i = 0; i < 2; i++) {
+      await expect(page.locator('.progresso-topo')).toContainText('Grupo ' + (i + 1) + ' de 2');
+      await responderGrupo(page, NATURAL);
+      await page.locator('[data-acao="proximo"]').click();
+    }
+    await responderParte2(page, TRABALHO, 2);
+    await expect(page.locator('.faixa-demo')).toBeVisible();
+    await expect(page.locator('.progresso-barra')).toHaveAttribute('aria-valuemax', '6');
+    await responderConfirmacao(page);
+    const salvo = await page.evaluate(() => JSON.parse(localStorage.getItem('disc_progresso_v1')));
+    expect(salvo.preenchidosAoAcaso2).toEqual([2, 3, 4, 5, 6, 7, 8, 9]);
+    await page.locator('[data-acao="enviar"]').click();
+    await expect(page.locator('h1')).toHaveText('Obrigado, Davi!');
+    const p = chamadas.find((c) => c.corpo.acao === 'enviar').corpo.payload;
+    expect(p.exigido).toMatch(/^[1-4]{40}$/);
+    expect(p.exigido.slice(0, 8)).toBe('1234'.repeat(2));
+    expect(await page.evaluate((e) => window.DISC_EXIGIDO.validar(e), p.exigido)).toBe(true);
+    expect(p.validacao.demonstracao).toBe(true);
+    expect(erros).toEqual([]);
+  });
+});
+
+test.describe('Candidato: foto', () => {
+  // PNG 320x240 gerado no navegador (nada de foto de gente real).
+  async function pngDeTeste(page) {
+    const b64 = await page.evaluate(() => {
+      const c = document.createElement('canvas');
+      c.width = 320; c.height = 240;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#13283f'; ctx.fillRect(0, 0, 320, 240);
+      ctx.fillStyle = '#f34405'; ctx.beginPath(); ctx.arc(160, 120, 70, 0, Math.PI * 2); ctx.fill();
+      return c.toDataURL('image/png').split(',')[1];
+    });
+    return { name: 'eu.png', mimeType: 'image/png', buffer: Buffer.from(b64, 'base64') };
+  }
+
+  async function linkFoto(page, foto, extra) {
+    await configurar(page, Object.assign({ API_URL: API_FALSA, GRUPOS_DEMONSTRACAO: 1 }, extra || {}));
+    return simularApi(page, (corpo) => {
+      if (corpo.acao === 'avaliacaoPublica') {
+        return { ok: true, avaliacao: { codigo: 'FOT1', nome: 'Recepção', tipo: 'selecao', empresaNome: 'Clínica Foto', mostrarResultado: true,
+          formulario: { campos: { idade: 'oculto', foto }, perguntas: [] } } };
+      }
+      return { ok: true, id: corpo.payload && corpo.payload.id, protocolo: '33F' };
+    });
+  }
+
+  async function terminar(page) {
+    await responderGrupo(page, ['D', 'I', 'S', 'C']);
+    await page.locator('[data-acao="proximo"]').click();
+    await responderConfirmacao(page);
+    await page.locator('[data-acao="enviar"]').click();
+  }
+
+  test('obrigatória bloqueia; escolher mostra a prévia redonda; trocar/remover; vai no payload e no relatório', async ({ page }) => {
+    const erros = coletarErros(page);
+    await page.setViewportSize({ width: 375, height: 667 });
+    const chamadas = await linkFoto(page, 'obrigatorio');
+    await page.goto('/index.html?a=FOT1');
+    await page.locator('[data-acao="comecar"]').click();
+    const campo = page.locator('.campo-foto');
+    await expect(campo.locator('.campo__rotulo')).toHaveText('Sua foto *');
+    await expect(campo.locator('#dica-foto')).toHaveText('A foto aparece só para quem conduz a avaliação e nos relatórios dela.');
+    await expect(campo.locator('label[for="foto-camera"]')).toHaveText('Tirar foto');
+    await expect(page.locator('#foto-camera')).toHaveAttribute('capture', 'user');
+    await expect(page.locator('.consentimento')).toContainText('foto');
+    await preencherIdentificacao(page, { nome: 'Flora Foto Teste', telefone: '11987654321' });
+    const caixaAntes = await page.locator('.foto-linha').boundingBox();
+    await page.locator('#form-identificacao button[type="submit"]').click();
+    await expect(page.locator('#erro-foto')).toHaveText('Envie uma foto.');
+    await expect(page.locator('h1')).toHaveText('Sua identificação');
+
+    await page.locator('#foto').setInputFiles(await pngDeTeste(page));
+    const img = campo.locator('.foto-previa img');
+    await expect(img).toBeVisible();
+    await expect(page.locator('#erro-foto')).toHaveText('');
+    expect(await img.evaluate((el) => [el.naturalWidth, el.naturalHeight])).toEqual([192, 192]);
+    // Nada pula: a linha da foto mantém a altura
+    const caixaDepois = await page.locator('.foto-linha').boundingBox();
+    expect(Math.abs(caixaDepois.height - caixaAntes.height)).toBeLessThan(1);
+    await expect(campo.locator('[data-acao="foto-remover"]')).toHaveText('Remover');
+    await expect(campo.locator('label[for="foto"]')).toHaveText('Trocar');
+    // Progresso guarda a foto
+    const salvo = await page.evaluate(() => JSON.parse(localStorage.getItem('disc_progresso_v1')).foto);
+    expect(salvo).toMatch(/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/);
+    // Remover e escolher de novo
+    await campo.locator('[data-acao="foto-remover"]').click();
+    await expect(img).toHaveCount(0);
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('disc_progresso_v1')).foto)).toBe('');
+    await page.locator('#foto').setInputFiles(await pngDeTeste(page));
+    await expect(img).toBeVisible();
+    const l = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
+    expect(l[0]).toBeLessThanOrEqual(l[1]);
+    await page.locator('#form-identificacao button[type="submit"]').click();
+    await terminar(page);
+    await expect(page.locator('h1')).toHaveText('Obrigado, Flora!');
+
+    const p = chamadas.find((c) => c.corpo.acao === 'enviar').corpo.payload;
+    expect(p.foto).toMatch(/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/);
+    expect(p.foto.length).toBeLessThanOrEqual(40000);
+    expect(await page.evaluate((f) => window.DISC_APP.fotoValida(f), p.foto)).toBe(true);
+    // Cabeçalho do relatório com a foto (continua ao recarregar)
+    await expect(page.locator('.relatorio-candidato .rel-avatar img')).toBeVisible();
+    await page.reload();
+    await expect(page.locator('.relatorio-candidato .rel-avatar img')).toBeVisible();
+    expect(erros).toEqual([]);
+  });
+
+  test('opcional (padrão) envia "" sem foto e o relatório mostra a inicial; oculta some', async ({ page }) => {
+    const erros = coletarErros(page);
+    const chamadas = await linkFoto(page, 'opcional');
+    await page.goto('/index.html?a=FOT1');
+    await page.locator('[data-acao="comecar"]').click();
+    await expect(page.locator('.campo-foto .campo__rotulo')).toHaveText('Sua foto (opcional)');
+    await expect(page.locator('#dica-foto')).toHaveText('Opcional. A foto aparece só para quem conduz a avaliação e nos relatórios dela.');
+    await preencherIdentificacao(page, { nome: 'Otto Sem Foto', telefone: '11987654321' });
+    await page.locator('#form-identificacao button[type="submit"]').click();
+    await terminar(page);
+    await expect(page.locator('h1')).toHaveText('Obrigado, Otto!');
+    expect(chamadas.find((c) => c.corpo.acao === 'enviar').corpo.payload.foto).toBe('');
+    await expect(page.locator('.rel-avatar')).toHaveText('O');
+
+    // Oculta: o campo não aparece e o consentimento não fala de foto
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await linkFoto(page, 'oculto');
+    await page.goto('about:blank');
+    await page.goto('/index.html?a=FOT1');
+    await page.locator('[data-acao="novo-teste"], [data-acao="comecar"]').first().waitFor();
+    if (await page.locator('[data-acao="novo-teste"]').count()) {
+      await page.locator('[data-acao="novo-teste"]').click();
+      await page.locator('[data-acao="novo-teste"]').click();
+    }
+    await page.locator('[data-acao="comecar"]').click();
+    await expect(page.locator('h1')).toHaveText('Sua identificação');
+    await expect(page.locator('.campo-foto')).toHaveCount(0);
+    await expect(page.locator('#foto')).toHaveCount(0);
+    await expect(page.locator('.consentimento')).not.toContainText('foto');
     expect(erros).toEqual([]);
   });
 });

@@ -1,7 +1,9 @@
 /*
  * Fluxo do candidato — Teste DISC.
- * Telas: boas-vindas → identificação → 25 grupos → revisão → envio → conclusão.
- * Depende de: CONFIG, DISC_DATA, DISC_SCORING, DISC_CODEC, DISC_API, DISC_DICAS (globais; DISC_DICAS é opcional).
+ * Telas: boas-vindas → identificação → 25 grupos → [Parte 2: transição + 10 grupos] → confirmação → envio → conclusão.
+ * A Parte 2 (perfil exigido pelo trabalho) só existe quando o processo tem formulario.parte2 === 'ligada'.
+ * Depende de: CONFIG, DISC_DATA, DISC_SCORING, DISC_CODEC, DISC_API, DISC_DICAS (globais; DISC_DICAS é opcional),
+ * DISC_EXIGIDO (Parte 2; opcional) e DISC_RELATORIO_PESSOA (relatório final; opcional).
  * No Node exporta apenas as funções puras (validações, máscara, payload) para testes.
  */
 (function (root) {
@@ -12,6 +14,22 @@
   var VALIDADE_PROGRESSO_MS = 7 * 24 * 60 * 60 * 1000;   // progresso abandonado é apagado após 7 dias
   var LETRAS = ['D', 'I', 'S', 'C'];
   var TOTAL = 25;
+  // Parte 2: 10 grupos fixos de DISC_DATA.grupos (os mesmos de DISC_EXIGIDO.GRUPOS).
+  var GRUPOS_PARTE2_PADRAO = [0, 2, 5, 7, 10, 12, 15, 17, 20, 22];
+  var TOTAL2 = GRUPOS_PARTE2_PADRAO.length;
+  // Pergunta de cada grupo da Parte 2 (pensando no trabalho), pela posição em GRUPOS_PARTE2.
+  var PERGUNTAS_PARTE2 = [
+    'No meu trabalho, preciso agir de forma...',
+    'Meu trabalho pede que eu busque...',
+    'Num conflito no trabalho, esperam que eu...',
+    'Diante de um erro, meu trabalho pede que eu...',
+    'Para fazer bem o meu trabalho, preciso de...',
+    'No meu trabalho, o que mais preciso evitar é...',
+    'Meu trabalho pede uma abordagem...',
+    'No meu trabalho, o que mais pesa é...',
+    'Diante de atrasos, meu trabalho pede que eu...',
+    'Para ir bem no meu trabalho, preciso melhorar...'
+  ];
   // Pergunta mostrada ao candidato em cada grupo (a planilha traz títulos escritos para o avaliador).
   // A pontuação continua mapeada pela letra de cada palavra, então o cálculo não muda.
   var PERGUNTAS = [
@@ -129,10 +147,57 @@
   /* ---------- Formulário de identificação do processo (processo.config.formulario) ---------- */
   // campos: idade/funcao/empresa/email/cidade -> 'obrigatorio' | 'opcional' | 'oculto'; perguntas extras: até 5.
   // Nome e WhatsApp são sempre obrigatórios (fora daqui). Ausente/inválido = comportamento de antes.
-  var CAMPOS_FORMULARIO = ['idade', 'funcao', 'empresa', 'email', 'cidade'];
+  var CAMPOS_FORMULARIO = ['idade', 'funcao', 'empresa', 'email', 'cidade', 'foto'];
   var MODOS_CAMPO = ['obrigatorio', 'opcional', 'oculto'];
-  var CAMPOS_PADRAO = { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto' };
-  var ROTULOS_CAMPOS = { idade: 'Idade', funcao: 'Função atual ou última', empresa: 'Empresa atual ou última', email: 'E-mail', cidade: 'Cidade onde mora' };
+  var CAMPOS_PADRAO = { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto', foto: 'opcional' };
+  var ROTULOS_CAMPOS = { idade: 'Idade', funcao: 'Função atual ou última', empresa: 'Empresa atual ou última', email: 'E-mail', cidade: 'Cidade onde mora', foto: 'Sua foto' };
+
+  /* ---------- Foto (data URL JPEG 192x192, até 40 000 caracteres) ---------- */
+  var FOTO_LADO = 192;
+  var FOTO_MAX = 40000;
+  var FOTO_ARQUIVO_MAX = 15 * 1024 * 1024;
+  var RE_FOTO = /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/;
+  function fotoValida(str) {
+    return typeof str === 'string' && str.length <= FOTO_MAX && RE_FOTO.test(str);
+  }
+  // Recorte quadrado ao centro: { sx, sy, lado } da imagem de origem.
+  function recorteCentro(largura, altura) {
+    var lado = Math.max(0, Math.min(largura, altura));
+    return { sx: Math.round((largura - lado) / 2), sy: Math.round((altura - lado) / 2), lado: lado };
+  }
+  // Navegador: lê o arquivo, recorta ao centro, reduz para 192 px e gera JPEG (~0,72; reduz a qualidade se passar do limite).
+  function prepararFoto(file) {
+    return new Promise(function (resolve, reject) {
+      if (!file || (file.type && !/^image\//i.test(file.type))) { reject(new Error('Escolha um arquivo de imagem.')); return; }
+      if (file.size > FOTO_ARQUIVO_MAX) { reject(new Error('A foto é grande demais (até 15 MB).')); return; }
+      var URLs = root.URL || root.webkitURL;
+      var url = URLs.createObjectURL(file);
+      var img = new root.Image();
+      img.onload = function () {
+        try {
+          var r = recorteCentro(img.naturalWidth || img.width, img.naturalHeight || img.height);
+          if (!r.lado) throw new Error('vazia');
+          var c = root.document.createElement('canvas');
+          c.width = FOTO_LADO; c.height = FOTO_LADO;
+          var ctx = c.getContext('2d');
+          ctx.fillStyle = '#fff';
+          ctx.fillRect(0, 0, FOTO_LADO, FOTO_LADO);
+          ctx.drawImage(img, r.sx, r.sy, r.lado, r.lado, 0, 0, FOTO_LADO, FOTO_LADO);
+          var qualidades = [0.72, 0.6, 0.5, 0.4, 0.3];
+          for (var q = 0; q < qualidades.length; q++) {
+            var dados = c.toDataURL('image/jpeg', qualidades[q]);
+            if (fotoValida(dados)) { URLs.revokeObjectURL(url); resolve(dados); return; }
+          }
+          throw new Error('grande');
+        } catch (e) {
+          URLs.revokeObjectURL(url);
+          reject(new Error('Não conseguimos usar esta foto. Tente outra.'));
+        }
+      };
+      img.onerror = function () { URLs.revokeObjectURL(url); reject(new Error('Não conseguimos abrir esta foto. Tente outra (JPG ou PNG).')); };
+      img.src = url;
+    });
+  }
   var MAX_PERGUNTAS = 5;
   var LIMITE_EMAIL = 120;
   var LIMITE_RESPOSTA = 500;
@@ -175,7 +240,12 @@
       if (p.id) return;
       for (var k = 1; k <= 99; k++) if (!usados['p' + k]) { p.id = 'p' + k; usados[p.id] = true; return; }
     });
-    return { campos: campos, perguntas: perguntas };
+    // Parte 2 (perfil exigido pelo trabalho): só 'ligada' liga; qualquer outro valor = 'desligada'.
+    return { campos: campos, perguntas: perguntas, parte2: fonte.parte2 === 'ligada' ? 'ligada' : 'desligada' };
+  }
+
+  function parte2Ligada(formulario) {
+    return !!(formulario && typeof formulario === 'object' && formulario.parte2 === 'ligada');
   }
 
   // Formulário que vale na tela: na avaliação de equipe a "empresa atual" só aparece se for obrigatória.
@@ -220,6 +290,7 @@
     ['funcao', 'empresa', 'cidade'].forEach(function (c) {
       if (modo[c] === 'obrigatorio' && !limparTextoCurto(d[c])) erros[c] = MSG_OBRIGATORIO[c];
     });
+    if (modo.foto === 'obrigatorio' && !fotoValida(d.foto)) erros.foto = 'Envie uma foto.';
     if (modo.email !== 'oculto') {
       var email = limparEmail(d.email);
       if (!email) { if (modo.email === 'obrigatorio') erros.email = MSG_OBRIGATORIO.email; }
@@ -245,6 +316,7 @@
       empresa: modo.empresa === 'oculto' ? '' : limparTextoCurto(d.empresa),
       email: emailValido(email) ? email : '',
       cidade: modo.cidade === 'oculto' ? '' : limparTextoCurto(d.cidade),
+      foto: modo.foto !== 'oculto' && fotoValida(d.foto) ? d.foto : '',
       extras: f.perguntas.map(function (p) {
         return { id: p.id, pergunta: p.texto, resposta: limparResposta(extras[p.id]) };
       }).filter(function (x) { return !!x.resposta; })
@@ -337,10 +409,43 @@
     }
     out.ordens = ordens;
     out.respondidos = respondidos;
+    // Parte 2: 10 grupos (ausente = nada respondido).
+    var ordens2 = [], respondidos2 = [];
+    for (var k = 0; k < TOTAL2; k++) {
+      var o2 = Array.isArray(p.ordens2) ? p.ordens2[k] : null;
+      var ok2 = ordemValida(o2);
+      ordens2.push(ok2 ? o2.slice() : null);
+      respondidos2.push(ok2 && !!(Array.isArray(p.respondidos2) && p.respondidos2[k]));
+    }
+    out.ordens2 = ordens2;
+    out.respondidos2 = respondidos2;
+    var g2 = Math.floor(Number(p.grupo2) || 0);
+    out.grupo2 = g2 >= 0 && g2 < TOTAL2 ? g2 : 0;
+    if (!(Array.isArray(p.permutacoes2) && p.permutacoes2.length === TOTAL2 && p.permutacoes2.every(ordemValida))) out.permutacoes2 = null;
     return out;
   }
 
-  // formulario: o do processo (padrão quando ausente) — decide idade/função/empresa/e-mail/cidade/extras.
+  // Ordem dos 10 grupos da Parte 2 (gerada uma vez por pessoa).
+  function gerarPermutacoes2(aleatorio) {
+    var out = [];
+    for (var i = 0; i < TOTAL2; i++) out.push(embaralhar(LETRAS, aleatorio));
+    return out;
+  }
+
+  // Ordens da Parte 2 -> string de 40 dígitos (4 por grupo, na ordem D,I,S,C; topo = 4). '' se faltar algum grupo.
+  function exigidoDasOrdens(ordens2) {
+    if (!Array.isArray(ordens2) || ordens2.length < TOTAL2) return '';
+    var out = '';
+    for (var i = 0; i < TOTAL2; i++) {
+      var g = ordemParaGrupo(ordens2[i]);
+      if (!g) return '';
+      out += LETRAS.map(function (l) { return g[l]; }).join('');
+    }
+    return out;
+  }
+
+  // formulario: o do processo (padrão quando ausente) — decide idade/função/empresa/e-mail/cidade/extras
+  // e a Parte 2: com parte2 'ligada' o payload leva `exigido` (40 dígitos de dados.ordens2); sem ela, nada de exigido.
   function montarPayload(dados, ordens, agora, formulario) {
     var respostas = ordens.map(ordemParaGrupo);
     var campos = camposDoPayload(dados, formulario);
@@ -348,7 +453,12 @@
     var res = scoring.calcular(respostas);
     var fim = agora || new Date();
     var inicio = dados.inicio ? new Date(dados.inicio) : fim;
-    return {
+    var exigido = '';
+    if (parte2Ligada(formulario)) {
+      exigido = exigidoDasOrdens(dados.ordens2);
+      if (!exigido) throw new Error('Segunda parte do teste incompleta.');
+    }
+    var payload = {
       v: 1,
       id: dados.id,
       nome: normalizarNome(dados.nome),
@@ -358,6 +468,7 @@
       empresa: campos.empresa,
       email: campos.email,
       cidade: campos.cidade,
+      foto: campos.foto,
       extras: campos.extras,
       vaga: String(dados.vaga || '').trim(),
       consentimento: !!dados.consentimento,
@@ -369,6 +480,8 @@
       avaliacao: String(dados.avaliacaoCodigo || '').replace(/\s+/g, '').toUpperCase(),
       validacao: montarValidacao(dados)
     };
+    if (exigido) payload.exigido = exigido;
+    return payload;
   }
 
   function escapar(s) {
@@ -402,12 +515,20 @@
     return n > 0 && n < TOTAL ? n : TOTAL;
   }
 
+  // Grupos da Parte 2 que a pessoa responde: 10, ou no modo demonstração o mesmo número da parte 1 (até 10).
+  function gruposParte2DoTeste(cfg) {
+    var n = gruposDoTeste(cfg);
+    return Math.min(TOTAL2, n);
+  }
+
   // Modo demonstração: completa os grupos a partir de `n` com ordens aleatórias válidas e marca como respondidos.
   // Não altera os grupos já respondidos. Retorna { ordens, respondidos, preenchidos: [índices preenchidos agora] }.
-  function completarGruposDemonstracao(ordens, respondidos, n, aleatorio) {
+  // total: quantos grupos há (25 na parte 1, padrão; 10 na Parte 2).
+  function completarGruposDemonstracao(ordens, respondidos, n, aleatorio, total) {
     var o = [], r = [], preenchidos = [];
-    var inicio = Math.max(0, Math.min(TOTAL, Math.floor(Number(n) || 0)));
-    for (var i = 0; i < TOTAL; i++) {
+    var TOT = total > 0 ? Math.floor(total) : TOTAL;
+    var inicio = Math.max(0, Math.min(TOT, Math.floor(Number(n) || 0)));
+    for (var i = 0; i < TOT; i++) {
       var atual = Array.isArray(ordens) ? ordens[i] : null;
       var marcado = !!(Array.isArray(respondidos) && respondidos[i]);
       if (i >= inicio && !(marcado && ordemValida(atual))) {
@@ -563,14 +684,48 @@
   // Ao continuar um progresso salvo: para onde ir. Etapas que não existem mais (ex.: 'revisao', do fluxo antigo)
   // caem num destino válido: o primeiro grupo incompleto ou, com tudo respondido, a confirmação (onde está o envio).
   // n: grupos que a pessoa responde; temValidacao: se a etapa de confirmação existe. Retorna { etapa, grupo, confTela }.
-  function etapaRetomada(e, n, temValidacao) {
+  // p2 (opcional): { n } = grupos da Parte 2 que a pessoa responde (processo com a Parte 2 ligada). Com p2 o retorno
+  // ganha `grupo2`, e as etapas 'parte2-intro' (transição) e 'parte2' (grupos) entram no caminho.
+  function etapaRetomada(e, n, temValidacao, p2) {
+    var r = etapaRetomadaParte1(e, n, temValidacao);
+    if (!p2) return r;
+    var est = e && typeof e === 'object' ? e : {};
+    var n1 = Math.max(1, Math.min(TOTAL, Math.floor(Number(n) || TOTAL)));
+    var n2 = Math.max(1, Math.min(TOTAL2, Math.floor(Number(p2.n) || TOTAL2)));
+    var g2 = Math.max(0, Math.min(n2 - 1, Math.floor(Number(est.grupo2) || 0)));
+    r.grupo2 = g2;
+    if (r.etapa === 'identificacao') return r;
+    if (est.etapa === 'teste' && r.etapa === 'teste') return r;
+    for (var i = 0; i < n1; i++) {
+      if (!(Array.isArray(est.respondidos) && est.respondidos[i] && ordemValida(Array.isArray(est.ordens) ? est.ordens[i] : null))) return r;
+    }
+    // Parte 1 completa: confere a Parte 2.
+    var falta = -1, algum = false;
+    for (var k = 0; k < n2; k++) {
+      var ok = !!(Array.isArray(est.respondidos2) && est.respondidos2[k] && ordemValida(Array.isArray(est.ordens2) ? est.ordens2[k] : null));
+      if (ok) algum = true;
+      else if (falta === -1) falta = k;
+    }
+    var base = { grupo: r.grupo, confTela: r.confTela };
+    function com(etapa, grupo2) { return { etapa: etapa, grupo: base.grupo, confTela: base.confTela, grupo2: grupo2 }; }
+    if (falta !== -1) {
+      if (!est.permutacoes2 || (!algum && est.etapa !== 'parte2')) return com('parte2-intro', 0);
+      return com('parte2', est.etapa === 'parte2' ? Math.min(g2, falta) : falta);
+    }
+    // Parte 2 completa: se parou nela, volta para ela; senão segue para a confirmação (ou o envio).
+    if (est.etapa === 'parte2' || est.etapa === 'parte2-intro') return com(est.etapa, g2);
+    if (!temValidacao) return com('parte2', n2 - 1);
+    return r;
+  }
+
+  function etapaRetomadaParte1(e, n, temValidacao) {
     var est = e && typeof e === 'object' ? e : {};
     var total = Math.max(1, Math.min(TOTAL, Math.floor(Number(n) || TOTAL)));
     var grupo = Math.max(0, Math.min(total - 1, Math.floor(Number(est.grupo) || 0)));
     var confTela = est.confTela === 2 ? 2 : 1;
     var etapa = est.etapa;
     if (etapa === 'identificacao') return { etapa: 'identificacao', grupo: grupo, confTela: confTela };
-    if (['teste', 'confirmacao', 'revisao', 'enviando'].indexOf(etapa) === -1) return { etapa: 'identificacao', grupo: grupo, confTela: confTela };
+    if (['teste', 'confirmacao', 'revisao', 'enviando', 'parte2', 'parte2-intro'].indexOf(etapa) === -1) return { etapa: 'identificacao', grupo: grupo, confTela: confTela };
     if (etapa === 'teste') return est.permutacoes ? { etapa: 'teste', grupo: grupo, confTela: confTela } : { etapa: 'identificacao', grupo: grupo, confTela: confTela };
     for (var i = 0; i < total; i++) {
       var ok = !!(Array.isArray(est.respondidos) && est.respondidos[i] && ordemValida(Array.isArray(est.ordens) ? est.ordens[i] : null));
@@ -595,6 +750,12 @@
     limparTextoCurto: limparTextoCurto,
     normalizarFormulario: normalizarFormulario,
     formularioEfetivo: formularioEfetivo,
+    parte2Ligada: parte2Ligada,
+    gerarPermutacoes2: gerarPermutacoes2,
+    exigidoDasOrdens: exigidoDasOrdens,
+    gruposParte2DoTeste: gruposParte2DoTeste,
+    GRUPOS_PARTE2: GRUPOS_PARTE2_PADRAO,
+    PERGUNTAS_PARTE2: PERGUNTAS_PARTE2,
     validarCamposFormulario: validarCamposFormulario,
     camposDoPayload: camposDoPayload,
     emailValido: emailValido,
@@ -602,6 +763,10 @@
     limparResposta: limparResposta,
     etapaRetomada: etapaRetomada,
     ROTULOS_CAMPOS: ROTULOS_CAMPOS,
+    fotoValida: fotoValida,
+    recorteCentro: recorteCentro,
+    prepararFoto: prepararFoto,
+    FOTO_MAX: FOTO_MAX,
     gerarId: gerarId,
     embaralhar: embaralhar,
     gerarPermutacoes: gerarPermutacoes,
@@ -647,6 +812,7 @@
   var DICAS = root.DISC_DICAS || null;
   var N = gruposDoTeste(CONFIG);          // grupos que a pessoa responde (25, ou menos no modo demonstração)
   var DEMO = N < TOTAL;
+  var N2 = gruposParte2DoTeste(CONFIG);   // grupos da Parte 2 que a pessoa responde (10, ou menos no modo demonstração)
   var app, aviso;
   var estado;
   var envio = { carregando: false, erro: '' };
@@ -670,6 +836,7 @@
       email: '',
       cidade: '',
       extras: {},              // respostas das perguntas extras do processo: { id: texto }
+      foto: '',                // data URL JPEG 192x192 (ou '')
       vaga: '',
       consentimento: false,
       inicio: '',
@@ -685,7 +852,13 @@
       validacao: null,         // etapa de confirmação: { montagem, escolhas, notas }
       confTela: 1,
       demoVista: false,        // a demonstração do arraste já foi vista (não reaparece sozinha)
-      demonstracao: DEMO
+      demonstracao: DEMO,
+      // Parte 2 (perfil exigido pelo trabalho), só com o processo que a liga:
+      permutacoes2: null,      // ordem inicial das palavras nos 10 grupos
+      ordens2: [],
+      respondidos2: [],
+      grupo2: 0,
+      preenchidosAoAcaso2: []  // modo demonstração: grupos da Parte 2 completados automaticamente
     };
   }
 
@@ -702,6 +875,13 @@
     if (!e.extras || typeof e.extras !== 'object' || Array.isArray(e.extras)) e.extras = {};
     if (typeof e.email !== 'string') e.email = '';
     if (typeof e.cidade !== 'string') e.cidade = '';
+    if (!fotoValida(e.foto)) e.foto = '';
+    if (!Array.isArray(e.ordens2)) e.ordens2 = [];
+    if (!Array.isArray(e.respondidos2)) e.respondidos2 = [];
+    if (!Array.isArray(e.preenchidosAoAcaso2)) e.preenchidosAoAcaso2 = [];
+    var g2 = Math.floor(Number(e.grupo2) || 0);
+    e.grupo2 = g2 >= 0 && g2 < N2 ? g2 : 0;
+    if (!(Array.isArray(e.permutacoes2) && e.permutacoes2.length === TOTAL2)) e.permutacoes2 = null;
     return e;
   }
 
@@ -709,6 +889,27 @@
 
   // Formulário de identificação que vale agora (o do link ou o padrão).
   function FORM() { return formularioEfetivo(AVAL && AVAL.formulario, AVAL ? AVAL.tipo : 'selecao'); }
+
+  /* ---- Parte 2 (perfil exigido pelo trabalho) ---- */
+  function modExigido() { return root.DISC_EXIGIDO || null; }
+  // Liga só com o link de um processo que tem formulario.parte2 === 'ligada'.
+  function P2() { return !!AVAL && parte2Ligada(AVAL.formulario); }
+  // Índices de DISC_DATA.grupos usados na Parte 2.
+  function G2() {
+    var E = modExigido();
+    var g = E && Array.isArray(E.GRUPOS) && E.GRUPOS.length === TOTAL2 ? E.GRUPOS : GRUPOS_PARTE2_PADRAO;
+    return g;
+  }
+  function naParte2() { return !!estado && estado.etapa === 'parte2'; }
+  // Grupos da Parte 2 que entram na barra (0 sem a Parte 2).
+  function passosParte2() { return P2() ? N2 : 0; }
+  // Índice em DISC_DATA.grupos do grupo na tela (parte 1 ou 2).
+  function indiceDados() { return naParte2() ? G2()[estado.grupo2] : estado.grupo; }
+  function perguntaParte2(k) {
+    var E = modExigido();
+    if (E && Array.isArray(E.PERGUNTAS) && E.PERGUNTAS[k]) return String(E.PERGUNTAS[k]);
+    return PERGUNTAS_PARTE2[k] || 'No meu trabalho, preciso ser...';
+  }
 
   // Mensagem de aviso mostrada uma vez na próxima tela (ex.: grupo incompleto no envio).
   var avisoTela = '';
@@ -761,7 +962,11 @@
     for (var k in estado) if (k !== 'concluido' && Object.prototype.hasOwnProperty.call(estado, k)) copia[k] = estado[k];
     if (crono && crono.estado === estado) copia.gruposSeg = somarTempo(estado.gruposSeg, crono.grupo, Date.now() - crono.t0);
     copia.salvoEm = new Date().toISOString();
-    gravarStorage(CHAVE_PROGRESSO, copia);
+    // A foto pode estourar a cota do armazenamento: nesse caso guarda o progresso sem ela e segue.
+    try { root.localStorage.setItem(CHAVE_PROGRESSO, JSON.stringify(copia)); }
+    catch (e) {
+      if (copia.foto) { copia.foto = ''; gravarStorage(CHAVE_PROGRESSO, copia); }
+    }
   }
 
   function progressoValido(p) {
@@ -806,6 +1011,27 @@
     return !!(estado.respondidos[i] && ordemValida(estado.ordens[i]));
   }
 
+  // Parte 2: ordem atual (a salva ou o embaralhamento) e se o grupo k está respondido.
+  function ordemDoGrupo2(k) {
+    var o = estado.ordens2[k];
+    if (ordemValida(o)) return o.slice();
+    var p = estado.permutacoes2 && estado.permutacoes2[k];
+    return ordemValida(p) ? p.slice() : LETRAS.slice();
+  }
+  function grupoCompleto2(k) {
+    return !!(estado.respondidos2[k] && ordemValida(estado.ordens2[k]));
+  }
+  function primeiroIncompleto2() {
+    for (var k = 0; k < N2; k++) if (!grupoCompleto2(k)) return k;
+    return -1;
+  }
+  function algumRespondido2() {
+    for (var k = 0; k < N2; k++) if (grupoCompleto2(k)) return true;
+    return false;
+  }
+  // Grupo na tela (parte 1 ou 2): completo?
+  function grupoAtualCompleto() { return naParte2() ? grupoCompleto2(estado.grupo2) : grupoCompleto(estado.grupo); }
+
   // Só os grupos que a pessoa responde (no modo demonstração, os N primeiros).
   function gruposRespondidos() {
     var n = 0;
@@ -829,6 +1055,28 @@
     estado.preenchidosAoAcaso = marcados;
   }
 
+  // Modo demonstração na Parte 2: completa ao acaso os grupos que a pessoa não responde (o exigido segue com os 10).
+  function completarDemonstracao2() {
+    if (!DEMO || !P2()) return;
+    var c = completarGruposDemonstracao(estado.ordens2, estado.respondidos2, N2, null, TOTAL2);
+    estado.ordens2 = c.ordens;
+    estado.respondidos2 = c.respondidos;
+    var marcados = Array.isArray(estado.preenchidosAoAcaso2) ? estado.preenchidosAoAcaso2 : [];
+    c.preenchidos.forEach(function (k) { if (marcados.indexOf(k) === -1) marcados.push(k); });
+    estado.preenchidosAoAcaso2 = marcados;
+  }
+
+  // Parte 2 por fazer: vai para a transição (ou, se já começou, para o primeiro grupo que falta). true se foi.
+  function irParaParte2SePreciso(direto) {
+    if (!P2()) return false;
+    if (!estado.permutacoes2) estado.permutacoes2 = gerarPermutacoes2();
+    var falta = primeiroIncompleto2();
+    if (falta === -1) return false;
+    if (direto && algumRespondido2()) { estado.grupo2 = falta; irPara('parte2'); }
+    else irPara('parte2-intro');
+    return true;
+  }
+
   // Depois do último grupo: 'confirmacao' (etapa de confirmação a fazer) ou 'enviar' (sem confirmação ou já feita).
   // Não há tela de revisão: terminou, envia.
   function destinoAposGrupos() {
@@ -842,6 +1090,8 @@
   // Monta (ou remonta, se o resultado mudou) a etapa de confirmação e vai para ela; sem a etapa, envia.
   function irDepoisDosGrupos() {
     completarDemonstracao();
+    if (irParaParte2SePreciso(false)) return;
+    completarDemonstracao2();
     if (!modValidacao()) { concluir(); return; }
     var res = resultadoDasOrdens(estado.ordens);
     if (!res) { irParaGrupoIncompleto('Encontramos um problema nas respostas. Confira este grupo e continue.'); return; }
@@ -864,7 +1114,8 @@
 
   function faixaDemonstracao() {
     if (!DEMO) return '';
-    return '<p class="faixa-demo">Modo demonstração: só ' + N + ' grupos; os outros são preenchidos ao acaso. O resultado não vale como avaliação.</p>';
+    var n = naParte2() ? N2 : N;
+    return '<p class="faixa-demo">Modo demonstração: só ' + n + ' grupos; os outros são preenchidos ao acaso. O resultado não vale como avaliação.</p>';
   }
 
   /* -------------------------- Render ------------------------------- */
@@ -880,6 +1131,8 @@
     else switch (estado.etapa) {
       case 'identificacao': html = telaIdentificacao(); break;
       case 'teste': html = telaGrupo(); break;
+      case 'parte2-intro': html = telaParte2Intro(); break;
+      case 'parte2': html = telaGrupo(); break;
       case 'confirmacao': html = telaConfirmacao(); break;
       case 'enviando': html = telaEnvio(); break;
       case 'concluido': html = telaConclusao(); break;
@@ -914,8 +1167,10 @@
     var continuar = temProgresso(salvo);
     var t = T();
     var empresa = t.empresa;
+    var p2 = P2();
     var passos = PASSOS.map(function (t, k) {
-      if (k === 1) t = 'Ordene ' + N + ' grupos de palavras';
+      if (k === 1) t = p2 ? 'Ordene os grupos de palavras, em 2 partes' : 'Ordene ' + N + ' grupos de palavras';
+      if (k === 2 && p2) t = 'Pronto, cerca de 15 minutos';
       return '<li class="passo' + (k === 0 ? ' passo--noite' : '') + '"><span class="passo-num" aria-hidden="true">' + (k + 1) + '</span><span class="passo-texto">' + t + '</span></li>';
     }).join('');
     return '' +
@@ -932,8 +1187,9 @@
         '<div class="boasvindas-noite moldura-noite">' +
           '<p class="boasvindas-destaque">Este teste ajuda a entender como você costuma agir, se comunicar e trabalhar em equipe.</p>' +
           '<ul class="lista-info">' +
-            '<li><strong>Leva cerca de 10 minutos.</strong> Faça com calma, em um lugar tranquilo.</li>' +
+            '<li><strong>Leva cerca de ' + (p2 ? 15 : 10) + ' minutos.</strong> Faça com calma, em um lugar tranquilo.</li>' +
             '<li><strong>São ' + N + ' grupos de 4 palavras.</strong> Em cada grupo, arraste as palavras para colocar no topo a que <em>mais</em> combina com você e embaixo a que <em>menos</em> combina.</li>' +
+            (p2 ? '<li><strong>Depois, uma segunda parte mais curta.</strong> São ' + N2 + ' grupos, agora pensando no que o seu trabalho exige de você.</li>' : '') +
             '<li><strong>Não entendeu uma palavra?</strong> Toque no i ao lado dela.</li>' +
             '<li><strong>Não há respostas certas ou erradas.</strong> Responda pensando em como você realmente é, e não em como gostaria de ser.</li>' +
             '<li><strong>No fim, uma confirmação rápida.</strong> Você diz o quanto o resultado combina com você.</li>' +
@@ -982,6 +1238,64 @@
       '</div>';
   }
 
+  // Ícone de pessoa (sem foto) na prévia redonda.
+  var ICONE_PESSOA = '<svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="1.8" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>';
+
+  // Prévia + botões da foto (redesenhados sem mexer no resto do formulário).
+  function fotoControlesHtml() {
+    var tem = fotoValida(estado.foto);
+    return '' +
+      '<span class="foto-previa' + (tem ? ' foto-previa--com' : '') + '">' +
+        (tem ? '<img src="' + escapar(estado.foto) + '" alt="Sua foto" width="64" height="64">' : ICONE_PESSOA) +
+      '</span>' +
+      '<span class="foto-acoes">' +
+        (tem
+          ? '<label class="botao botao--claro foto-botao" for="foto">Trocar</label>' +
+            '<button type="button" class="botao botao--claro foto-botao" data-acao="foto-remover">Remover</button>'
+          : '<label class="botao botao--contorno foto-botao" for="foto-camera">Tirar foto</label>' +
+            '<label class="botao botao--claro foto-botao" for="foto">Da galeria</label>') +
+      '</span>';
+  }
+
+  function campoFotoHtml(modo) {
+    if (modo === 'oculto') return '';
+    var obrig = modo === 'obrigatorio';
+    var ajuda = (obrig ? '' : 'Opcional. ') + 'A foto aparece só para quem conduz a avaliação e nos relatórios dela.';
+    return '' +
+      '<div class="campo campo-foto">' +
+        '<p class="campo__rotulo" id="rotulo-foto">' + escapar(ROTULOS_CAMPOS.foto) + marcaCampo(obrig) + '</p>' +
+        '<div class="foto-linha" id="foto-controles">' + fotoControlesHtml() + '</div>' +
+        '<input class="visualmente-oculto foto-arquivo" id="foto" name="foto" type="file" accept="image/*" aria-labelledby="rotulo-foto" aria-describedby="dica-foto erro-foto"' + (obrig ? ' required' : '') + '>' +
+        '<input class="visualmente-oculto foto-arquivo" id="foto-camera" type="file" accept="image/*" capture="user" tabindex="-1" aria-hidden="true">' +
+        '<p class="campo__ajuda" id="dica-foto">' + escapar(ajuda) + '</p>' +
+        '<p class="campo__erro erro" id="erro-foto" role="alert"></p>' +
+      '</div>';
+  }
+
+  function atualizarFotoNaTela(msgErro) {
+    var caixa = app.querySelector('#foto-controles');
+    if (caixa) caixa.innerHTML = fotoControlesHtml();
+    var form = app.querySelector('#form-identificacao');
+    if (form) mostrarErro(form, 'foto', msgErro || '');
+  }
+
+  function aoEscolherFoto(input) {
+    var file = input.files && input.files[0];
+    input.value = '';
+    if (!file) return;
+    var caixa = app.querySelector('#foto-controles');
+    if (caixa) caixa.setAttribute('aria-busy', 'true');
+    prepararFoto(file).then(function (dados) {
+      estado.foto = dados;
+      salvar();
+      atualizarFotoNaTela('');
+      anunciar('Foto escolhida.');
+    }, function (e) {
+      atualizarFotoNaTela((e && e.message) || 'Não conseguimos usar esta foto. Tente outra.');
+    }).then(function () { if (caixa) caixa.removeAttribute('aria-busy'); });
+  }
+
   // Pergunta extra do processo: texto livre até 500 caracteres, com contador discreto.
   function perguntaExtraHtml(p) {
     var id = 'extra-' + p.id;
@@ -1002,6 +1316,7 @@
     if (f.campos.idade !== 'oculto') itens.push('idade');
     if (f.campos.email !== 'oculto') itens.push('e-mail');
     if (f.campos.cidade !== 'oculto') itens.push('cidade');
+    if (f.campos.foto !== 'oculto') itens.push('foto');
     if (f.campos.funcao !== 'oculto' || f.campos.empresa !== 'oculto') itens.push('experiência');
     itens.push(f.perguntas.length ? 'respostas do teste e das perguntas do processo' : 'respostas');
     return itens.slice(0, -1).join(', ') + ' e ' + itens[itens.length - 1];
@@ -1050,6 +1365,7 @@
           (campoIdade ? '<div class="campos-dupla campos-dupla--telefone">' + campoTelefone + campoIdade + '</div>' : campoTelefone) +
           campoVaga +
           duplas +
+          campoFotoHtml(f.campos.foto) +
           extras +
           '<div class="campo consentimento">' +
             '<label class="marcar" for="consentimento">' +
@@ -1071,11 +1387,18 @@
 
   // Barra de progresso no padrão BarraMeta do BI: feito em azul-escuro, trilho liso, bolinha de vidro.
   // A barra conta os N grupos + as 2 telas da confirmação.
+  // Com a Parte 2, a barra conta também os grupos dela (as duas partes juntas).
   var TELAS_CONFIRMACAO = 2;
-  function passosTotais() { return N + TELAS_CONFIRMACAO; }
+  function passosTotais() { return N + passosParte2() + TELAS_CONFIRMACAO; }
+
+  // Passos feitos no grupo da tela (parte 1: i; parte 2: N + k).
+  function feitosGrupo(completo) {
+    return naParte2() ? N + estado.grupo2 + (completo ? 1 : 0) : estado.grupo + (completo ? 1 : 0);
+  }
 
   function progressoHtml(i, completo) {
-    return barraProgressoHtml('Grupo', i + 1, N, i + (completo ? 1 : 0));
+    if (naParte2()) return barraProgressoHtml('Parte 2 · Grupo', estado.grupo2 + 1, N2, feitosGrupo(completo));
+    return barraProgressoHtml(P2() ? 'Parte 1 · Grupo' : 'Grupo', i + 1, N, i + (completo ? 1 : 0));
   }
 
   function barraProgressoHtml(nome, atual, de, feitos) {
@@ -1149,26 +1472,32 @@
   }
 
   function telaGrupo() {
-    var i = estado.grupo;
+    var p2 = naParte2();
+    var i = indiceDados();
     var g = DATA.grupos[i];
-    var ordem = ordemDoGrupo(i);
-    var completo = grupoCompleto(i);
-    var ultimo = i === N - 1;
+    var ordem = p2 ? ordemDoGrupo2(estado.grupo2) : ordemDoGrupo(i);
+    var completo = grupoAtualCompleto();
+    var ultimo = p2 ? estado.grupo2 === N2 - 1 : i === N - 1;
+    var pergunta = p2 ? perguntaParte2(estado.grupo2) : perguntaDoGrupo(i, g);
+    var regua = p2 ? 'o trabalho pede' : 'me identifica';
     // Régua à esquerda: números 4..1 pequenos, alinhados ao centro de cada cartão.
     var posicoes = [4, 3, 2, 1].map(function (n, k) {
       return '<li class="posicao' + (n === 4 ? ' posicao--topo' : '') + '" style="--pos:' + k + '">' + n + '</li>';
     }).join('');
     var cartoes = ordem.map(function (l, k) { return cartaoHtml(i, g, l, k); }).join('');
     return '' +
-      '<section class="caixa tela-grupo" aria-labelledby="titulo">' +
+      '<section class="caixa tela-grupo' + (p2 ? ' tela-grupo--parte2' : '') + '" aria-labelledby="titulo" data-parte="' + (p2 ? 2 : 1) + '">' +
         faixaDemonstracao() +
-        progressoHtml(i, completo) +
+        progressoHtml(estado.grupo, completo) +
         avisoHtml() +
-        '<h1 id="titulo" class="titulo-grupo">' + escapar(perguntaDoGrupo(i, g)) +
-          (temDicaPergunta(i) ? '\u00a0' + botaoInfo('Entender a pergunta', 'data-dica="pergunta"') : '') +
+        (p2 ? '<p class="selo-parte2">Pense no seu trabalho, não em você</p>' : '') +
+        '<h1 id="titulo" class="titulo-grupo">' + escapar(pergunta) +
+          (!p2 && temDicaPergunta(i) ? '\u00a0' + botaoInfo('Entender a pergunta', 'data-dica="pergunta"') : '') +
         '</h1>' +
         // A régua (MAIS / MENOS me identifica) faz o papel da instrução na tela; o texto fica para o leitor de tela.
-        '<p class="visualmente-oculto" id="instrucao">No topo, a palavra que mais combina com você; embaixo, a que menos combina.</p>' +
+        '<p class="visualmente-oculto" id="instrucao">' + (p2
+          ? 'No topo, o que o seu trabalho mais exige de você; embaixo, o que ele menos exige.'
+          : 'No topo, a palavra que mais combina com você; embaixo, a que menos combina.') + '</p>' +
         '<p class="visualmente-oculto" id="ajuda-teclado">Arraste a palavra ou use as setas para cima e para baixo do teclado para mudar a posição.</p>' +
         '<div class="ordenar">' +
           '<div class="regua" aria-hidden="true">' +
@@ -1176,13 +1505,13 @@
             '<ol class="posicoes">' + posicoes + '</ol>' +
           '</div>' +
           '<div class="regua-topo">' +
-            '<p class="regua-texto regua-texto--mais" aria-hidden="true"><span class="regua-forte">MAIS</span> me identifica</p>' +
+            '<p class="regua-texto regua-texto--mais" aria-hidden="true"><span class="regua-forte">MAIS</span> ' + regua + '</p>' +
             '<button type="button" class="ver-demo" data-acao="ver-demo">Ver como funciona</button>' +
           '</div>' +
           '<div class="lista-ordenar">' +
-            '<ol class="cartoes" aria-label="Palavras, da que mais à que menos combina com você" aria-describedby="instrucao">' + cartoes + '</ol>' +
+            '<ol class="cartoes" aria-label="' + (p2 ? 'Palavras, da que o trabalho mais à que menos exige' : 'Palavras, da que mais à que menos combina com você') + '" aria-describedby="instrucao">' + cartoes + '</ol>' +
           '</div>' +
-          '<p class="regua-texto regua-texto--menos" aria-hidden="true"><span class="regua-forte">MENOS</span> me identifica</p>' +
+          '<p class="regua-texto regua-texto--menos" aria-hidden="true"><span class="regua-forte">MENOS</span> ' + regua + '</p>' +
         '</div>' +
         '<div class="confirmar" id="confirmar">' + confirmarHtml(completo) + '</div>' +
         '<div class="barra-nav">' +
@@ -1198,8 +1527,40 @@
   }
 
   // Sem revisão: depois do último grupo vem a confirmação ("Avançar"); sem a etapa de confirmação, já envia.
+  // Com a Parte 2, o último grupo da parte 1 leva à transição ("Avançar").
   function rotuloProximo(ultimo) {
+    if (ultimo && P2() && !naParte2()) return 'Avançar';
     return ultimo && !modValidacao() ? 'Enviar e finalizar' : 'Avançar';
+  }
+
+  /* -------------------- Parte 2: transição -------------------- */
+
+  function telaParte2Intro() {
+    var comecou = algumRespondido2();
+    return '' +
+      '<section class="caixa tela-grupo tela-parte2" aria-labelledby="titulo">' +
+        faixaDemonstracao() +
+        barraProgressoHtml('Parte', 2, 2, N) +
+        '<div class="parte2-corpo surgir">' +
+          '<p class="sobretitulo">Primeira parte concluída</p>' +
+          '<h1 id="titulo" class="titulo-grupo">Agora pense no seu trabalho</h1>' +
+          '<p class="parte2-destaque">Como o seu trabalho exige que você seja? Não é como você gostaria de ser.</p>' +
+          '<ul class="parte2-lista">' +
+            '<li><strong>São ' + N2 + ' grupos de 4 palavras</strong>, com a mesma mecânica de arrastar.</li>' +
+            '<li>No topo, o que o dia a dia do seu trabalho <em>mais</em> pede de você; embaixo, o que ele <em>menos</em> pede.</li>' +
+            '<li>Se não estiver trabalhando agora, pense no seu último trabalho.</li>' +
+          '</ul>' +
+        '</div>' +
+        '<div class="barra-nav">' +
+          '<p class="barra-dica" id="dica-avancar">Leva uns 3 minutos.</p>' +
+          '<div class="barra-botoes">' +
+            '<button type="button" class="botao botao--claro botao--grande" data-acao="parte2-voltar">Voltar</button>' +
+            '<button type="button" class="botao botao--principal botao--grande" data-acao="parte2-comecar" aria-describedby="dica-avancar">' +
+              (comecou ? 'Continuar' : 'Começar') +
+            '</button>' +
+          '</div>' +
+        '</div>' +
+      '</section>';
   }
 
   /* -------------------- Confirmação (depois dos grupos) -------------------- */
@@ -1271,7 +1632,7 @@
           '</li>';
       }).join('') + '</ol>';
     }
-    var feitos = N + (tela - 1) + (completo ? 1 : 0);
+    var feitos = N + passosParte2() + (tela - 1) + (completo ? 1 : 0);
     return '' +
       '<section class="caixa tela-confirmacao" aria-labelledby="titulo">' +
         faixaDemonstracao() +
@@ -1315,7 +1676,7 @@
     if (prox) prox.disabled = !completo;
     var dica = app.querySelector('#dica-avancar');
     if (dica) dica.textContent = dicaConfirmacao(tela, completo);
-    atualizarBarra(N + (tela - 1) + (completo ? 1 : 0));
+    atualizarBarra(N + passosParte2() + (tela - 1) + (completo ? 1 : 0));
   }
 
   function telaEnvio() {
@@ -1340,12 +1701,35 @@
   }
 
   // Dados do relatório da pessoa: só percentuais + código do perfil (é o que fica na sessionStorage).
+  // Com a Parte 2, também o perfil exigido já calculado: exigido = { percentuais, codigo } (nunca as respostas).
   function relatorioDoPayload(payload) {
     var R = root.DISC_RELATORIO_PESSOA;
     if (!R || !payload) return null;
     var res;
     try { res = root.DISC_SCORING.calcular(root.DISC_SCORING.descompactar(payload.respostas)); } catch (e) { return null; }
-    return R.dadosDoResultado(res.percentuais, res.codigo);
+    var rel = R.dadosDoResultado(res.percentuais, res.codigo);
+    var ex = exigidoDoPayload(payload);
+    if (rel && ex) rel.exigido = ex;
+    return rel;
+  }
+
+  // Perfil exigido ({ percentuais, codigo }) a partir do `exigido` de 40 dígitos, ou null.
+  function exigidoDoPayload(payload) {
+    var E = modExigido();
+    var str = payload && payload.exigido;
+    if (!E || !str) return null;
+    try {
+      if (E.validar && !E.validar(str)) return null;
+      var r = E.calcular(str);
+      if (!r || !r.percentuais) return null;
+      var p = {};
+      for (var k = 0; k < LETRAS.length; k++) {
+        var v = Number(r.percentuais[LETRAS[k]]);
+        if (!isFinite(v)) return null;
+        p[LETRAS[k]] = Math.round(v * 10) / 10;
+      }
+      return { percentuais: p, codigo: String(r.codigo || '') };
+    } catch (e) { return null; }
   }
 
   // A pessoa vê o próprio resultado? Com link, vale a configuração da avaliação; sem link, a do CONFIG.
@@ -1394,28 +1778,89 @@
       '</section>';
   }
 
-  // Relatório "modelo pessoa" (dados de js/relatorio-pessoa.js) em cartões empilhados.
-  function relatorioPessoaHtml(d) {
-    if (!d) return '';
-    var barras = d.fatores.map(function (f) {
-      var largura = Math.max(4, Math.min(100, (Number(f.pct) / 40) * 100));
+  var NOMES_FATORES = { D: 'Dominância', I: 'Influência', S: 'Estabilidade', C: 'Conformidade' };
+
+  function larguraPct(v) { return Math.max(4, Math.min(100, (Number(v) / 40) * 100)); }
+
+  // "Onde você está se esticando" (Parte 2): índice de esforço, natural × trabalho por fator e os textos.
+  function secaoEsticando(sec, d) {
+    var natural = {};
+    (d.fatores || []).forEach(function (f) { natural[f.letra] = Number(f.pct); });
+    var ex = (sec.exigido && sec.exigido.percentuais) || {};
+    var comparacao = LETRAS.map(function (l) {
+      var n = natural[l], e = Number(ex[l]);
+      if (!isFinite(n) || !isFinite(e)) return '';
+      var delta = Math.round((e - n) * 10) / 10;
+      var deltaTxt = delta > 0 ? '+' + pctTexto(delta).replace('%', '') : delta < 0 ? '−' + pctTexto(-delta).replace('%', '') : '0';
       return '' +
-        '<li class="barra-linha rel-fator" data-letra="' + escapar(f.letra) + '">' +
+        '<li class="estica-fator" data-letra="' + l + '">' +
+          '<span class="letra-disc letra-disc--mini disc-' + l + '" aria-hidden="true">' + l + '</span>' +
+          '<span class="estica-nome">' + escapar(NOMES_FATORES[l]) + '</span>' +
+          '<span class="estica-delta' + (Math.abs(delta) >= 3 ? ' estica-delta--forte' : '') + '" aria-label="diferença de ' + escapar(deltaTxt) + ' pontos">' + escapar(deltaTxt) + '</span>' +
+          '<span class="estica-barras">' +
+            '<span class="estica-linha"><span class="estica-rotulo">Natural</span><span class="trilho estica-trilho"><span class="estica-valor disc-' + l + '" style="width:' + larguraPct(n) + '%"></span></span><span class="estica-pct">' + pctTexto(n) + '</span></span>' +
+            '<span class="estica-linha"><span class="estica-rotulo">Trabalho</span><span class="trilho estica-trilho"><span class="estica-valor estica-valor--trabalho" style="width:' + larguraPct(e) + '%"></span></span><span class="estica-pct">' + pctTexto(e) + '</span></span>' +
+          '</span>' +
+        '</li>';
+    }).join('');
+    var indice = Math.max(0, Math.min(100, Math.round(Number(sec.indice) || 0)));
+    var idT = 'rel-' + escapar(sec.id);
+    return '' +
+      '<section class="caixa rel-caixa rel-secao rel-esticando surgir" data-secao="esticando" data-faixa="' + escapar(sec.faixa || '') + '" aria-labelledby="' + idT + '">' +
+        '<h2 id="' + idT + '" class="caixa__titulo rel-secao-titulo">' + escapar(sec.titulo) + '</h2>' +
+        (sec.intro ? '<p class="rel-nota">' + escapar(sec.intro) + '</p>' : '') +
+        '<div class="estica-indice">' +
+          '<p class="estica-indice-num"><span class="t-numero">' + indice + '</span><span class="estica-indice-de">de 100</span></p>' +
+          '<p class="estica-indice-texto">Esforço de adaptação <span class="selo selo--noite estica-faixa">' + escapar(sec.rotulo || '') + '</span></p>' +
+        '</div>' +
+        (comparacao ? '<ul class="estica-fatores" aria-label="Seu jeito natural e o que o trabalho pede, por fator">' + comparacao + '</ul>' : '') +
+        listaItens(sec.itens) +
+      '</section>';
+  }
+
+  // Relatório "modelo pessoa" (dados de js/relatorio-pessoa.js) em cartões empilhados.
+  // Com a rodada 3: nome da combinação, faixa de intensidade de cada fator, as seções de aprofundamento e,
+  // com a Parte 2, "Onde você está se esticando" logo depois do resumo.
+  function avatarHtml(foto, nome) {
+    var inicial = String(nome || '').trim().charAt(0).toUpperCase();
+    return '<span class="rel-avatar" aria-hidden="true">' +
+      (fotoValida(foto) ? '<img src="' + escapar(foto) + '" alt="" width="48" height="48">' : escapar(inicial || '•')) + '</span>';
+  }
+
+  function relatorioPessoaHtml(d, foto) {
+    if (!d) return '';
+    var faixas = {};
+    (d.intensidade || []).forEach(function (f) { if (f && f.letra) faixas[f.letra] = f; });
+    var barras = d.fatores.map(function (f) {
+      var largura = larguraPct(f.pct);
+      var fx = faixas[f.letra];
+      return '' +
+        '<li class="barra-linha rel-fator" data-letra="' + escapar(f.letra) + '"' + (fx ? ' data-faixa="' + escapar(fx.faixa) + '"' : '') + '>' +
           '<span class="letra-disc disc-' + escapar(f.letra) + ' barra-letra" aria-hidden="true">' + escapar(f.letra) + '</span>' +
           '<span class="barra-nome"><span class="rel-fator-nome">' + escapar(f.nome) + '</span>' +
             '<span class="visualmente-oculto"> (' + escapar(f.letra) + ')</span>' +
+            (fx && fx.rotulo ? '<span class="rel-fator-faixa">Intensidade ' + escapar(String(fx.rotulo).toLowerCase()) + '</span>' : '') +
             '<span class="rel-fator-desc">' + escapar(f.descricao) + '</span></span>' +
           '<span class="barra-trilho trilho" aria-hidden="true"><span class="barra-valor disc-' + escapar(f.letra) + '" style="width:' + largura + '%"></span></span>' +
           '<span class="barra-pct rel-pct">' + pctTexto(f.pct) + '</span>' +
         '</li>';
     }).join('');
     var titulo = (d.nome ? escapar(d.nome) + ', seu' : 'Seu') + ' estilo é ' + escapar(d.primario.rotulo) + ', com traços de ' + escapar(d.secundario.rotulo);
+    var cb = d.combinacao;
+    var combinacao = cb && cb.nome
+      ? '<p class="rel-combinacao"><span class="rel-combinacao-rotulo">Sua combinação</span><strong class="rel-combinacao-nome">' + escapar(cb.nome) + '</strong>' +
+          (cb.frase ? '<span class="rel-combinacao-frase">' + escapar(cb.frase) + '</span>' : '') + '</p>'
+      : '';
+    var extras = Array.isArray(d.aprofundamento) ? d.aprofundamento : [];
+    var est = extras.filter(function (x) { return x && x.id === 'esticando'; })[0] || d.esticando || null;
+    var outras = extras.filter(function (x) { return x && x.id !== 'esticando'; });
     return '' +
       '<div class="relatorio-candidato relatorio-pessoa" data-codigo="' + escapar(d.codigo) + '">' +
         '<section class="caixa rel-caixa surgir" aria-labelledby="titulo-relatorio">' +
-          '<p class="sobretitulo">Seu relatório DISC</p>' +
+          '<div class="rel-cabeca">' + avatarHtml(foto, d.nome) + '<p class="sobretitulo">Seu relatório DISC</p></div>' +
           '<h2 id="titulo-relatorio" class="rel-titulo">' + titulo + '</h2>' +
           '<p class="rel-intro rel-frase">' + escapar(d.frase) + '</p>' +
+          combinacao +
           '<h3 class="rel-h3">Seus 4 fatores</h3>' +
           '<p class="rel-nota">Quanto maior a barra, mais esse jeito aparece no seu dia a dia. Os quatro somam 100%.</p>' +
           '<ul class="barras rel-barras">' + barras + '</ul>' +
@@ -1423,7 +1868,9 @@
             '<button type="button" class="botao botao--claro" data-acao="imprimir">Salvar em PDF</button>' +
           '</div>' +
         '</section>' +
+        (est ? secaoEsticando(est, d) : '') +
         d.secoes.map(secaoRelatorio).join('') +
+        outras.map(secaoRelatorio).join('') +
         '<p class="rel-aviso">' + escapar(d.aviso) + '</p>' +
       '</div>';
   }
@@ -1434,7 +1881,16 @@
     var R = root.DISC_RELATORIO_PESSOA;
     if (!R || !mostraResultado()) return '';
     var rel = (dados && dados.relatorio) || relatorioDoPayload(payload);
-    return rel ? relatorioPessoaHtml(R.montar(rel, primeiroNome, DATA)) : '';
+    if (!rel) return '';
+    var base = { percentuais: rel.percentuais, codigo: rel.codigo };
+    var d;
+    try {
+      d = rel.exigido && rel.exigido.percentuais
+        ? R.montar(base, primeiroNome, DATA, { exigido: rel.exigido })
+        : R.montar(base, primeiroNome, DATA);
+    } catch (e) { d = null; }
+    var foto = (payload && payload.foto) || (dados && dados.foto) || '';
+    return d ? relatorioPessoaHtml(d, foto) : '';
   }
 
   function numeroWhatsApp() {
@@ -1522,7 +1978,10 @@
     }
 
     // Plano B: sem servidor ou envio falhou → código de segurança longo.
-    var codigo = root.DISC_CODEC.encode(payload);
+    // O código de segurança vai sem a foto (ficaria longo demais para o WhatsApp).
+    var paraCodigo = {};
+    for (var k in payload) if (Object.prototype.hasOwnProperty.call(payload, k) && k !== 'foto') paraCodigo[k] = payload[k];
+    var codigo = root.DISC_CODEC.encode(paraCodigo);
     var wa = linkWhatsApp(codigo, payload);
     return '' +
       '<div class="pilha-telas">' +
@@ -1637,6 +2096,9 @@
           salvar();
         });
       });
+      Array.prototype.forEach.call(form.querySelectorAll('.foto-arquivo'), function (inp) {
+        inp.addEventListener('change', function () { aoEscolherFoto(inp); });
+      });
       // Perguntas extras: contador discreto e progresso salvo.
       Array.prototype.forEach.call(form.querySelectorAll('textarea[data-extra]'), function (ta) {
         var id = ta.getAttribute('data-extra');
@@ -1696,6 +2158,7 @@
       empresa: valorCampo(form, 'empresa'),
       email: valorCampo(form, 'email'),
       cidade: valorCampo(form, 'cidade'),
+      foto: estado.foto,
       extras: extrasDoForm(form)
     };
     var errosForm = validarCamposFormulario(dados, f);
@@ -1764,10 +2227,12 @@
         var salvo = lerStorage(CHAVE_PROGRESSO);
         estado = garantirCampos(progressoValido(salvo) ? migrarProgresso(salvo) : estadoInicial());
         // Etapas antigas (ex.: 'revisao') caem num destino válido.
-        var dest = etapaRetomada(estado, N, !!modValidacao());
+        var dest = etapaRetomada(estado, N, !!modValidacao(), P2() ? { n: N2 } : null);
         estado.etapa = dest.etapa;
         estado.grupo = dest.grupo;
         estado.confTela = dest.confTela;
+        if (dest.grupo2 !== undefined) estado.grupo2 = dest.grupo2;
+        if (P2() && !estado.permutacoes2 && estado.etapa === 'parte2') estado.permutacoes2 = gerarPermutacoes2();
         estado.reenviar = false;
         // Identificação incompleta para este formulário (ex.: progresso de antes do campo idade): pede antes de seguir.
         if (estado.etapa !== 'identificacao' && !identificacaoValida()) estado.etapa = 'identificacao';
@@ -1783,6 +2248,14 @@
         estado.reenviar = false;
         irPara('boasvindas');
         break;
+      case 'foto-remover':
+        estado.foto = '';
+        salvar();
+        atualizarFotoNaTela('');
+        var gal = app.querySelector('#foto');
+        if (gal) { try { gal.focus({ preventScroll: true }); } catch (e) { gal.focus(); } }
+        anunciar('Foto removida.');
+        break;
       case 'ver-demo':
         iniciarDemo();
         break;
@@ -1793,10 +2266,35 @@
         anunciar('Ordem registrada. Você já pode avançar.');
         break;
       case 'anterior':
-        if (estado.grupo === 0) irPara('identificacao');
+        if (naParte2()) {
+          if (estado.grupo2 === 0) irPara('parte2-intro');
+          else { estado.grupo2--; irPara('parte2'); }
+        } else if (estado.grupo === 0) irPara('identificacao');
         else { estado.grupo--; irPara('teste'); }
         break;
+      case 'parte2-voltar':
+        estado.grupo = N - 1;
+        irPara('teste');
+        break;
+      case 'parte2-comecar':
+        if (!estado.permutacoes2) estado.permutacoes2 = gerarPermutacoes2();
+        var f2 = primeiroIncompleto2();
+        estado.grupo2 = f2 === -1 ? 0 : f2;
+        irPara('parte2');
+        break;
       case 'proximo':
+        if (naParte2()) {
+          if (!grupoCompleto2(estado.grupo2)) return;
+          if (estado.grupo2 >= N2 - 1) {
+            var falta2 = primeiroIncompleto2();
+            if (falta2 !== -1) { estado.grupo2 = falta2; avisoTela = 'Falta ordenar este grupo para concluir.'; irPara('parte2'); }
+            else irDepoisDosGrupos();
+          } else {
+            estado.grupo2++;
+            irPara('parte2');
+          }
+          return;
+        }
         if (!grupoCompleto(estado.grupo)) return;
         if (estado.grupo >= N - 1) {
           var falta = primeiroIncompleto();
@@ -1844,6 +2342,7 @@
         break;
       case 'usar-codigo':
         completarDemonstracao();
+        completarDemonstracao2();
         estado.avaliacaoCodigo = AVAL ? AVAL.codigo : '';
         try {
           finalizar(montarPayload(estado, estado.ordens, null, FORM()), false);
@@ -1907,7 +2406,7 @@
   }
 
   function conteudoDica(botao) {
-    var i = estado.grupo;
+    var i = indiceDados();
     var g = DATA.grupos[i];
     try {
       if (botao.getAttribute('data-dica') === 'pergunta') {
@@ -1996,7 +2495,7 @@
     var cartoes = cartoesNaTela();
     if (!caixa || cartoes.length !== 4) return;
     var ultimo = cartoes[3];
-    var texto = palavraDoGrupo(estado.grupo, DATA.grupos[estado.grupo], ultimo.getAttribute('data-letra'));
+    var texto = palavraDoGrupo(indiceDados(), DATA.grupos[indiceDados()], ultimo.getAttribute('data-letra'));
     var el = document.createElement('div');
     el.className = 'demo';
     el.setAttribute('aria-hidden', 'true');
@@ -2047,6 +2546,14 @@
   // Grava a ordem, marca o grupo como respondido e atualiza só o que muda (nada é redesenhado).
   // aceito: true quando a pessoa tocou em "Esta ordem está certa" sem mexer; mexer depois desfaz.
   function marcarRespondido(ordem, respondido, aceito) {
+    if (naParte2()) {
+      var k = estado.grupo2;
+      estado.ordens2[k] = ordem.slice();
+      if (respondido) estado.respondidos2[k] = true;
+      salvar();
+      atualizarControles();
+      return;
+    }
     var i = estado.grupo;
     estado.ordens[i] = ordem.slice();
     if (respondido) estado.respondidos[i] = true;
@@ -2056,8 +2563,8 @@
   }
 
   function atualizarControles() {
-    var i = estado.grupo;
-    var completo = grupoCompleto(i);
+    var p2 = naParte2();
+    var completo = grupoAtualCompleto();
     var prox = app.querySelector('[data-acao="proximo"]');
     if (prox) prox.disabled = !completo;
     var dica = app.querySelector('#dica-avancar');
@@ -2066,10 +2573,10 @@
     var querConfirmado = completo ? '.confirmado' : '[data-acao="confirmar-ordem"]';
     if (conf && !conf.querySelector(querConfirmado)) conf.innerHTML = confirmarHtml(completo);
     if (prox) {
-      var rotulo = rotuloProximo(i === N - 1);
+      var rotulo = rotuloProximo(p2 ? estado.grupo2 === N2 - 1 : estado.grupo === N - 1);
       if (prox.textContent !== rotulo) prox.textContent = rotulo;
     }
-    atualizarBarra(i + (completo ? 1 : 0));
+    atualizarBarra(feitosGrupo(completo));
   }
 
   // Barra de progresso (anima a largura; não redesenha a tela)
@@ -2129,7 +2636,7 @@
   }
 
   function anunciarPosicao(letra, ordem) {
-    var i = estado.grupo;
+    var i = indiceDados();
     var k = ordem.indexOf(letra);
     anunciar(palavraDoGrupo(i, DATA.grupos[i], letra) + ' agora está na ' + descricaoPosicao(k) + '.');
   }
@@ -2256,6 +2763,8 @@
     if (enviado && mostraResultado()) {
       var rel = relatorioDoPayload(payload);
       if (rel) { sessao.relatorio = rel; concluido.relatorio = rel; }
+      // A própria foto, para o cabeçalho do relatório continuar ao recarregar (só nesta aba).
+      if (rel && fotoValida(payload.foto)) sessao.foto = payload.foto;
     }
     gravarSessao(CHAVE_CONCLUIDO, sessao);
     apagarStorage(CHAVE_CONCLUIDO);
@@ -2270,6 +2779,14 @@
     if (envio.carregando) return;
     envio = { carregando: false, erro: '' };
     if (primeiroIncompleto() !== -1) { irParaGrupoIncompleto('Falta ordenar este grupo para concluir.'); return; }
+    if (P2() && primeiroIncompleto2() !== -1) {
+      if (!estado.permutacoes2) estado.permutacoes2 = gerarPermutacoes2();
+      if (!algumRespondido2()) { irPara('parte2-intro'); return; }
+      estado.grupo2 = primeiroIncompleto2();
+      avisoTela = 'Falta ordenar este grupo para concluir.';
+      irPara('parte2');
+      return;
+    }
     // Dado da identificação faltando (ex.: idade obrigatória): volta à identificação; "Salvar e enviar" reenvia.
     if (!identificacaoValida()) {
       estado.reenviar = true;
@@ -2278,6 +2795,7 @@
       return;
     }
     completarDemonstracao();
+    completarDemonstracao2();
     if (destinoAposGrupos() === 'confirmacao') { irDepoisDosGrupos(); return; }
     estado.avaliacaoCodigo = AVAL ? AVAL.codigo : '';
     var payload;

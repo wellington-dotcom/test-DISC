@@ -11,12 +11,15 @@ const { payloadValido, respostasFixas, prng } = require('./helpers/fixtures.js')
 const RE_PROTOCOLO = /^[0-9]{2}[A-HJ-NP-Z]$/;
 
 // Novidades da simulada que o Code.gs (legado) não tem: config.formulario / avaliacao.formulario e, nos
-// itens de "listar", a pessoa (pessoaId, pessoa) e os campos novos do formulário (email, cidade, extras).
-const CAMPOS_NOVOS_ITEM = ['pessoaId', 'pessoa', 'email', 'cidade', 'extras'];
+// itens de "listar", a pessoa (pessoaId, pessoa), os campos novos do formulário (email, cidade, extras) e a
+// Parte 2 (exigido, resultadoExigido) e a foto (item e usuário).
+const CAMPOS_NOVOS_ITEM = ['pessoaId', 'pessoa', 'email', 'cidade', 'extras', 'exigido', 'resultadoExigido', 'foto'];
 // Empresas (rodada empresas/equipes): cidade, observações, ativo e contagem de colaboradores.
 const CAMPOS_NOVOS_EMPRESA = ['cidade', 'observacoes', 'ativo', 'atualizadoEm', 'colaboradores'];
 function semNovidades(dono, k) {
   if (k === 'formulario') return true;
+  // Foto do usuário (rodada fotos): o Code.gs não tem.
+  if (k === 'foto' && dono && typeof dono === 'object' && !Array.isArray(dono) && 'papel' in dono) return true;
   if (dono && typeof dono === 'object' && !Array.isArray(dono) && 'colaboradores' in dono && CAMPOS_NOVOS_EMPRESA.includes(k)) return true;
   return !!(dono && typeof dono === 'object' && !Array.isArray(dono) && 'pessoaId' in dono && 'respostas' in dono && CAMPOS_NOVOS_ITEM.includes(k));
 }
@@ -258,7 +261,7 @@ test('semente da prévia: admin e gestor, Clínica Exemplo, SEL1/EQP1/ATD1 e 9 r
   const armazenamento = localStorageFalso();
   const api = SIM.criar({ armazenamento, scoring: S, latenciaMs: 0 });
   const adm = await api.login('admin@previa.com', 'previa123');
-  assert.deepEqual(adm.usuario, { id: adm.usuario.id, nome: 'Você (admin)', email: 'admin@previa.com', papel: 'admin', empresaId: '', empresaNome: '' });
+  assert.deepEqual(adm.usuario, { id: adm.usuario.id, nome: 'Você (admin)', email: 'admin@previa.com', papel: 'admin', empresaId: '', empresaNome: '', foto: '' });
   const ges = await api.login('GESTOR@previa.com', 'previa123');
   assert.equal(ges.usuario.papel, 'gestor');
   assert.equal(ges.usuario.empresaNome, 'Clínica Exemplo');
@@ -315,8 +318,9 @@ test('prévia: avaliacaoPublica, enviar com código ativo/inativo/inexistente e 
   const api = SIM.criar({ armazenamento: localStorageFalso(), scoring: S, latenciaMs: 0 });
   const pub = await api.avaliacaoPublica('eqp1');
   assert.deepEqual(pub.avaliacao, { codigo: 'EQP1', nome: 'Equipe comercial', tipo: 'equipe', empresaNome: 'Clínica Exemplo', mostrarResultado: true,
-    formulario: { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto' }, perguntas: [] } });
+    formulario: { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto', foto: 'opcional' }, perguntas: [], parte2: 'ligada' } });
   await assert.rejects(api.avaliacaoPublica('NADA'), { message: 'Link inválido ou avaliação encerrada. Fale com quem enviou o link.' });
+  assert.equal((await api.avaliacaoPublica('SEL1')).avaliacao.formulario.parte2, 'desligada');
   const r = await api.enviar(payloadValido({ id: 'link-sel1-0001', avaliacao: 'SEL1' }));
   assert.match(r.protocolo, RE_PROTOCOLO);
   await assert.rejects(api.enviar(payloadValido({ id: 'link-xxxx-0001', avaliacao: 'ZZZZ' })), { message: 'Este link de avaliação não está mais ativo.' });
@@ -953,4 +957,94 @@ test('relatórios por modelo: salvar, publicar (link), página pública com o mo
   assert.equal((await api.relatorioPublico('exemplo-cartorio')).modelo, 'processo');
   assert.deepEqual(await api.excluirRelatorioModelo(T, r3.id), { ok: true, id: r3.id });
   await assert.rejects(api.excluirRelatorioModelo(T, r3.id), /Relatório não encontrado/);
+});
+
+/* ---------- Fotos (como a migração 20261009120000_fotos.sql) ---------- */
+const FOTO = 'data:image/jpeg;base64,/9j/' + 'A'.repeat(300);
+const FOTO2 = 'data:image/jpeg;base64,/9j/' + 'B'.repeat(300);
+
+test('fotos: envio conforme formulario.campos.foto; ficha guarda a mais recente; listar devolve as duas', async () => {
+  const { api, T } = nova();
+  const proc = async (codigoForm) => (await api.processosSalvar(T, { nome: 'Proc ' + codigoForm, config: { formulario: { campos: { foto: codigoForm } } } })).processo;
+  const obrig = await proc('obrigatorio');
+  const oculta = await proc('oculto');
+  assert.equal(obrig.config.formulario.campos.foto, 'obrigatorio');
+  assert.equal((await api.processosSalvar(T, { nome: 'Padrão' })).processo.config.formulario.campos.foto, 'opcional');
+
+  await assert.rejects(api.enviar(payloadValido({ id: 'ft-obrig-1', avaliacao: obrig.codigo })), /^Error: Envie uma foto\.$/);
+  for (const ruim of ['data:image/png;base64,AAAA', 'https://x/y.jpg', 'data:image/jpeg;base64,/9j/' + 'A'.repeat(40000)]) {
+    await assert.rejects(api.enviar(payloadValido({ id: 'ft-ruim-1', foto: ruim })), /Foto inválida ou grande demais/);
+  }
+  await assert.rejects(api.enviar(payloadValido({ id: 'ft-grande', foto: FOTO, vaga: 'x'.repeat(81000) })), /Requisição grande demais/);
+  assert.equal((await api.enviar(payloadValido({ id: 'ft-obrig-2', avaliacao: obrig.codigo, foto: FOTO, telefone: '11977770001' }))).ok, true);
+  assert.equal((await api.enviar(payloadValido({ id: 'ft-oculta', avaliacao: oculta.codigo, foto: 'lixo', telefone: '11977770002' }))).ok, true);
+  assert.equal((await api.enviar(payloadValido({ id: 'ft-sem', telefone: '11977770001' }))).ok, true);
+  assert.equal((await api.enviar(payloadValido({ id: 'ft-maior', foto: 'data:image/jpeg;base64,/9j/' + 'C'.repeat(39000), vaga: 'x'.repeat(30000), telefone: '11977770003' }))).ok, true);
+
+  const itens = (await api.listar(T)).itens;
+  const por = Object.fromEntries(itens.map((i) => [i.id, i]));
+  assert.equal(por['ft-obrig-2'].foto, FOTO);
+  assert.equal(por['ft-obrig-2'].pessoa.foto, FOTO);
+  assert.equal(por['ft-sem'].foto, '');
+  assert.equal(por['ft-sem'].pessoa.foto, FOTO, 'envio sem foto não apaga a da ficha');
+  assert.equal(por['ft-oculta'].foto, '');
+  assert.equal(por['ft-oculta'].pessoa.foto, '');
+});
+
+test('fotos: removerFoto / atualizar {foto: ""} apagam da ficha e de todas as respostas da pessoa (só admin)', async () => {
+  const { api, T } = nova();
+  await api.enviar(payloadValido({ id: 'rm-foto-1', foto: FOTO, telefone: '11977771111' }));
+  await api.enviar(payloadValido({ id: 'rm-foto-2', foto: FOTO2, telefone: '11977771111' }));
+  await api.enviar(payloadValido({ id: 'rm-foto-3', foto: FOTO, telefone: '11977772222' }));
+  assert.deepEqual(await api.removerFoto(T, 'rm-foto-1'), { ok: true, id: 'rm-foto-1', removidas: 3 });
+  let por = Object.fromEntries((await api.listar(T)).itens.map((i) => [i.id, i]));
+  assert.deepEqual([por['rm-foto-1'].foto, por['rm-foto-2'].foto, por['rm-foto-2'].pessoa.foto, por['rm-foto-3'].foto], ['', '', '', FOTO]);
+  await assert.rejects(api.removerFoto(T, 'nao-existe'), /Candidato não encontrado/);
+  assert.deepEqual(await api.atualizar(T, 'rm-foto-3', { foto: '' }), { ok: true, id: 'rm-foto-3' });
+  por = Object.fromEntries((await api.listar(T)).itens.map((i) => [i.id, i]));
+  assert.equal(por['rm-foto-3'].foto, '');
+  await assert.rejects(api.atualizar(T, 'rm-foto-3', { foto: FOTO }), /só pode ser removida/);
+});
+
+test('fotos: salvarMinhaFoto (só a própria), eu e listarUsuarios', async () => {
+  const { api, T } = nova();
+  assert.equal((await api.eu(T)).usuario.foto, '');
+  assert.deepEqual(await api.salvarMinhaFoto(T, FOTO), { ok: true, foto: FOTO });
+  assert.equal((await api.eu(T)).usuario.foto, FOTO);
+  assert.equal((await api.listarUsuarios(T)).usuarios[0].foto, FOTO);
+  await assert.rejects(api.salvarMinhaFoto(T, 'data:image/png;base64,AAAA'), /Foto inválida ou grande demais/);
+  assert.deepEqual(await api.salvarMinhaFoto(T, ''), { ok: true, foto: '' });
+  assert.equal((await api.eu(T)).usuario.foto, '');
+  await assert.rejects(api.salvarMinhaFoto('', FOTO), (e) => e.sessaoExpirada === true);
+});
+
+test('fotos na prévia: avatares fictícios (iniciais) em fichas, respostas, equipe e no relatório do Cartório Exemplo', async () => {
+  const { api, T } = await previa();
+  const itens = (await api.listar(T)).itens;
+  const porId = Object.fromEntries(itens.map((i) => [i.id, i]));
+  for (const id of ['previa-exemplo-03', 'previa-exemplo-04', 'previa-exemplo-05', 'previa-exemplo-06']) {
+    assert.ok(SIM.fotoValida(porId[id].foto), id);
+    assert.equal(porId[id].pessoa.foto, porId[id].foto);
+  }
+  assert.equal(porId['previa-exemplo-01'].foto, '');
+  assert.equal(porId['previa-exemplo-01'].pessoa.foto, porId['previa-exemplo-05'].foto, 'Ana: mesma ficha');
+  assert.equal(porId['previa-exemplo-09'].foto, '');
+  assert.ok(SIM.fotoValida(porId['previa-exemplo-09'].pessoa.foto), 'Renata só na ficha');
+  Object.values(SIM.AVATARES_PREVIA).forEach((f) => { assert.ok(SIM.fotoValida(f)); assert.ok(f.length < 15000); });
+  const emp = (await api.listarEmpresas(T)).empresas.find((e) => e.nome === 'Clínica Exemplo');
+  const eq = await api.listarEquipe(T, emp.id);
+  assert.equal(eq.colaboradores.filter((c) => c.foto).length, 4);
+  assert.equal(eq.colaboradores.find((c) => /Tiago/.test(c.nome)).foto, '');
+  const rel = (await api.relatorioPublico('exemplo-cartorio')).relatorio;
+  const comFoto = rel.ranking.linhas.filter((l) => l.foto).map((l) => l.nome).sort();
+  assert.deepEqual(comFoto, ['Ana E.', 'Carla M.']);
+  assert.ok(rel.disc.quadro.some((q) => q.nome === 'Ana E.' && q.foto === SIM.AVATARES_PREVIA['5511900000001']));
+});
+
+test('relatório por modelo: até 1 MB passa (as fotos vão no snapshot)', async () => {
+  const { api, T } = await previa();
+  const emp = (await api.listarEmpresas(T)).empresas.find((e) => e.nome === 'Clínica Exemplo');
+  const ok = await api.salvarRelatorioModelo(T, { modelo: 'equipe', empresaId: emp.id, dados: { titulo: 'Grande', t: 'x'.repeat(900000) } });
+  assert.equal(ok.ok, true);
+  await assert.rejects(api.salvarRelatorioModelo(T, { modelo: 'equipe', empresaId: emp.id, dados: { t: 'x'.repeat(1000001) } }), /grande demais/);
 });

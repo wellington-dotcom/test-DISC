@@ -474,10 +474,10 @@ test('admin.html: carrega supabase-js e api-supabase depois das APIs e tem os fl
 /* ---------- Formulário do processo e pessoas ---------- */
 
 test('formulário do processo: padrão, normalização (ids p1..p5, até 5) e config nova', () => {
-  assert.deepEqual(AD.formularioPadrao(), { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto' }, perguntas: [] });
+  assert.deepEqual(AD.formularioPadrao(), { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto', foto: 'opcional' }, perguntas: [], parte2: 'desligada' });
   assert.deepEqual(AD.normalizarFormulario(null), AD.formularioPadrao());
   assert.deepEqual(AD.normalizarFormulario({ campos: { idade: 'xx', email: 'obrigatorio' } }).campos,
-    { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'obrigatorio', cidade: 'oculto' });
+    { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'obrigatorio', cidade: 'oculto', foto: 'opcional' });
   const n = AD.normalizarFormulario({ perguntas: [
     { id: 'p2', texto: '  Pretensão   salarial? ', obrigatoria: true },
     { id: 'p2', texto: 'Disponibilidade de horário?' },
@@ -506,6 +506,118 @@ test('formulário: pergunta com dado sensível é recusada com a mensagem do con
   assert.equal(AD.validarConfig(com(Array.from({ length: 6 }, (_, i) => ({ texto: 'Pergunta ' + i })))), 'Use no máximo 5 perguntas extras.');
   assert.equal(AD.validarConfig(Object.assign({}, base, { formulario: { campos: { email: 'talvez' }, perguntas: [] } })),
     'Escolha se "E-mail" é obrigatória, opcional ou não perguntada.');
+});
+
+test('Parte 2: formulario.parte2 normalizado e validado; padrão ao criar segue o tipo', () => {
+  assert.equal(AD.normalizarFormulario({ parte2: 'ligada' }).parte2, 'ligada');
+  assert.equal(AD.normalizarFormulario({ parte2: 'talvez' }).parte2, 'desligada');
+  assert.equal(AD.normalizarFormulario({}).parte2, 'desligada');
+  const base = AD.configPadrao();
+  assert.equal(AD.validarConfig(Object.assign({}, base, { formulario: { campos: base.formulario.campos, perguntas: [], parte2: 'ligada' } })), '');
+  assert.equal(AD.validarConfig(Object.assign({}, base, { formulario: { campos: base.formulario.campos, perguntas: [], parte2: 'sim' } })),
+    'Escolha se a segunda parte do teste fica ligada ou desligada.');
+  assert.equal(AD.parte2Padrao('equipe'), 'ligada');
+  assert.equal(AD.parte2Padrao('selecao'), 'desligada');
+  assert.match(AD.textoParte2('ligada'), /10/);
+});
+
+test('Parte 2: exigido do registro, eixos, esforço e nome da combinação', () => {
+  const EX = require('../js/disc-exigido.js');
+  // 10 grupos: D mais alto (4 = mais parecido), depois C, S, I
+  const exigido = '4123'.repeat(10);
+  assert.equal(EX.validar(exigido), true);
+  const reg = AD.recalcular(payloadValido({ exigido }));
+  const ex = AD.exigidoDoRegistro(reg);
+  assert.ok(ex && ex.percentuais.D > ex.percentuais.I);
+  assert.equal(ex.codigo, EX.calcular(exigido).codigo);
+  // Sem string válida: usa resultadoExigido; sem nada: null
+  assert.deepEqual(AD.exigidoDoRegistro({ exigido: '', resultadoExigido: { percentuais: { D: 25, I: 25, S: 25, C: 25 }, codigo: 'DI' } }).percentuais, { D: 25, I: 25, S: 25, C: 25 });
+  assert.equal(AD.exigidoDoRegistro({ exigido: '123' }), null);
+  assert.equal(AD.exigidoDoRegistro(null), null);
+  // Eixos: mesma convenção do DISC_EXIGIDO (+ acelerado, + tarefas)
+  assert.deepEqual(AD.eixosDe({ D: 40, I: 30, S: 20, C: 10 }), EX.eixos({ D: 40, I: 30, S: 20, C: 10 }));
+  assert.equal(AD.eixosDe({ D: 1 }), null);
+  // Esforço: natural DI × exigido SC é alto; igual é baixo
+  const nat = { D: 40, I: 30, S: 20, C: 10 };
+  const a = AD.esforcoDe({ percentuais: nat }, { percentuais: { D: 10, I: 20, S: 30, C: 40 } });
+  assert.ok(a.indice >= 30);
+  assert.equal(a.faixa, 'muito_alta');
+  assert.equal(AD.esforcoDe(nat, nat).faixa, 'baixa');
+  assert.equal(AD.esforcoDe(nat, null), null);
+  assert.equal(AD.rotuloEsforco('alta'), 'Esforço alto');
+  assert.ok(AD.frasesEsforco(a).length >= 1);
+  assert.deepEqual(AD.frasesEsforco(null), []);
+  assert.equal(typeof AD.nomeCombinacao('DI'), 'string');
+  assert.equal(AD.nomeCombinacao(''), '');
+});
+
+test('Parte 2 na empresa: pontos do mapa (natural e exigido) e esforço por colaborador em ordem', () => {
+  const colabs = [
+    { pessoaId: 'a', nome: 'Ana', cargo: 'Gerente', resultado: { percentuais: { D: 40, I: 30, S: 20, C: 10 }, codigo: 'DI' }, exigido: { percentuais: { D: 10, I: 20, S: 30, C: 40 }, codigo: 'CS' } },
+    { pessoaId: 'b', nome: 'Bia', resultado: { percentuais: { D: 25, I: 25, S: 25, C: 25 }, codigo: 'DI' }, exigido: { percentuais: { D: 27, I: 25, S: 24, C: 24 }, codigo: 'DI' } },
+    { pessoaId: 'c', nome: 'Caio', resultado: { percentuais: { D: 20, I: 20, S: 30, C: 30 }, codigo: 'SC' }, exigido: null },
+    { pessoaId: 'd', nome: 'Duda', resultado: null }
+  ];
+  const pts = AD.pontosMapaEquipe(colabs);
+  assert.deepEqual(pts.map((p) => p.id), ['a', 'b', 'c']);
+  assert.ok(pts[0].exigido && typeof pts[0].natural.ritmo === 'number');
+  assert.equal(pts[2].exigido, undefined);
+  const esf = AD.esforcoEquipe(colabs);
+  assert.deepEqual(esf.map((x) => x.pessoaId), ['a', 'b']);
+  assert.ok(esf[0].indice > esf[1].indice);
+  assert.equal(esf[0].cargo, 'Gerente');
+});
+
+test('fotos: fotoValida (só data URL JPEG até 40000), iniciais e foto da resposta ou da pessoa', () => {
+  const ok = 'data:image/jpeg;base64,' + 'A'.repeat(100);
+  assert.equal(AD.fotoValida(ok), true);
+  assert.equal(AD.fotoValida('data:image/png;base64,AAAA'), false);
+  assert.equal(AD.fotoValida('https://exemplo.com/a.jpg'), false);
+  assert.equal(AD.fotoValida('data:image/jpeg;base64,' + 'A'.repeat(40000)), false);
+  assert.equal(AD.fotoValida('data:image/jpeg;base64,AA"onerror=x'), false);
+  assert.equal(AD.iniciais('Ana Maria Souza'), 'AS');
+  assert.equal(AD.iniciais('bruno'), 'B');
+  assert.equal(AD.iniciais(''), '?');
+  assert.equal(AD.fotoDe({ foto: ok }), ok);
+  assert.equal(AD.fotoDe({ foto: '', pessoa: { foto: ok } }), ok);
+  assert.equal(AD.fotoDe({ foto: 'x' }), '');
+  assert.equal(AD.normalizarFormulario({ campos: { foto: 'obrigatorio' } }).campos.foto, 'obrigatorio');
+  assert.equal(AD.resumoFormulario(null).find((x) => x.rotulo === 'Foto').texto, 'Opcional');
+});
+
+test('organograma de arrastar: mover sob um líder, Topo, Sem posição e ciclo recusado', () => {
+  const rels = [
+    { de: 'a', para: 'b', tipo: 'lidera' },
+    { de: 'b', para: 'c', tipo: 'lidera' },
+    { de: 'c', para: 'd', tipo: 'direto' }
+  ];
+  const nomes = { a: 'Ana', b: 'Bia', c: 'Caio', d: 'Duda' };
+  assert.deepEqual(AD.descendentes(rels, 'a').sort(), ['b', 'c']);
+  // Duda passa a ser liderada por Caio: some o 'direto' entre os dois
+  let r = AD.moverNoOrganograma(rels, 'd', { tipo: 'lider', id: 'c' }, nomes);
+  assert.equal(r.erro, '');
+  assert.equal(AD.liderDe(r.relacoes, 'd'), 'c');
+  assert.equal(r.relacoes.filter((x) => x.tipo === 'direto').length, 0);
+  // Troca de líder: Caio sai da Bia e vai para a Ana (um líder só)
+  r = AD.moverNoOrganograma(rels, 'c', { tipo: 'lider', id: 'a' }, nomes);
+  assert.equal(AD.liderDe(r.relacoes, 'c'), 'a');
+  assert.equal(r.relacoes.filter((x) => x.tipo === 'lidera' && x.para === 'c').length, 1);
+  // Ciclo: Ana sobre o Caio (liderado indireto dela) é recusado sem mudar nada
+  r = AD.moverNoOrganograma(rels, 'a', { tipo: 'lider', id: 'c' }, nomes);
+  assert.match(r.erro, /Não dá para colocar Ana abaixo de Caio/);
+  assert.deepEqual(r.relacoes, rels);
+  assert.equal(AD.moverNoOrganograma(rels, 'a', { tipo: 'lider', id: 'a' }).erro, '');
+  // Topo: sem líder (mantém os liderados); Sem posição: tira todas as 'lidera' dela, mantém 'direto'
+  r = AD.moverNoOrganograma(rels, 'b', { tipo: 'topo' });
+  assert.equal(AD.liderDe(r.relacoes, 'b'), null);
+  assert.deepEqual(AD.lideradosDe(r.relacoes, 'b'), ['c']);
+  r = AD.moverNoOrganograma(rels, 'c', { tipo: 'sem' });
+  assert.deepEqual(r.relacoes, [{ de: 'a', para: 'b', tipo: 'lidera' }, { de: 'c', para: 'd', tipo: 'direto' }]);
+  // Posições: sem líder e sem liderados = "Sem posição" (a não ser que esteja marcada no Topo)
+  const pos = AD.posicoesOrganograma(['a', 'b', 'c', 'd', 'e'], rels, { e: true });
+  assert.deepEqual(pos.raizes, ['a', 'e']);
+  assert.deepEqual(pos.sem, ['d']);
+  assert.deepEqual(pos.filhos.a, ['b']);
 });
 
 test('resumo do formulário: Nome e WhatsApp sempre, campos e perguntas extras', () => {

@@ -259,3 +259,163 @@ test('modelos novos: escape (XSS), modelo desconhecido e campos sensíveis ignor
   // snapshot mínimo de cada modelo não quebra
   for (const m of ['equipe', 'lideranca', 'pessoa']) assert.match(V.montarHtml({ modelo: m }), /data-secao="capa"/);
 });
+
+/* ------------------------------------------------------------------ rodada 3: mapa ritmo × foco, régua, Parte 2, simples, fotos */
+const EXIGIDO_DI = '4321'.repeat(10);
+const FOTO = 'data:image/jpeg;base64,' + 'A'.repeat(200) + '==';
+function cx(html, id) {
+  const m = html.match(new RegExp('data-id="' + id + '"><title>[^<]*</title>(?:<circle cx="[^"]+" cy="[^"]+" r="9"[^>]*>)?<circle class="mapa-rf__natural" cx="([\\d.]+)" cy="([\\d.]+)"'));
+  assert.ok(m, 'ponto ' + id);
+  return { x: Number(m[1]), y: Number(m[2]) };
+}
+
+test('mapaRitmoFocoHtml: quadrantes D/I/S/C, posição pelo sinal do DISC_EXIGIDO (foco + = tarefas), seta tracejada laranja', () => {
+  const pontos = [
+    { id: 'd', nome: 'Dani', natural: { ritmo: 40, foco: 40 } },     // acelerado + tarefas -> D (cima, esquerda)
+    { id: 'i', nome: 'Ivo', natural: { ritmo: 40, foco: -40 } },     // acelerado + pessoas -> I (cima, direita)
+    { id: 's', nome: 'Sara', natural: { ritmo: -40, foco: -40 }, exigido: { ritmo: 30, foco: 30 } },
+    { id: 'c', nome: 'Caio', natural: { D: 10, I: 15, S: 25, C: 50 } } // aceita percentuais
+  ];
+  const html = V.mapaRitmoFocoHtml(pontos);
+  assert.match(html, /^<figure class="mapa-rf mapa-rf--exigido"/);
+  assert.match(html, /<svg class="mapa-rf__svg" viewBox="0 0 360 388"[^>]*role="img"/);
+  for (const L of ['D', 'I', 'S', 'C']) assert.match(html, new RegExp('class="mapa-rf__letra">' + L + '<'));
+  assert.ok(html.includes('ACELERADO') && html.includes('CAUTELOSO') && html.includes('TAREFAS') && html.includes('PESSOAS'));
+  const d = cx(html, 'd'), i = cx(html, 'i'), s = cx(html, 's'), c = cx(html, 'c');
+  assert.ok(d.x < 180 && d.y < 176, 'D em cima à esquerda');
+  assert.ok(i.x > 180 && i.y < 176, 'I em cima à direita');
+  assert.ok(s.x > 180 && s.y > 176, 'S embaixo à direita');
+  assert.ok(c.x < 180 && c.y > 176, 'C embaixo à esquerda');
+  // seta só para quem tem exigido, tracejada e laranja
+  assert.equal((html.match(/class="mapa-rf__seta"/g) || []).length, 1);
+  assert.match(html, /mapa-rf__seta" data-id="s"><line[^>]*stroke="#f34405"[^>]*stroke-dasharray="4 3"/);
+  assert.equal((html.match(/class="mapa-rf__exigido"/g) || []).length, 1);
+  assert.match(html, /Exigido pelo trabalho/);
+  // rótulos com os nomes, sem bolhas grandes (r ≤ 9)
+  for (const n of ['Dani', 'Ivo', 'Sara', 'Caio']) assert.ok(html.includes('>' + n + '</text>'));
+  for (const r of html.match(/ r="([\d.]+)"/g)) assert.ok(Number(r.match(/[\d.]+/)[0]) <= 9);
+  // convenção oposta por opção
+  const inv = V.mapaRitmoFocoHtml([{ id: 'd', nome: 'Dani', natural: { ritmo: 40, foco: -40 } }], { focoPessoas: true });
+  assert.ok(cx(inv, 'd').x < 180);
+});
+
+test('mapaRitmoFocoHtml: muitos pontos viram números + lista; coincidentes não se escondem; escape e entradas inválidas', () => {
+  const muitos = Array.from({ length: 10 }, (_, k) => ({ id: 'p' + k, nome: 'Pessoa ' + k, codigo: 'DI', natural: { ritmo: 10, foco: 10 } }));
+  const html = V.mapaRitmoFocoHtml(muitos);
+  assert.match(html, /<ol class="mapa-rf__lista">/);
+  assert.equal((html.match(/<li>/g) || []).length, 10);
+  const xs = new Set(muitos.map((p) => { const q = cx(html, p.id); return q.x + ',' + q.y; }));
+  assert.equal(xs.size, 10, 'pontos iguais abrem um leque');
+  const ataque = V.mapaRitmoFocoHtml([{ id: '"><x', nome: '<img src=x onerror=1>', natural: { ritmo: 0, foco: 0 } }]);
+  assert.ok(!ataque.includes('<img') && !ataque.includes('"><x'));
+  const vazio = V.mapaRitmoFocoHtml([null, { nome: 'Sem eixos' }, { nome: 'Texto', natural: { ritmo: 'a', foco: 1 } }]);
+  assert.match(vazio, /Sem pontos/);
+  assert.match(V.mapaRitmoFocoHtml(null), /<svg/);
+  // fora da escala: fica dentro do quadro
+  const longe = V.mapaRitmoFocoHtml([{ id: 'z', nome: 'Z', natural: { ritmo: 100, foco: -100 } }]);
+  const z = cx(longe, 'z');
+  assert.ok(z.x <= 326 && z.y >= 30);
+});
+
+test('régua de intensidade e natural × exigido', () => {
+  const r = V.reguaHtml([{ letra: 'D', nome: 'Dominância', pct: 12 }, { letra: 'C', nome: 'Conformidade', pct: 42, faixa: 'muito_alta', texto: { resumo: 'Resumo <b>', excesso: 'Excesso' } }]);
+  assert.match(r, /data-letra="D" data-faixa="muito_baixa"/);
+  assert.match(r, /data-letra="C" data-faixa="muito_alta"/);
+  assert.ok(r.includes('Resumo &lt;b&gt;') && r.includes('Quando exagerado'));
+  const n = V.naturalExigidoHtml({ D: 10, I: 15, S: 25, C: 50 }, { percentuais: { D: 35, I: 30, S: 15, C: 20 }, indice: 40, faixa: 'muito_alta' });
+  assert.match(n, /40<small>\/100/);
+  assert.match(n, /selo-doc--esf-muito_alta/);
+  assert.match(n, /natex__dif--mais">\+25/);
+  assert.equal(V.naturalExigidoHtml({}, null), '');
+});
+
+test('modelo pessoa completo: régua, mapa e (com Parte 2) "Onde você está se esticando"', () => {
+  const sem = V.montarHtml(MODELOS.pessoa({ pessoa: { nome: 'Carla Dias', resultado: RES.CS } }, { geradoEm: GERADO }));
+  assert.match(sem, /data-secao="intensidade"/);
+  assert.match(sem, /class="regua-doc"/);
+  assert.match(sem, /class="mapa-rf"/);
+  assert.ok(!sem.includes('data-secao="esticando"') && !sem.includes('mapa-rf__seta'));
+  const d = MODELOS.pessoa({ pessoa: { nome: 'Carla Dias', resultado: RES.CS, exigido: EXIGIDO_DI } }, { geradoEm: GERADO });
+  const com = V.montarHtml(d);
+  assert.match(com, /data-variante="completo"/);
+  assert.match(com, /data-secao="esticando"/);
+  assert.match(com, /class="natex"/);
+  assert.match(com, /class="mapa-rf__seta"/);
+  assert.ok(com.includes(V.esc(d.exigido.textos[0])));
+  // seções antigas continuam
+  for (const id of ['perfil', 'fortes', 'atencao', 'pressao', 'comunicacao', 'plano', 'encerramento']) assert.match(com, new RegExp('data-secao="' + id + '"'));
+});
+
+test('modelo pessoa simples: duas seções curtas, forças, cuidados, hábitos e régua', () => {
+  const d = MODELOS.pessoaSimples({ pessoa: { nome: 'Carla Dias', resultado: RES.CS } }, { geradoEm: GERADO });
+  const html = V.montarHtml(d);
+  assert.match(html, /data-modelo="pessoa" data-variante="simples"/);
+  for (const id of ['capa', 'resumo', 'habitos', 'encerramento', 'rodape']) assert.match(html, new RegExp('data-secao="' + id + '"'));
+  for (const id of ['fortes', 'pressao', 'comunicacao']) assert.ok(!html.includes('data-secao="' + id + '"'), id);
+  assert.match(html, /Suas forças/);
+  assert.match(html, /Cuidados/);
+  assert.equal((html.match(/class="regua-doc__item"/g) || []).length, 4);
+  for (const it of d.forcas.concat(d.cuidados, d.habitos)) assert.ok(html.includes(V.esc(it.texto)));
+  assert.match(html, /Olá, Carla\./);
+});
+
+test('modelo liderança: mapa, combinação e esforço de adaptação ao cargo', () => {
+  const d = MODELOS.lideranca({ pessoa: { nome: 'Bruno Lima', cargo: 'Gerente', resultado: RES.SC, exigido: EXIGIDO_DI }, empresa: { nome: 'Cartório' } }, { geradoEm: GERADO });
+  const html = V.montarHtml(d);
+  assert.match(html, /class="mapa-rf mapa-rf--exigido"/);
+  assert.match(html, /Esforço de adaptação ao cargo/);
+  assert.match(html, /class="natex"/);
+  const sem = V.montarHtml(MODELOS.lideranca({ pessoa: { nome: 'Bruno Lima', resultado: RES.SC }, empresa: { nome: 'X' } }, { geradoEm: GERADO }));
+  assert.ok(!sem.includes('Esforço de adaptação ao cargo'));
+  assert.match(sem, /class="mapa-rf"/);
+});
+
+test('modelo equipe: seção ritmo e foco com todos no mapa, decisão do grupo e pressão (com Parte 2)', () => {
+  const d = dadosEquipe(true);
+  const html = V.montarHtml(d);
+  assert.match(html, /data-secao="ritmo"/);
+  assert.match(html, /Como o grupo decide/);
+  assert.ok(!html.includes('Pressão do trabalho sobre o estilo'));
+  assert.equal((html.match(/class="mapa-rf__natural"/g) || []).length, d.mapa.pontos.length);
+  const e = MODELOS.equipe({
+    empresa: { nome: 'X' },
+    colaboradores: [{ pessoaId: 'a', nome: 'Ana Souza', resultado: RES.SC, exigido: EXIGIDO_DI }, { pessoaId: 'b', nome: 'Bia Lima', resultado: RES.IS }],
+    relacoes: []
+  }, { geradoEm: GERADO });
+  const h2 = V.montarHtml(e);
+  assert.match(h2, /Pressão do trabalho sobre o estilo/);
+  assert.match(h2, /class="mapa-rf__seta"/);
+  assert.match(h2, /pessoa-doc__esf/);
+});
+
+test('fotos: data:image/jpeg válida vira <img>; inválida ou URL externa vira iniciais; processo sem foto não muda', () => {
+  assert.equal(V.fotoValida(FOTO), true);
+  for (const f of ['https://x.com/a.jpg', 'data:image/png;base64,AAAA', 'data:image/jpeg;base64,<x>', 'data:image/svg+xml;base64,AAAA', 'data:image/jpeg;base64,' + 'A'.repeat(40001), null, 42]) assert.equal(V.fotoValida(f), false, String(f).slice(0, 30));
+  assert.match(V.avatarHtml('Ana Souza', FOTO, 40), /<img src="data:image\/jpeg;base64,/);
+  assert.match(V.avatarHtml('Ana Souza', 'https://x.com/a.jpg', 40), /avatar--iniciais[^>]*>AS</);
+  assert.ok(!V.avatarHtml('Ana', 'javascript:alert(1)').includes('<img'));
+  // capa da pessoa e da liderança
+  const p = MODELOS.pessoa({ pessoa: { nome: 'Carla Dias', resultado: RES.CS, foto: FOTO } }, { geradoEm: GERADO });
+  assert.match(V.montarHtml(p), /capa__retrato"><span class="avatar avatar--foto avatar--capa"/);
+  const p2 = MODELOS.pessoa({ pessoa: { nome: 'Carla Dias', resultado: RES.CS } }, { geradoEm: GERADO });
+  assert.match(V.montarHtml(p2), /avatar--iniciais avatar--capa"[^>]*>CD</);
+  p2.pessoa.foto = 'https://rastreador.exemplo/x.jpg';
+  assert.ok(!V.montarHtml(p2).includes('rastreador'));
+  const l = MODELOS.lideranca({ pessoa: { nome: 'Bruno Lima', resultado: RES.SC, foto: FOTO }, empresa: { nome: 'X' } }, { geradoEm: GERADO });
+  assert.match(V.montarHtml(l), /capa__retrato"><span class="avatar avatar--foto/);
+  // organograma: foto no cartão com a letra como selo
+  const org = V.organogramaHtml({ raizes: [{ id: 'a', nome: 'Ana S.', codigo: 'DI', foto: FOTO, filhos: [{ id: 'b', nome: 'Bia L.', codigo: 'SC', foto: 'https://x/y.jpg', filhos: [] }] }] });
+  assert.match(org, /org-cartao--D org-cartao--com-foto/);
+  assert.match(org, /org-cartao__selo disc-fundo-D" aria-hidden="true">D</);
+  assert.ok(!org.includes('https://x'));
+  assert.match(org, /org-cartao--S">/);
+  // processo: sem foto, nenhum avatar; com foto no ranking, avatar nos cartões
+  const rel = relatorio();
+  assert.ok(!V.montarHtml(rel).includes('class="avatar'));
+  rel.ranking.linhas[0].foto = FOTO;
+  rel.ranking.linhas[1].foto = 'https://x/y.jpg';
+  const h = V.montarHtml(rel);
+  assert.match(h, /avatar--rank/);
+  assert.match(h, /avatar--analise/);
+  assert.ok(!h.includes('https://x/y.jpg'));
+});

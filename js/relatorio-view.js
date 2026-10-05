@@ -132,6 +132,30 @@
 
   function lista(v) { return Array.isArray(v) ? v : []; }
 
+  /* ------------------------------------------------------------------ fotos (rodada 3b)
+   * Só data URL JPEG em base64, até 40 000 caracteres. Qualquer outra coisa (URL externa, SVG, PNG, javascript:)
+   * é ignorada: no lugar entram as iniciais no círculo. Nunca <img> com URL externa. */
+  var FOTO_MAX = 40000;
+  var RE_FOTO = /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/;
+  function fotoValida(f) { return typeof f === 'string' && f.length <= FOTO_MAX && RE_FOTO.test(f); }
+  function iniciais(nome) {
+    var partes = String(nome || '').replace(/[^A-Za-zÀ-ÿ\s]/g, ' ').trim().split(/\s+/).filter(Boolean);
+    if (!partes.length) return '?';
+    var a = partes[0].charAt(0), b = partes.length > 1 ? partes[partes.length - 1].charAt(0) : '';
+    return (a + b).toUpperCase();
+  }
+  // Avatar redondo: foto válida ou iniciais. tam em px (estilo inline: funciona também no painel, sem relatorio.css).
+  function avatarHtml(nome, foto, tam, classe) {
+    var t = tam || 40;
+    var base = 'display:inline-flex;align-items:center;justify-content:center;flex:none;width:' + t + 'px;height:' + t + 'px;border-radius:50%;overflow:hidden;';
+    if (fotoValida(foto)) {
+      return '<span class="avatar avatar--foto' + (classe ? ' ' + classe : '') + '" style="' + base + '"><img src="' + foto + '" alt="" width="' + t + '" height="' + t + '" style="width:100%;height:100%;object-fit:cover;display:block"></span>';
+    }
+    return '<span class="avatar avatar--iniciais' + (classe ? ' ' + classe : '') + '" style="' + base + '" aria-hidden="true">' + esc(iniciais(nome)) + '</span>';
+  }
+  // No relatório de processo, sem foto nada muda (só desenha quando há foto válida).
+  function avatarSeFoto(nome, foto, tam, classe) { return fotoValida(foto) ? avatarHtml(nome, foto, tam, classe) : ''; }
+
   /* ------------------------------------------------------------------ peças */
 
   function paragrafos(t, classe) {
@@ -260,7 +284,7 @@
       h += '<div class="rec">' +
         '<div class="rec__topo"><span class="rec__etiqueta">Recomendação ' + (ctx.pendente ? 'preliminar' : 'técnica') + '</span>' +
         '<span class="rec__nota"><span class="rec__nota-num">' + esc(numero(rec.score)) + '</span><span class="rec__nota-den">/100</span></span></div>' +
-        '<div class="rec__nome">' + esc(rec.nome) + ' ' + selo(rec.situacao, rotuloSituacao(rec.situacao)) + '</div>' +
+        '<div class="rec__nome">' + avatarSeFoto(rec.nome, rec.foto, 44, 'avatar--rec') + esc(rec.nome) + ' ' + selo(rec.situacao, rotuloSituacao(rec.situacao)) + '</div>' +
         '<div class="rec__texto">' + paragrafos(texto(rel, rec.textoId)) + '</div>' +
         (margem !== null ? '<div class="rec__margem"><span class="rec__margem-num">+' + esc(numero(margem)) + ' pts</span> sobre ' + esc(seg.nome) + ' (' + esc(numero(seg.total)) + ')' + (ehNumero(corte) ? ' · corte em ' + esc(numeroCurto(corte)) + ' pts' : '') + '</div>' : '') +
         '</div>';
@@ -271,7 +295,7 @@
       h += '<ol class="ranklista">' + ctx.linhas.slice(0, 4).map(function (l) {
         return '<li class="' + (l.posicao === 1 ? 'eh-topo' : '') + '">' +
           '<span class="ranklista__pos">' + esc(l.posicao) + 'º</span>' +
-          '<span class="ranklista__nome"><strong>' + esc(l.nome) + '</strong>' + selo(l.situacao, rotuloSituacao(l.situacao)) + '</span>' +
+          '<span class="ranklista__nome">' + avatarSeFoto(l.nome, l.foto, 32, 'avatar--rank') + '<strong>' + esc(l.nome) + '</strong>' + selo(l.situacao, rotuloSituacao(l.situacao)) + '</span>' +
           '<span class="ranklista__nota">' + esc(numero(l.total)) + '<small>/100</small></span></li>';
       }).join('') + '</ol>';
     }
@@ -455,7 +479,7 @@
       h += '<h3 class="h3 mt48">Quadro dos finalistas</h3><p class="nota-curta">Barra = distribuição do perfil (soma 100%). Letras: <b>D</b> Dominância · <b>I</b> Influência · <b>S</b> Estabilidade · <b>C</b> Conformidade.</p>' +
         '<ul class="quadro-disc">' + quadro.map(function (q) {
           return '<li class="quadro-disc__item">' +
-            '<div class="quadro-disc__cab"><strong>' + esc(q.nome) + '</strong><span class="quadro-disc__cod">' + esc(q.codigo || '—') + '</span>' +
+            '<div class="quadro-disc__cab">' + avatarSeFoto(q.nome, q.foto, 32, 'avatar--quadro') + '<strong>' + esc(q.nome) + '</strong><span class="quadro-disc__cod">' + esc(q.codigo || '—') + '</span>' +
             '<span class="quadro-disc__selos">' + selo('ad-' + classeSegura(q.aderencia), 'Aderência ' + rotuloAderencia(q.aderencia).toLowerCase()) +
             selo('cf-' + classeSegura(q.confiabilidade), rotuloConfiabilidade(q.confiabilidade)) + '</span></div>' +
             barraDisc(q) + '</li>';
@@ -505,7 +529,7 @@
       h += '<h3 class="h3 mt48">Análise posição a posição</h3>' + (ehNumero(cfg.corte) ? '<p class="nota-curta">Barra = total de 0 a 100. O traço verde marca o corte de ' + esc(numeroCurto(cfg.corte)) + ' pontos.</p>' : '') + '<ol class="analise">' + ctx.linhas.map(function (l) {
         return '<li class="analise__item sit-' + classeSegura(l.situacao) + '">' +
           '<div class="analise__pos">' + esc(l.posicao) + 'º</div>' +
-          '<div class="analise__corpo"><div class="analise__cab"><strong>' + esc(l.nome) + '</strong>' + selo(l.situacao, rotuloSituacao(l.situacao)) +
+          '<div class="analise__corpo"><div class="analise__cab">' + avatarSeFoto(l.nome, l.foto, 36, 'avatar--analise') + '<strong>' + esc(l.nome) + '</strong>' + selo(l.situacao, rotuloSituacao(l.situacao)) +
           '<span class="analise__nota">' + esc(numero(l.total)) + '</span></div>' +
           '<div class="analise__trilho">' + barra(l.total, 100, l.posicao === 1 ? 'barra--top' : '', 'Total ' + numero(l.total) + ' de 100') +
           (ehNumero(cfg.corte) ? '<span class="analise__corte" style="left:' + Math.max(0, Math.min(100, cfg.corte)) + '%" title="Corte ' + esc(numeroCurto(cfg.corte)) + '"></span>' : '') + '</div>' +
@@ -584,8 +608,12 @@
   function cartaoPessoa(no) {
     var l = letraDisc(no.codigo || no.primario);
     var cod = codigoSeguro(no.codigo);
-    return '<div class="org-cartao' + (l ? ' org-cartao--' + l : ' org-cartao--sem') + (no.foco ? ' org-cartao--foco' : '') + '">' +
-      '<span class="org-cartao__letra' + (l ? ' disc-fundo-' + l : '') + '" aria-hidden="true">' + (l || '–') + '</span>' +
+    var comFoto = fotoValida(no.foto);
+    var letra = comFoto ?
+      '<span class="org-cartao__letra org-cartao__letra--foto" style="position:relative">' + avatarHtml(no.nome, no.foto, 36, 'org-cartao__foto') +
+        '<b class="org-cartao__selo' + (l ? ' disc-fundo-' + l : '') + '" aria-hidden="true">' + (l || '–') + '</b></span>' :
+      '<span class="org-cartao__letra' + (l ? ' disc-fundo-' + l : '') + '" aria-hidden="true">' + (l || '–') + '</span>';
+    return '<div class="org-cartao' + (l ? ' org-cartao--' + l : ' org-cartao--sem') + (no.foco ? ' org-cartao--foco' : '') + (comFoto ? ' org-cartao--com-foto' : '') + '">' + letra +
       '<span class="org-cartao__txt"><strong class="org-cartao__nome">' + esc(no.nome) + '</strong>' +
       (no.cargo ? '<span class="org-cartao__cargo">' + esc(no.cargo) + '</span>' : '') +
       '<span class="org-cartao__cod">' + (cod ? 'Perfil ' + esc(cod) : 'Sem teste') + (no.foco ? ' · candidato' : '') + '</span></span></div>';
@@ -636,6 +664,7 @@
         '<span class="capa__meta"><span>' + esc(c.meta) + '</span></span>' +
       '</header>' +
       '<div class="capa__miolo">' +
+        (c.retrato ? '<div class="capa__retrato">' + avatarHtml(c.retrato.nome, c.retrato.foto, 96, 'avatar--capa') + '</div>' : '') +
         '<div class="capa__sobre"><span class="ponto" aria-hidden="true"></span>' + esc(c.sobre) + '</div>' +
         '<h1 class="capa__titulo">' + c.tituloHtml + '</h1>' +
         (c.subtitulo ? '<p class="capa__subtitulo">' + esc(c.subtitulo) + '</p>' : '') +
@@ -672,6 +701,248 @@
 
   function pilhaDe(percentuais) { return percentuais && typeof percentuais === 'object' ? barraDisc(percentuais) : ''; }
 
+  /* ------------------------------------------------------------------ MAPA RITMO × FOCO (rodada 3)
+   * mapaRitmoFocoHtml(pontos, opcoes) -> <figure class="mapa-rf"> com um SVG autossuficiente (cores nos atributos,
+   * funciona também no painel, sem relatorio.css).
+   *   pontos: [{ id, nome, natural: {ritmo, foco}, exigido?: {ritmo, foco}, destaque?: bool, codigo? }]
+   *     ritmo e foco em −100..100, na convenção de DISC_EXIGIDO.eixos / js/compatibilidade.js:
+   *     ritmo + = acelerado (D+I) · foco + = TAREFAS (D+C). Também aceita os percentuais {D,I,S,C} no lugar dos eixos.
+   *     Com opcoes.focoPessoas = true, foco + = pessoas (DISC_EXIGIDO.paraPessoas).
+   *   opcoes: { rotulo?: aria-label, numerar?: bool (padrão: mais de 8 pontos), legenda?: bool (padrão true),
+   *             rotuloExigido?: texto do ponto exigido quando há um só ponto (padrão 'Trabalho') }
+   * Eixos: horizontal = foco (tarefas à esquerda, pessoas à direita); vertical = ritmo (acelerado em cima).
+   * Quadrantes: D (acelerado + tarefas), I (acelerado + pessoas), S (cauteloso + pessoas), C (cauteloso + tarefas).
+   * Pontos pequenos com rótulo (sem bolhas); o rótulo procura um lugar livre; com muitos pontos vira número + lista.
+   * Seta tracejada laranja do natural ao exigido. Escala fixa ±60 (o máximo prático dos percentuais 10–40). */
+
+  var MAPA = { W: 360, H: 360, X0: 34, Y0: 30, L: 292, DOM: 60 };
+  var COR = { tinta: '#13283f', notus: '#f34405', forte: '#c43803', ambar: '#ff9f40', ardosia: '#324e73', clara: '#8a97ab', fio: '#d6cfc1', mudo: '#6b6960', branco: '#ffffff', papel: '#f5f1ea' };
+  var COR_DISC = { D: COR.tinta, I: COR.ambar, S: COR.clara, C: COR.ardosia };
+
+  function r1(n) { return Math.round(n * 10) / 10; }
+  // Normaliza para { ritmo, foco } com foco + = tarefas. Aceita eixos ou percentuais {D,I,S,C}.
+  function eixoValido(e, focoPessoas) {
+    if (!e || typeof e !== 'object') return null;
+    if (ehNumero(e.ritmo) && ehNumero(e.foco)) return { ritmo: e.ritmo, foco: focoPessoas ? -e.foco : e.foco };
+    var soma = 0, ok = true;
+    LETRAS.forEach(function (L) { if (!ehNumero(e[L]) || e[L] < 0) ok = false; else soma += e[L]; });
+    if (!ok || soma <= 0) return null;
+    var p = {};
+    LETRAS.forEach(function (L) { p[L] = e[L] * 100 / soma; });
+    return { ritmo: r1(p.D + p.I - p.S - p.C), foco: r1(p.D + p.C - p.I - p.S) };
+  }
+  function posMapa(e) {
+    var lim = MAPA.DOM - 3, meio = MAPA.L / 2;
+    var f = Math.max(-lim, Math.min(lim, e.foco)), r = Math.max(-lim, Math.min(lim, e.ritmo));
+    // tarefas (foco +) à esquerda, pessoas à direita
+    return { x: r1(MAPA.X0 + meio - f / MAPA.DOM * meio), y: r1(MAPA.Y0 + meio - r / MAPA.DOM * meio) };
+  }
+  function descreverEixos(e) {
+    return (e.ritmo >= 0 ? 'ritmo acelerado' : 'ritmo cauteloso') + ' (' + Math.abs(Math.round(e.ritmo)) + ') e foco em ' + (e.foco >= 0 ? 'tarefas' : 'pessoas') + ' (' + Math.abs(Math.round(e.foco)) + ')';
+  }
+
+  function mapaRitmoFocoHtml(pontos, opcoes) {
+    var op = opcoes || {};
+    var M = MAPA, meio = M.L / 2, cx = M.X0 + meio, cy = M.Y0 + meio;
+    var fp = !!op.focoPessoas;
+    var ps = lista(pontos).filter(function (p) { return p && eixoValido(p.natural, fp); }).map(function (p, i) {
+      var nat = eixoValido(p.natural, fp), exi = eixoValido(p.exigido, fp);
+      return { n: i + 1, id: p.id == null ? String(i + 1) : p.id, nome: String(p.nome || ''), codigo: codigoSeguro(p.codigo), destaque: !!p.destaque,
+        nat: posMapa(nat), exi: exi ? posMapa(exi) : null, natural: nat, exigido: exi };
+    });
+    var numerar = op.numerar != null ? !!op.numerar : ps.length > 8;
+    var temExigido = ps.some(function (p) { return p.exi; });
+    var legenda = op.legenda !== false;
+    var H = M.H + (legenda ? 28 : 0);
+
+    // Pontos coincidentes: abre um leque pequeno (determinístico) para nenhum esconder o outro.
+    var originais = [];
+    ps.forEach(function (p) {
+      var k = 0;
+      originais.forEach(function (q) { if (Math.abs(q.x - p.nat.x) < 6 && Math.abs(q.y - p.nat.y) < 6) k++; });
+      originais.push(p.nat);
+      if (k) { var ang = k * 2.4, raio = 8 * Math.sqrt(k); p.nat = { x: r1(Math.max(M.X0 + 6, Math.min(M.X0 + M.L - 6, p.nat.x + Math.cos(ang) * raio))), y: r1(Math.max(M.Y0 + 6, Math.min(M.Y0 + M.L - 6, p.nat.y + Math.sin(ang) * raio))) }; }
+    });
+
+    var s = '';
+    // Quadrantes: fundo branco com fio, cruz central e as letras nos cantos.
+    s += '<rect x="' + M.X0 + '" y="' + M.Y0 + '" width="' + M.L + '" height="' + M.L + '" rx="2" fill="' + COR.branco + '" stroke="' + COR.fio + '"/>';
+    s += '<line x1="' + cx + '" y1="' + M.Y0 + '" x2="' + cx + '" y2="' + (M.Y0 + M.L) + '" stroke="' + COR.fio + '"/>';
+    s += '<line x1="' + M.X0 + '" y1="' + cy + '" x2="' + (M.X0 + M.L) + '" y2="' + cy + '" stroke="' + COR.fio + '"/>';
+    var QUADS = [
+      { L: 'D', x: M.X0 + 12, y: M.Y0 + 30, a: 'start' }, { L: 'I', x: M.X0 + M.L - 12, y: M.Y0 + 30, a: 'end' },
+      { L: 'C', x: M.X0 + 12, y: M.Y0 + M.L - 24, a: 'start' }, { L: 'S', x: M.X0 + M.L - 12, y: M.Y0 + M.L - 24, a: 'end' }
+    ];
+    s += QUADS.map(function (q) {
+      return '<g class="mapa-rf__quad" aria-hidden="true"><text x="' + q.x + '" y="' + q.y + '" text-anchor="' + q.a + '" font-size="28" font-weight="700" fill="' + COR_DISC[q.L] + '" class="mapa-rf__letra">' + q.L + '</text>' +
+        '<text x="' + q.x + '" y="' + (q.y + 15) + '" text-anchor="' + q.a + '" font-size="11" fill="' + COR.mudo + '" class="mapa-rf__mono">' + esc(NOMES_DISC[q.L].nome) + '</text></g>';
+    }).join('');
+    // Eixos
+    s += '<g class="mapa-rf__eixos" font-size="11" fill="' + COR.mudo + '" aria-hidden="true">' +
+      '<text x="' + cx + '" y="' + (M.Y0 - 10) + '" text-anchor="middle" class="mapa-rf__mono">↑ ACELERADO</text>' +
+      '<text x="' + cx + '" y="' + (M.Y0 + M.L + 20) + '" text-anchor="middle" class="mapa-rf__mono">↓ CAUTELOSO</text>' +
+      '<text transform="translate(' + (M.X0 - 12) + ' ' + cy + ') rotate(-90)" text-anchor="middle" class="mapa-rf__mono">TAREFAS</text>' +
+      '<text transform="translate(' + (M.X0 + M.L + 18) + ' ' + cy + ') rotate(90)" text-anchor="middle" class="mapa-rf__mono">PESSOAS</text></g>';
+
+    // Setas (por baixo dos pontos)
+    ps.forEach(function (p) {
+      if (!p.exi) return;
+      var dx = p.exi.x - p.nat.x, dy = p.exi.y - p.nat.y, d = Math.sqrt(dx * dx + dy * dy);
+      if (d < 14) return; // perto demais: os dois círculos já se tocam
+      var ux = dx / d, uy = dy / d;
+      var x1 = r1(p.nat.x + ux * 7), y1 = r1(p.nat.y + uy * 7), xb = p.exi.x - ux * 8, yb = p.exi.y - uy * 8;
+      var x2 = r1(xb - ux * 6), y2 = r1(yb - uy * 6);
+      var ponta = [[r1(xb), r1(yb)], [r1(xb - ux * 8 - uy * 4.5), r1(yb - uy * 8 + ux * 4.5)], [r1(xb - ux * 8 + uy * 4.5), r1(yb - uy * 8 - ux * 4.5)]];
+      s += '<g class="mapa-rf__seta" data-id="' + esc(p.id) + '"><line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" stroke="' + COR.notus + '" stroke-width="1.75" stroke-dasharray="4 3" stroke-linecap="round"/>' +
+        '<polygon points="' + ponta.map(function (q) { return q.join(','); }).join(' ') + '" fill="' + COR.notus + '"/></g>';
+    });
+
+    // Rótulos: procura uma posição livre (direita, esquerda, cima, baixo, diagonais) sem cobrir outro rótulo ou ponto.
+    var ocupados = [];
+    ps.forEach(function (p) {
+      ocupados.push({ x: p.nat.x - 6, y: p.nat.y - 6, w: 12, h: 12 });
+      if (p.exi) ocupados.push({ x: p.exi.x - 7, y: p.exi.y - 7, w: 14, h: 14 });
+    });
+    function cruza(a, b) { return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h; }
+    function dentro(b) { return b.x >= M.X0 + 2 && b.x + b.w <= M.X0 + M.L - 2 && b.y >= M.Y0 + 2 && b.y + b.h <= M.Y0 + M.L - 2; }
+    function rotular(txt, x, y, peso) {
+      var w = Math.max(8, txt.length * (numerar ? 7 : 6.6)), h = 14;
+      var cands = [
+        { x: x + 9, y: y - 7, a: 'start' }, { x: x - 9 - w, y: y - 7, a: 'end' },
+        { x: x - w / 2, y: y - 22, a: 'middle' }, { x: x - w / 2, y: y + 8, a: 'middle' },
+        { x: x + 7, y: y - 20, a: 'start' }, { x: x + 7, y: y + 6, a: 'start' },
+        { x: x - 7 - w, y: y - 20, a: 'end' }, { x: x - 7 - w, y: y + 6, a: 'end' }
+      ];
+      var escolhido = null;
+      for (var i = 0; i < cands.length && !escolhido; i++) {
+        var b = { x: cands[i].x, y: cands[i].y, w: w, h: h };
+        if (!dentro(b)) continue;
+        var livre = true;
+        for (var j = 0; j < ocupados.length; j++) {
+          var o = ocupados[j];
+          // o próprio ponto não conta (é ele que o rótulo acompanha)
+          if (Math.abs(o.x + o.w / 2 - x) < 0.5 && Math.abs(o.y + o.h / 2 - y) < 0.5) continue;
+          if (cruza(b, o)) { livre = false; break; }
+        }
+        if (livre) escolhido = cands[i];
+      }
+      if (!escolhido) { escolhido = x > cx ? cands[1] : cands[0]; }
+      ocupados.push({ x: escolhido.x, y: escolhido.y, w: w, h: h });
+      var tx = escolhido.a === 'start' ? escolhido.x : escolhido.a === 'end' ? escolhido.x + w : escolhido.x + w / 2;
+      return '<text x="' + r1(tx) + '" y="' + r1(escolhido.y + 11) + '" text-anchor="' + escolhido.a + '" font-size="12" font-weight="' + (peso || 600) + '" fill="' + COR.tinta + '" class="mapa-rf__rot" paint-order="stroke" stroke="' + COR.branco + '" stroke-width="3" stroke-linejoin="round">' + esc(txt) + '</text>';
+    }
+
+    var rotuloExigido = op.rotuloExigido || 'Trabalho';
+    // Camadas: círculos do exigido por baixo; pontos naturais e rótulos por cima (nenhum ponto some sob um círculo).
+    s += ps.filter(function (p) { return p.exi; }).map(function (p) {
+      return '<circle class="mapa-rf__exigido" data-id="' + esc(p.id) + '" cx="' + p.exi.x + '" cy="' + p.exi.y + '" r="5.5" fill="' + COR.branco + '" stroke="' + COR.notus + '" stroke-width="2"/>';
+    }).join('');
+    s += ps.map(function (p) {
+      var titulo = p.nome + (p.codigo ? ' (' + p.codigo + ')' : '') + ': ' + descreverEixos(p.natural) + (p.exigido ? '; o trabalho pede ' + descreverEixos(p.exigido) : '');
+      var g = '<g class="mapa-rf__ponto' + (p.destaque ? ' mapa-rf__ponto--destaque' : '') + '" data-id="' + esc(p.id) + '"><title>' + esc(titulo) + '</title>';
+      if (p.destaque) g += '<circle cx="' + p.nat.x + '" cy="' + p.nat.y + '" r="9" fill="none" stroke="' + COR.notus + '" stroke-width="1.5"/>';
+      g += '<circle class="mapa-rf__natural" cx="' + p.nat.x + '" cy="' + p.nat.y + '" r="5" fill="' + COR.tinta + '" stroke="' + COR.branco + '" stroke-width="1.5"/>';
+      g += rotular(numerar ? String(p.n) : p.nome, p.nat.x, p.nat.y, p.destaque ? 700 : 600);
+      if (p.exi && ps.length === 1) g += rotular(rotuloExigido, p.exi.x, p.exi.y, 500);
+      return g + '</g>';
+    }).join('');
+
+    if (legenda) {
+      var ly = M.H + 14;
+      s += '<g class="mapa-rf__legenda" font-size="11" fill="' + COR.mudo + '" aria-hidden="true">' +
+        '<circle cx="' + (M.X0 + 5) + '" cy="' + (ly - 4) + '" r="5" fill="' + COR.tinta + '"/><text x="' + (M.X0 + 15) + '" y="' + ly + '">Jeito natural</text>' +
+        (temExigido ? '<circle cx="' + (M.X0 + 112) + '" cy="' + (ly - 4) + '" r="5" fill="' + COR.branco + '" stroke="' + COR.notus + '" stroke-width="2"/><text x="' + (M.X0 + 122) + '" y="' + ly + '">Exigido pelo trabalho</text>' +
+          '<line x1="' + (M.X0 + 248) + '" y1="' + (ly - 4) + '" x2="' + (M.X0 + 270) + '" y2="' + (ly - 4) + '" stroke="' + COR.notus + '" stroke-width="1.75" stroke-dasharray="4 3"/><polygon points="' + (M.X0 + 278) + ',' + (ly - 4) + ' ' + (M.X0 + 270) + ',' + (ly - 8.5) + ' ' + (M.X0 + 270) + ',' + (ly + 0.5) + '" fill="' + COR.notus + '"/>' : '') +
+        '</g>';
+    }
+
+    var aria = (op.rotulo || 'Mapa de ritmo e foco') + '. Eixo vertical: ritmo, de cauteloso a acelerado. Eixo horizontal: foco, de tarefas a pessoas. ' +
+      (ps.length ? ps.map(function (p) { return p.nome + ': ' + descreverEixos(p.natural) + (p.exigido ? ', trabalho pede ' + descreverEixos(p.exigido) : ''); }).join('; ') + '.' : 'Sem pontos.');
+    var svg = '<svg class="mapa-rf__svg" viewBox="0 0 ' + M.W + ' ' + H + '" width="100%" role="img" aria-label="' + esc(aria) + '" style="display:block;max-width:100%;height:auto">' + s + '</svg>';
+    var listaNum = numerar && ps.length ? '<ol class="mapa-rf__lista">' + ps.map(function (p) {
+      return '<li><span class="mapa-rf__n">' + p.n + '</span> ' + esc(p.nome) + (p.codigo ? ' <span class="mapa-rf__cod">' + esc(p.codigo) + '</span>' : '') + '</li>';
+    }).join('') + '</ol>' : '';
+    return '<figure class="mapa-rf' + (temExigido ? ' mapa-rf--exigido' : '') + '" style="margin:0 auto;max-width:440px">' + svg + listaNum + '</figure>';
+  }
+
+  /* ------------------------------------------------------------------ RÉGUA DE INTENSIDADE
+   * reguaHtml(fatores, regua) — uma linha por fator com 5 faixas (muito baixa → muito alta) e o marcador no percentual.
+   *   fatores: [{ letra, nome, pct, faixa?, faixaRotulo?, texto?: {resumo, comportamento, excesso, falta} }]
+   *   regua:   { limites: [15, 22, 29, 36], min: 10, max: 40, rotulos: {muito_baixa: ..., ...} } (snapshot; padrão abaixo) */
+  var REGUA_PADRAO = { limites: [15, 22, 29, 36], min: 10, max: 40,
+    rotulos: { muito_baixa: 'Muito baixa', baixa: 'Baixa', media: 'Média', alta: 'Alta', muito_alta: 'Muito alta' } };
+  var FAIXAS = ['muito_baixa', 'baixa', 'media', 'alta', 'muito_alta'];
+  function reguaDe(r) {
+    var x = r && typeof r === 'object' ? r : {};
+    var lim = lista(x.limites).filter(ehNumero);
+    if (lim.length !== 4) lim = REGUA_PADRAO.limites;
+    var min = ehNumero(x.min) ? x.min : REGUA_PADRAO.min, max = ehNumero(x.max) ? x.max : REGUA_PADRAO.max;
+    if (!(max > min)) { min = REGUA_PADRAO.min; max = REGUA_PADRAO.max; }
+    var rot = {};
+    FAIXAS.forEach(function (f) { rot[f] = (x.rotulos && typeof x.rotulos[f] === 'string' && x.rotulos[f]) || REGUA_PADRAO.rotulos[f]; });
+    return { limites: lim, min: min, max: max, rotulos: rot };
+  }
+  function faixaDe(pctv, rg) {
+    for (var i = 0; i < 4; i++) if (pctv < rg.limites[i]) return FAIXAS[i];
+    return FAIXAS[4];
+  }
+  function reguaHtml(fatores, regua) {
+    var rg = reguaDe(regua);
+    var span = rg.max - rg.min;
+    function posPct(v) { return Math.max(0, Math.min(100, (v - rg.min) / span * 100)); }
+    var cortes = [rg.min].concat(rg.limites, [rg.max]);
+    return '<ul class="regua-doc">' + lista(fatores).map(function (f) {
+      var L = letraDisc(f.letra);
+      if (!L || !ehNumero(f.pct)) return '';
+      var fx = FAIXAS.indexOf(f.faixa) >= 0 ? f.faixa : faixaDe(f.pct, rg);
+      var t = f.texto && typeof f.texto === 'object' ? f.texto : {};
+      return '<li class="regua-doc__item" data-letra="' + L + '" data-faixa="' + fx + '">' +
+        '<div class="regua-doc__cab"><span class="disc-def__letra disc-letra-' + L + ' regua-doc__letra">' + L + '</span>' +
+        '<span class="regua-doc__nome">' + esc(f.nome || NOMES_DISC[L].nome) + '</span>' +
+        '<span class="regua-doc__faixa regua-doc__faixa--' + fx + '">' + esc(f.faixaRotulo || rg.rotulos[fx]) + ' · ' + esc(pct(f.pct)) + '</span></div>' +
+        '<div class="regua-doc__trilho" role="img" aria-label="' + esc((f.nome || NOMES_DISC[L].nome) + ': ' + pct(f.pct) + ', intensidade ' + (f.faixaRotulo || rg.rotulos[fx]).toLowerCase()) + '">' +
+          FAIXAS.map(function (nome, i) {
+            return '<span class="regua-doc__faixa-seg' + (nome === fx ? ' regua-doc__faixa-seg--ativa' : '') + '" style="left:' + posPct(cortes[i]).toFixed(1) + '%;width:' + (posPct(cortes[i + 1]) - posPct(cortes[i])).toFixed(1) + '%"></span>';
+          }).join('') +
+          '<span class="regua-doc__marca disc-fundo-' + L + '" style="left:' + posPct(f.pct).toFixed(1) + '%"></span></div>' +
+        '<div class="regua-doc__escala" aria-hidden="true"><span>Muito baixa</span><span>Média</span><span>Muito alta</span></div>' +
+        (t.resumo ? '<p class="regua-doc__resumo"><strong>' + esc(t.resumo) + '</strong>' + (t.comportamento ? ' ' + esc(t.comportamento) : '') + '</p>' : (t.comportamento ? '<p class="regua-doc__resumo">' + esc(t.comportamento) + '</p>' : '')) +
+        (t.excesso ? '<p class="regua-doc__nota"><span class="rotulo-doc">Quando exagerado</span> ' + esc(t.excesso) + '</p>' : '') +
+        (t.falta ? '<p class="regua-doc__nota"><span class="rotulo-doc">Quando falta</span> ' + esc(t.falta) + '</p>' : '') +
+        '</li>';
+    }).join('') + '</ul>';
+  }
+
+  // Natural × exigido: barras lado a lado por fator + índice de esforço. x = snapshot.exigido (modelos).
+  var ROTULO_FAIXA_ESFORCO = { baixa: 'Esforço baixo', moderada: 'Esforço moderado', alta: 'Esforço alto', muito_alta: 'Esforço muito alto' };
+  function naturalExigidoHtml(natural, x) {
+    if (!x || typeof x !== 'object' || !x.percentuais) return '';
+    var nat = natural || {}, ex = x.percentuais || {};
+    var fx = ROTULO_FAIXA_ESFORCO[x.faixa] ? x.faixa : null;
+    return '<div class="natex">' +
+      '<div class="natex__indice cartao-doc"><div class="rotulo-doc">Esforço de adaptação</div>' +
+        '<div class="natex__num">' + (ehNumero(x.indice) ? esc(numeroCurto(x.indice)) + '<small>/100</small>' : '—') + '</div>' +
+        (fx ? '<span class="selo-doc selo-doc--esf-' + fx + '">' + esc(ROTULO_FAIXA_ESFORCO[fx]) + '</span>' : '') +
+        '<p class="nota-curta">Quanto o jeito que o trabalho pede se afasta do jeito natural (metade da soma das diferenças por fator).</p></div>' +
+      '<ul class="natex__fatores cartao-doc">' + LETRAS.map(function (L) {
+        var a = ehNumero(nat[L]) ? nat[L] : null, b = ehNumero(ex[L]) ? ex[L] : null;
+        var dif = a !== null && b !== null ? Math.round((b - a) * 10) / 10 : null;
+        return '<li class="natex__fator"><span class="barras__rot"><span class="legenda disc-fundo-' + L + '" aria-hidden="true"></span>' + esc(NOMES_DISC[L].nome) + '</span>' +
+          '<span class="natex__barras">' + barra(a, 50, 'barra--disc-' + L, 'Natural ' + pct(a)) + barra(b, 50, 'barra--exigido', 'Exigido ' + pct(b)) + '</span>' +
+          '<span class="natex__val"><strong>' + esc(pct(a)) + '</strong> → <strong>' + esc(pct(b)) + '</strong>' +
+          (dif !== null && dif !== 0 ? ' <span class="natex__dif natex__dif--' + (dif > 0 ? 'mais' : 'menos') + '">' + (dif > 0 ? '+' : '−') + esc(numeroCurto(Math.abs(dif))) + '</span>' : '') + '</span></li>';
+      }).join('') + '<li class="natex__leg nota-curta"><span class="natex__leg-item"><span class="natex__amostra natex__amostra--nat"></span> natural</span><span class="natex__leg-item"><span class="natex__amostra natex__amostra--ex"></span> exigido pelo trabalho</span><span class="natex__leg-item">escala 0 a 50%</span></li></ul>' +
+      '</div>';
+  }
+
+  function combinacaoHtml(cb) {
+    if (!cb || typeof cb !== 'object' || !cb.nome) return '';
+    return '<div class="combinacao-doc"><div class="rotulo-doc">Sua combinação' + (cb.codigo ? ' · ' + esc(codigoSeguro(cb.codigo)) : '') + '</div>' +
+      '<div class="combinacao-doc__nome">' + esc(cb.nome) + '</div>' +
+      (cb.frase ? '<p class="combinacao-doc__frase">' + esc(cb.frase) + '</p>' : '') +
+      (cb.descricao ? '<p>' + esc(cb.descricao) + '</p>' : '') + '</div>';
+  }
+
   /* ------------------------------------------------------------------ EQUIPE */
 
   function secoesEquipe(d) {
@@ -679,6 +950,7 @@
       { id: 'sumario', titulo: 'Sumário executivo', meta: 'Equilíbrio · Harmonia · Destaques e alertas' },
       { id: 'organograma', titulo: 'Organograma com perfis', curto: 'Organograma', meta: 'Quem lidera quem · Perfil DISC de cada pessoa' },
       { id: 'equilibrio', titulo: 'Equilíbrio do time', meta: 'Média D/I/S/C · Estilos · Lacunas' },
+      { id: 'ritmo', titulo: 'Ritmo, foco e decisão', curto: 'Ritmo e foco', meta: 'Mapa do time · Como o grupo decide' + (d.pressao ? ' · Pressão do trabalho' : '') },
       { id: 'relacoes', titulo: 'Mapa de relações', meta: 'Fluido · Atenção · Tensão' },
       { id: 'lideres', titulo: 'Guia por líder', meta: 'Como conduzir cada liderado' },
       { id: 'pessoas', titulo: 'Como liderar cada pessoa', curto: 'Como liderar', meta: 'Comunicação · Delegação · Feedback · Motivação' }
@@ -755,7 +1027,39 @@
     if (sem.length) c += '<div class="obs obs--info mt24"><div class="obs__tit">Sem teste (' + esc(sem.length) + ')</div><p>' + esc(sem.map(function (x) { return x.nome + (x.cargo ? ' (' + x.cargo + ')' : ''); }).join(', ')) + '. Aplicar o teste completa a leitura do time.</p></div>';
     h += secao(sec('equilibrio'), false, cabecalhoPagina(sec('equilibrio'), numeroCurto(eqb.comTeste) + ' com teste') + c);
 
-    // 04 Mapa de relações
+    // 04 Ritmo, foco e decisão (rodada 3)
+    var pts = lista(d.mapa && d.mapa.pontos);
+    var dec = d.decisao && typeof d.decisao === 'object' ? d.decisao : null;
+    var prs = d.pressao && typeof d.pressao === 'object' ? d.pressao : null;
+    c = '<h3 class="h2doc">Onde cada pessoa fica no ritmo e no foco</h3><p class="lede lede--curta">Cada ponto é uma pessoa: em cima, quem acelera; embaixo, quem prefere cautela. À esquerda, o olhar para a tarefa; à direita, para as pessoas.' +
+      (pts.some(function (x) { return x && x.exigido; }) ? ' O círculo laranja mostra o que o trabalho pede de quem respondeu a segunda parte do teste.' : '') + '</p>';
+    c += pts.length ? '<div class="cartao-doc mapa-cartao">' + mapaRitmoFocoHtml(pts, { rotulo: 'Mapa de ritmo e foco do time' }) + '</div>' :
+      '<div class="obs obs--info"><div class="obs__tit">Sem pontos no mapa</div><p>O mapa aparece quando os colaboradores concluírem o teste.</p></div>';
+    if (dec) {
+      var maxB = 0;
+      lista(dec.bases).forEach(function (b) { if (ehNumero(b.qtd) && b.qtd > maxB) maxB = b.qtd; });
+      c += '<h3 class="h3 mt48">Como o grupo decide</h3><div class="duas"><div class="cartao-doc"><div class="mini-nums mini-nums--2">' +
+        '<div class="mini-num"><div class="mini-num__valor mini-num__valor--texto">' + esc(dec.ritmoRotulo || '—') + '</div><div class="mini-num__rot">ritmo de decisão</div></div>' +
+        '<div class="mini-num"><div class="mini-num__valor mini-num__valor--texto">' + esc(dec.focoRotulo || '—') + '</div><div class="mini-num__rot">olhar principal</div></div></div>' +
+        '<div class="rotulo-doc mt24">Base de decisão (pelo fator principal)</div><ul class="barras">' + lista(dec.bases).map(function (b) {
+          return '<li><span class="barras__rot">' + esc(b.nome) + '</span>' + barra(b.qtd, maxB || 1, '', b.nome + ': ' + b.qtd) + '<span class="barras__val"><strong>' + esc(numeroCurto(b.qtd || 0)) + '</strong></span></li>';
+        }).join('') + '</ul></div><div class="cartao-doc">' + listaItens(dec.textos) + '</div></div>';
+    }
+    if (prs) {
+      var ROT_F = { baixa: 'Baixa', moderada: 'Moderada', alta: 'Alta', muito_alta: 'Muito alta' };
+      var fxp = ROT_F[prs.faixa] ? prs.faixa : 'baixa';
+      c += '<h3 class="h3 mt48">Pressão do trabalho sobre o estilo</h3><div class="duas"><div class="cartao-doc">' +
+        '<div class="rotulo-doc">Esforço médio de adaptação</div><div class="natex__num">' + esc(numeroCurto(prs.media)) + '<small>/100</small></div>' +
+        '<span class="selo-doc selo-doc--esf-' + fxp + '">' + esc(ROT_F[fxp]) + '</span>' +
+        '<p class="nota-curta">' + esc(numeroCurto(prs.comExigido)) + ' de ' + esc(numeroCurto(prs.total)) + ' pessoas responderam a segunda parte do teste.</p>' + listaItens(prs.textos) + '</div>' +
+        '<div class="cartao-doc"><div class="rotulo-doc">Esforço por pessoa</div><ul class="barras">' + lista(prs.pessoas).map(function (x) {
+          var fx = ROT_F[x.faixa] ? x.faixa : 'baixa';
+          return '<li><span class="barras__rot">' + esc(x.nome) + '</span>' + barra(x.indice, 50, 'barra--esf-' + fx, x.nome + ': ' + x.indice + ' de 100') + '<span class="barras__val"><strong>' + esc(numeroCurto(x.indice)) + '</strong></span></li>';
+        }).join('') + '</ul><p class="nota-curta">Escala da barra: 0 a 50. Abaixo de 10, baixo; 10 a 19, moderado; 20 a 29, alto; a partir de 30, muito alto.</p></div></div>';
+    }
+    h += secao(sec('ritmo'), true, cabecalhoPagina(sec('ritmo'), pts.length + ' no mapa') + c);
+
+    // 05 Mapa de relações
     var pares = lista(d.pares);
     var cont = { fluido: 0, atencao: 0, tensao: 0, indefinido: 0 };
     pares.forEach(function (p) { cont[nivelSeguro(p.nivel)]++; });
@@ -779,14 +1083,14 @@
           '</div></li>';
       }).join('') + '</ol>';
     } else c += '<div class="obs obs--info mt24"><div class="obs__tit">Sem relações registradas</div><p>Registre quem lidera quem e quem trabalha com quem para ver o mapa.</p></div>';
-    h += secao(sec('relacoes'), true, cabecalhoPagina(sec('relacoes'), pares.length + ' relações') + c);
+    h += secao(sec('relacoes'), false, cabecalhoPagina(sec('relacoes'), pares.length + ' relações') + c);
 
     // 05 Guia por líder
     var lids = lista(d.liderancas);
     c = '<h3 class="h2doc">Como cada líder pode conduzir a equipe</h3><p class="lede lede--curta">Estilo provável de cada líder e, para cada liderado, a tendência da relação e o que fazer no dia a dia.</p>';
     c += lids.length ? lids.map(function (l) {
       return '<article class="lider-doc">' +
-        '<div class="lider-doc__cab">' + cartaoPessoa({ nome: l.nome, cargo: l.cargo, codigo: l.codigo }) + '</div>' +
+        '<div class="lider-doc__cab">' + cartaoPessoa({ nome: l.nome, cargo: l.cargo, codigo: l.codigo, foto: l.foto }) + '</div>' +
         (l.estilo ? '<p class="lider-doc__estilo">' + esc(l.estilo) + '</p>' : '') +
         (lista(l.alertas).length ? '<div class="obs obs--alerta"><div class="obs__tit">Atenção</div>' + listaItens(l.alertas) + '</div>' : '') +
         '<ul class="liderados-doc">' + lista(l.liderados).map(function (x) {
@@ -797,7 +1101,7 @@
             (lista(x.comoConduzir).length ? '<div class="rotulo-doc mt16">Como conduzir</div>' + listaItens(x.comoConduzir) : '') + '</li>';
         }).join('') + '</ul></article>';
     }).join('') : '<div class="obs obs--info"><div class="obs__tit">Sem lideranças registradas</div><p>Registre as relações "lidera" para ver o guia por líder.</p></div>';
-    h += secao(sec('lideres'), false, cabecalhoPagina(sec('lideres'), lids.length + ' líderes') + c);
+    h += secao(sec('lideres'), true, cabecalhoPagina(sec('lideres'), lids.length + ' líderes') + c);
 
     // 06 Como liderar cada pessoa
     var cols = lista(d.colaboradores);
@@ -805,14 +1109,17 @@
     c += '<div class="pessoas-doc">' + cols.map(function (p) {
       return '<article class="pessoa-doc">' + cartaoPessoa(p) +
         (p.codigo ? pilhaDe(p.percentuais) : '') +
+        (p.combinacao && p.combinacao.nome ? '<div class="pessoa-doc__comb">' + esc(p.combinacao.nome) + '</div>' : '') +
         (p.estilo ? '<div class="pessoa-doc__estilo">' + esc(p.estilo) + '</div>' : '') +
+        (p.exigido && ehNumero(p.exigido.indice) ? '<div class="pessoa-doc__esf">Esforço de adaptação: <strong>' + esc(numeroCurto(p.exigido.indice)) + '/100</strong>' +
+          (ROTULO_FAIXA_ESFORCO[p.exigido.faixa] ? ' · ' + esc(ROTULO_FAIXA_ESFORCO[p.exigido.faixa].replace('Esforço ', '')) : '') + '</div>' : '') +
         (p.resumo ? '<p class="pessoa-doc__resumo">' + esc(p.resumo) + '</p>' : '') +
         (lista(p.secoes).length ? lista(p.secoes).map(function (s) {
           return '<div class="pessoa-doc__sec"><div class="rotulo-doc">' + esc(s.titulo) + '</div>' + listaItens(s.itens) + '</div>';
         }).join('') : '<p class="nota-curta">Ainda sem teste: o guia aparece quando a pessoa responder.</p>') +
         '</article>';
     }).join('') + '</div>';
-    h += secao(sec('pessoas'), true, cabecalhoPagina(sec('pessoas'), cols.length + ' pessoas') + c);
+    h += secao(sec('pessoas'), false, cabecalhoPagina(sec('pessoas'), cols.length + ' pessoas') + c);
 
     // 07 Encaixe do candidato
     if (d.foco) {
@@ -824,7 +1131,7 @@
       lista(f.indiretos).forEach(function (x) { rel.push({ papel: 'Trabalho indireto', x: x }); });
       c = '<div class="rec"><div class="rec__topo"><span class="rec__etiqueta">Encaixe do candidato</span>' +
         '<span class="rec__nota"><span class="rec__nota-num">' + (ehNumero(f.pontuacao) ? esc(numeroCurto(f.pontuacao)) : '—') + '</span><span class="rec__nota-den">/100</span></span></div>' +
-        '<div class="rec__nome">' + esc(f.nome) + ' ' + seloNivel(f.nivel) + '</div>' +
+        '<div class="rec__nome">' + avatarSeFoto(f.nome, f.foto, 44, 'avatar--rec') + esc(f.nome) + ' ' + seloNivel(f.nivel) + '</div>' +
         '<div class="rec__texto"><p>' + esc((f.cargo ? 'Posição: ' + f.cargo + '. ' : '') + (f.codigo ? 'Perfil ' + codigoSeguro(f.codigo) + '.' : 'Ainda sem teste DISC.')) + '</p></div></div>';
       if (f.percentuais) c += '<div class="mt24">' + pilhaDe(f.percentuais) + '</div>';
       if (f.organograma) c += '<h3 class="h3 mt48">Onde entra no organograma</h3><div class="cartao-doc">' + organogramaHtml(f.organograma, { rotulo: 'Organograma com o candidato' }) + '</div>';
@@ -846,7 +1153,7 @@
           return '<div class="cartao-doc"><div class="rotulo-doc">' + esc(e.periodo) + '</div>' + listaItens(e.itens) + '</div>';
         }).join('') + '</div>';
       }
-      h += secao(sec('foco'), false, cabecalhoPagina(sec('foco'), f.nome) + c);
+      h += secao(sec('foco'), true, cabecalhoPagina(sec('foco'), f.nome) + c);
     }
 
     // Encerramento: avisos e limites
@@ -867,13 +1174,14 @@
     var p = d.pessoa || {};
     var emp = d.empresa || {};
     var S = [
-      { id: 'resumo', titulo: 'Quem é ' + (p.nome || 'esta pessoa'), curto: 'Quem é', meta: 'Perfil · Estilo · Relação com o líder' },
+      { id: 'resumo', titulo: 'Quem é ' + (p.nome || 'esta pessoa'), curto: 'Quem é', meta: 'Perfil · Ritmo e foco · Relação com o líder' },
       { id: 'liderar', titulo: 'Como liderar no dia a dia', curto: 'Como liderar', meta: 'Comunicação · Delegação · Feedback · Plano' },
       { id: 'encerramento', titulo: 'Limites deste guia', curto: 'Limites', meta: 'Como usar' }
     ];
     S.forEach(function (x, i) { x.n = n2(i); });
     var cod = codigoSeguro(p.codigo);
     var h = capaModelo({
+      retrato: { nome: p.nome, foto: p.foto },
       meta: 'Guia de liderança', sobre: 'Guia de liderança' + (emp.nome ? ' · ' + emp.nome : ''),
       tituloHtml: 'Como liderar <em>' + esc(p.nome || 'esta pessoa') + '</em>',
       subtitulo: ('Um guia curto para o líder: como se comunicar, delegar, dar feedback e acompanhar ' + (p.nome || 'esta pessoa') + '.').replace(/\.\.$/, '.'),
@@ -900,13 +1208,30 @@
         (lista(r.riscos).length ? '<div><div class="rotulo-doc">Riscos</div>' + listaItens(r.riscos) + '</div>' : '') +
         (lista(r.dicas).length ? '<div><div class="rotulo-doc">Dicas</div>' + listaItens(r.dicas) + '</div>' : '') + '</div></div>';
     }
+    // Combinação, mapa ritmo × foco e esforço de adaptação ao cargo (Parte 2)
+    var ex = d.exigido && typeof d.exigido === 'object' && d.exigido.percentuais ? d.exigido : null;
+    var secsRL = lista(d.secoes).filter(function (s) { return s && typeof s === 'object'; });
+    var secEsforco = secsRL.filter(ehSecaoExigido)[0] || null;
+    c += combinacaoHtml(d.combinacao).replace('Sua combinação', 'Combinação');
+    if (d.mapa && lista(d.mapa.pontos).length) {
+      var pt0 = lista(d.mapa.pontos)[0];
+      c += '<h3 class="h3 mt48">Ritmo e foco</h3><div class="mapa-bloco">' + mapaRitmoFocoHtml(d.mapa.pontos, { rotulo: 'Ritmo e foco de ' + (p.nome || 'esta pessoa'), rotuloExigido: 'Cargo' }) +
+        '<div class="mapa-bloco__txt"><p>' + esc(textoMapaPessoa(d, false)) + '</p>' +
+        (ex && pt0 && eixoValido(pt0.exigido) ? '<p>O círculo laranja mostra o que o cargo pede, na percepção de ' + esc(p.nome || 'esta pessoa') + '; a seta indica a direção do ajuste diário.</p>' : '') +
+        '<p class="nota-curta">Em cima, ritmo acelerado; embaixo, cauteloso. À esquerda, foco em tarefas; à direita, em pessoas.</p></div></div>';
+    }
+    if (ex) {
+      c += '<h3 class="h3 mt48">Esforço de adaptação ao cargo</h3>' + naturalExigidoHtml(p.percentuais, ex) + (secEsforco ? '' : textosExigido(ex, null));
+    }
     var h1 = secao(S[0], false, cabecalhoPagina(S[0], p.cargo) + c);
     // 02
-    c = '<div class="guia-doc">' + lista(d.secoes).map(function (s, i) {
+    c = '<div class="guia-doc">' + secsRL.map(function (s, i) {
       var corpo = lista(s.etapas).length ? lista(s.etapas).map(function (e) {
         return '<div class="guia-doc__etapa"><div class="rotulo-doc">' + esc(e.periodo) + '</div>' + listaItens(e.itens) + '</div>';
       }).join('') : listaItens(s.itens);
-      return '<article class="guia-doc__sec' + (s.chave === 'plano' || s.chave === 'voceEEla' ? ' guia-doc__sec--larga' : '') + '"><div class="leitura__n">' + n2(i) + '</div><h3 class="h4doc">' + esc(s.titulo) + '</h3>' + corpo + '</article>';
+      if (lista(s.exemplos).length) corpo += '<div class="rotulo-doc mt16">Exemplos</div>' + listaItens(lista(s.exemplos).map(function (e) { return typeof e === 'string' ? e : e && (e.texto || e.frase) ? String(e.texto || e.frase) : ''; }), 'itens-doc--exemplos');
+      var larga = s.chave === 'plano' || s.chave === 'voceEEla' || ehSecaoExigido(s);
+      return '<article class="guia-doc__sec' + (larga ? ' guia-doc__sec--larga' : '') + '"><div class="leitura__n">' + n2(i) + '</div><h3 class="h4doc">' + esc(s.titulo) + '</h3>' + corpo + '</article>';
     }).join('') + '</div>';
     var h2 = secao(S[1], true, cabecalhoPagina(S[1], cod ? 'Perfil ' + cod : '') + c);
     var h3 = encerramentoModelo(S[2], emp.nome, '<div class="final__texto"><p>' + esc(d.aviso || '') + '</p></div>', d.consultor, d.geradoEm);
@@ -916,31 +1241,109 @@
 
   /* ------------------------------------------------------------------ PESSOA (desenvolvimento) */
 
-  function pessoaHtml(d) {
+  // Corpo genérico de uma seção do relatório da pessoa (DISC_RELATORIO_PESSOA): intro, características, sinais,
+  // perfis, itens ({titulo, texto} | {prazo, titulo, texto} | string), paragrafos/texto e listas [{titulo, itens}].
+  function corpoSecaoPessoa(x) {
+    var cc = (x.intro ? '<p class="lede lede--curta">' + esc(x.intro) + '</p>' : '');
+    if (typeof x.texto === 'string' && x.texto) cc += paragrafos(x.texto);
+    lista(x.paragrafos).forEach(function (t) { if (typeof t === 'string') cc += '<p>' + esc(t) + '</p>'; });
+    if (lista(x.caracteristicas).length) cc += '<ul class="chips-doc">' + lista(x.caracteristicas).map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>';
+    if (lista(x.sinais).length) cc += '<div class="cartao-doc mt24"><div class="rotulo-doc">Sinais de que a pressão chegou</div>' + listaItens(x.sinais) + '</div>';
+    if (lista(x.perfis).length) {
+      cc += '<div class="disc-defs disc-defs--3 mt24">' + lista(x.perfis).map(function (pf) {
+        var L = letraDisc(pf.letra);
+        return '<div class="disc-def"><div class="disc-def__letra disc-letra-' + L + '">' + L + '</div><div class="disc-def__nome">' + esc(pf.nome) + (pf.rotulo ? ' <span class="disc-def__tag">' + esc(pf.rotulo) + '</span>' : '') + '</div><p>' + esc(pf.texto) + '</p></div>';
+      }).join('') + '</div>';
+    }
+    var itens = lista(x.itens);
+    var objs = itens.filter(function (it) { return it && typeof it === 'object'; });
+    var strs = itens.filter(function (it) { return typeof it === 'string' && it; });
+    if (objs.length) {
+      var plano = objs.some(function (it) { return it.prazo; });
+      cc += (plano ? '<ol class="plano-doc mt24">' : '<div class="leituras leituras--par mt24">') + objs.map(function (it, k) {
+        if (plano) return '<li><span class="plano-doc__prazo">' + esc(it.prazo) + '</span><span><strong>' + esc(it.titulo) + '</strong><span class="plano-doc__txt">' + esc(it.texto) + '</span></span></li>';
+        return '<article class="leitura"><div class="leitura__n">' + n2(k) + '</div>' + (it.titulo ? '<h4>' + esc(it.titulo) + '</h4>' : '') + '<p>' + esc(it.texto) + '</p></article>';
+      }).join('') + (plano ? '</ol>' : '</div>');
+    }
+    if (strs.length) cc += '<div class="cartao-doc mt24">' + listaItens(strs) + '</div>';
+    var grupos = lista(x.listas).concat(lista(x.grupos)).filter(function (g) { return g && typeof g === 'object'; });
+    if (grupos.length) {
+      cc += '<div class="duas mt24">' + grupos.map(function (g) {
+        return '<div class="cartao-doc">' + (g.titulo ? '<div class="rotulo-doc">' + esc(g.titulo) + '</div>' : '') + (listaItens(g.itens) || (g.texto ? '<p>' + esc(g.texto) + '</p>' : '')) + '</div>';
+      }).join('') + '</div>';
+    }
+    return cc;
+  }
+
+  // Seção do RP que já traz os textos da Parte 2 ("Onde você está se esticando"): é desenhada junto com os números.
+  function ehSecaoExigido(sx) { return /estic|exig|adapta|esforc/i.test(String((sx && (sx.id || sx.chave)) || '')); }
+
+  var CURTO_PESSOA = { fortes: 'Pontos fortes', atencao: 'Pontos de atenção', pressao: 'Sob pressão', comunicacao: 'Comunicação', plano: 'Seu plano' };
+
+  function textoMapaPessoa(d, voce) {
+    var pt = d.mapa && lista(d.mapa.pontos)[0];
+    var e = pt && eixoValido(pt.natural);
+    if (!e) return '';
+    var r = e.ritmo >= 10 ? 'mais acelerado' : e.ritmo <= -10 ? 'mais cauteloso' : 'equilibrado entre acelerado e cauteloso';
+    var f = e.foco >= 10 ? 'mais voltado a tarefas' : e.foco <= -10 ? 'mais voltado a pessoas' : 'equilibrado entre tarefas e pessoas';
+    return voce ? 'O ponto azul mostra o seu jeito natural: ritmo ' + r + ' e foco ' + f + '.' : 'Jeito natural: ritmo ' + r + ' e foco ' + f + '.';
+  }
+
+  function capaPessoa(d, simples) {
     var p = d.pessoa || {};
     var pri = p.primario || {}, sec2 = p.secundario || {};
-    var secs = lista(d.secoes);
-    var S = [{ id: 'perfil', titulo: 'Seu perfil', meta: 'Os quatro fatores do DISC' }];
-    secs.forEach(function (s) {
-      var id = String(s.id || '').replace(/[^a-z]/g, '') || 'secao';
-      S.push({ id: id, titulo: s.titulo, curto: { fortes: 'Pontos fortes', atencao: 'Pontos de atenção', pressao: 'Sob pressão', comunicacao: 'Comunicação', plano: 'Seu plano' }[id], meta: '', dados: s });
-    });
-    S.push({ id: 'encerramento', titulo: 'Para levar com você', curto: 'Para levar', meta: '' });
-    S.forEach(function (x, i) { x.n = n2(i); });
     var fat = lista(d.fatores);
-    var h = capaModelo({
-      meta: 'Relatório de desenvolvimento', sobre: 'Relatório de desenvolvimento pessoal',
+    var cb = d.combinacao && d.combinacao.nome ? d.combinacao.nome : '';
+    return capaModelo({
+      retrato: { nome: p.nome, foto: p.foto },
+      meta: simples ? 'Relatório de desenvolvimento · resumo' : 'Relatório de desenvolvimento', sobre: simples ? 'Seu perfil em duas páginas' : 'Relatório de desenvolvimento pessoal',
       tituloHtml: 'Olá, ' + esc(p.primeiroNome || p.nome || '') + '. Este é o seu <em>jeito de trabalhar</em>.',
       subtitulo: d.frase,
       numeros: fat.map(function (f) { return { valor: numeroCurto(f.pct), sufixo: '%', rotulo: f.nome, destaque: f.letra === pri.letra }; }),
       rodape: [
         { rotulo: 'Para', linhas: [p.nome] },
-        { rotulo: 'Seu estilo', linhas: [codigoSeguro(p.codigo) + (pri.nome ? ' · ' + pri.nome + (sec2.nome ? ' e ' + sec2.nome : '') : '')] },
+        { rotulo: 'Seu estilo', linhas: [codigoSeguro(p.codigo) + (cb ? ' · ' + cb : pri.nome ? ' · ' + pri.nome + (sec2.nome ? ' e ' + sec2.nome : '') : '')] },
         { rotulo: 'Consultoria', linhas: ['Notus Agência', d.consultor] },
         { rotulo: 'Emitido em', linhas: [data(d.geradoEm) || '—'] }
       ]
     });
-    var c = '<p class="lede">' + esc(d.frase || '') + '</p>' + pilhaDe(fat.reduce(function (o, f) { o[f.letra] = f.pct; return o; }, {})) +
+  }
+
+  function textosExigido(x, rpSec) {
+    if (rpSec) return corpoSecaoPessoa(rpSec);
+    var t = lista(x && x.textos).filter(function (v) { return typeof v === 'string' && v; });
+    return t.length ? '<div class="obs-pilha mt24">' + t.map(function (v) { return '<div class="obs obs--info"><p>' + esc(v) + '</p></div>'; }).join('') + '</div>' : '';
+  }
+
+  function pessoaHtml(d) {
+    if (d.variante === 'simples') return pessoaSimplesHtml(d);
+    var p = d.pessoa || {};
+    var pri = p.primario || {};
+    var secs = lista(d.secoes).filter(function (x) { return x && typeof x === 'object'; });
+    var rpExigido = secs.filter(ehSecaoExigido)[0] || null;
+    var ex = d.exigido && typeof d.exigido === 'object' && d.exigido.percentuais ? d.exigido : null;
+    var fat = lista(d.fatores);
+    var temRegua = fat.some(function (f) { return ehNumero(f.pct); });
+    var temMapa = d.mapa && lista(d.mapa.pontos).length;
+    var S = [{ id: 'perfil', titulo: 'Seu perfil', meta: 'Os quatro fatores do DISC' }];
+    if (temRegua || temMapa) S.push({ id: 'intensidade', titulo: 'Intensidade, ritmo e foco', curto: 'Intensidade', meta: 'Régua de cada fator · Mapa ritmo × foco', tipo: 'intensidade' });
+    if (ex) S.push({ id: 'esticando', titulo: (rpExigido && rpExigido.titulo) || 'Onde você está se esticando', curto: 'Seu trabalho', meta: 'Jeito natural × o que o trabalho pede', tipo: 'exigido' });
+    var usados = {};
+    S.forEach(function (x) { usados[x.id] = 1; });
+    secs.forEach(function (sx) {
+      if (ex && sx === rpExigido) return;
+      if (!ex && ehSecaoExigido(sx)) return;
+      var id = String(sx.id || '').replace(/[^a-z]/g, '') || 'secao';
+      while (usados[id]) id += 'x';
+      usados[id] = 1;
+      S.push({ id: id, titulo: sx.titulo, curto: CURTO_PESSOA[id] || sx.curto, meta: '', dados: sx });
+    });
+    S.push({ id: 'encerramento', titulo: 'Para levar com você', curto: 'Para levar', meta: '' });
+    S.forEach(function (x, i) { x.n = n2(i); });
+    var h = capaPessoa(d, false);
+
+    // 01 Seu perfil
+    var c = '<p class="lede">' + esc(d.frase || '') + '</p>' + combinacaoHtml(d.combinacao) + pilhaDe(fat.reduce(function (o, f) { o[f.letra] = f.pct; return o; }, {})) +
       '<div class="disc-defs mt32">' + fat.map(function (f) {
         var L = letraDisc(f.letra);
         return '<div class="disc-def' + (L === pri.letra ? ' disc-def--ideal' : '') + '"><div class="disc-def__letra disc-letra-' + L + '">' + L + '</div>' +
@@ -948,29 +1351,65 @@
       }).join('') + '</div>' +
       '<p class="nota-curta mt24">Todo mundo tem um pouco dos quatro fatores. O que muda é a dose de cada um, e isso não é certo nem errado.</p>';
     h += secao(S[0], false, cabecalhoPagina(S[0], p.nome) + c);
+
     S.slice(1, -1).forEach(function (s, i) {
-      var x = s.dados;
-      var cc = (x.intro ? '<p class="lede lede--curta">' + esc(x.intro) + '</p>' : '');
-      if (lista(x.caracteristicas).length) cc += '<ul class="chips-doc">' + lista(x.caracteristicas).map(function (t) { return '<li>' + esc(t) + '</li>'; }).join('') + '</ul>';
-      if (lista(x.sinais).length) cc += '<div class="cartao-doc mt24"><div class="rotulo-doc">Sinais de que a pressão chegou</div>' + listaItens(x.sinais) + '</div>';
-      if (lista(x.perfis).length) {
-        cc += '<div class="disc-defs disc-defs--3 mt24">' + lista(x.perfis).map(function (pf) {
-          var L = letraDisc(pf.letra);
-          return '<div class="disc-def"><div class="disc-def__letra disc-letra-' + L + '">' + L + '</div><div class="disc-def__nome">' + esc(pf.nome) + (pf.rotulo ? ' <span class="disc-def__tag">' + esc(pf.rotulo) + '</span>' : '') + '</div><p>' + esc(pf.texto) + '</p></div>';
-        }).join('') + '</div>';
-      }
-      if (lista(x.itens).length) {
-        cc += (x.id === 'plano' ? '<ol class="plano-doc mt24">' : '<div class="leituras leituras--par mt24">') + lista(x.itens).map(function (it, k) {
-          if (x.id === 'plano') return '<li><span class="plano-doc__prazo">' + esc(it.prazo) + '</span><span><strong>' + esc(it.titulo) + '</strong><span class="plano-doc__txt">' + esc(it.texto) + '</span></span></li>';
-          return '<article class="leitura"><div class="leitura__n">' + n2(k) + '</div><h4>' + esc(it.titulo) + '</h4><p>' + esc(it.texto) + '</p></article>';
-        }).join('') + (x.id === 'plano' ? '</ol>' : '</div>');
-      }
+      var cc = '';
+      if (s.tipo === 'intensidade') {
+        cc = '<p class="lede lede--curta">Quanto de cada fator aparece no seu jeito de trabalhar, de muito baixa a muito alta. Faixas altas mostram forças evidentes; faixas baixas, comportamentos que você usa menos, não falhas.</p>' +
+          (temRegua ? reguaHtml(fat, d.regua) : '');
+        if (temMapa) {
+          cc += '<h3 class="h3 mt48">Seu ritmo e seu foco</h3><div class="mapa-bloco">' +
+            mapaRitmoFocoHtml(d.mapa.pontos, { rotulo: 'Seu mapa de ritmo e foco', rotuloExigido: 'Trabalho' }) +
+            '<div class="mapa-bloco__txt"><p>' + esc(textoMapaPessoa(d, true)) + '</p>' +
+            (ex ? '<p>O círculo laranja mostra como você percebe o que o seu trabalho pede; a seta indica a direção do ajuste que você faz no dia a dia.</p>' : '') +
+            '<p class="nota-curta">Em cima, ritmo acelerado; embaixo, cauteloso. À esquerda, foco em tarefas; à direita, em pessoas. As letras mostram onde cada fator do DISC costuma ficar.</p></div></div>';
+        }
+      } else if (s.tipo === 'exigido') {
+        cc = '<p class="lede lede--curta">Na segunda parte do teste você respondeu como o seu trabalho pede que você seja. A comparação mostra onde você está se esticando: comportamentos que usa mais (ou menos) do que seria natural.</p>' +
+          naturalExigidoHtml(fat.reduce(function (o, f) { o[f.letra] = f.pct; return o; }, {}), ex) + textosExigido(ex, rpExigido);
+      } else cc = corpoSecaoPessoa(s.dados);
       h += secao(s, i % 2 === 0, cabecalhoPagina(s, p.nome) + cc);
     });
     h += encerramentoModelo(S[S.length - 1], p.nome, '<div class="final__texto"><p>' + esc(d.aviso || '') + '</p></div>' +
       '<div class="passos-cab">Um passo de cada vez</div><p class="final__dica">Escolha um hábito do seu plano, pratique por algumas semanas e observe o que muda. Crescer é isso: pequenas escolhas repetidas.</p>', d.consultor, d.geradoEm);
-    return '<article class="doc doc--pessoa" data-modelo="pessoa">' + h +
+    return '<article class="doc doc--pessoa" data-modelo="pessoa" data-variante="completo">' + h +
       rodapeModelo(['Relatório de desenvolvimento', p.nome], 'Documento pessoal. Compartilhe só se quiser.') + '</article>';
+  }
+
+  // Variante simples (2 páginas): frase, 4 fatores com faixa, 3 forças, 3 cuidados, 3 hábitos (+ mapa e esforço se houver).
+  function pessoaSimplesHtml(d) {
+    var p = d.pessoa || {};
+    var fat = lista(d.fatores);
+    var ex = d.exigido && typeof d.exigido === 'object' && d.exigido.percentuais ? d.exigido : null;
+    var S = [
+      { id: 'resumo', titulo: 'Seu perfil em resumo', curto: 'Seu perfil', meta: 'Fatores · Forças · Cuidados' },
+      { id: 'habitos', titulo: 'Para praticar', meta: 'Três hábitos · Ritmo e foco' },
+      { id: 'encerramento', titulo: 'Para levar com você', curto: 'Para levar', meta: '' }
+    ];
+    S.forEach(function (x, i) { x.n = n2(i); });
+    function cartoes(itens, classe) {
+      var l = lista(itens).filter(function (it) { return it && (it.titulo || it.texto); });
+      if (!l.length) return '<p class="nota-curta">—</p>';
+      return '<ol class="simples-doc__lista' + (classe ? ' ' + classe : '') + '">' + l.map(function (it, k) {
+        return '<li><span class="simples-doc__n">' + n2(k) + '</span><span>' + (it.titulo ? '<strong>' + esc(it.titulo) + '</strong> ' : '') + (it.texto ? esc(it.texto) : '') + '</span></li>';
+      }).join('') + '</ol>';
+    }
+    var h = capaPessoa(d, true);
+    var c = '<p class="lede">' + esc(d.frase || '') + '</p>' + combinacaoHtml(d.combinacao) +
+      '<div class="simples-doc__fatores">' + reguaHtml(fat, d.regua) + '</div>' +
+      '<div class="duas mt32"><div class="cartao-doc"><div class="rotulo-doc">Suas forças</div>' + cartoes(d.forcas) + '</div>' +
+      '<div class="cartao-doc"><div class="rotulo-doc">Cuidados</div>' + cartoes(d.cuidados) + '</div></div>';
+    h += secao(S[0], false, cabecalhoPagina(S[0], p.nome) + c, 'simples-doc');
+    c = '<h3 class="h2doc">Três hábitos para os próximos meses</h3>' + cartoes(d.habitos, 'simples-doc__lista--habitos');
+    if (d.mapa && lista(d.mapa.pontos).length) {
+      c += '<h3 class="h3 mt48">Seu ritmo e seu foco</h3><div class="mapa-bloco">' + mapaRitmoFocoHtml(d.mapa.pontos, { rotulo: 'Seu mapa de ritmo e foco' }) +
+        '<div class="mapa-bloco__txt"><p>' + esc(textoMapaPessoa(d, true)) + '</p>' +
+        (ex ? '<p>O círculo laranja mostra o que o seu trabalho pede' + (ehNumero(ex.indice) ? ' (esforço de adaptação ' + esc(numeroCurto(ex.indice)) + '/100)' : '') + '.</p>' + textosExigido(ex, null) : '') + '</div></div>';
+    }
+    h += secao(S[1], true, cabecalhoPagina(S[1], p.nome) + c, 'simples-doc');
+    h += encerramentoModelo(S[2], p.nome, '<div class="final__texto"><p>' + esc(d.aviso || '') + '</p></div>', d.consultor, d.geradoEm);
+    return '<article class="doc doc--pessoa doc--simples" data-modelo="pessoa" data-variante="simples">' + h +
+      rodapeModelo(['Relatório de desenvolvimento · resumo', p.nome], 'Documento pessoal. Compartilhe só se quiser.') + '</article>';
   }
 
   var MODELOS = { equipe: equipeHtml, lideranca: liderancaHtml, pessoa: pessoaHtml };
@@ -1071,6 +1510,12 @@
     texto: texto,
     montarHtml: montarHtml,
     organogramaHtml: organogramaHtml,
+    mapaRitmoFocoHtml: mapaRitmoFocoHtml,
+    reguaHtml: reguaHtml,
+    naturalExigidoHtml: naturalExigidoHtml,
+    avatarHtml: avatarHtml,
+    fotoValida: fotoValida,
+    iniciais: iniciais,
     rotuloNivel: rotuloNivel,
     render: render,
     mostrarErro: mostrarErro,

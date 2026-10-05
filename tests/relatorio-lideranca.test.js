@@ -140,3 +140,81 @@ test('todas as 12 combinações geram relatório válido', () => {
     assert.ok(secao(d, 'voceEEla').itens.length >= 2);
   }));
 });
+
+// ---- Rodada 3: novas seções e Parte 2 (perfil exigido) ----
+const EXIG = require('../js/disc-exigido.js');
+const SAUDE = /estresse|estressad|saúde|saude|doen|burnout|esgota|ansied|adoec|emocional|cérebro/i;
+
+test('novas seções: do que precisa, o que tende a evitar e feedback com mais exemplos', () => {
+  for (const r of Object.values(PERFIS)) {
+    const d = R.montar(r, { nome: 'Maria Souza' });
+    const chaves = d.secoes.map((s) => s.chave);
+    assert.ok(chaves.indexOf('precisa') > chaves.indexOf('motivacao'));
+    assert.ok(chaves.indexOf('evita') === chaves.indexOf('precisa') + 1);
+    assert.equal(secao(d, 'precisa').titulo, 'Do que esta pessoa precisa');
+    assert.equal(secao(d, 'evita').titulo, 'O que ela tende a evitar');
+    assert.ok(secao(d, 'precisa').itens.length >= 4);
+    assert.ok(secao(d, 'evita').itens.length >= 4);
+    assert.ok(!/medo|pavor|terror/i.test(secao(d, 'evita').itens.join(' ')));
+    const fb = secao(d, 'feedback').itens.join(' ');
+    assert.match(fb, /Momento:/);
+    assert.match(fb, /Exemplo de frase \(combinado de mudança\)/);
+    assert.match(fb, /Evite no feedback:/);
+    assert.equal(secao(d, 'esforco'), undefined);
+    assert.equal(d.adaptacao, null);
+    const txt = R.gerarTexto(d);
+    assert.ok(txt.includes('*Do que esta pessoa precisa*'));
+    assert.ok(!txt.includes('Esforço de adaptação'));
+  }
+  // traço secundário relevante entra em "precisa"
+  assert.ok(secao(R.montar(PERFIS.D, { nome: 'Rui' }), 'precisa').itens.some((i) => /traço secundário \(Influência\)/.test(i)));
+});
+
+test('com exigido (string da Parte 2): seção "Esforço de adaptação ao cargo" e objeto adaptacao', () => {
+  // natural D 42 · I 28 · S 12 · C 18; cargo pede C > S > I > D
+  const d = R.montar(PERFIS.D, { nome: 'Maria Aparecida Souza', exigido: '1234'.repeat(10) });
+  verificar(d);
+  const s = secao(d, 'esforco');
+  assert.ok(s, 'seção esforco ausente');
+  assert.equal(s.titulo, 'Esforço de adaptação ao cargo');
+  const chaves = d.secoes.map((x) => x.chave);
+  assert.ok(chaves.indexOf('esforco') > chaves.indexOf('rendeMais') && chaves.indexOf('esforco') < chaves.indexOf('plano'));
+  assert.match(s.itens[0], /Índice de esforço de adaptação: \d+ de 100 \(muito alto\)/);
+  assert.match(s.itens[0], /Estilo natural DI; estilo que Maria A\. percebe que o cargo pede: CS\./);
+  s.itens.forEach((i) => {
+    assert.ok(!SAUDE.test(i), i);
+    assert.ok(!/\{nome\}|undefined|null|NaN|\.\./.test(i), i);
+  });
+  assert.ok(s.itens.some((i) => i.includes('Maria A.')));
+  assert.ok(!JSON.stringify(d).includes('Souza'));
+  assert.equal(d.adaptacao.faixa, 'muito_alta');
+  assert.equal(d.adaptacao.maisCobrado, 'C');
+  assert.equal(d.adaptacao.menosUsado, 'D');
+  assert.deepEqual(d.adaptacao.exigido, { percentuais: { D: 10, I: 20, S: 30, C: 40 }, codigo: 'CS' });
+  assert.deepEqual(d.adaptacao.eixos.exigido, EXIG.eixos({ D: 10, I: 20, S: 30, C: 40 }));
+  // esforço alto entra no plano de 60 dias
+  assert.ok(secao(d, 'plano').etapas[1].itens.some((i) => /Esforço de adaptação ao cargo/.test(i)));
+  assert.ok(R.gerarTexto(d).includes('*Esforço de adaptação ao cargo*'));
+});
+
+test('exigido como objeto {percentuais}; perto do natural => baixo e sem item extra no plano', () => {
+  const d = R.montar(PERFIS.S, { nome: 'Ana', exigido: { percentuais: { D: 12, I: 22, S: 41, C: 25 }, codigo: 'SC' } });
+  verificar(d);
+  assert.equal(d.adaptacao.faixa, 'baixa');
+  assert.match(secao(d, 'esforco').itens[0], /\(baixo\)/);
+  assert.ok(!secao(d, 'plano').itens.some((i) => /Esforço de adaptação/.test(i)));
+});
+
+test('exigido inválido ou vazio: sem seção de esforço e sem erro', () => {
+  ['', null, '1111'.repeat(10), '4321', { percentuais: { D: 0, I: 0, S: 0, C: 0 } }].forEach((exigido) => {
+    const d = R.montar(PERFIS.I, { nome: 'Bia', exigido });
+    verificar(d);
+    assert.equal(secao(d, 'esforco'), undefined);
+    assert.equal(d.adaptacao, null);
+  });
+});
+
+test('com exigido continua determinístico', () => {
+  const ctx = { nome: 'Bia Costa', exigido: '2143'.repeat(10), lider: { nome: 'Rui', percentuais: { D: 20, I: 20, S: 20, C: 40 } } };
+  assert.deepEqual(R.montar(PERFIS.C, ctx), R.montar(PERFIS.C, JSON.parse(JSON.stringify(ctx))));
+});

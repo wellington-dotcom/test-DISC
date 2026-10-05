@@ -52,7 +52,8 @@
       try {
         var mapa = {
           DISC_SCORING: './scoring.js', DISC_DATA: './disc-data.js',
-          DISC_CONFIABILIDADE: './confiabilidade.js', DISC_VALIDACAO: './validacao.js'
+          DISC_CONFIABILIDADE: './confiabilidade.js', DISC_VALIDACAO: './validacao.js',
+          DISC_EXIGIDO: './disc-exigido.js', DISC_COMBINACOES: './disc-combinacoes.js', DISC_INTENSIDADE: './disc-intensidade.js'
         };
         if (mapa[nome]) return require(mapa[nome]);
       } catch (e) { /* ignora */ }
@@ -158,10 +159,11 @@
   }
 
   // Confiabilidade calculada no painel (como o perfil), nunca enviada pelo participante.
-  function confiabilidade(respostas, validacao) {
+  function confiabilidade(respostas, validacao, duracaoSeg) {
     var CF = dep('DISC_CONFIABILIDADE');
     if (!CF || typeof CF.avaliar !== 'function') return null;
-    try { return CF.avaliar(respostas, lerValidacao(validacao)); } catch (e) { return null; }
+    var d = Number(duracaoSeg);
+    try { return CF.avaliar(respostas, lerValidacao(validacao), isFinite(d) && d > 0 ? { duracaoSeg: d } : undefined); } catch (e) { return null; }
   }
 
   // Recalcula a partir de payload.respostas; nunca confia em payload.resultado.
@@ -179,7 +181,7 @@
       r.calc = null;
       r.invalido = true;
     }
-    r.conf = confiabilidade(r.respostas, r.validacao);
+    r.conf = confiabilidade(r.respostas, r.validacao, r.duracaoSeg);
     return r;
   }
 
@@ -398,14 +400,15 @@
     { chave: 'funcao', rotulo: 'Função atual ou última' },
     { chave: 'empresa', rotulo: 'Empresa atual ou última' },
     { chave: 'email', rotulo: 'E-mail' },
-    { chave: 'cidade', rotulo: 'Cidade onde mora' }
+    { chave: 'cidade', rotulo: 'Cidade onde mora' },
+    { chave: 'foto', rotulo: 'Foto' }
   ];
   var MODOS_CAMPO = { obrigatorio: 'Obrigatória', opcional: 'Opcional', oculto: 'Não perguntar' };
   var MAX_PERGUNTAS = 5;
 
   // Padrão = comportamento antigo: idade obrigatória, função e empresa opcionais, e-mail e cidade não perguntados.
   function formularioPadrao() {
-    return { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto' }, perguntas: [] };
+    return { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto', foto: 'opcional' }, perguntas: [], parte2: 'desligada' };
   }
 
   // Mesma regra de classificar_campo do servidor: termo sensível no começo de uma palavra (sem acento, sem pontuação).
@@ -423,7 +426,7 @@
   // Ausente/inválido -> padrão. Perguntas: texto aparado, vazias saem, até 5, id ^[a-z0-9_]{1,20}$ (p1..p5 se faltar/repetir).
   function normalizarFormulario(f) {
     var pad = formularioPadrao();
-    var out = { campos: {}, perguntas: [] };
+    var out = { campos: {}, perguntas: [], parte2: f && typeof f === 'object' && f.parte2 === 'ligada' ? 'ligada' : 'desligada' };
     var campos = f && typeof f === 'object' && f.campos && typeof f.campos === 'object' ? f.campos : {};
     CAMPOS_FORMULARIO.forEach(function (c) {
       out.campos[c.chave] = Object.prototype.hasOwnProperty.call(MODOS_CAMPO, campos[c.chave]) ? campos[c.chave] : pad.campos[c.chave];
@@ -458,6 +461,7 @@
       var v = campos[CAMPOS_FORMULARIO[i].chave];
       if (v != null && !Object.prototype.hasOwnProperty.call(MODOS_CAMPO, v)) return 'Escolha se "' + CAMPOS_FORMULARIO[i].rotulo + '" é obrigatória, opcional ou não perguntada.';
     }
+    if (f.parte2 != null && !Object.prototype.hasOwnProperty.call(PARTE2, f.parte2)) return 'Escolha se a segunda parte do teste fica ligada ou desligada.';
     var lista = Array.isArray(f.perguntas) ? f.perguntas : [];
     if (lista.length > MAX_PERGUNTAS) return 'Use no máximo ' + MAX_PERGUNTAS + ' perguntas extras.';
     for (var j = 0; j < lista.length; j++) {
@@ -483,6 +487,186 @@
       out.push({ rotulo: p.texto, modo: p.obrigatoria ? 'obrigatorio' : 'opcional', texto: p.obrigatoria ? 'Obrigatória' : 'Opcional', extra: true });
     });
     return out;
+  }
+
+  /* ---------- Parte 2: perfil exigido pelo trabalho (DISC_EXIGIDO) ---------- */
+
+  var PARTE2 = { desligada: 'Desligada', ligada: 'Ligada' };
+  var ROTULO_PARTE2 = 'Segunda parte do teste (perfil exigido pelo trabalho)';
+  var FAIXAS_ESFORCO = { baixa: 'Esforço baixo', moderada: 'Esforço moderado', alta: 'Esforço alto', muito_alta: 'Esforço muito alto' };
+  var CLASSE_ESFORCO = { baixa: 'selo--verde', moderada: '', alta: 'selo--laranja', muito_alta: 'selo--vermelho' };
+
+  // Ao CRIAR: ligada para avaliação de equipe, desligada para seleção. Ao editar, o valor salvo manda (não muda sozinho).
+  function parte2Padrao(tipo) { return tipo === 'equipe' ? 'ligada' : 'desligada'; }
+
+  function textoParte2(parte2) {
+    return parte2 === 'ligada'
+      ? 'Ligada: depois dos 25 grupos, a pessoa responde mais 10 pensando em como o trabalho exige que ela seja.'
+      : 'Desligada: só o perfil natural (25 grupos).';
+  }
+
+  function pctValido(p) {
+    return !!(p && typeof p === 'object' && LETRAS.every(function (l) { return typeof p[l] === 'number' && isFinite(p[l]); }));
+  }
+
+  // Perfil exigido de uma resposta: recalcula da string `exigido` (40 dígitos) quando o módulo existe; senão usa resultadoExigido.
+  function exigidoDoRegistro(r) {
+    if (!r) return null;
+    var EX = dep('DISC_EXIGIDO');
+    var s = typeof r.exigido === 'string' ? r.exigido : '';
+    if (s && EX && typeof EX.validar === 'function' && typeof EX.calcular === 'function') {
+      try { if (EX.validar(s)) { var c = EX.calcular(s); if (c && pctValido(c.percentuais)) return { percentuais: c.percentuais, codigo: c.codigo || '' }; } } catch (e) { /* cai no resultadoExigido */ }
+    }
+    var x = r.resultadoExigido || (r.exigido && typeof r.exigido === 'object' ? r.exigido : null);
+    return x && pctValido(x.percentuais) ? { percentuais: x.percentuais, codigo: String(x.codigo || '') } : null;
+  }
+
+  // Eixos ritmo × foco (−100..100) pela convenção do DISC_EXIGIDO (= js/compatibilidade.js): ritmo = (D+I)−(S+C), + acelerado;
+  // foco = (D+C)−(I+S), + tarefas. Sem o módulo, a mesma conta aqui.
+  function eixosDe(p) {
+    if (!pctValido(p)) return null;
+    var EX = dep('DISC_EXIGIDO');
+    if (EX && typeof EX.eixos === 'function') { try { var e = EX.eixos(p); if (e && isFinite(e.ritmo) && isFinite(e.foco)) return { ritmo: e.ritmo, foco: e.foco }; } catch (er) { /* fallback */ } }
+    return { ritmo: Math.round((p.D + p.I - p.S - p.C) * 10) / 10, foco: Math.round((p.D + p.C - p.I - p.S) * 10) / 10 };
+  }
+
+  // Esforço de adaptação natural → exigido (DISC_EXIGIDO.adaptacao). null sem os dois perfis ou sem o módulo.
+  function esforcoDe(natural, exigido) {
+    var EX = dep('DISC_EXIGIDO');
+    var n = natural && natural.percentuais ? natural.percentuais : natural;
+    var x = exigido && exigido.percentuais ? exigido.percentuais : exigido;
+    if (!pctValido(n) || !pctValido(x) || !EX || typeof EX.adaptacao !== 'function') return null;
+    try {
+      var a = EX.adaptacao(n, x);
+      if (!a || !isFinite(a.indice)) return null;
+      return a;
+    } catch (e) { return null; }
+  }
+
+  function rotuloEsforco(faixa) { return FAIXAS_ESFORCO[faixa] || 'Esforço'; }
+
+  // Nome Notus da combinação (DISC_COMBINACOES); '' se o módulo não existe ou o código é desconhecido.
+  function nomeCombinacao(codigo) {
+    var CB = dep('DISC_COMBINACOES');
+    if (!codigo || !CB || typeof CB.nome !== 'function') return '';
+    try { var n = CB.nome(String(codigo)); return n && n.nome ? String(n.nome) : ''; } catch (e) { return ''; }
+  }
+
+  // Pontos do mapa ritmo × foco (DISC_RELATORIO_VIEW.mapaRitmoFocoHtml) a partir dos colaboradores de listarEquipe.
+  function pontosMapaEquipe(colaboradores) {
+    var out = [];
+    (colaboradores || []).forEach(function (c) {
+      var res = c && c.resultado && pctValido(c.resultado.percentuais) ? c.resultado : null;
+      if (!res) return;
+      var pt = { id: String(c.pessoaId), nome: c.nome, codigo: res.codigo || '', natural: eixosDe(res.percentuais) };
+      var ex = c.exigido && pctValido(c.exigido.percentuais) ? c.exigido : null;
+      if (ex) pt.exigido = eixosDe(ex.percentuais);
+      out.push(pt);
+    });
+    return out;
+  }
+
+  // Esforço por colaborador (só quem tem Parte 2), do maior para o menor.
+  function esforcoEquipe(colaboradores) {
+    var out = [];
+    (colaboradores || []).forEach(function (c) {
+      if (!c || !c.resultado || !c.exigido) return;
+      var a = esforcoDe(c.resultado, c.exigido);
+      if (a) out.push({ pessoaId: String(c.pessoaId), nome: c.nome, cargo: c.cargo || '', indice: a.indice, faixa: a.faixa, maisCobrado: a.maisCobrado || null, menosUsado: a.menosUsado || null });
+    });
+    return out.sort(function (a, b) { return b.indice - a.indice || String(a.nome).localeCompare(String(b.nome)); });
+  }
+
+  // Frase curta: qual fator o trabalho mais cobra e qual fica menos usado.
+  function frasesEsforco(a) {
+    if (!a) return [];
+    var f = [];
+    if (a.maisCobrado) f.push('O trabalho pede mais ' + NOMES[a.maisCobrado] + ' (' + a.maisCobrado + ') do que o natural da pessoa.');
+    if (a.menosUsado) f.push('Usa menos ' + NOMES[a.menosUsado] + ' (' + a.menosUsado + ') do que o natural no dia a dia.');
+    return f;
+  }
+
+  /* ---------- Fotos (data URL JPEG 192×192, guardada no banco) ---------- */
+
+  var FOTO_MAX = 40000;
+  var FOTO_LADO = 192;
+  var FOTO_ORIGINAL_MAX = 15 * 1024 * 1024;
+  function fotoValida(str) {
+    return typeof str === 'string' && str.length <= FOTO_MAX && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(str);
+  }
+  // Iniciais para o círculo sem foto: primeira letra do primeiro e do último nome.
+  function iniciais(nome) {
+    var p = String(nome || '').trim().split(/\s+/).filter(Boolean);
+    if (!p.length) return '?';
+    return (p[0].charAt(0) + (p.length > 1 ? p[p.length - 1].charAt(0) : '')).toUpperCase();
+  }
+  function fotoDe(r) {
+    if (!r) return '';
+    if (fotoValida(r.foto)) return r.foto;
+    if (r.pessoa && fotoValida(r.pessoa.foto)) return r.pessoa.foto;
+    return '';
+  }
+
+  /* ---------- Organograma de arrastar: relações 'lidera' ---------- */
+
+  function liderDe(rels, id) {
+    var r = (rels || []).filter(function (x) { return x.tipo === 'lidera' && String(x.para) === String(id); })[0];
+    return r ? String(r.de) : null;
+  }
+  function lideradosDe(rels, id) {
+    return (rels || []).filter(function (x) { return x.tipo === 'lidera' && String(x.de) === String(id); }).map(function (x) { return String(x.para); });
+  }
+  // Todos abaixo de id (liderados, liderados dos liderados…), sem repetir.
+  function descendentes(rels, id) {
+    var vistos = {}, fila = [String(id)], out = [];
+    while (fila.length) {
+      lideradosDe(rels, fila.shift()).forEach(function (x) { if (!vistos[x] && x !== String(id)) { vistos[x] = true; out.push(x); fila.push(x); } });
+    }
+    return out;
+  }
+
+  // Move uma pessoa no organograma. destino: {tipo:'lider', id} | {tipo:'topo'} | {tipo:'sem'}.
+  // Devolve {relacoes, erro}. 'lider': passa a ser liderada por id (troca o líder; tira direto/indireto entre os dois);
+  // 'topo': sem líder; 'sem': tira todas as 'lidera' dela (como líder e como liderada); 'direto'/'indireto' ficam.
+  function moverNoOrganograma(rels, id, destino, nomes) {
+    id = String(id);
+    var lista = (rels || []).map(function (r) { return { de: String(r.de), para: String(r.para), tipo: r.tipo }; });
+    var nome = function (x) { return (nomes && nomes[x]) || 'esta pessoa'; };
+    if (!destino || !destino.tipo) return { relacoes: lista, erro: 'Destino inválido.' };
+    if (destino.tipo === 'lider') {
+      var alvo = String(destino.id);
+      if (alvo === id) return { relacoes: lista, erro: '' };
+      if (descendentes(lista, id).indexOf(alvo) !== -1) {
+        return { relacoes: lista, erro: 'Não dá para colocar ' + nome(id) + ' abaixo de ' + nome(alvo) + ': ' + nome(alvo) + ' já está na equipe liderada por ' + nome(id) + '.' };
+      }
+      if (liderDe(lista, id) === alvo) return { relacoes: lista, erro: '' };
+      lista = lista.filter(function (r) {
+        if (r.tipo === 'lidera' && r.para === id) return false;
+        if (r.tipo !== 'lidera' && ((r.de === id && r.para === alvo) || (r.de === alvo && r.para === id))) return false;
+        return true;
+      });
+      lista.push({ de: alvo, para: id, tipo: 'lidera' });
+      return { relacoes: lista, erro: '' };
+    }
+    if (destino.tipo === 'topo') return { relacoes: lista.filter(function (r) { return !(r.tipo === 'lidera' && r.para === id); }), erro: '' };
+    if (destino.tipo === 'sem') return { relacoes: lista.filter(function (r) { return !(r.tipo === 'lidera' && (r.para === id || r.de === id)); }), erro: '' };
+    return { relacoes: lista, erro: 'Destino inválido.' };
+  }
+
+  // Posições: sem = sem líder e sem liderados (e fora do conjunto "topo"); raizes = sem líder com liderados (ou marcadas no topo).
+  function posicoesOrganograma(ids, rels, topo) {
+    var ativos = {};
+    ids.forEach(function (x) { ativos[String(x)] = true; });
+    var rs = (rels || []).filter(function (r) { return r.tipo === 'lidera' && ativos[String(r.de)] && ativos[String(r.para)]; });
+    var sem = [], raizes = [];
+    ids.forEach(function (x) {
+      x = String(x);
+      if (liderDe(rs, x)) return;
+      if (lideradosDe(rs, x).length || (topo && topo[x])) raizes.push(x); else sem.push(x);
+    });
+    var filhos = {};
+    ids.forEach(function (x) { filhos[String(x)] = lideradosDe(rs, x); });
+    return { sem: sem, raizes: raizes, filhos: filhos };
   }
 
   /* ---------- Pessoas: várias respostas da mesma pessoa (mesmo WhatsApp) ---------- */
@@ -1009,6 +1193,26 @@
     validarFormulario: validarFormulario,
     perguntaSensivel: perguntaSensivel,
     resumoFormulario: resumoFormulario,
+    PARTE2: PARTE2,
+    FOTO_MAX: FOTO_MAX,
+    fotoValida: fotoValida,
+    iniciais: iniciais,
+    fotoDe: fotoDe,
+    liderDe: liderDe,
+    lideradosDe: lideradosDe,
+    descendentes: descendentes,
+    moverNoOrganograma: moverNoOrganograma,
+    posicoesOrganograma: posicoesOrganograma,
+    parte2Padrao: parte2Padrao,
+    textoParte2: textoParte2,
+    exigidoDoRegistro: exigidoDoRegistro,
+    eixosDe: eixosDe,
+    esforcoDe: esforcoDe,
+    rotuloEsforco: rotuloEsforco,
+    nomeCombinacao: nomeCombinacao,
+    pontosMapaEquipe: pontosMapaEquipe,
+    esforcoEquipe: esforcoEquipe,
+    frasesEsforco: frasesEsforco,
     lerExtras: lerExtras,
     chavePessoa: chavePessoa,
     agruparPessoas: agruparPessoas,
@@ -1093,6 +1297,109 @@
     var n = document.createElementNS('http://www.w3.org/2000/svg', tag);
     for (var k in attrs) if (Object.prototype.hasOwnProperty.call(attrs, k)) n.setAttribute(k, attrs[k]);
     return n;
+  }
+
+  /* ---------- Fotos no navegador ---------- */
+
+  // Avatar redondo: a foto (só data:image/jpeg validada) ou as iniciais. Com letra, um selo DISC pequeno no canto.
+  function avatar(nome, foto, opcoes) {
+    var op = opcoes || {};
+    var tem = fotoValida(foto);
+    var filhos = [tem ? el('img', { classe: 'avatar__img', src: foto, alt: '', width: 192, height: 192, loading: 'lazy', decoding: 'async' })
+      : el('span', { classe: 'avatar__iniciais', texto: iniciais(nome) })];
+    if (op.letra) filhos.push(el('span', { classe: 'avatar__letra disc-fundo-' + op.letra, 'aria-hidden': 'true', texto: op.letra }));
+    return el('span', { classe: 'avatar' + (tem ? ' avatar--foto' : '') + (op.classe ? ' ' + op.classe : ''), 'aria-hidden': 'true', 'data-foto': tem ? 'sim' : 'nao' }, filhos);
+  }
+
+  // Arquivo de imagem -> data URL JPEG 192×192 recortada ao centro (qualidade ~0,72; baixa até caber em FOTO_MAX).
+  function prepararFoto(file) {
+    return new Promise(function (resolve, reject) {
+      if (!file) { reject(new Error('Escolha uma foto.')); return; }
+      if (file.type && !/^image\//.test(file.type)) { reject(new Error('Escolha um arquivo de imagem (JPG, PNG ou WEBP).')); return; }
+      if (file.size > FOTO_ORIGINAL_MAX) { reject(new Error('A foto passa de 15 MB. Escolha outra.')); return; }
+      var url = (root.URL && root.URL.createObjectURL) ? root.URL.createObjectURL(file) : '';
+      var img = new Image();
+      img.onload = function () {
+        try {
+          var lado = Math.min(img.naturalWidth, img.naturalHeight);
+          var c = document.createElement('canvas');
+          c.width = FOTO_LADO; c.height = FOTO_LADO;
+          var ctx = c.getContext('2d');
+          ctx.fillStyle = '#ffffff';
+          ctx.fillRect(0, 0, FOTO_LADO, FOTO_LADO);
+          ctx.drawImage(img, (img.naturalWidth - lado) / 2, (img.naturalHeight - lado) / 2, lado, lado, 0, 0, FOTO_LADO, FOTO_LADO);
+          var q = 0.72, dado = c.toDataURL('image/jpeg', q);
+          while (dado.length > FOTO_MAX && q > 0.3) { q -= 0.1; dado = c.toDataURL('image/jpeg', q); }
+          if (url) root.URL.revokeObjectURL(url);
+          if (!fotoValida(dado)) { reject(new Error('Não foi possível preparar a foto. Tente outra.')); return; }
+          resolve(dado);
+        } catch (e) { reject(new Error('Não foi possível ler a foto. Tente outra.')); }
+      };
+      img.onerror = function () { if (url) root.URL.revokeObjectURL(url); reject(new Error('Este formato de imagem não abre neste navegador. Use JPG ou PNG.')); };
+      img.src = url;
+    });
+  }
+
+  function desenharUsuarioTopo() {
+    var u = estado.usuario;
+    var box = $('usuario-inicial');
+    if (!u || !box) return;
+    var nome = String(u.nome || u.email || '');
+    limpar(box);
+    if (fotoValida(u.foto)) { box.classList.add('usuario__inicial--foto'); box.appendChild(el('img', { src: u.foto, alt: '', width: 32, height: 32 })); }
+    else { box.classList.remove('usuario__inicial--foto'); box.textContent = iniciais(nome).charAt(0) || '?'; }
+  }
+
+  // "Minha foto" (menu do usuário): enviar, trocar ou remover a própria foto.
+  function janelaMinhaFoto() {
+    var u = estado.usuario || {};
+    var nova = fotoValida(u.foto) ? u.foto : '';
+    var previa = el('div', { classe: 'foto-previa', id: 'minha-foto-previa' });
+    var entrada = el('input', { type: 'file', id: 'minha-foto-arquivo', classe: 'visualmente-oculto', accept: 'image/*' });
+    var btnRemover = botao('botao--claro botao--pequeno', 'Remover foto', function () { nova = ''; desenhar(); }, { id: 'btn-minha-foto-remover' });
+    var status = el('p', { classe: 't-nota texto-suave', id: 'minha-foto-status', 'aria-live': 'polite' });
+    function desenhar() {
+      limpar(previa);
+      previa.appendChild(avatar(u.nome || u.email, nova, { classe: 'avatar--grande' }));
+      btnRemover.hidden = !nova;
+    }
+    entrada.addEventListener('change', function () {
+      var f = entrada.files && entrada.files[0];
+      if (!f) return;
+      status.textContent = 'Preparando a foto…';
+      prepararFoto(f).then(function (d) { nova = d; status.textContent = 'Foto pronta. Toque em "Salvar foto".'; desenhar(); },
+        function (e) { status.textContent = e.message; });
+      entrada.value = '';
+    });
+    desenhar();
+    abrirJanela({
+      id: 'janela-minha-foto',
+      titulo: 'Minha foto',
+      texto: 'Aparece no menu, na aba Usuários e nos relatórios que você gerar. A foto é reduzida para 192×192 antes de salvar.',
+      corpo: [
+        el('div', { classe: 'foto-escolha' }, [
+          previa,
+          el('div', { classe: 'foto-escolha__acoes' }, [
+            el('label', { classe: 'botao botao--contorno botao--pequeno', for: 'minha-foto-arquivo', id: 'btn-minha-foto-escolher', tabindex: '0',
+              onkeydown: function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); entrada.click(); } } }, [fotoValida(u.foto) ? 'Trocar foto' : 'Escolher foto']),
+            entrada, btnRemover
+          ])
+        ]),
+        status
+      ],
+      botao: 'Salvar foto',
+      aoConfirmar: function () {
+        if (!metodoApi('salvarMinhaFoto')) throw new Error('Este servidor ainda não guarda fotos.');
+        return api('salvarMinhaFoto', nova).then(function (resp) {
+          u.foto = resp && typeof resp.foto === 'string' ? resp.foto : (resp && resp.usuario && typeof resp.usuario.foto === 'string') ? resp.usuario.foto : nova;
+          ss('set', CHAVE_USUARIO, JSON.stringify(u));
+          desenharUsuarioTopo();
+          avisar(nova ? 'Foto salva.' : 'Foto removida.', 'ok');
+          (estado.usuarios || []).forEach(function (x) { if (x.id && x.id === u.id) x.foto = u.foto; });
+          renderizarUsuarios();
+        });
+      }
+    });
   }
 
   function ls(acao, chave, valor) {
@@ -1727,7 +2034,7 @@
       if (g.total > 1) selos.push(el('span', { classe: 'selo selo--noite selo-respostas', title: 'Respostas desta pessoa' + (estado.filtros.processo ? ' neste filtro' : ''), texto: g.total + ' respostas' }));
       ul.appendChild(el('li', { classe: 'card caixa' + (animar ? ' surgir' : '') + (r.invalido ? ' card-invalido' : ''), 'data-id': r.id, 'data-pessoa': g.chave, 'data-respostas': String(g.total), estilo: animar ? { 'animation-delay': Math.min(i, 8) * 30 + 'ms' } : null }, [
         el('div', { classe: 'card-topo' }, [
-          r.calc ? letraDisc(r.calc.primario, 'card-letra') : el('span', { classe: 'letra-disc card-letra card-letra--vazia', 'aria-hidden': 'true', texto: '?' }),
+          avatar(r.nome, fotoDe(r), { letra: r.calc ? r.calc.primario : '', classe: 'card-avatar' }),
           el('button', { type: 'button', classe: 'card-nome', texto: r.nome || '(sem nome)',
             onclick: function () { abrirDetalhe(r.id); } }),
           seloProtocolo(r, 'card-protocolo')
@@ -1895,6 +2202,91 @@
     ]);
   }
 
+  // HTML de um desenho do relatório (string já escapada pelo DISC_RELATORIO_VIEW) num nó do painel.
+  function nodoDeHtml(html, attrs) {
+    var modelo = document.createElement('template');
+    modelo.innerHTML = html;
+    return el('div', attrs, modelo.content);
+  }
+
+  // Mapa ritmo × foco (DISC_RELATORIO_VIEW.mapaRitmoFocoHtml); null sem o módulo ou sem pontos.
+  function mapaRitmoFoco(pontos, opcoes, attrs) {
+    var VIEW = root.DISC_RELATORIO_VIEW;
+    if (!pontos.length || !VIEW || typeof VIEW.mapaRitmoFocoHtml !== 'function') return null;
+    var html = '';
+    try { html = String(VIEW.mapaRitmoFocoHtml(pontos, opcoes || {}) || ''); } catch (e) { html = ''; }
+    return html ? nodoDeHtml(html, attrs) : null;
+  }
+
+  function seloEsforco(a, extra) {
+    return el('span', { classe: 'selo esforco-selo ' + (CLASSE_ESFORCO[a.faixa] || '') + (extra ? ' ' + extra : ''), 'data-faixa': a.faixa, texto: rotuloEsforco(a.faixa) });
+  }
+
+  // Detalhe: natural × exigido (barras lado a lado), índice de esforço com faixa e mapa ritmo × foco.
+  function blocoParte2(r) {
+    var ex = exigidoDoRegistro(r);
+    if (!r.calc || !ex) return null;
+    var nat = r.calc.percentuais, exi = ex.percentuais;
+    var a = esforcoDe(nat, exi);
+    var linhas = el('ul', { classe: 'comparar-barras', id: 'det-natural-exigido', role: 'list' }, LETRAS.map(function (l) {
+      var d = Math.round((exi[l] - nat[l]) * 10) / 10;
+      function barra(classe, v) {
+        return el('span', { classe: 'comparar-barras__linha' }, [
+          el('span', { classe: 'mini-trilho trilho' }, el('span', { classe: 'mini-barra ' + classe, estilo: { width: Math.min(100, (v / 40) * 100) + '%' } })),
+          el('span', { classe: 'mini-valor tabular', texto: String(v).replace('.', ',') + '%' })
+        ]);
+      }
+      return el('li', { classe: 'comparar-barras__item', 'data-letra': l, 'aria-label': NOMES[l] + ': natural ' + nat[l] + '%, exigido ' + exi[l] + '%' }, [
+        letraDisc(l, 'comparar-barras__letra'),
+        el('span', { classe: 'comparar-barras__barras' }, [barra('comparar-barras__natural', nat[l]), barra('comparar-barras__exigido', exi[l])]),
+        el('span', { classe: 'comparar-barras__delta tabular' + (Math.abs(d) >= 5 ? ' comparar-barras__delta--forte' : ''), texto: (d > 0 ? '+' : d < 0 ? '−' : '') + String(Math.abs(d)).replace('.', ',') })
+      ]);
+    }));
+    var esforco = a ? el('div', { classe: 'esforco', id: 'det-esforco', 'data-faixa': a.faixa }, [
+      el('p', { classe: 'esforco__rotulo t-rotulo texto-suave', texto: 'Índice de esforço de adaptação' }),
+      el('p', { classe: 'esforco__linha' }, [
+        el('span', { classe: 't-numero tabular esforco__indice', id: 'det-esforco-indice', texto: String(Math.round(a.indice)) }),
+        el('span', { classe: 'texto-suave t-rotulo', texto: ' de 100 ' }),
+        seloEsforco(a)
+      ]),
+      el('ul', { classe: 'lista-simples esforco__frases' }, frasesEsforco(a).map(function (t) { return el('li', { classe: 't-rotulo', texto: t }); }))
+    ]) : el('p', { classe: 'texto-suave t-rotulo', id: 'det-esforco', texto: 'Índice de esforço indisponível (disc-exigido.js não carregado).' });
+    var mapa = mapaRitmoFoco([{ id: String(r.id), nome: primeiroNome(r.nome) || 'Pessoa', codigo: r.calc.codigo, natural: eixosDe(nat), exigido: eixosDe(exi), destaque: true }], {}, { classe: 'mapa-painel', id: 'det-mapa' });
+    return el('section', { classe: 'caixa caixa--ampla det-parte2 surgir', id: 'det-parte2' }, [
+      el('header', { classe: 'det-grafico__topo' }, [
+        el('h3', { classe: 'caixa__titulo', texto: 'Natural × exigido pelo trabalho' }),
+        ex.codigo ? el('span', { classe: 'badge disc-' + ex.codigo.charAt(0), title: 'Perfil exigido', texto: ex.codigo }) : null
+      ]),
+      el('p', { classe: 'texto-suave t-rotulo', texto: 'Natural: como a pessoa é (25 grupos). Exigido: como ela sente que o trabalho pede que ela seja (segunda parte). É um retrato do momento, não uma avaliação de desempenho.' }),
+      el('div', { classe: 'det-parte2__grade' }, [
+        el('div', null, [
+          el('p', { classe: 'comparar-legenda t-nota' }, [
+            el('span', { classe: 'comparar-legenda__item' }, [el('span', { classe: 'comparar-legenda__cor comparar-barras__natural', 'aria-hidden': 'true' }), 'Natural']),
+            el('span', { classe: 'comparar-legenda__item' }, [el('span', { classe: 'comparar-legenda__cor comparar-barras__exigido', 'aria-hidden': 'true' }), 'Exigido'])
+          ]),
+          linhas,
+          esforco
+        ]),
+        mapa ? el('div', null, [el('h4', { classe: 'conf-subtitulo', texto: 'Mapa ritmo × foco' }), mapa]) : null
+      ])
+    ]);
+  }
+
+  // LGPD: apaga a foto da resposta, da ficha e das outras respostas da pessoa (removerFoto no servidor; senão atualizar).
+  function removerFotoResposta(r) {
+    var chave = chavePessoa(r);
+    function limparLocal() {
+      estado.registros.forEach(function (x) {
+        if (x.id !== r.id && chavePessoa(x) !== chave) return;
+        x.foto = '';
+        if (x.pessoa && typeof x.pessoa === 'object') x.pessoa.foto = '';
+      });
+      esquecerEquipes();
+    }
+    if (MODO_API && metodoApi('removerFoto')) return api('removerFoto', r.id).then(limparLocal);
+    return atualizarCampos(r.id, { foto: '' }).then(limparLocal);
+  }
+
   function renderizarDetalhe() {
     var art = $('vista-detalhe');
     limpar(art);
@@ -1909,7 +2301,10 @@
       el('div', { classe: 'cabecalho__texto-area' }, [
         el('p', { classe: 'det-relatorio so-imprimir', texto: 'Relatório DISC' + (r.empresaNome ? ' — ' + r.empresaNome : (CONFIG.EMPRESA ? ' — ' + CONFIG.EMPRESA : '')) }),
         el('p', { classe: 'sobretitulo nao-imprimir', texto: equipe ? 'Avaliação de equipe · Colaborador' : 'Processo seletivo · Candidato' }),
-        el('h2', { classe: 'cabecalho__titulo t-pagina seminegrito', texto: r.nome || '(sem nome)' }),
+        el('div', { classe: 'det-titulo' }, [
+          avatar(r.nome, fotoDe(r), { classe: 'avatar--grande det-avatar' }),
+          el('h2', { classe: 'cabecalho__titulo t-pagina seminegrito', texto: r.nome || '(sem nome)' })
+        ]),
         el('p', { classe: 'det-protocolo', id: 'det-protocolo' }, [
           el('span', { classe: 'det-protocolo__rotulo', texto: 'Código ' }),
           el('span', { classe: 'det-protocolo__valor t-indicador negrito tabular', texto: textoProtocolo(r.protocolo) })
@@ -1939,7 +2334,7 @@
         MODO_API ? el('div', { classe: 'det-dl__largo' }, [el('dt', { texto: 'Processo' }), el('dd', { id: 'det-avaliacao', texto: textoOrigem(r) })]) : null,
         el('div', null, [el('dt', { texto: 'Concluído em' }), el('dd', { texto: formatarData(r.fim || r.recebidoEm) })]),
         el('div', null, [el('dt', { texto: 'Duração' }), el('dd', { texto: formatarDuracao(r.duracaoSeg) })]),
-        el('div', null, [el('dt', { texto: 'Perfil' }), el('dd', { classe: 'det-perfil' }, [badgePerfil(r), r.calc ? ' ' + NOMES[r.calc.primario] + ' / ' + NOMES[r.calc.secundario] : ''])]),
+        el('div', null, [el('dt', { texto: 'Perfil' }), el('dd', { classe: 'det-perfil' }, [badgePerfil(r), r.calc ? ' ' + NOMES[r.calc.primario] + ' / ' + NOMES[r.calc.secundario] + (nomeCombinacao(r.calc.codigo) ? ' · ' + nomeCombinacao(r.calc.codigo) : '') : ''])]),
         el('div', null, [el('dt', { texto: 'Status' }), el('dd', { id: 'det-status-selo' }, badgeStatus(r))])
       ])
     ]);
@@ -2020,7 +2415,19 @@
       el('h3', { classe: 'caixa__titulo', texto: 'Avaliação do recrutador' }),
       el('div', { classe: 'campo' }, [el('span', { classe: 'campo__rotulo', id: 'det-status-rotulo', texto: 'Status' }), escStatus.caixa]),
       el('div', { classe: 'campo' }, [el('label', { classe: 'campo__rotulo', for: 'det-obs', texto: 'Observações' }), taObs]),
-      el('div', { classe: 'det-gestao__acoes' }, [btnObs, btnExcluir, btnExcluirPessoa])
+      el('div', { classe: 'det-gestao__acoes' }, [btnObs, btnExcluir, btnExcluirPessoa]),
+      fotoValida(r.foto) && pode('excluir') ? el('div', { classe: 'det-gestao__acoes det-foto' }, [
+        botao('botao--claro', 'Remover foto', function () {
+          confirmar({ titulo: 'Remover a foto desta resposta?', texto: 'A foto enviada pela pessoa é apagada desta resposta. Os dados do teste continuam.', botao: 'Remover foto' }).then(function (ok) {
+            if (!ok) return;
+            removerFotoResposta(r).then(function () {
+              avisar('Foto removida.', 'ok');
+              renderizarLista(); renderizarDetalhe();
+            }).catch(falhou);
+          });
+        }, { id: 'btn-remover-foto' }),
+        el('span', { classe: 't-nota texto-suave', texto: 'A pessoa pode pedir a remoção a qualquer momento (LGPD).' })
+      ]) : null
     ]);
     var obsImpressa = el('p', { classe: 'obs-impressa', texto: r.observacoes || '' });
 
@@ -2042,10 +2449,16 @@
         el('h3', { classe: 'caixa__titulo', texto: 'Resultado DISC' }),
         badgePerfil(r)
       ]),
+      nomeCombinacao(r.calc.codigo) ? el('p', { classe: 'det-combinacao', id: 'det-combinacao' }, [
+        el('span', { classe: 'texto-suave', texto: 'Combinação ' + r.calc.codigo + ': ' }),
+        el('span', { classe: 'seminegrito', texto: nomeCombinacao(r.calc.codigo) })
+      ]) : null,
       graficoDisc(r.calc),
       el('p', { classe: 'legenda', texto: 'D = Dominância · I = Influência · S = Estabilidade · C = Conformidade. Cada letra varia de 10% a 40%; a soma é 100%.' })
     ]);
     art.appendChild(el('div', { classe: 'det-grade' }, [grafico, el('div', { classe: 'det-lado' }, [dados, gestao])]));
+    var parte2 = blocoParte2(r);
+    if (parte2) art.appendChild(parte2);
     art.appendChild(el('section', { classe: 'so-imprimir det-obs-impressa' }, [el('h3', { texto: 'Observações' }), obsImpressa]));
     if (extrasDet) art.appendChild(extrasDet);
     var relDet = blocoRelatoriosDetalhe(r, ficha);
@@ -2436,6 +2849,38 @@
     ], 'form-secao--perguntas'));
     desenharPerguntas();
 
+    // 1c. Segunda parte do teste (perfil exigido pelo trabalho). Ao criar, segue o tipo até a pessoa mexer; ao editar, fica o salvo.
+    f.parte2 = p ? formBase.parte2 : parte2Padrao(escTipo.botao.value);
+    var parte2Tocada = !!p;
+    var estadoParte2 = el('span', { classe: 'pilula-liga__texto', id: 'proc-parte2-estado' });
+    var pilulaParte2 = el('button', { type: 'button', classe: 'pilula-liga', id: 'proc-parte2', role: 'switch', 'aria-labelledby': 'proc-parte2-rotulo' }, [
+      el('span', { classe: 'pilula-liga__trilho', 'aria-hidden': 'true' }, el('span', { classe: 'pilula-liga__bola' })),
+      estadoParte2
+    ]);
+    var notaParte2 = el('p', { classe: 'form-secao__texto', id: 'proc-parte2-nota', 'aria-live': 'polite' });
+    function desenharParte2() {
+      var ligada = f.parte2 === 'ligada';
+      pilulaParte2.setAttribute('aria-checked', ligada ? 'true' : 'false');
+      pilulaParte2.setAttribute('data-valor', f.parte2);
+      estadoParte2.textContent = PARTE2[f.parte2];
+      notaParte2.textContent = textoParte2(f.parte2);
+    }
+    pilulaParte2.addEventListener('click', function () {
+      parte2Tocada = true;
+      f.parte2 = f.parte2 === 'ligada' ? 'desligada' : 'ligada';
+      desenharParte2();
+    });
+    escTipo.botao.addEventListener('change', function () {
+      if (parte2Tocada) return;
+      f.parte2 = parte2Padrao(escTipo.botao.value);
+      desenharParte2();
+    });
+    form.appendChild(secaoForm(ROTULO_PARTE2, 'Depois do teste, a pessoa responde 10 grupos pensando em como o trabalho exige que ela seja. O painel compara com o perfil natural e mostra o esforço de adaptação. Recomendado para avaliação de equipe.', [
+      el('div', { classe: 'parte2-linha' }, [el('span', { classe: 'campo__rotulo', id: 'proc-parte2-rotulo', texto: 'Segunda parte do teste' }), pilulaParte2]),
+      notaParte2
+    ], 'form-secao--parte2'));
+    desenharParte2();
+
     // 2. ClickUp
     var clickupCorpo = el('div', { classe: 'clickup-corpo', id: 'proc-clickup' });
     form.appendChild(secaoForm('Lista do ClickUp', 'Os candidatos do processo vêm dessa lista: notas das etapas, status e respostas do formulário.', [clickupCorpo]));
@@ -2632,7 +3077,8 @@
         permitirAntecedentes: $('proc-antecedentes').checked,
         formulario: {
           campos: Object.assign({}, f.campos),
-          perguntas: f.perguntas.map(function (q) { return { id: q.id, texto: String(q.texto).replace(/\s+/g, ' ').trim(), obrigatoria: q.obrigatoria === true }; })
+          perguntas: f.perguntas.map(function (q) { return { id: q.id, texto: String(q.texto).replace(/\s+/g, ' ').trim(), obrigatoria: q.obrigatoria === true }; }),
+          parte2: f.parte2 === 'ligada' ? 'ligada' : 'desligada'
         }
       };
       if (cfgBase.permitirSaude === true) config.permitirSaude = true;
@@ -2851,6 +3297,16 @@
       (function () {
         var fora = resumoFormulario(cfg.formulario).filter(function (it) { return it.modo === 'oculto'; }).map(function (it) { return it.rotulo; });
         return fora.length ? el('p', { classe: 'texto-suave t-rotulo proc-formulario__fora', texto: 'Não perguntamos: ' + fora.join(', ') + '.' }) : null;
+      })(),
+      (function () {
+        var p2 = normalizarFormulario(cfg.formulario).parte2;
+        return el('div', { classe: 'proc-parte2', id: 'proc-parte2-resumo', 'data-parte2': p2 }, [
+          el('p', { classe: 'proc-parte2__topo' }, [
+            el('span', { classe: 'proc-etapas-resumo__nome', texto: 'Segunda parte do teste' }),
+            el('span', { classe: 'selo' + (p2 === 'ligada' ? ' selo--noite' : ''), texto: PARTE2[p2] })
+          ]),
+          el('p', { classe: 'texto-suave t-rotulo', texto: textoParte2(p2) })
+        ]);
       })()
     ]);
     var linkBox = el('section', { classe: 'caixa' }, [
@@ -3396,7 +3852,6 @@
     }
     emp = emp || eq.empresa || { id: id, nome: '' };
     var colabs = eq.colaboradores.filter(function (c) { return c.status !== 'desligado'; });
-    var nomes = nomePorId(colabs);
     var proc = processoEquipeDa(id);
     var linkTeste = proc ? linkDe(proc) : '';
 
@@ -3427,7 +3882,22 @@
       }, { id: 'btn-criar-link-equipe' }))
     ]));
 
-    // Colaboradores ativos
+    box.appendChild(blocoColaboradores(emp, eq, colabs, id, proc, linkTeste));
+
+    // Organograma (editável: arrastar ou "Mover para…") e compatibilidade
+    box.appendChild(blocoOrganogramaEditavel(emp, eq, colabs));
+    box.appendChild(blocoCompatibilidade(compatDe(emp, colabs, eq.relacoes), colabs));
+    box.appendChild(blocoMapaEquipe(colabs));
+
+    // Relatórios da empresa e histórico
+    box.appendChild(el('div', { classe: 'proc-grade emp-rodape' }, [
+      blocoRelatoriosModelo({ empresaId: id }, 'e:' + id, { empresa: emp.nome }),
+      blocoHistorico2(eq)
+    ]));
+  }
+
+  function blocoColaboradores(emp, eq, colabs, id, proc, linkTeste) {
+    var nomes = nomePorId(colabs);
     var secColab = el('section', { classe: 'emp-colaboradores', id: 'emp-colaboradores' }, [
       el('h3', { classe: 'emp-secao__titulo seminegrito', texto: 'Colaboradores ativos (' + colabs.length + ')' })
     ]);
@@ -3445,45 +3915,73 @@
         if (lig.indiretos.length) partes.push(lig.indiretos.length + ' indireto' + (lig.indiretos.length === 1 ? '' : 's'));
         return el('li', { classe: 'caixa gestao-card colab-card', 'data-pessoa': c.pessoaId, 'data-vinculo': c.vinculoId, 'data-nome': c.nome }, [
           el('div', { classe: 'card-topo' }, [
-            primario ? letraDisc(primario, 'card-letra') : el('span', { classe: 'letra-disc card-letra card-letra--vazia', 'aria-hidden': 'true', texto: '?' }),
+            avatar(c.nome, c.foto, { letra: primario, classe: 'card-avatar' }),
             el('div', { classe: 'colab-card__nome-area' }, [
               el('p', { classe: 'colab-card__nome seminegrito', texto: c.nome }),
               el('p', { classe: 'gestao-card__sub colab-card__cargo', texto: [c.cargo, c.area].filter(Boolean).join(' · ') || 'Cargo não informado' })
             ]),
             res ? el('span', { classe: 'badge disc-' + primario + ' colab-card__codigo', texto: res.codigo }) : el('span', { classe: 'selo colab-sem-teste', texto: 'Sem teste' })
           ]),
+          res && nomeCombinacao(res.codigo) ? el('p', { classe: 'colab-card__combinacao t-rotulo texto-medio', texto: nomeCombinacao(res.codigo) }) : null,
           res ? miniBarras(res.percentuais) : el('div', { classe: 'colab-card__sem' }, [
             el('p', { classe: 'texto-suave t-rotulo', texto: 'Ainda não fez o teste DISC.' }),
             proc ? botao('botao--contorno botao--pequeno', 'Copiar link do teste', function () { copiar(linkTeste, 'Link do teste copiado. Envie para ' + primeiroNome(c.nome) + '.'); }, { 'data-acao': 'copiar-link-teste' }) : null
           ]),
           el('p', { classe: 'colab-card__ligacoes t-rotulo texto-medio', texto: partes.join(' · ') }),
+          (function () {
+            var a = res && c.exigido ? esforcoDe(res, c.exigido) : null;
+            return a ? el('p', { classe: 'colab-card__esforco t-rotulo' }, [seloEsforco(a), el('span', { classe: 'texto-suave tabular', texto: ' índice ' + Math.round(a.indice) + ' de 100' })]) : null;
+          })(),
           el('div', { classe: 'gestao-card__acoes' }, [
             botao('botao--claro botao--pequeno', 'Ligações', function () { janelaLigacoes(emp, eq, c); }, { 'data-acao': 'ligacoes' }),
             botao('botao--claro botao--pequeno', 'Editar', function () { janelaEditarColaborador(emp, c); }, { 'data-acao': 'editar' }),
             botao('botao--claro botao--pequeno', 'Mover', function () { janelaMover(emp, c); }, { 'data-acao': 'mover' }),
             botao('botao--claro botao--pequeno', 'Como liderar', function () { gerarLideranca(emp, eq, c); }, { 'data-acao': 'como-liderar', disabled: res ? null : true, title: res ? null : 'Precisa do teste DISC' }),
-            botao('botao--claro botao--pequeno', 'Relatório da pessoa', function () { gerarPessoa(c.pessoaId, c.nome, res, { aba: 'empresas', tela: 'pagina', id: id }, id); }, { 'data-acao': 'relatorio-pessoa', disabled: res ? null : true }),
+            botao('botao--claro botao--pequeno', 'Relatório da pessoa', function () { gerarPessoa(c.pessoaId, c.nome, res, { aba: 'empresas', tela: 'pagina', id: id }, id, c.exigido || null, c.foto); }, { 'data-acao': 'relatorio-pessoa', disabled: res ? null : true }),
             botao('botao--perigo botao--pequeno', 'Desligar', function () { desligar(emp, c); }, { 'data-acao': 'desligar' })
           ])
         ]);
       })));
     }
-    box.appendChild(secColab);
+    return secColab;
+  }
 
-    // Organograma e compatibilidade
+  function compatDe(emp, colabs, relacoes) {
     var CP = root.DISC_COMPATIBILIDADE;
-    var compat = null;
-    if (CP && typeof CP.montar === 'function' && colabs.length) {
-      try { compat = CP.montar(entradaCompatibilidade(emp, colabs, eq.relacoes)); } catch (e) { compat = null; }
-    }
-    box.appendChild(blocoOrganograma(compat, colabs, eq.relacoes));
-    box.appendChild(blocoCompatibilidade(compat, colabs));
+    if (!CP || typeof CP.montar !== 'function' || !colabs.length) return null;
+    try { return CP.montar(entradaCompatibilidade(emp, colabs, relacoes)); } catch (e) { return null; }
+  }
 
-    // Relatórios da empresa e histórico
-    box.appendChild(el('div', { classe: 'proc-grade emp-rodape' }, [
-      blocoRelatoriosModelo({ empresaId: id }, 'e:' + id, { empresa: emp.nome }),
-      blocoHistorico2(eq)
-    ]));
+  // Empresa: mapa ritmo × foco com todos os colaboradores testados e o esforço de adaptação de quem respondeu a Parte 2.
+  function blocoMapaEquipe(colabs) {
+    var sec = el('section', { classe: 'caixa caixa--ampla emp-bloco', id: 'emp-mapa' }, [el('h3', { classe: 'caixa__titulo', texto: 'Mapa ritmo × foco' })]);
+    var pontos = pontosMapaEquipe(colabs);
+    if (!pontos.length) { sec.appendChild(el('p', { classe: 'texto-suave t-rotulo', texto: 'O mapa aparece quando algum colaborador fizer o teste DISC.' })); return sec; }
+    var temExigido = pontos.some(function (x) { return x.exigido; });
+    sec.appendChild(el('p', { classe: 'texto-suave t-rotulo', texto: 'Ritmo: acelerado (D e I) ou cauteloso (S e C). Foco: tarefas (D e C) ou pessoas (I e S).' +
+      (temExigido ? ' A seta tracejada vai do perfil natural ao exigido pelo trabalho.' : '') }));
+    var mapa = mapaRitmoFoco(pontos, {}, { classe: 'mapa-painel', id: 'emp-mapa-desenho' });
+    sec.appendChild(mapa || el('p', { classe: 'texto-suave t-rotulo', texto: 'Mapa indisponível (relatorio-view.js sem o mapa ritmo × foco).' }));
+    var lista = esforcoEquipe(colabs);
+    sec.appendChild(el('h4', { classe: 'conf-subtitulo', texto: 'Esforço de adaptação por colaborador' }));
+    if (!lista.length) {
+      sec.appendChild(el('p', { classe: 'texto-suave t-rotulo', id: 'emp-esforco-vazio', texto: 'Ninguém respondeu a segunda parte do teste ainda. Ligue-a no processo da equipe para ver o quanto cada um se estica no cargo.' }));
+      return sec;
+    }
+    sec.appendChild(el('ul', { classe: 'lista-simples esforco-lista', id: 'emp-esforco' }, lista.map(function (x) {
+      return el('li', { classe: 'esforco-item', 'data-pessoa': x.pessoaId, 'data-faixa': x.faixa }, [
+        el('span', { classe: 'esforco-item__nome' }, [
+          el('span', { classe: 'seminegrito', texto: x.nome }),
+          el('span', { classe: 'texto-suave t-rotulo', texto: [x.cargo, x.maisCobrado ? 'cobra mais ' + x.maisCobrado : ''].filter(Boolean).join(' · ') })
+        ]),
+        el('span', { classe: 'esforco-item__valor' }, [
+          el('span', { classe: 'esforco-item__trilho trilho', 'aria-hidden': 'true' }, el('span', { classe: 'esforco-item__cheia', estilo: { width: Math.min(100, x.indice * 2) + '%' } })),
+          el('span', { classe: 'negrito tabular esforco-item__indice', texto: String(Math.round(x.indice)) }),
+          seloEsforco(x)
+        ])
+      ]);
+    })));
+    return sec;
   }
 
   function blocoHistorico2(eq) {
@@ -3499,47 +3997,271 @@
     ]);
   }
 
-  // Organograma: o desenho do relatório (organogramaHtml) num quadro isolado; sem ele, uma árvore simples de cartões.
-  function blocoOrganograma(compat, colabs, relacoes) {
-    var sec = el('section', { classe: 'caixa caixa--ampla emp-bloco', id: 'emp-organograma' }, [el('h3', { classe: 'caixa__titulo', texto: 'Organograma' })]);
+  /* ----- Organograma de arrastar ----- */
+  // Soltar SOBRE um cartão = passa a ser liderado dele; na área "Topo" = sem líder; em "Sem posição" = tira as relações 'lidera'.
+  // Pointer events (mouse e toque pela alça), fantasma do cartão, realce do alvo, rolagem perto das bordas e "Mover para…"
+  // (lista com busca, por teclado). Salva com salvarRelacoes depois de ~600 ms sem mexer.
+
+  var org = { timer: null, arrasto: null, pendente: null };
+
+  function chaveTopo(eid) { return 'disc_admin_org_topo:' + eid; }
+  function lerTopo(eid) {
+    try { var o = JSON.parse(ls('get', chaveTopo(eid)) || '{}'); return o && typeof o === 'object' ? o : {}; } catch (e) { return {}; }
+  }
+  function gravarTopo(eid, t) { ls('set', chaveTopo(eid), JSON.stringify(t)); }
+
+  function cartaoOrg(c, emp, eq, colabs) {
+    var res = c.resultado && c.resultado.percentuais ? c.resultado : null;
+    var primario = res && res.codigo ? String(res.codigo).charAt(0) : '';
+    var pid = String(c.pessoaId);
+    var cartao = el('div', { classe: 'orgd-cartao', 'data-pessoa': pid, 'data-org-alvo': 'pessoa', 'data-nome': c.nome }, [
+      el('span', { classe: 'orgd-alca', 'aria-hidden': 'true', title: 'Arraste para mudar a posição' }, icone('M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01', 'orgd-alca__icone')),
+      avatar(c.nome, c.foto, { letra: primario, classe: 'orgd-avatar' }),
+      el('span', { classe: 'orgd-texto' }, [
+        el('span', { classe: 'orgd-nome seminegrito', texto: c.nome }),
+        el('span', { classe: 'orgd-cargo', texto: [c.cargo, res ? res.codigo : 'sem teste'].filter(Boolean).join(' · ') })
+      ]),
+      el('button', { type: 'button', classe: 'orgd-mover', 'data-acao': 'mover-org', 'aria-label': 'Mover ' + c.nome + ' para…', title: 'Mover para…',
+        onclick: function () { janelaMoverOrg(emp, eq, colabs, pid); } }, [icone('M5 12h14M13 6l6 6-6 6', 'orgd-mover__icone'), el('span', { classe: 'orgd-mover__texto', texto: 'Mover para…' })])
+    ]);
+    cartao.addEventListener('pointerdown', function (e) { iniciarArrasto(e, cartao, emp, eq, colabs); });
+    return cartao;
+  }
+
+  function blocoOrganogramaEditavel(emp, eq, colabs) {
+    var sec = el('section', { classe: 'caixa caixa--ampla emp-bloco', id: 'emp-organograma' }, [
+      el('div', { classe: 'orgd-cabeca' }, [
+        el('h3', { classe: 'caixa__titulo', texto: 'Organograma' }),
+        el('span', { classe: 't-nota texto-suave orgd-status', id: 'emp-org-status', 'aria-live': 'polite' })
+      ])
+    ]);
     if (!colabs.length) { sec.appendChild(el('p', { classe: 'texto-suave t-rotulo', texto: 'Adicione colaboradores para montar o organograma.' })); return sec; }
-    var temLider = (relacoes || []).some(function (r) { return r.tipo === 'lidera'; });
-    if (!temLider) sec.appendChild(el('p', { classe: 'texto-suave t-rotulo emp-dica', texto: 'Ninguém tem líder definido ainda: use "Ligações" em cada colaborador para montar a hierarquia.' }));
-    var VIEW = root.DISC_RELATORIO_VIEW;
-    var org = compat && compat.organograma;
-    var html = '';
-    if (org && VIEW && typeof VIEW.organogramaHtml === 'function') {
-      try { html = String(VIEW.organogramaHtml(org) || ''); } catch (e) { html = ''; }
-    }
-    if (html) {
-      // organogramaHtml escapa todo texto (nomes já vêm curtos do DISC_COMPATIBILIDADE); estilos do bloco .org em admin.css.
-      var modelo = document.createElement('template');
-      modelo.innerHTML = html;
-      sec.appendChild(el('div', { classe: 'org-painel', id: 'emp-organograma-desenho' }, modelo.content));
-      return sec;
-    }
-    sec.appendChild(arvoreOrganograma(org, colabs));
+    sec.appendChild(el('p', { classe: 'texto-suave t-rotulo emp-dica', texto: 'Arraste um cartão e solte sobre outro: ele passa a ser liderado por essa pessoa. Solte no Topo para ficar sem líder. No celular, arraste pela alça ⋮⋮ ou toque em "Mover para…".' }));
+    sec.appendChild(el('p', { classe: 'aviso aviso--erro orgd-aviso', id: 'emp-org-aviso', role: 'alert', hidden: true }));
+    sec.appendChild(el('div', { classe: 'orgd', id: 'emp-org-editor' }, desenhoOrg(emp, eq, colabs)));
     return sec;
   }
 
-  function arvoreOrganograma(org, colabs) {
-    var raizes = org && org.raizes ? org.raizes : colabs.map(function (c) {
-      return { id: String(c.pessoaId), nome: c.nome, cargo: c.cargo, codigo: c.resultado ? c.resultado.codigo : null, filhos: [] };
-    });
-    function no(n) {
-      var letra = n.codigo ? String(n.codigo).charAt(0) : '';
-      return el('li', { classe: 'orgf-no', 'data-pessoa': n.id }, [
-        el('div', { classe: 'orgf-cartao' }, [
-          letra ? letraDisc(letra, 'orgf-letra') : el('span', { classe: 'letra-disc orgf-letra card-letra--vazia', 'aria-hidden': 'true', texto: '?' }),
-          el('span', { classe: 'orgf-texto' }, [
-            el('span', { classe: 'orgf-nome seminegrito', texto: n.nome }),
-            el('span', { classe: 'orgf-cargo', texto: [n.cargo, n.codigo || 'sem teste'].filter(Boolean).join(' · ') })
-          ])
-        ]),
-        n.filhos && n.filhos.length ? el('ul', { classe: 'orgf-filhos' }, n.filhos.map(no)) : null
+  function desenhoOrg(emp, eq, colabs) {
+    var porId = {};
+    colabs.forEach(function (c) { porId[String(c.pessoaId)] = c; });
+    var pos = posicoesOrganograma(colabs.map(function (c) { return String(c.pessoaId); }), eq.relacoes, lerTopo(emp.id));
+    function no(pid, nivel) {
+      var filhos = pos.filhos[pid] || [];
+      return el('li', { classe: 'orgd-no', 'data-pessoa': pid }, [
+        cartaoOrg(porId[pid], emp, eq, colabs),
+        filhos.length && nivel < 30 ? el('ul', { classe: 'orgd-filhos' }, filhos.filter(function (f) { return porId[f]; }).map(function (f) { return no(f, nivel + 1); })) : null
       ]);
     }
-    return el('ul', { classe: 'orgf-arvore', id: 'emp-organograma-arvore' }, raizes.map(no));
+    return [
+      el('div', { classe: 'orgd-sem', id: 'emp-org-sem', 'data-org-alvo': 'sem' }, [
+        el('p', { classe: 'orgd-zona__titulo' }, [el('span', { classe: 'seminegrito', texto: 'Sem posição' }), el('span', { classe: 'texto-suave tabular', id: 'emp-org-sem-n', texto: ' (' + pos.sem.length + ')' })]),
+        pos.sem.length ? el('ul', { classe: 'orgd-sem__lista' }, pos.sem.map(function (pid) { return el('li', { 'data-pessoa': pid }, cartaoOrg(porId[pid], emp, eq, colabs)); }))
+          : el('p', { classe: 't-nota texto-suave', texto: 'Todos já têm posição. Solte um cartão aqui para tirá-lo do organograma.' })
+      ]),
+      el('div', { classe: 'orgd-palco' }, [
+        el('div', { classe: 'orgd-topo', id: 'emp-org-topo', 'data-org-alvo': 'topo' }, [
+          el('span', { classe: 'seminegrito', texto: 'Topo' }), el('span', { classe: 't-nota texto-suave', texto: ' · solte aqui para ficar sem líder' })
+        ]),
+        pos.raizes.length ? el('ul', { classe: 'orgd-arvore', id: 'emp-org-arvore' }, pos.raizes.map(function (r) { return no(r, 0); }))
+          : el('p', { classe: 't-rotulo texto-suave orgd-vazio', texto: 'Ninguém posicionado ainda: arraste alguém para o Topo e depois os liderados sobre ele.' })
+      ])
+    ];
+  }
+
+  // Redesenha só o editor, com animação FLIP (cada cartão desliza da posição antiga para a nova).
+  function redesenharOrg(emp, eq, colabs) {
+    var box = $('emp-org-editor');
+    if (!box) return;
+    var antes = {};
+    Array.prototype.forEach.call(box.querySelectorAll('.orgd-cartao'), function (n) { antes[n.getAttribute('data-pessoa')] = n.getBoundingClientRect(); });
+    limpar(box);
+    adicionar(box, desenhoOrg(emp, eq, colabs));
+    var calmo = root.matchMedia && root.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (calmo) return;
+    Array.prototype.forEach.call(box.querySelectorAll('.orgd-cartao'), function (n) {
+      var a = antes[n.getAttribute('data-pessoa')];
+      if (!a) return;
+      var b = n.getBoundingClientRect();
+      var dx = a.left - b.left, dy = a.top - b.top;
+      if (!dx && !dy) return;
+      n.style.transition = 'none';
+      n.style.transform = 'translate(' + dx + 'px,' + dy + 'px)';
+      n.getBoundingClientRect();
+      n.style.transition = 'transform .32s var(--curva)';
+      n.style.transform = '';
+      var limpo = false;
+      var fim = function () { if (limpo) return; limpo = true; n.style.transition = ''; n.removeEventListener('transitionend', fim); };
+      n.addEventListener('transitionend', fim);
+      setTimeout(fim, 450);
+    });
+  }
+
+  function avisoOrg(msg) {
+    var a = $('emp-org-aviso');
+    if (a) { a.textContent = msg || ''; a.hidden = !msg; }
+  }
+
+  function moverOrg(emp, eq, colabs, pid, destino) {
+    var r = moverNoOrganograma(eq.relacoes, pid, destino, nomePorId(colabs));
+    if (r.erro) { avisoOrg(r.erro); return false; }
+    avisoOrg('');
+    var topo = lerTopo(emp.id);
+    var antigos = lideradosDe(eq.relacoes, pid);
+    if (destino.tipo === 'topo') topo[pid] = true;
+    else delete topo[pid];
+    // Quem perdeu o líder ao tirar alguém do organograma continua posicionado (vai para o Topo, nada some).
+    if (destino.tipo === 'sem') antigos.forEach(function (x) { topo[x] = true; });
+    gravarTopo(emp.id, topo);
+    eq.relacoes = r.relacoes;
+    redesenharOrg(emp, eq, colabs);
+    agendarSalvarOrg(emp, eq, colabs);
+    return true;
+  }
+
+  function agendarSalvarOrg(emp, eq, colabs) {
+    var st = $('emp-org-status');
+    if (st) st.textContent = 'Salvando…';
+    clearTimeout(org.timer);
+    org.timer = setTimeout(function () {
+      org.timer = null;
+      var rels = eq.relacoes.slice();
+      api('salvarRelacoes', emp.id, rels).then(function () {
+        var s2 = $('emp-org-status');
+        if (s2) s2.textContent = 'Salvo';
+        if (org.arrasto) { org.pendente = function () { atualizarDepoisOrg(emp, eq, colabs); }; return; }
+        atualizarDepoisOrg(emp, eq, colabs);
+      }).catch(function (e) {
+        var s3 = $('emp-org-status');
+        if (s3) s3.textContent = 'Não salvo';
+        falhou(e);
+      });
+    }, 600);
+  }
+
+  // Depois de salvar: atualiza a compatibilidade e os cartões dos colaboradores (líder de cada um) sem redesenhar a página.
+  function atualizarDepoisOrg(emp, eq, colabs) {
+    if (estado.emp.tela !== 'pagina' || estado.emp.id !== emp.id) return;
+    var velhoC = $('emp-compat');
+    if (velhoC) velhoC.parentNode.replaceChild(blocoCompatibilidade(compatDe(emp, colabs, eq.relacoes), colabs), velhoC);
+    var velhoL = $('emp-colaboradores');
+    var proc = processoEquipeDa(emp.id);
+    if (velhoL) velhoL.parentNode.replaceChild(blocoColaboradores(emp, eq, colabs, emp.id, proc, proc ? linkDe(proc) : ''), velhoL);
+    estado.emp.indice = null;
+  }
+
+  function janelaMoverOrg(emp, eq, colabs, pid) {
+    var c = colabs.filter(function (x) { return String(x.pessoaId) === pid; })[0];
+    if (!c) return;
+    var proibidos = {};
+    proibidos[pid] = true;
+    descendentes(eq.relacoes, pid).forEach(function (x) { proibidos[x] = true; });
+    var lider = liderDe(eq.relacoes, pid);
+    var opcoes = [{ valor: '__topo', rotulo: 'Topo (sem líder)' }, { valor: '__sem', rotulo: 'Sem posição' }].concat(
+      colabs.filter(function (x) { return !proibidos[String(x.pessoaId)]; }).map(function (x) {
+        return { valor: String(x.pessoaId), rotulo: x.nome, sub: ['liderado(a) por ' + x.nome.split(/\s+/)[0], x.cargo].filter(Boolean).join(' · ') };
+      }));
+    var esc = criarSeletorBusca({ id: 'org-destino', rotulo: 'Para onde', rotuloId: 'org-destino-rotulo', vazio: 'Escolher', opcoes: opcoes, valor: '' });
+    abrirJanela({
+      id: 'janela-mover-org',
+      titulo: 'Mover ' + c.nome + ' para…',
+      texto: 'Escolha o novo líder (a pessoa passa a ser liderada por ele), o Topo (sem líder) ou "Sem posição". Hoje: ' +
+        (lider ? 'liderado(a) por ' + (nomePorId(colabs)[lider] || 'alguém') : 'sem líder') + '.',
+      corpo: [campoEscolha('Para onde', esc, 'org-destino-rotulo')],
+      botao: 'Mover',
+      aoConfirmar: function () {
+        var v = esc.valor();
+        if (!v) throw new Error('Escolha para onde mover.');
+        var destino = v === '__topo' ? { tipo: 'topo' } : v === '__sem' ? { tipo: 'sem' } : { tipo: 'lider', id: v };
+        var r = moverNoOrganograma(eq.relacoes, pid, destino, nomePorId(colabs));
+        if (r.erro) throw new Error(r.erro);
+        moverOrg(emp, eq, colabs, pid, destino);
+      }
+    });
+  }
+
+  function alvoOrgEm(x, y, origem) {
+    var n = document.elementFromPoint(x, y);
+    var alvo = n && n.closest ? n.closest('[data-org-alvo]') : null;
+    if (!alvo || !$('emp-org-editor') || !$('emp-org-editor').contains(alvo)) return null;
+    if (alvo === origem) return null;
+    return alvo;
+  }
+
+  function iniciarArrasto(e, cartao, emp, eq, colabs) {
+    if (e.button !== 0 && e.pointerType === 'mouse') return;
+    if (e.target.closest('button')) return;
+    var porToque = e.pointerType !== 'mouse';
+    if (porToque && !e.target.closest('.orgd-alca')) return;   // no toque, só pela alça: o resto do cartão rola a página
+    var pid = cartao.getAttribute('data-pessoa');
+    var r0 = cartao.getBoundingClientRect();
+    var a = { pid: pid, x0: e.clientX, y0: e.clientY, dx: e.clientX - r0.left, dy: e.clientY - r0.top, ativo: false, fantasma: null, alvo: null, x: e.clientX, y: e.clientY, raf: 0 };
+    var proibidos = {};
+    descendentes(eq.relacoes, pid).forEach(function (x) { proibidos[x] = true; });
+    if (porToque) e.preventDefault();
+
+    function marcar(alvo) {
+      if (a.alvo === alvo) return;
+      if (a.alvo) a.alvo.classList.remove('orgd-alvo--ativo', 'orgd-alvo--proibido');
+      a.alvo = alvo;
+      if (alvo) alvo.classList.add(alvo.getAttribute('data-org-alvo') === 'pessoa' && proibidos[alvo.getAttribute('data-pessoa')] ? 'orgd-alvo--proibido' : 'orgd-alvo--ativo');
+    }
+    function rolar() {
+      if (!a.ativo) return;
+      var m = 64, h = root.innerHeight, v = 0;
+      if (a.y < m) v = -Math.ceil((m - a.y) / 4); else if (a.y > h - m) v = Math.ceil((a.y - (h - m)) / 4);
+      if (v) { root.scrollBy(0, v); marcar(alvoOrgEm(a.x, a.y, cartao)); }
+      a.raf = root.requestAnimationFrame(rolar);
+    }
+    function mover(ev) {
+      if (ev.pointerId !== e.pointerId) return;
+      a.x = ev.clientX; a.y = ev.clientY;
+      if (!a.ativo) {
+        if (Math.abs(a.x - a.x0) + Math.abs(a.y - a.y0) < 6) return;
+        a.ativo = true;
+        org.arrasto = a;
+        a.fantasma = cartao.cloneNode(true);
+        a.fantasma.classList.add('orgd-fantasma');
+        a.fantasma.removeAttribute('data-org-alvo');
+        a.fantasma.style.width = r0.width + 'px';
+        document.body.appendChild(a.fantasma);
+        cartao.classList.add('orgd-cartao--origem');
+        document.body.classList.add('org-arrastando');
+        a.raf = root.requestAnimationFrame(rolar);
+      }
+      ev.preventDefault();
+      a.fantasma.style.transform = 'translate(' + (a.x - a.dx) + 'px,' + (a.y - a.dy) + 'px)';
+      marcar(alvoOrgEm(a.x, a.y, cartao));
+    }
+    function fim(ev, cancelado) {
+      if (ev.pointerId !== e.pointerId) return;
+      document.removeEventListener('pointermove', mover);
+      document.removeEventListener('pointerup', solta);
+      document.removeEventListener('pointercancel', cancela);
+      if (!a.ativo) {
+        // Toque/clique sem arrastar: abre "Mover para…"
+        if (!cancelado) janelaMoverOrg(emp, eq, colabs, pid);
+        return;
+      }
+      root.cancelAnimationFrame(a.raf);
+      var alvo = cancelado ? null : alvoOrgEm(ev.clientX, ev.clientY, cartao);
+      marcar(null);
+      if (a.fantasma) a.fantasma.remove();
+      cartao.classList.remove('orgd-cartao--origem');
+      document.body.classList.remove('org-arrastando');
+      org.arrasto = null;
+      if (alvo) {
+        var tipo = alvo.getAttribute('data-org-alvo');
+        var destino = tipo === 'pessoa' ? { tipo: 'lider', id: alvo.getAttribute('data-pessoa') } : { tipo: tipo };
+        moverOrg(emp, eq, colabs, pid, destino);
+      }
+      if (org.pendente) { var f = org.pendente; org.pendente = null; f(); }
+    }
+    function solta(ev) { fim(ev, false); }
+    function cancela(ev) { fim(ev, true); }
+    document.addEventListener('pointermove', mover, { passive: false });
+    document.addEventListener('pointerup', solta);
+    document.addEventListener('pointercancel', cancela);
   }
 
   var NIVEIS_PAR = { fluido: 'Fluido', atencao: 'Atenção', tensao: 'Tensão', indefinido: 'Sem teste' };
@@ -3759,7 +4481,7 @@
         if ($('rel-incluir-candidato').checked) {
           var r = acharRegistro(escCand.valor());
           if (!r) throw new Error('Escolha o candidato.');
-          foco = { nome: r.nome, cargo: $('rel-cand-cargo').value.trim() || r.vaga || '', resultado: resultadoDoRegistro(r),
+          foco = { nome: r.nome, cargo: $('rel-cand-cargo').value.trim() || r.vaga || '', resultado: resultadoDoRegistro(r), foto: fotoDe(r) || undefined,
             liderId: escLider.valor(), diretos: escColegas.valores() };
           foco.relacoes = relacoesDoFoco(foco);
         }
@@ -3775,17 +4497,31 @@
     try {
       var lig = ligacoesDe(eq.relacoes, c.pessoaId);
       var l = lig.lider ? eq.colaboradores.filter(function (x) { return String(x.pessoaId) === lig.lider; })[0] : null;
-      var dados = modelos().lideranca({ pessoa: { nome: c.nome, cargo: c.cargo || '', resultado: c.resultado },
-        lider: l ? { nome: l.nome, resultado: l.resultado || null } : null, empresa: { nome: emp.nome } });
+      var dados = modelos().lideranca({ pessoa: { nome: c.nome, cargo: c.cargo || '', resultado: c.resultado, exigido: c.exigido && pctValido(c.exigido.percentuais) ? c.exigido : undefined, foto: fotoValida(c.foto) ? c.foto : undefined },
+        lider: l ? { nome: l.nome, resultado: l.resultado || null, foto: fotoValida(l.foto) ? l.foto : undefined } : null, empresa: { nome: emp.nome } });
       abrirRelatorioModelo({ modelo: 'lideranca', empresaId: emp.id, pessoaId: c.pessoaId, dados: dados, ctx: { empresa: emp.nome, pessoa: c.nome },
         volta: { aba: 'empresas', tela: 'pagina', id: emp.id } });
     } catch (e) { falhou(e); }
   }
 
-  function gerarPessoa(pessoaId, nome, resultado, volta, empresaId) {
+  // Relatório da pessoa: completo (padrão) ou simples (2 páginas). A prévia troca a variante sem sair da tela.
+  function dadosPessoa(variante, nome, resultado, exigido, foto) {
+    var M = modelos();
+    var entrada = { pessoa: { nome: nome, resultado: resultado }, consultor: consultorAtual() || undefined };
+    if (fotoValida(foto)) entrada.pessoa.foto = foto;
+    if (exigido && pctValido(exigido.percentuais)) entrada.pessoa.exigido = { percentuais: exigido.percentuais, codigo: exigido.codigo || '' };
+    if (variante === 'simples') {
+      if (typeof M.pessoaSimples !== 'function') throw new Error('A versão simples do relatório não está disponível (relatorio-modelos.js).');
+      return M.pessoaSimples(entrada);
+    }
+    return M.pessoa(entrada);
+  }
+
+  function gerarPessoa(pessoaId, nome, resultado, volta, empresaId, exigido, foto) {
     try {
-      var dados = modelos().pessoa({ pessoa: { nome: nome, resultado: resultado } });
-      abrirRelatorioModelo({ modelo: 'pessoa', empresaId: empresaId || null, pessoaId: pessoaId, dados: dados, ctx: { pessoa: nome }, volta: volta });
+      var dados = dadosPessoa('completo', nome, resultado, exigido, foto);
+      abrirRelatorioModelo({ modelo: 'pessoa', empresaId: empresaId || null, pessoaId: pessoaId, dados: dados, ctx: { pessoa: nome }, volta: volta,
+        variante: 'completo', gerar: function (v) { return dadosPessoa(v, nome, resultado, exigido, foto); } });
     } catch (e) { falhou(e); }
   }
 
@@ -3836,6 +4572,22 @@
     }
     var sub = [MODELOS_REL[rel.modelo], rel.ctx && rel.ctx.empresa, publicado ? 'publicado' : (rel.status === 'rascunho' ? 'rascunho salvo' : 'ainda não salvo')].filter(Boolean).join(' · ');
     box.appendChild(cabecalhoVista(sub, titulo, 'Prévia do documento como quem recebe vai ver. Salve como rascunho ou publique para gerar o link.', acoes));
+
+    // Relatório da pessoa: completo / simples (troca os dados da prévia; salvar grava a variante escolhida)
+    if (rel.modelo === 'pessoa' && typeof rel.gerar === 'function') {
+      var variante = rel.variante === 'simples' ? 'simples' : 'completo';
+      var trocar = function (v) {
+        if (v === variante) return;
+        try { rel.dados = rel.gerar(v); rel.variante = v; renderizarEmpresas(); } catch (e) { falhou(e); }
+      };
+      box.appendChild(el('div', { classe: 'rel-variante', id: 'rel-variante' }, [
+        el('span', { classe: 'campo__rotulo', id: 'rel-variante-rotulo', texto: 'Relatório da pessoa:' }),
+        el('div', { classe: 'segmento', role: 'group', 'aria-labelledby': 'rel-variante-rotulo' }, [
+          el('button', { type: 'button', classe: 'segmento__botao', id: 'btn-rel-completo', 'aria-pressed': variante === 'completo' ? 'true' : 'false', texto: 'Completo', onclick: function () { trocar('completo'); } }),
+          el('button', { type: 'button', classe: 'segmento__botao', id: 'btn-rel-simples', 'aria-pressed': variante === 'simples' ? 'true' : 'false', texto: 'Simples (2 páginas)', onclick: function () { trocar('simples'); } })
+        ])
+      ]));
+    }
 
     if (publicado && rel.url) {
       var ctx = { empresa: rel.ctx && rel.ctx.empresa, pessoa: rel.ctx && rel.ctx.pessoa, consultor: consultorAtual() };
@@ -3938,7 +4690,7 @@
     var nome = ficha.nome || r.nome || '';
     var acoes = el('div', { classe: 'det-gestao__acoes', id: 'det-relatorios-acoes' }, [
       botao('botao--claro', 'Relatório da pessoa', function () {
-        gerarPessoa(r.pessoaId, nome, resultadoDoRegistro(r), { detalhe: r.id }, null);
+        gerarPessoa(r.pessoaId, nome, resultadoDoRegistro(r), { detalhe: r.id }, null, exigidoDoRegistro(r), fotoDe(r));
       }, { id: 'btn-det-rel-pessoa' })
     ]);
     var nota = el('p', { classe: 'texto-suave t-rotulo', id: 'det-vinculo', texto: 'Procurando vínculo com empresa…' });
@@ -4009,6 +4761,7 @@
       var euMesmo = u.voce === true || (!!u.id && u.id === eu.id);
       var situacao = u.convitePendente ? { t: 'Convite pendente', c: '' } : { t: 'Ativo', c: 'selo--verde' };
       return el('li', { classe: 'caixa caixa--compacta gestao-linha', 'data-email': u.email, 'data-papel': 'admin' }, [
+        avatar(u.nome || u.email, euMesmo && eu.foto ? eu.foto : u.foto, { classe: 'usuario-avatar' }),
         el('div', { classe: 'gestao-linha__texto' }, [
           el('p', { classe: 'seminegrito gestao-linha__nome', texto: (u.nome || u.email || '') + (euMesmo && !/você/i.test(u.nome || '') ? ' (você)' : '') }),
           el('p', { classe: 'gestao-card__sub', texto: u.email || '' }),
@@ -4262,7 +5015,7 @@
     $('usuario-area').hidden = !(MODO_API && u);
     if (u) {
       var nome = String(u.nome || u.email || '');
-      $('usuario-inicial').textContent = nome.trim().charAt(0).toUpperCase() || '?';
+      desenharUsuarioTopo();
       $('usuario-nome').textContent = nome;
       $('menu-nome').textContent = nome;
       $('menu-email').textContent = u.email || '';
@@ -4443,6 +5196,7 @@
     });
     $('btn-sair').addEventListener('click', sair);
     $('btn-trocar-senha').addEventListener('click', function () { fecharMenuUsuario(); janelaTrocarSenha(); });
+    $('btn-minha-foto').addEventListener('click', function () { fecharMenuUsuario(); janelaMinhaFoto(); });
 
     // Login
     $('form-login').addEventListener('submit', function (e) {

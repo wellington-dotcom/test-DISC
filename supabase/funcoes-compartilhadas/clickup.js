@@ -348,8 +348,17 @@ export function itemDaResposta(l) {
   return {
     id: String(l.id), telefone: l.telefone || '', respostas: l.respostas || '', validacao,
     protocolo: normalizarProtocolo(l.protocolo), resultado,
-    pessoaId: l.pessoa_id ? String(l.pessoa_id) : '', recebidoEm: l.recebido_em ? String(l.recebido_em) : ''
+    pessoaId: l.pessoa_id ? String(l.pessoa_id) : '', recebidoEm: l.recebido_em ? String(l.recebido_em) : '',
+    foto: fotoDaLinha(l)
   };
+}
+
+/** Foto da resposta ou, sem ela, a da ficha da pessoa (pessoas embutida); '' se nenhuma válida. */
+function fotoDaLinha(l) {
+  const ok = (f) => typeof f === 'string' && f.length <= 40000 && /^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/=]+$/.test(f);
+  if (ok(l.foto)) return l.foto;
+  const p = Array.isArray(l.pessoas) ? l.pessoas[0] : l.pessoas;
+  return p && ok(p.foto) ? p.foto : '';
 }
 
 /**
@@ -445,11 +454,13 @@ export async function cuMontarDadosProcesso(cu, proc, linhasRespostas, motorConf
     if (cuEhBriefing(t.name)) continue;
     const fones = telefones.map((c) => cuValorNaTarefa(t, c)).filter(Boolean);
     let disc = null;
+    let foto = '';
     for (const resp of respostas) {
       if (disc) break;
       if (usadas[resp.id]) continue;
       if (fones.some((f) => cuMesmoTelefone(f, resp.telefone))) {
         disc = cuDiscDaResposta(resp, motorConfiabilidade);
+        foto = resp.foto || '';
         usadas[resp.id] = true;
       }
     }
@@ -492,6 +503,7 @@ export async function cuMontarDadosProcesso(cu, proc, linhasRespostas, motorConf
       disc,
       finalista
     };
+    if (foto) cand.foto = foto;
     if (antecedentes.length) {
       cand.antecedentes = antecedentes.map((c) => cuValorNaTarefa(t, c))
         .filter((v) => v !== null && v !== false).map(String).join('; ') || null;

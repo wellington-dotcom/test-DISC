@@ -284,7 +284,7 @@ test('avaliacaoPublica e relatorioPublico: formatos {ok, avaliacao} e {ok, relat
     }
   });
   assert.deepEqual(await api.avaliacaoPublica('SEL1'), { ok: true, avaliacao: { codigo: 'SEL1', nome: 'Recepcionista', tipo: 'selecao', empresaNome: 'Clínica', mostrarResultado: false,
-    formulario: { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto' }, perguntas: [] } } });
+    formulario: { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto', foto: 'opcional' }, perguntas: [], parte2: 'desligada' } } });
   await assert.rejects(api.avaliacaoPublica('ZZZZ'), /Link inválido ou avaliação encerrada/);
   await assert.rejects(api.avaliacaoPublica(''), /Link inválido/);
   const t = 'a'.repeat(64);
@@ -299,7 +299,7 @@ test('login: signInWithPassword + garantir_primeiro_admin -> {ok, token, usuario
   const { api, e, login } = await logado();
   assert.equal(login.ok, true);
   assert.equal(login.token, 'jwt-dona@empresa.com');
-  assert.deepEqual(login.usuario, { id: UID, nome: 'Dona do Sistema', email: 'dona@empresa.com', papel: 'admin', empresaId: '', empresaNome: '' });
+  assert.deepEqual(login.usuario, { id: UID, nome: 'Dona do Sistema', email: 'dona@empresa.com', papel: 'admin', empresaId: '', empresaNome: '', foto: '' });
   assert.ok(e.chamadas.some((c) => c.rpc === 'garantir_primeiro_admin'));
   await assert.rejects(api.login('dona@empresa.com', 'errada'), /^Error: E-mail ou senha incorretos\.$/);
   await assert.rejects(api.login('', 'x'), /Informe o e-mail e a senha/);
@@ -330,7 +330,7 @@ test('sem sessão guardada (ou sem token) os métodos rejeitam com sessaoExpirad
 
 test('eu, sair e sessaoAtual', async () => {
   const { api, T, e } = await logado();
-  assert.deepEqual(await api.eu(T), { ok: true, usuario: { id: UID, nome: 'Dona do Sistema', email: 'dona@empresa.com', papel: 'admin', empresaId: '', empresaNome: '' } });
+  assert.deepEqual(await api.eu(T), { ok: true, usuario: { id: UID, nome: 'Dona do Sistema', email: 'dona@empresa.com', papel: 'admin', empresaId: '', empresaNome: '', foto: '' } });
   const s = await api.sessaoAtual();
   assert.equal(s.token, T);
   assert.deepEqual(await api.sair(T), { ok: true });
@@ -402,8 +402,9 @@ test('listar: itens no formato do Code.gs (resultado recalculado, processo embut
     processoId: PID, empresaNome: 'Clínica Exemplo', avaliacaoNome: 'Recepcionista 2026', avaliacaoTipo: 'selecao',
     pessoaId: PESSOA,
     pessoa: { id: PESSOA, nome: 'João da Silva', telefone: '5511999998888', idade: 30, funcao: 'Recepcionista', empresa: 'Loja Centro',
-      email: 'joao@x.com', cidade: 'Campinas', atualizadoEm: '2026-10-01T12:10:02.500Z' },
-    email: 'joao@x.com', cidade: 'Campinas', extras: [{ id: 'p1', pergunta: 'Pretensão?', resposta: 'R$ 3.000' }]
+      email: 'joao@x.com', cidade: 'Campinas', foto: '', atualizadoEm: '2026-10-01T12:10:02.500Z' },
+    email: 'joao@x.com', cidade: 'Campinas', extras: [{ id: 'p1', pergunta: 'Pretensão?', resposta: 'R$ 3.000' }],
+    exigido: '', resultadoExigido: null, foto: ''
   });
   assert.equal(antigo.pessoaId, '');
   assert.equal(antigo.pessoa, null);
@@ -561,8 +562,11 @@ test('salvarUsuario com id só muda o nome', async () => {
 });
 
 test('formulário do processo: validarConfigProcesso normaliza config.formulario e recusa pergunta sensível', async () => {
-  const padrao = { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto' }, perguntas: [] };
+  const padrao = { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto', foto: 'opcional' }, perguntas: [], parte2: 'desligada' };
   assert.deepEqual(SB.validarConfigProcesso({}).config.formulario, padrao);
+  assert.equal(SB.normalizarFormulario({ parte2: 'ligada' }).parte2, 'ligada');
+  assert.equal(SB.validarConfigProcesso({ formulario: { parte2: 'ligada' } }).config.formulario.parte2, 'ligada');
+  for (const x of ['LIGADA', true, 1, 'sim', null]) assert.equal(SB.normalizarFormulario({ parte2: x }).parte2, 'desligada');
   assert.deepEqual(SB.normalizarFormulario('x'), padrao);
   assert.deepEqual(SB.normalizarFormulario({
     campos: { idade: 'oculto', email: 'obrigatorio', cidade: 'opcional', funcao: 'talvez' },
@@ -576,14 +580,15 @@ test('formulário do processo: validarConfigProcesso normaliza config.formulario
     ]
   }), {
     // mesmo resultado de disc_interno.normalizar_formulario (tests/supabase/banco.test.js)
-    campos: { idade: 'oculto', funcao: 'opcional', empresa: 'opcional', email: 'obrigatorio', cidade: 'opcional' },
+    campos: { idade: 'oculto', funcao: 'opcional', empresa: 'opcional', email: 'obrigatorio', cidade: 'opcional', foto: 'opcional' },
     perguntas: [
       { id: 'p1', texto: 'Qual sua pretensão salarial?', obrigatoria: true },
       { id: 'p2', texto: 'Tem disponibilidade aos sábados?', obrigatoria: false },
       { id: 'p3', texto: 'Como soube da vaga?', obrigatoria: false },
       { id: 'carro', texto: 'Tem carro próprio?', obrigatoria: false },
       { id: 'p4', texto: 'Pergunta seis aqui?', obrigatoria: false }
-    ]
+    ],
+    parte2: 'desligada'
   });
   assert.deepEqual(SB.validarConfigProcesso({ permitirSaude: true, formulario: { perguntas: [{ texto: 'Você tem filhos?' }] } }),
     { ok: false, erro: 'A pergunta "Você tem filhos?" pede um dado sensível e não pode ser usada.' });
@@ -624,7 +629,7 @@ function equipeBase() {
     ],
     respostas: [
       resposta({ id: 'r-antiga', pessoa_id: P1, recebido_em: '2026-09-01T10:00:00+00:00', respostas: '1234'.repeat(25) }),
-      resposta({ id: 'r-nova', pessoa_id: P1, recebido_em: '2026-10-01T10:00:00+00:00' })
+      resposta({ id: 'r-nova', pessoa_id: P1, recebido_em: '2026-10-01T10:00:00+00:00', exigido: '4321'.repeat(10) })
     ],
     vinculos: [
       { id: V1, pessoa_id: P1, empresa_id: EMP, cargo: 'Diretora', area: 'Diretoria', status: 'ativo', inicio: '2024-01-01', fim: null },
@@ -680,14 +685,16 @@ test('listarEquipe: ativos com o resultado mais recente, relações só entre at
   const esperado = S.calcular(S.descompactar(payloadValido().respostas));
   assert.deepEqual(marta, { vinculoId: V1, pessoaId: P1, nome: 'Marta Diretora Souza', telefone: '5511900000001', cargo: 'Diretora',
     area: 'Diretoria', status: 'ativo', inicio: '2024-01-01', fim: '', resultado: { percentuais: esperado.percentuais, codigo: esperado.codigo },
-    respondidoEm: '2026-10-01T10:00:00.000Z' });
+    respondidoEm: '2026-10-01T10:00:00.000Z', exigido: { percentuais: { D: 40, I: 30, S: 20, C: 10 }, codigo: 'DI' }, foto: '' });
   assert.equal(r.colaboradores[0].resultado, null, 'sem teste');
+  assert.equal(r.colaboradores[0].exigido, null);
   assert.equal(r.colaboradores[0].respondidoEm, '');
   assert.deepEqual(r.relacoes, [{ de: P1, para: P2, tipo: 'lidera' }]);
   assert.deepEqual(r.historico.map((c) => [c.nome, c.status, c.fim]), [['Bruno Antigo Reis', 'desligado', '2026-08-01']]);
   assert.ok(!JSON.stringify(r).includes('"idade"'), 'nada de idade na equipe');
   const sel = e.chamadas.find((c) => c.tabela === 'vinculos' && c.op === 'select' && /respostas\(/.test(c.colunas));
   assert.deepEqual(sel.eqs, [['empresa_id', EMP]]);
+  assert.match(sel.colunas, /respostas\(respostas, exigido,/);
   await assert.rejects(api.listarEquipe(T, EMP2.replace('5', '9')), /Empresa não encontrada\./);
   await assert.rejects(api.listarEquipe(T, 'xyz'), /Empresa não encontrada\./);
   await assert.rejects(api.listarEquipe(T, ''), /Empresa não informada\./);
@@ -759,7 +766,10 @@ test('relatórios por modelo: salvar (rascunho/publicar com link), listar com t�
   await assert.rejects(api.salvarRelatorioModelo(T, { modelo: 'processo', empresaId: EMP, dados: {} }), /Modelo de relatório inválido/);
   await assert.rejects(api.salvarRelatorioModelo(T, { modelo: 'equipe', empresaId: EMP, dados: [] }), /Relatório vazio/);
   await assert.rejects(api.salvarRelatorioModelo(T, { modelo: 'equipe', empresaId: EMP, dados: { modelo: 'pessoa' } }), /não são de um relatório "equipe"/);
-  await assert.rejects(api.salvarRelatorioModelo(T, { modelo: 'equipe', empresaId: EMP, dados: { t: 'x'.repeat(300001) } }), /grande demais/);
+  await assert.rejects(api.salvarRelatorioModelo(T, { modelo: 'equipe', empresaId: EMP, dados: { t: 'x'.repeat(1000001) } }), /grande demais \(máximo 1 MB\)/);
+  // Até 1 MB passa (as fotos vão dentro do snapshot).
+  assert.equal((await api.salvarRelatorioModelo(T, { modelo: 'equipe', empresaId: EMP, dados: { t: 'x'.repeat(900000) } })).ok, true);
+  e.tabelas.relatorios.pop();
   // id de relatório de processo: o update filtra modelo <> processo
   await assert.rejects(api.salvarRelatorioModelo(T, { id: '77777777-7777-4777-8777-777777777771', modelo: 'equipe', empresaId: EMP, dados }), /Relatório não encontrado\./);
   assert.equal(e.tabelas.relatorios[0].modelo, 'processo');
@@ -795,4 +805,124 @@ test('api.js (Apps Script legado): métodos novos recusam com "Disponível só c
     'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo']) {
     await assert.rejects(API[m]('token', {}), (err) => err.message === 'Disponível só com o servidor Supabase.' && err.resposta.ok === false, m);
   }
+});
+
+test('Parte 2: listar devolve exigido e resultadoExigido; avaliacaoPublica repassa parte2; exigidoValido/calcularExigido', async () => {
+  const EX = '4321'.repeat(5) + '1234'.repeat(5);  // D=I=S=C=25 -> empate: DI
+  const { api, T } = await logado({
+    processos: [processo()],
+    respostas: [resposta({ exigido: EX }), resposta({ id: 'ex-invalido-1', exigido: '1111'.repeat(10) })]
+  });
+  const { itens } = await api.listar(T);
+  const ok = itens.find((i) => i.id === 'lx1abc-teste01');
+  assert.equal(ok.exigido, EX);
+  assert.deepEqual(ok.resultadoExigido, { percentuais: { D: 25, I: 25, S: 25, C: 25 }, codigo: 'DI' });
+  const ruim = itens.find((i) => i.id === 'ex-invalido-1');
+  assert.deepEqual([ruim.exigido, ruim.resultadoExigido], ['', null]);
+
+  assert.equal(SB.exigidoValido('2143'.repeat(10)), true);
+  for (const x of ['2143'.repeat(9), '2143'.repeat(9) + '2144', '2143'.repeat(9) + '5143', null, 1234]) assert.equal(SB.exigidoValido(x), false);
+  const c = SB.calcularExigido('1234'.repeat(9) + '4321');
+  assert.equal(c.percentuais.D + c.percentuais.I + c.percentuais.S + c.percentuais.C, 100);
+  assert.deepEqual(c.percentuais, { D: 13, I: 21, S: 29, C: 37 });
+  assert.equal(c.codigo, 'CS');
+
+  const { api: api2 } = nova({ rpc: { avaliacao_publica: () => ({ data: { ok: true, avaliacao: { codigo: 'EQP1', nome: 'Equipe', tipo: 'equipe',
+    formulario: { parte2: 'ligada' } } }, error: null }) } });
+  assert.equal((await api2.avaliacaoPublica('EQP1')).avaliacao.formulario.parte2, 'ligada');
+});
+
+// ---------------------------------------------------------------------------
+// Fotos (migração 20261009120000_fotos.sql)
+// ---------------------------------------------------------------------------
+const FOTO = 'data:image/jpeg;base64,/9j/' + 'A'.repeat(300);
+const FOTO2 = 'data:image/jpeg;base64,/9j/' + 'B'.repeat(300);
+
+test('fotoValida: só data URL JPEG até 40 000 caracteres', () => {
+  assert.equal(SB.FOTO_MAX, 40000);
+  assert.equal(SB.fotoValida(FOTO), true);
+  assert.equal(SB.fotoValida('data:image/jpeg;base64,/9j/' + 'A'.repeat(40000 - 27)), true);
+  for (const ruim of ['', null, undefined, 1, 'data:image/png;base64,iVBOR', 'https://x.com/a.jpg', 'data:image/jpeg;base64,AAAA',
+    'data:image/jpeg;base64,/9j/"><script>', 'data:image/jpeg;base64,/9j/' + 'A'.repeat(40000 - 26)]) {
+    assert.equal(SB.fotoValida(ruim), false, String(ruim).slice(0, 30));
+  }
+});
+
+test('fotos em listar (resposta e ficha), listarEquipe (da ficha), eu e listarUsuarios; foto inválida vira ""', async () => {
+  const base = equipeBase();
+  base.pessoas[0].foto = FOTO;
+  base.pessoas[1].foto = 'data:image/png;base64,AAAA';
+  base.processos = [processo()];
+  base.respostas = base.respostas.map((r, i) => Object.assign({}, r, { foto: i === 0 ? FOTO2 : null }));
+  base.admins = [{ user_id: UID, nome: 'Dona do Sistema', criado_em: '2026-10-01T10:00:00+00:00', foto: FOTO }];
+  base.funcoes = { admin: (corpo) => ({ data: corpo.acao === 'usuarios.listar'
+    ? { ok: true, usuarios: [{ id: UID, nome: 'Dona', foto: FOTO }, { id: 'x', nome: 'Outro', foto: 'https://x/y.jpg' }, { id: 'y', nome: 'Sem' }] }
+    : { ok: true }, error: null }) };
+  const { api, T, login, e } = await logado(base);
+  assert.equal(login.usuario.foto, FOTO);
+  assert.equal((await api.eu(T)).usuario.foto, FOTO);
+  assert.match(e.chamadas.filter((c) => c.tabela === 'admins').pop().colunas, /foto/);
+
+  const l = await api.listar(T);
+  const comFoto = l.itens.find((it) => it.id === base.respostas[0].id);
+  assert.equal(comFoto.foto, FOTO2);
+  assert.equal(comFoto.pessoa.foto, base.respostas[0].pessoa_id === P1 ? FOTO : '');
+  l.itens.filter((it) => it !== comFoto).forEach((it) => assert.equal(it.foto, ''));
+  assert.match(e.chamadas.find((c) => c.tabela === 'respostas' && c.op === 'select').colunas, /pessoas\([^)]*foto/);
+
+  const eq = await api.listarEquipe(T, EMP);
+  const porId = {};
+  eq.colaboradores.concat(eq.historico).forEach((c) => { porId[c.pessoaId] = c.foto; });
+  assert.equal(porId[P1], FOTO);
+  assert.equal(porId[P2], '');
+  assert.match(e.chamadas.find((c) => c.tabela === 'vinculos' && c.op === 'select' && /respostas\(/.test(c.colunas)).colunas, /pessoas\(id, nome, telefone, foto,/);
+
+  const u = await api.listarUsuarios(T);
+  assert.deepEqual(u.usuarios.map((x) => x.foto), [FOTO, '', '']);
+});
+
+test('salvarMinhaFoto: valida no navegador e chama salvar_minha_foto; "" remove', async () => {
+  const { api, T, e } = await logado({
+    rpc: { salvar_minha_foto: (a) => ({ data: { ok: true, foto: a.p_foto }, error: null }) }
+  });
+  assert.deepEqual(await api.salvarMinhaFoto(T, FOTO), { ok: true, foto: FOTO });
+  assert.deepEqual(e.chamadas.filter((c) => c.rpc === 'salvar_minha_foto').pop().args, { p_foto: FOTO });
+  assert.deepEqual(await api.salvarMinhaFoto(T, ''), { ok: true, foto: '' });
+  assert.deepEqual(await api.salvarMinhaFoto(T, null), { ok: true, foto: '' });
+  assert.deepEqual(e.chamadas.filter((c) => c.rpc === 'salvar_minha_foto').pop().args, { p_foto: '' });
+  const n = e.chamadas.length;
+  for (const ruim of ['data:image/png;base64,AAAA', 'data:image/jpeg;base64,/9j/' + 'A'.repeat(40000), 123, {}]) {
+    await assert.rejects(api.salvarMinhaFoto(T, ruim), /Foto inválida ou grande demais\. Escolha outra imagem\./);
+  }
+  assert.equal(e.chamadas.length, n, 'nada vai ao servidor com foto inválida');
+  const semPermissao = await logado({ rpc: { salvar_minha_foto: () => ({ data: { ok: false, erro: 'Sem permissão.' }, error: null }) } });
+  await assert.rejects(semPermissao.api.salvarMinhaFoto(semPermissao.T, FOTO), /Sem permissão\./);
+  await assert.rejects(api.salvarMinhaFoto('', FOTO), (err) => err.sessaoExpirada === true);
+});
+
+test('removerFoto e atualizar(…, {foto: ""}) chamam remover_foto (LGPD)', async () => {
+  const { api, T, e } = await logado({
+    processos: [processo()], respostas: [resposta({ foto: FOTO })],
+    rpc: { remover_foto: (a) => ({ data: a.p_resposta === 'lx1abc-teste01' ? { ok: true, id: a.p_resposta, removidas: 2 } : { ok: false, erro: 'Candidato não encontrado.' }, error: null }) }
+  });
+  assert.deepEqual(await api.removerFoto(T, 'lx1abc-teste01'), { ok: true, id: 'lx1abc-teste01', removidas: 2 });
+  assert.deepEqual(e.chamadas.filter((c) => c.rpc === 'remover_foto').pop().args, { p_resposta: 'lx1abc-teste01' });
+  await assert.rejects(api.removerFoto(T, 'outra-123'), /Candidato não encontrado\./);
+  await assert.rejects(api.removerFoto(T, ''), /Candidato não informado\./);
+
+  const antes = e.chamadas.filter((c) => c.rpc === 'remover_foto').length;
+  assert.deepEqual(await api.atualizar(T, 'lx1abc-teste01', { foto: '' }), { ok: true, id: 'lx1abc-teste01' });
+  assert.deepEqual(await api.atualizar(T, 'lx1abc-teste01', { status: 'aprovado', foto: '' }), { ok: true, id: 'lx1abc-teste01' });
+  assert.equal(e.tabelas.respostas[0].status, 'aprovado');
+  assert.equal(e.chamadas.filter((c) => c.rpc === 'remover_foto').length, antes + 2);
+  assert.ok(!e.chamadas.some((c) => c.tabela === 'respostas' && c.op === 'update' && c.dados && 'foto' in c.dados), 'a foto nunca vai por update direto');
+  await assert.rejects(api.atualizar(T, 'lx1abc-teste01', { foto: FOTO2 }), /só pode ser removida/);
+});
+
+test('enviar: a foto vai no payload para enviar_resposta (o banco valida)', async () => {
+  const { api, e } = nova({ rpc: { enviar_resposta: (a) => ({ data: { ok: true, id: a.p_payload.id, protocolo: '12A' }, error: null }) } });
+  const p = payloadValido({ foto: FOTO });
+  const r = await api.enviar(p);
+  assert.equal(r.ok, true);
+  assert.equal(e.chamadas.find((c) => c.rpc === 'enviar_resposta').args.p_payload.foto, FOTO);
 });

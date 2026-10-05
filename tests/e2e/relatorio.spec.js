@@ -195,3 +195,102 @@ test('modelo vindo só no campo "modelo" da resposta também é desenhado', asyn
   await expect(page.locator('#relatorio')).toHaveAttribute('data-modelo', 'pessoa');
   await expect(page.locator('.capa__titulo')).toContainText('Olá, Carla.');
 });
+
+/* ------------------------------------------------------------------ rodada 3: mapa ritmo × foco, régua, Parte 2, versão simples, fotos */
+const EXIGIDO_DI = '4321'.repeat(10);
+// JPEG 1×1 válido (data URL) — foto de teste, sem gente real.
+const FOTO = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////wgALCAABAAEBAREA/8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxA=';
+const DADOS_R3 = {
+  pessoaCompleto: MODELOS.pessoa({ pessoa: { nome: 'Carla Dias', resultado: RES.CS, exigido: EXIGIDO_DI, foto: FOTO }, consultor: 'Wellington V.' }, { geradoEm: GERADO }),
+  pessoaSimples: MODELOS.pessoaSimples({ pessoa: { nome: 'Carla Dias', resultado: RES.CS, exigido: EXIGIDO_DI } }, { geradoEm: GERADO }),
+  lideranca: MODELOS.lideranca({ pessoa: { nome: 'Bruno Lima', cargo: 'Gerente', resultado: RES.SC, exigido: EXIGIDO_DI, foto: 'https://exemplo.com/foto.jpg' }, lider: { nome: 'Ana Paula Souza', resultado: RES.DI }, empresa: { nome: 'Cartório Exemplo' } }, { geradoEm: GERADO }),
+  equipe: MODELOS.equipe({
+    empresa: { nome: 'Clínica Exemplo' }, consultor: 'Wellington V.',
+    colaboradores: [
+      { pessoaId: 'a', nome: 'Ana Paula Souza', cargo: 'Diretora', status: 'ativo', resultado: RES.DI, exigido: EXIGIDO_DI, foto: FOTO },
+      { pessoaId: 'b', nome: 'Bruno Lima', cargo: 'Gerente', status: 'ativo', resultado: RES.SC, exigido: { percentuais: { D: 35, I: 30, S: 15, C: 20 }, codigo: 'DI' } },
+      { pessoaId: 'c', nome: 'Carla Dias', cargo: 'Analista', status: 'ativo', resultado: RES.CS },
+      { pessoaId: 'e', nome: 'Eva Nunes', cargo: 'Atendimento', status: 'ativo', resultado: RES.ID },
+      { pessoaId: 'f', nome: 'Fernanda Melo', cargo: 'Financeiro', status: 'ativo', resultado: RES.SC }
+    ],
+    relacoes: [{ de: 'a', para: 'b', tipo: 'lidera' }, { de: 'a', para: 'e', tipo: 'lidera' }, { de: 'b', para: 'c', tipo: 'lidera' }]
+  }, { geradoEm: GERADO })
+};
+const SECOES_R3 = {
+  pessoaCompleto: ['capa', 'perfil', 'intensidade', 'esticando', 'fortes', 'plano', 'encerramento', 'rodape'],
+  pessoaSimples: ['capa', 'resumo', 'habitos', 'encerramento', 'rodape'],
+  lideranca: ['capa', 'resumo', 'liderar', 'encerramento', 'rodape'],
+  equipe: ['capa', 'sumario', 'organograma', 'equilibrio', 'ritmo', 'relacoes', 'pessoas', 'encerramento', 'rodape']
+};
+
+for (const chave of Object.keys(DADOS_R3)) {
+  for (const [nome, viewport] of [['celular 375', { width: 375, height: 812 }], ['computador', { width: 1280, height: 900 }]]) {
+    test('rodada 3: ' + chave + ' com mapa ritmo × foco e seta, sem rolagem lateral (' + nome + ')', async ({ page }) => {
+      const erros = coletarErros(page);
+      await page.setViewportSize(viewport);
+      const d = DADOS_R3[chave];
+      await prepararModelo(page, d.modelo, { ok: true, modelo: d.modelo, relatorio: d });
+      await page.goto('/relatorio.html#r-' + TOKEN);
+      await expect(page.locator('#relatorio')).toHaveAttribute('data-estado', 'pronto');
+      for (const id of SECOES_R3[chave]) await expect(page.locator('[data-secao="' + id + '"]')).toHaveCount(1);
+      const mapa = page.locator('.mapa-rf').first();
+      await expect(mapa).toBeVisible();
+      await expect(mapa.locator('.mapa-rf__letra')).toHaveText(['D', 'I', 'C', 'S']);
+      // seta tracejada laranja do natural ao exigido
+      const seta = mapa.locator('.mapa-rf__seta line').first();
+      await expect(seta).toHaveAttribute('stroke-dasharray', '4 3');
+      expect(await seta.evaluate((e) => getComputedStyle(e).stroke)).toBe('rgb(243, 68, 5)');
+      // o mapa cabe na largura (sem estourar o cartão)
+      const caixa = await mapa.boundingBox();
+      expect(caixa.x).toBeGreaterThanOrEqual(0);
+      expect(caixa.x + caixa.width).toBeLessThanOrEqual(viewport.width);
+      if (chave.startsWith('pessoa')) await expect(page.locator('.regua-doc__item')).toHaveCount(4);
+      if (chave === 'equipe') {
+        await expect(page.locator('[data-secao="ritmo"]')).toContainText('Como o grupo decide');
+        await expect(page.locator('[data-secao="ritmo"]')).toContainText('Pressão do trabalho sobre o estilo');
+        await expect(page.locator('[data-secao="organograma"] .org-cartao--com-foto img')).toHaveCount(1);
+      }
+      if (chave === 'pessoaCompleto') await expect(page.locator('.capa__retrato img')).toHaveCount(1);
+      if (chave === 'lideranca') {
+        // foto inválida (URL externa) vira iniciais; nenhuma imagem externa na página
+        await expect(page.locator('.capa__retrato .avatar--iniciais')).toHaveText('BL');
+        await expect(page.locator('.esforco, [data-secao="resumo"]')).toContainText('Esforço de adaptação ao cargo');
+      }
+      expect(await page.locator('img[src^="http"]').count()).toBe(0);
+      await page.evaluate(() => document.fonts.ready);
+      await semRolagemLateral(page);
+      const texto = await page.locator('body').innerText();
+      for (const proibido of ['Souza', '@', 'WhatsApp', 'exemplo.com']) expect(texto).not.toContain(proibido);
+      expect(erros).toEqual([]);
+    });
+  }
+}
+
+test('rodada 3: versão simples e pessoa completa imprimem em A4 sem rolagem lateral', async ({ page }) => {
+  for (const chave of ['pessoaSimples', 'pessoaCompleto', 'equipe']) {
+    const d = DADOS_R3[chave];
+    await page.setViewportSize({ width: 794, height: 1123 });
+    await prepararModelo(page, d.modelo, { ok: true, modelo: d.modelo, relatorio: d });
+    await page.goto('/relatorio.html#r-' + TOKEN);
+    await expect(page.locator('#relatorio')).toHaveAttribute('data-estado', 'pronto');
+    await page.emulateMedia({ media: 'print' });
+    await expect(page.locator('.mapa-rf').first()).toBeVisible();
+    await semRolagemLateral(page);
+    await page.emulateMedia({ media: 'screen' });
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+  }
+});
+
+test('rodada 3: foto no relatório de processo (ranking) e sem foto nada muda', async ({ page }) => {
+  const rel = JSON.parse(JSON.stringify(RELATORIO));
+  rel.ranking.linhas[0].foto = FOTO;
+  rel.ranking.linhas[1].foto = 'https://exemplo.com/x.jpg';
+  await page.setViewportSize({ width: 375, height: 812 });
+  await configurar(page, { API_URL: API_FALSA });
+  await simularApi(page, () => ({ ok: true, relatorio: rel }));
+  await page.goto('/relatorio.html#r-' + TOKEN);
+  await expect(page.locator('#relatorio')).toHaveAttribute('data-estado', 'pronto');
+  await expect(page.locator('.analise__item .avatar--foto img')).toHaveCount(1);
+  expect(await page.locator('img[src^="http"]').count()).toBe(0);
+  await semRolagemLateral(page);
+});

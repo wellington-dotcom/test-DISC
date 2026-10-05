@@ -6,13 +6,18 @@ import {
   gas, criarFetch, criarDbFalso, criarAuthAdminFalso, linhaProcesso, UUID_PROC, UUID_ADMIN, TOKEN_CU
 } from './apoio.js';
 import { atenderAdmin, origemPermitida } from '../../supabase/funcoes-compartilhadas/http.js';
-import { relBaseSite, relNomeCurto, REL_IA_MODELO } from '../../supabase/funcoes-compartilhadas/relatorio.js';
+import {
+  relBaseSite, relNomeCurto, REL_IA_MODELO, relMontar, relNomesCurtos, relFotoValida, REL_MAX_JSON_COM_FOTOS
+} from '../../supabase/funcoes-compartilhadas/relatorio.js';
+import { itemDaResposta } from '../../supabase/funcoes-compartilhadas/clickup.js';
+import { readFileSync } from 'node:fs';
 import { DISC_RELATORIO, DISC_CONFIABILIDADE } from '../../supabase/funcoes-compartilhadas/motores-gerado.js';
 
 const SITE = 'https://disc.gestaosemcaos.com.br';
 const JWT_ADMIN = 'jwt-admin';
 const JWT_COMUM = 'jwt-comum';
 const OUTRO = 'aaaaaaaa-0000-4000-8000-000000000002';
+const FOTO_A = 'data:image/jpeg;base64,/9j/' + 'A'.repeat(200);
 
 function preparar(op) {
   op = op || {};
@@ -222,7 +227,13 @@ test('usuários: listar, convidar (com redirect para o painel), já existente, r
   const l = (await chamar({ acao: 'usuarios.listar' })).json;
   assert.equal(l.ok, true);
   assert.deepEqual(l.usuarios, [{ id: UUID_ADMIN, nome: 'Dona do Sistema', email: 'dona@empresa.com', papel: 'admin', ativo: true,
-    criadoEm: '2026-09-01T00:00:00Z', ultimoAcesso: '2026-10-05T09:00:00Z', convitePendente: false, voce: true }]);
+    criadoEm: '2026-09-01T00:00:00Z', ultimoAcesso: '2026-10-05T09:00:00Z', convitePendente: false, voce: true, foto: '' }]);
+  // Foto do usuário (admins.foto) vai junto; inválida vira ''.
+  db.st.admins[0].foto = FOTO_A;
+  assert.equal((await chamar({ acao: 'usuarios.listar' })).json.usuarios[0].foto, FOTO_A);
+  db.st.admins[0].foto = 'data:image/png;base64,AAAA';
+  assert.equal((await chamar({ acao: 'usuarios.listar' })).json.usuarios[0].foto, '');
+  delete db.st.admins[0].foto;
 
   assert.equal((await chamar({ acao: 'usuarios.convidar', email: 'nova@empresa.com', nome: 'X' })).json.erro, 'Informe o nome do usuário.');
   assert.equal((await chamar({ acao: 'usuarios.convidar', email: 'nao-e-email', nome: 'Nova Pessoa' })).json.erro, 'E-mail inválido.');
@@ -266,4 +277,81 @@ test('relatórios dos modelos novos (equipe/liderança/pessoa, sem processo) fic
   assert.equal((await chamar({ acao: 'relatorio.salvar', relatorioToken: tokenEquipe, relatorio: { textos: { a: 'b' } } })).json.erro, 'Relatório não encontrado.');
   const lista = (await chamar({ acao: 'relatorios.listar' })).json;
   assert.ok(lista.relatorios.every((r) => r.token !== tokenEquipe));
+});
+
+// ---------------------------------------------------------------------------
+// Fotos no relatório do processo (snapshot montado no servidor)
+// ---------------------------------------------------------------------------
+const FIXTURE = JSON.parse(readFileSync(new URL('../fixtures/processo-exemplo.json', import.meta.url), 'utf8'));
+const fotoDe = (id, tam) => 'data:image/jpeg;base64,/9j/' + id.replace(/[^A-Za-z0-9]/g, '') + 'Q'.repeat(tam || 300);
+
+test('relatório do processo: cada candidato do ranking e do quadro DISC ganha a foto certa (nomes curtos repetidos)', () => {
+  const dados = JSON.parse(JSON.stringify(FIXTURE));
+  // Dois finalistas com o mesmo nome curto ("Ana P."): o motor desempata e a foto tem de seguir a pessoa certa.
+  dados.candidatos[0].nome = 'Ana Paula Souza';
+  dados.candidatos[1].nome = 'Ana Pereira Lima';
+  dados.candidatos.forEach((c, i) => { if (i !== 2) c.foto = fotoDe(c.id); });
+  dados.candidatos[3].foto = 'data:image/png;base64,AAAA'; // inválida: fica sem foto
+  const rel = relMontar(DISC_RELATORIO, dados, '2026-10-05T12:00:00.000Z');
+  const curtos = relNomesCurtos(DISC_RELATORIO, dados.candidatos);
+  const linhas = rel.ranking.linhas;
+  assert.ok(linhas.length >= 5);
+  const nomesCurtos = new Set(Object.values(curtos));
+  linhas.concat(rel.disc.quadro).forEach((l) => assert.ok(nomesCurtos.has(l.nome), 'nome do motor reconhecido: ' + l.nome));
+  // Confere de forma independente: casa cada linha do ranking com o candidato pelas notas.
+  let conferidas = 0;
+  linhas.forEach((l) => {
+    const casam = dados.candidatos.filter((c) => c.finalista && Object.keys(l.notas).every((k) => l.notas[k] === null || c.notas[k] === l.notas[k]));
+    if (casam.length !== 1) return;
+    const c = casam[0];
+    const esperada = relFotoValida(c.foto) ? c.foto : undefined;
+    assert.equal(l.foto, esperada, l.nome);
+    const q = rel.disc.quadro.find((x) => x.nome === l.nome);
+    if (q) assert.equal(q.foto, esperada, 'quadro ' + l.nome);
+    conferidas++;
+  });
+  assert.ok(conferidas >= 5, 'conferidas: ' + conferidas);
+  assert.ok(linhas.some((l) => l.nome.startsWith('Ana P') && l.foto), 'Ana com foto');
+  assert.ok(!JSON.stringify(rel).includes('image/png'));
+  // Sem fotos: nenhum campo foto.
+  const semFoto = relMontar(DISC_RELATORIO, FIXTURE, '2026-10-05T12:00:00.000Z');
+  assert.ok(!JSON.stringify(semFoto).includes('"foto"'));
+});
+
+test('relatório do processo: fotos que estourariam o limite ficam de fora (o relatório continua)', () => {
+  const dados = JSON.parse(JSON.stringify(FIXTURE));
+  dados.candidatos.forEach((c) => { c.foto = fotoDe(c.id, 39900); });
+  const rel = relMontar(DISC_RELATORIO, dados, '2026-10-05T12:00:00.000Z');
+  assert.ok(JSON.stringify(rel).length <= REL_MAX_JSON_COM_FOTOS);
+  const com = rel.ranking.linhas.filter((l) => l.foto).length;
+  assert.ok(com >= 1 && com <= rel.ranking.linhas.length);
+});
+
+test('itemDaResposta: foto da resposta ou, sem ela, a da ficha (pessoas embutida)', () => {
+  const base = { id: 'r1', telefone: '5511999990000', respostas: '1234'.repeat(25), recebido_em: '2026-10-01T00:00:00Z' };
+  assert.equal(itemDaResposta(Object.assign({ foto: FOTO_A, pessoas: { foto: fotoDe('x') } }, base)).foto, FOTO_A);
+  assert.equal(itemDaResposta(Object.assign({ foto: null, pessoas: { foto: fotoDe('x') } }, base)).foto, fotoDe('x'));
+  assert.equal(itemDaResposta(Object.assign({ foto: 'https://x/y.jpg', pessoas: [{ foto: 'lixo' }] }, base)).foto, '');
+  assert.equal(itemDaResposta(base).foto, '');
+});
+
+test('processo.dados e rascunho: a resposta do DISC casada pelo WhatsApp leva a foto (da resposta ou da ficha)', async () => {
+  const a = preparar();
+  a.db.st.respostas.push({ id: 'r-ana', processo_id: UUID_PROC, avaliacao: 'RCP2', telefone: '5511988881111',
+    respostas: '4321'.repeat(25), protocolo: '11A', recebido_em: '2026-09-10T00:00:00Z', foto: null, pessoas: { foto: FOTO_A } });
+  a.db.st.respostas.push({ id: 'r-bruno', processo_id: UUID_PROC, avaliacao: 'RCP2', telefone: '5521977772222',
+    respostas: '1234'.repeat(25), protocolo: '12B', recebido_em: '2026-09-10T00:00:00Z', foto: 'data:image/png;base64,AAAA' });
+  const d = (await a.chamar({ acao: 'processo.dados', id: UUID_PROC })).json;
+  assert.equal(d.ok, true, d.erro);
+  const porNome = Object.fromEntries(d.candidatos.map((c) => [c.nome, c]));
+  assert.equal(porNome['Ana Paula Souza'].foto, FOTO_A);
+  assert.equal(porNome['Bruno Lima Castro'].foto, undefined);
+  assert.equal(porNome['Carla Dias'].foto, undefined);
+  const r = (await a.chamar({ acao: 'relatorio.rascunho', processoId: UUID_PROC })).json;
+  assert.equal(r.ok, true, r.erro);
+  const json = JSON.stringify(r.relatorio);
+  assert.ok(!json.includes('image/png'));
+  const linhasComFoto = r.relatorio.ranking.linhas.filter((l) => l.foto);
+  assert.ok(linhasComFoto.length >= 1, 'Ana aparece no ranking com foto');
+  assert.ok(linhasComFoto.every((l) => l.foto === FOTO_A && l.nome.startsWith('Ana')));
 });

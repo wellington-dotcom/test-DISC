@@ -37,6 +37,14 @@
  * No navegador, o motor e a fixture são carregados sob demanda (mesma pasta deste arquivo), então as
  * páginas não precisam incluí-los.
  *
+ * Fotos (como a migração 20261009120000_fotos.sql): data URL "data:image/jpeg;base64,/9j/…" até 40 000 caracteres
+ * (fotoValida). O envio aceita "foto" conforme formulario.campos.foto ('obrigatorio' -> "Envie uma foto.", 'oculto' ->
+ * descartada); a ficha da pessoa fica com a foto mais recente (envio sem foto não apaga). listar: item.foto e
+ * item.pessoa.foto; listarEquipe: colaborador.foto; eu/listarUsuarios: usuario.foto; salvarMinhaFoto(token, dataUrl|'');
+ * removerFoto(token, respostaId) ou atualizar(token, id, {foto: ''}) apagam a foto da pessoa e das respostas dela.
+ * Semente: avatares FICTÍCIOS (iniciais sobre a cor DISC) para Ana, Carla, Diego, Marta e Renata — os mesmos do
+ * supabase/seed_previa.sql; no relatório do Cartório Exemplo, a Ana e a Carla da fixture usam os avatares AE e CM.
+ *
  * No Node (testes): require('./js/api-simulada.js').criar({ armazenamento, scoring, latenciaMs: 0, semente: false }).
  * Opcional: { motor, fixture } para trocar o motor do relatório e os dados do processo de exemplo.
  */
@@ -55,7 +63,9 @@
     relacoes: 'disc_simulada_relacoes',
     semente: 'disc_simulada_semente',
     sementeRelatorio: 'disc_simulada_semente_relatorio',
-    sementeEquipe: 'disc_simulada_semente_equipe'
+    sementeEquipe: 'disc_simulada_semente_equipe',
+    sementeParte2: 'disc_simulada_semente_parte2',
+    sementeFotos: 'disc_simulada_semente_fotos'
   };
   var CHAVE_ADMIN = 'previa';
   var LATENCIA_MS = 400;
@@ -68,13 +78,35 @@
     relatorioToken: 'exemplo-cartorio'
   };
 
+  // Avatares FICTÍCIOS da prévia (iniciais sobre a cor do fator principal do DISC, JPEG 192 px gerado por código;
+  // nenhuma foto de gente real), por WhatsApp — os mesmos de supabase/seed_previa.sql.
+  var AVATARES_PREVIA = {
+    '5511900000001': 'data:image/jpeg;base64,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',
+    '5511900000003': 'data:image/jpeg;base64,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',
+    '5511900000004': 'data:image/jpeg;base64,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',
+    '5511900000006': 'data:image/jpeg;base64,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',
+    '5511900000009': 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/4gHYSUNDX1BST0ZJTEUAAQEAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADb/2wBDAAkGBwgHBgkIBwgKCgkLDRYPDQwMDRsUFRAWIB0iIiAdHx8kKDQsJCYxJx8fLT0tMTU3Ojo6Iys/RD84QzQ5Ojf/2wBDAQoKCg0MDRoPDxo3JR8lNzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzf/wAARCADAAMADASIAAhEBAxEB/8QAGwABAQEBAQEBAQAAAAAAAAAAAAcGBQQCAwH/xABDEAABAgMDBggLBQkAAAAAAAAAAQIDBAUGERITFiExVNI2QVFhcpGSsgcUFRciUmVxpMHiMkOBoaMjJUJEgqKx0fD/xAAYAQEBAQEBAAAAAAAAAAAAAAAAAQMCBP/EAB0RAQEBAQADAQEBAAAAAAAAAAABAhEDITESIkH/2gAMAwEAAhEDEQA/AOmAD1MQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB4qtUoNKkXzcw2I6GxURUhoirpW7jVDg5/UrZ53sM3j1W84Nx+mzvIS0y3qy+nWcyxSM/qVs872Gbx9Mt3SXL6UObZzuht+TjI5oV5f5H9aHvHxGsrXILFe+nvVE9R7XL1IqqT9bXmVIptcptTVGyk0x0Rfu3ei7qU6RDvThRP4mRGL7laqFHsPXolTgRJScer5mCmJHrre3n50+aHWd99VLnjUmVz+pWzzvYZvGqXUpDRvVnwzOqRn9StnnewzeGf1K2ed7DN4xchZ2q1GWbMycrlILlVEdlGJq5lU9OaFe2D9aHvHP62vMtXn9StnnewzePbSLVyFWnWyktCmWxHNVyLEa1E0e5ymHzQr2wfrQ947VkLPVWnVpkxOSuThIxyK7KMXSqciKWa10szxvAAauAAAAAAAAAAAAABnrecG4/TZ3kJaVK3nBuP02d5CWmHk+tMfFyb9lPcf08DazSsKfvOS1bQz/AGfEav0iCxXvqUqqJ6kRHL1JebdjPjH+EiShQZ2Vm4bUa+O1yRLuNW3aepfyOVYqMsK0spdfc/ExfxavzuFra2lan2ugtVsvBbhh4ta361/7kPV4P5J8xXGzKJ+zlmK5y86oqIn5qv4GP3fpp8z7UxdSkNLkupSGnXk/xMKlYPg3A6b+8poSa0G2Hkimsk/EMtgc5ceWw33rfqwqdDzh+yviPpLNziXN63QML5w/ZXxH0ncsxaLy8syniuQyOH7zFivv5k5DqalS5sd4AHSAAAAAAAAAAAAADPW84Nx+mzvIS0qVvODcfps7yEtMPJ9aY+ALk37Ke4w/hEpGhlVgN5GR7v7XfLqLccnSa6y9Co0etTawJd8NmFMT3PXUnu1qVKjUqXpEk2Wlkv43vVNL3cqkno9Qi0uowZuFpVi+k31m8aFilZiFNS0OYgOxQ4jUc1eZS+Pib6/RdSkNLkupSGjyf4Yd+kWTn6tIsm5eNLNhuVURIjnIuhbuJqnszBqu0SXbfumnsHwbgdN/eU0JZiWJdXqb5g1XaJLtv3TR2Ps/N0NZtZuJAflkZhyTlW66/XeicppQWYkvUurQAHaAAAAAAAAAAAAADPW84Nx+mzvIS0r1pabGqtIiyku6G2I9zVRYiqiaFv4kUxmYNV2iS7b90y3m2+nebJFHb9lPcfnNS8OalokvHbihxGq1ycyn6JoREP6auEYq9PiUyoxpSLpWG70Xes3iXqNb4PKxcr6VHdyvgX/m359Z17XWbdW0gxZV0OHMw/RVYiqiObyaEXUv+VM9LWIrMrMQ48Cak2xIbkc1Ue/Qqf0mP5udenfZYoa6lIaXCHjWE3Ko1ImFMSNW9EXju5idZg1XaJLtv3Trct5xM3j5oNsPJFNZJ+IZbA5y48thvvW/VhU6HnD9lfEfSeHMGq7RJdt+6MwartEl237pz/a/y93nD9lfEfSdKgWv8sVFsn4jkcTVdjy2LVzYUM/mDVdoku2/dOtZiyk/SasybmYss6G1jmqkNzlXSnO1Cy777L+eNkADVwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAP/9k='
+  };
+  // Respostas da semente que levam a foto (as outras da mesma pessoa ficam sem: a ficha guarda a mais recente).
+  var FOTO_RESPOSTA_PREVIA = { 'previa-exemplo-03': '5511900000003', 'previa-exemplo-04': '5511900000004',
+    'previa-exemplo-05': '5511900000001', 'previa-exemplo-06': '5511900000006' };
+  // Candidatos da fixture do Cartório Exemplo com avatar (as iniciais combinam: Ana Exemplo, Carla Modelo).
+  var FOTO_CANDIDATO_PREVIA = { 'cu-001': '5511900000001', 'cu-003': '5511900000003' };
+
   // Mesmos valores do Code.gs
   var LIMITE_CORPO = 20000;
   var LIMITE_CORPO_RELATORIO = 450000;      // só "relatorio.salvar" (o relatório inteiro volta do painel)
-  var ACOES_CORPO_GRANDE = ['relatorio.salvar', 'relatorioModelo.salvar'];
+  var LIMITE_CORPO_MODELO = 1100000;        // "relatorioModelo.salvar" (snapshot até 1 MB, com as fotos)
+  var LIMITE_CORPO_FOTO = 82000;            // envio com foto (o servidor aceita até 80 000) e "Minha foto"
+  var LIMITE_PAYLOAD_ENVIO = 80000;
+  var ACOES_CORPO_FOTO = ['enviar', 'usuarios.minhaFoto'];
+  var FOTO_MAX = 40000;
+  var RE_FOTO = /^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/=]+$/;
+  var MSG_FOTO_OBRIGATORIA = 'Envie uma foto.';
+  var MSG_FOTO_INVALIDA = 'Foto inválida ou grande demais. Escolha outra imagem.';
   var MODELOS_RELATORIO = ['equipe', 'lideranca', 'pessoa'];
   var TIPOS_RELACAO = ['lidera', 'direto', 'indireto'];
-  var MAX_DADOS_RELATORIO = 300000;          // mesmo limite do js/api-supabase.js (~300 KB de JSON)
+  var MAX_DADOS_RELATORIO = 1000000;         // mesmo limite do js/api-supabase.js (~1 MB de JSON)
   var REL_MAX_TEXTO = 4000;
   var REL_MAX_TEXTOS_IA = 80;
   var PREFIXO_IA = '[IA] ';
@@ -119,6 +151,7 @@
   var MSG_SESSAO = 'Sessão expirada. Entre de novo.';
   var MSG_SEM_PERMISSAO = 'Sem permissão.';
   var MSG_LINK_INATIVO = 'Este link de avaliação não está mais ativo.';
+  var MSG_PARTE2 = 'Responda também a segunda parte do teste.';
   var MSG_LINK_INVALIDO = 'Link inválido ou avaliação encerrada. Fale com quem enviou o link.';
 
   /* ---------- SHA-256 em JS puro (navegador e Node; síncrono) ---------- */
@@ -434,8 +467,8 @@
   /* ---------- Formulário do processo (config.formulario) — mesma regra do banco e do js/api-supabase.js ---------- */
 
   var MODOS_CAMPO = ['obrigatorio', 'opcional', 'oculto'];
-  var CAMPOS_FORMULARIO = ['idade', 'funcao', 'empresa', 'email', 'cidade'];
-  var FORMULARIO_PADRAO = { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto' };
+  var CAMPOS_FORMULARIO = ['idade', 'funcao', 'empresa', 'email', 'cidade', 'foto'];
+  var FORMULARIO_PADRAO = { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto', foto: 'opcional' };
   var MAX_PERGUNTAS = 5;
 
   function normalizarFormulario(f) {
@@ -461,8 +494,49 @@
       usados[id] = true;
       perguntas.push({ id: id, texto: texto, obrigatoria: p.obrigatoria === true });
     });
-    return { campos: campos, perguntas: perguntas };
+    return { campos: campos, perguntas: perguntas, parte2: f.parte2 === 'ligada' ? 'ligada' : 'desligada' };
   }
+  // ---------------------------------------------------------------------------
+  // Parte 2 (perfil exigido pelo trabalho): 40 dígitos, 10 grupos × 4 na ordem D,I,S,C, cada grupo uma
+  // permutação de 1..4. Usa DISC_EXIGIDO (js/disc-exigido.js) quando carregado; senão o cálculo mínimo
+  // com a mesma regra (total por letra nos 10 grupos = percentual; código = maior + segundo, empate D,I,S,C).
+  // ---------------------------------------------------------------------------
+  function moduloExigido() {
+    if (root && root.DISC_EXIGIDO) return root.DISC_EXIGIDO;
+    if (typeof require === 'function') {
+      try { return require('./disc-exigido.js'); } catch (e) { /* usa o cálculo local */ }
+    }
+    return null;
+  }
+  /** Foto aceita pelo servidor: data URL JPEG (base64 começando em "/9j/") com até 40 000 caracteres. */
+  function fotoValida(str) { return typeof str === 'string' && str.length <= FOTO_MAX && RE_FOTO.test(str); }
+  function fotoOuVazio(str) { return fotoValida(str) ? str : ''; }
+
+  function exigidoValido(str) {
+    if (typeof str !== 'string' || !/^[1-4]{40}$/.test(str)) return false;
+    for (var g = 0; g < 10; g++) {
+      if (str.substr(g * 4, 4).split('').sort().join('') !== '1234') return false;
+    }
+    return true;
+  }
+  /** exigido (string) -> {percentuais:{D,I,S,C}, codigo} ou null se ausente/inválido. */
+  function calcularExigido(str) {
+    str = typeof str === 'string' ? str.replace(/\D/g, '') : '';
+    if (!exigidoValido(str)) return null;
+    var m = moduloExigido();
+    if (m && typeof m.calcular === 'function') {
+      try {
+        var r = m.calcular(str);
+        if (r && r.percentuais) return { percentuais: r.percentuais, codigo: r.codigo };
+      } catch (e) { /* usa o cálculo local */ }
+    }
+    var letras = ['D', 'I', 'S', 'C'];
+    var tot = { D: 0, I: 0, S: 0, C: 0 };
+    for (var i = 0; i < 40; i++) tot[letras[i % 4]] += Number(str[i]);
+    var ordem = letras.slice().sort(function (a, b) { return tot[b] - tot[a]; });
+    return { percentuais: { D: tot.D, I: tot.I, S: tot.S, C: tot.C }, codigo: ordem[0] + ordem[1] };
+  }
+
 
   function perguntaSensivel(f) {
     var lista = f && typeof f === 'object' && Array.isArray(f.perguntas) ? f.perguntas : [];
@@ -772,7 +846,8 @@
       return {
         id: u.id, nome: u.nome, email: u.email, papel: u.papel,
         empresaId: u.papel === 'gestor' ? u.empresaId : '',
-        empresaNome: u.papel === 'gestor' ? (emp[u.empresaId] || '') : ''
+        empresaNome: u.papel === 'gestor' ? (emp[u.empresaId] || '') : '',
+        foto: fotoOuVazio(u.foto)
       };
     }
 
@@ -886,9 +961,27 @@
         var avForm = cod ? buscarPor(avaliacoes(), 'codigo', cod) : null;
         if (avForm && avForm.ativa) form = formularioDoProcesso(avForm);
       }
+      if (bruto && typeof bruto === 'object') {
+        try { if (JSON.stringify(bruto).length > LIMITE_PAYLOAD_ENVIO) return erro('Requisição grande demais.'); } catch (e) { return erro('JSON inválido.'); }
+      }
       var v = validarPayload(bruto, form);
       if (!v.ok) return v;
       var payload = v.payload;
+      // Parte 2: obrigatória e validada só com o formulário 'ligada'; senão o que vier é descartado.
+      delete payload.exigido;
+      if (normalizarFormulario(form).parte2 === 'ligada') {
+        var exigido = typeof bruto.exigido === 'string' ? bruto.exigido.trim() : '';
+        if (!exigidoValido(exigido)) return erro(MSG_PARTE2);
+        payload.exigido = exigido;
+      }
+      // Foto (formulario.campos.foto): fora do payload, na resposta e na ficha da pessoa.
+      var modoFoto = normalizarFormulario(form).campos.foto;
+      var foto = '';
+      if (modoFoto !== 'oculto') {
+        foto = typeof bruto.foto === 'string' ? bruto.foto.trim() : '';
+        if (!foto && modoFoto === 'obrigatorio') return erro(MSG_FOTO_OBRIGATORIA);
+        if (foto && !fotoValida(foto)) return erro(MSG_FOTO_INVALIDA);
+      }
       var linhas = ler();
       var i = indice(linhas, payload.id);
       if (i !== -1) {
@@ -917,9 +1010,11 @@
       linha.status = STATUS_PADRAO;
       linha.observacoes = '';
       linha.protocolo = protocolo;
+      linha.foto = foto;
       var lsPessoas = pessoas();
       var pessoa = pessoaDoEnvio(lsPessoas, payload, true, linha.recebidoEm);
       linha.pessoaId = pessoa ? pessoa.id : '';
+      if (pessoa && foto) pessoa.foto = foto;
       gravarPessoas(lsPessoas);
       linhas.push(linha);
       gravar(linhas);
@@ -1049,6 +1144,9 @@
         duracaoSeg: Number(l.duracaoSeg) || 0,
         respostas: respostas,
         resultado: recalcular(respostas),
+        exigido: exigidoValido(l.exigido) ? l.exigido : '',
+        resultadoExigido: calcularExigido(l.exigido),
+        foto: fotoOuVazio(l.foto),
         status: status,
         observacoes: String(l.observacoes == null ? '' : l.observacoes),
         recebidoEm: String(l.recebidoEm || ''),
@@ -1071,7 +1169,7 @@
     function pessoaPublica(p) {
       if (!p) return null;
       return { id: p.id, nome: p.nome || '', telefone: p.telefone || '', idade: idadeGravada(p.idade), funcao: p.funcao || '',
-        empresa: p.empresa || '', email: p.email || '', cidade: p.cidade || '', atualizadoEm: p.atualizadoEm || '' };
+        empresa: p.empresa || '', email: p.email || '', cidade: p.cidade || '', foto: fotoOuVazio(p.foto), atualizadoEm: p.atualizadoEm || '' };
     }
 
     function acaoListar(u) {
@@ -1108,7 +1206,13 @@
         if (STATUS_VALIDOS.indexOf(novoStatus) === -1) return erro('Status inválido. Use: aprovado, reprovado ou em_analise.');
       }
       if (campos.observacoes !== undefined) novasObs = limparTextoLongo(campos.observacoes, 5000);
-      if (novoStatus === null && novasObs === null) return erro('Nada para atualizar.');
+      var tirarFoto = false;
+      if (campos.foto !== undefined) {
+        if (campos.foto !== '' && campos.foto !== null) return erro('A foto do participante só pode ser removida.');
+        if (u && u.papel !== 'admin') return erro(MSG_SEM_PERMISSAO);
+        tirarFoto = true;
+      }
+      if (novoStatus === null && novasObs === null && !tirarFoto) return erro('Nada para atualizar.');
       var linhas = ler();
       var i = indice(linhas, id);
       if (i === -1) return erro('Candidato não encontrado.');
@@ -1116,7 +1220,39 @@
       if (novoStatus !== null) linhas[i].status = novoStatus;
       if (novasObs !== null) linhas[i].observacoes = novasObs;
       gravar(linhas);
+      if (tirarFoto) acaoRemoverFoto(id);
       return { ok: true, id: id };
+    }
+
+    // LGPD: apaga a foto da resposta, da ficha da pessoa e das outras respostas dela (como remover_foto do banco).
+    function acaoRemoverFoto(idBruto) {
+      var id = limparTexto(idBruto, 80);
+      var linhas = ler();
+      var i = indice(linhas, id);
+      if (i === -1) return erro('Candidato não encontrado.');
+      var pessoaId = String(linhas[i].pessoaId || '');
+      var n = 0;
+      linhas.forEach(function (l, k) {
+        if (l.foto && (k === i || (pessoaId && l.pessoaId === pessoaId))) { l.foto = ''; n++; }
+      });
+      gravar(linhas);
+      if (pessoaId) {
+        var lsP = pessoas();
+        var p = buscarPor(lsP, 'id', pessoaId);
+        if (p && p.foto) { p.foto = ''; n++; gravarPessoas(lsP); }
+      }
+      return { ok: true, id: id, removidas: n };
+    }
+
+    function acaoMinhaFoto(u, dataUrl) {
+      var foto = dataUrl === null || dataUrl === undefined ? '' : (typeof dataUrl === 'string' ? dataUrl.trim() : null);
+      if (foto === null || (foto !== '' && !fotoValida(foto))) return erro(MSG_FOTO_INVALIDA);
+      var lista = usuarios();
+      var reg = buscarPor(lista, 'id', u.id);
+      if (!reg) return erro(MSG_SEM_PERMISSAO);
+      reg.foto = foto;
+      gravarChave(CHAVES.usuarios, lista);
+      return { ok: true, foto: foto };
     }
 
     function acaoExcluir(idBruto) {
@@ -1243,6 +1379,8 @@
         var l = ultima[v.pessoaId];
         c.resultado = l ? recalcular(String(l.respostas || '')) : null;
         c.respondidoEm = c.resultado ? String(l.recebidoEm || '') : '';
+        c.exigido = l ? calcularExigido(l.exigido) : null;
+        c.foto = fotoOuVazio((fichas[v.pessoaId] || {}).foto);
         return c;
       });
       var porNome = function (a, b) { return String(a.nome).localeCompare(String(b.nome), 'pt-BR'); };
@@ -1378,7 +1516,7 @@
       var snap = dados.dados;
       if (!snap || typeof snap !== 'object' || Array.isArray(snap)) return erro('Relatório vazio: gere o relatório antes de salvar.');
       if (snap.modelo !== undefined && snap.modelo !== modelo) return erro('Os dados não são de um relatório "' + modelo + '".');
-      if (JSON.stringify(snap).length > MAX_DADOS_RELATORIO) return erro('Relatório grande demais (máximo 300 KB).');
+      if (JSON.stringify(snap).length > MAX_DADOS_RELATORIO) return erro('Relatório grande demais (máximo 1 MB).');
       snap = copiar(snap);
       snap.modelo = modelo;
       var lista = relatoriosSalvos();
@@ -1557,6 +1695,8 @@
       }
       var candidatos = (Array.isArray(fx.candidatos) ? fx.candidatos : []).map(function (c) {
         delete c.antecedentes; // a prévia nunca mostra antecedentes
+        var tel = FOTO_CANDIDATO_PREVIA[c.id];
+        if (tel && AVATARES_PREVIA[tel] && !c.foto) c.foto = AVATARES_PREVIA[tel];
         return c;
       });
       return {
@@ -1598,7 +1738,7 @@
       var M = obterMotor();
       if (!M || typeof M.montar !== 'function') throw new Error('motor do relatório indisponível.');
       var copia = copiar(dados);
-      (copia.candidatos || []).forEach(function (c) { delete c.antecedentes; });
+      (copia.candidatos || []).forEach(function (c) { delete c.antecedentes; delete c.foto; });
       var relatorio = M.montar(copia, { geradoEm: agoraIso() });
       if (relatorio && relatorio.processo) delete relatorio.processo.clickupListId;
       var json = JSON.stringify(relatorio);
@@ -1609,7 +1749,38 @@
           json = json.split(JSON.stringify(completo).slice(1, -1)).join(JSON.stringify(curto).slice(1, -1));
         }
       });
-      return JSON.parse(json);
+      return aplicarFotos(JSON.parse(json), M, dados.candidatos);
+    }
+
+    // Igual a relAplicarFotos (supabase/funcoes-compartilhadas/relatorio.js): "foto" em ranking.linhas e disc.quadro,
+    // pelo mesmo nome curto que o motor dá a cada candidato (nomesCurtos do js/relatorio-motor.js).
+    var PARTICULAS = { de: 1, da: 1, das: 1, 'do': 1, dos: 1, e: 1, di: 1, du: 1, del: 1, van: 1, von: 1 };
+    function nomesCurtosDoMotor(M, candidatos) {
+      var mapa = {}, usadosN = {};
+      (candidatos || []).filter(function (c) { return c && typeof c === 'object'; }).forEach(function (c) {
+        var curto = M.primeiroNome(c.nome);
+        if (usadosN[curto]) {
+          var partes = String(c.nome == null ? '' : c.nome).split(/\s+/).filter(function (p) { return p && !PARTICULAS[p.toLowerCase()]; });
+          var alt = partes[0] ? partes[0].charAt(0).toUpperCase() + partes[0].slice(1) : curto;
+          for (var i = 1; i < partes.length; i++) alt += ' ' + partes[i].charAt(0).toUpperCase() + '.';
+          curto = usadosN[alt] ? curto : alt;
+        }
+        var base = curto, n = 2;
+        while (usadosN[curto]) curto = base + ' (' + (n++) + ')';
+        usadosN[curto] = true;
+        mapa[c.id] = curto;
+      });
+      return mapa;
+    }
+    function aplicarFotos(relatorio, M, candidatos) {
+      if (!relatorio || !M || typeof M.primeiroNome !== 'function') return relatorio;
+      var curtos = nomesCurtosDoMotor(M, candidatos);
+      var porNome = {};
+      (candidatos || []).forEach(function (c) { if (c && fotoValida(c.foto) && curtos[c.id]) porNome[curtos[c.id]] = c.foto; });
+      var linhas = relatorio.ranking && Array.isArray(relatorio.ranking.linhas) ? relatorio.ranking.linhas : [];
+      var quadro = relatorio.disc && Array.isArray(relatorio.disc.quadro) ? relatorio.disc.quadro : [];
+      linhas.concat(quadro).forEach(function (l) { if (l && porNome[l.nome]) l.foto = porNome[l.nome]; });
+      return relatorio;
     }
 
     // {lista, reg} do token, ou null. O relatório da semente é montado na primeira leitura.
@@ -1845,6 +2016,8 @@
       'listar': { fn: function (u) { return acaoListar(u); } },
       'atualizar': { fn: function (u, c) { return acaoAtualizar(c.id, c.campos, u); } },
       'excluir': { soAdmin: true, fn: function (u, c) { return acaoExcluir(c.id); } },
+      'respostas.removerFoto': { soAdmin: true, fn: function (u, c) { return acaoRemoverFoto(c.id); } },
+      'usuarios.minhaFoto': { fn: function (u, c) { return acaoMinhaFoto(u, c.foto); } },
       'excluirTodos': { soAdmin: true, fn: function (u, c) { return acaoExcluirTodos(c.avaliacao); } },
       'empresas.listar': { soAdmin: true, fn: function () { return acaoEmpresasListar(); } },
       'equipe.listar': { soAdmin: true, fn: function (u, c) { return acaoEquipeListar(c.empresaId); } },
@@ -1890,8 +2063,10 @@
       var tamanho = 0;
       try { tamanho = JSON.stringify(corpo).length; } catch (e) { return erro('JSON inválido.'); }
       var acao = corpo.acao;
-      if (tamanho > LIMITE_CORPO_RELATORIO) return erro('Requisição grande demais.');
-      if (tamanho > LIMITE_CORPO && ACOES_CORPO_GRANDE.indexOf(acao) === -1) return erro('Requisição grande demais.');
+      var limite = acao === 'relatorioModelo.salvar' ? LIMITE_CORPO_MODELO
+        : (acao === 'relatorio.salvar' ? LIMITE_CORPO_RELATORIO
+          : (ACOES_CORPO_FOTO.indexOf(acao) >= 0 ? LIMITE_CORPO_FOTO : LIMITE_CORPO));
+      if (tamanho > limite) return erro('Requisição grande demais.');
       garantirSemente();
       if (acao === 'enviar') return acaoEnviar(corpo.payload);
       if (acao === 'relatorioPublico') return acaoRelatorioPublico(corpo.token);
@@ -1914,12 +2089,16 @@
       var base = !!lerChave(CHAVES.semente, null);
       var rel = !!lerChave(CHAVES.sementeRelatorio, null);
       var equipe = !!lerChave(CHAVES.sementeEquipe, null);
-      if (base && rel && equipe) return;
+      var parte2 = !!lerChave(CHAVES.sementeParte2, null);
+      var fotos = !!lerChave(CHAVES.sementeFotos, null);
+      if (base && rel && equipe && parte2 && fotos) return;
       semeando = true;
       try {
         if (!base && temScoring()) { semear(); base = true; } // sem scoring.js (página do relatório) fica para a próxima página
         if (!rel) semearProcessoExemplo(); // prévias antigas (só com a semente base) ganham o processo de exemplo
-        if (base && !equipe && temScoring()) semearEquipe(); // e a equipe da Clínica Exemplo
+        if (base && !equipe && temScoring()) { semearEquipe(); equipe = true; } // e a equipe da Clínica Exemplo
+        if (base && equipe && !parte2) semearParte2(); // e a Parte 2 (perfil exigido) no EQP1
+        if (base && equipe && !fotos) semearFotos(); // e os avatares fictícios
       } finally { semeando = false; }
     }
 
@@ -2044,6 +2223,63 @@
       });
       gravarChave(CHAVES.relacoes, lsR);
       gravarChave(CHAVES.sementeEquipe, 1);
+    }
+
+    // Parte 2 na prévia: EQP1 com formulario.parte2 'ligada' e o perfil exigido de quem respondeu por ele
+    // (Renata e Carla com esforço de adaptação alto; Diego quase sem esforço). Não sobrescreve nada já gravado.
+    var EXIGIDO_PREVIA = {
+      'previa-exemplo-03': [['I', 'D', 'S', 'C'], ['D', 'I', 'C', 'S'], 3],  // natural S/C, cargo pede I/D (alto)
+      'previa-exemplo-04': [['D', 'I', 'C', 'S'], ['I', 'D', 'S', 'C'], 3],  // natural D/I, igual ao natural (baixo)
+      'previa-exemplo-06': [['D', 'C', 'S', 'I'], ['C', 'D', 'I', 'S'], 4],
+      'previa-exemplo-07': [['C', 'D', 'S', 'I'], ['D', 'C', 'S', 'I'], 3],
+      'previa-exemplo-08': [['I', 'S', 'D', 'C'], ['S', 'I', 'C', 'D'], 4],
+      'previa-exemplo-09': [['D', 'C', 'I', 'S'], ['C', 'D', 'S', 'I'], 3]   // natural S/I, cargo pede D/C (muito alto)
+    };
+    function exigidoDe(principal, alternativa, cada) {
+      var out = '';
+      for (var i = 0; i < 10; i++) {
+        var ordem = (i % cada === 0) ? alternativa : principal;
+        out += ['D', 'I', 'S', 'C'].map(function (l) { return String(4 - ordem.indexOf(l)); }).join('');
+      }
+      return out;
+    }
+    function semearParte2() {
+      var lsAv = lerLista(CHAVES.avaliacoes);
+      var eqp = buscarPor(lsAv, 'codigo', 'EQP1');
+      if (eqp && eqp.id === 'ava_previa_eqp1') {
+        var bruto = {};
+        try { bruto = eqp.config ? (typeof eqp.config === 'string' ? JSON.parse(eqp.config) : eqp.config) : {}; } catch (e) { bruto = {}; }
+        var form = bruto.formulario && typeof bruto.formulario === 'object' ? bruto.formulario : {};
+        if (form.parte2 === undefined) {
+          bruto.formulario = Object.assign({}, form, { parte2: 'ligada' });
+          var cfg = validarConfigProcesso(bruto);
+          if (cfg.ok) { eqp.config = JSON.stringify(cfg.config); gravarChave(CHAVES.avaliacoes, lsAv); }
+        }
+      }
+      var linhas = lerLista(CHAVE_ARMAZENAMENTO);
+      var mudou = false;
+      linhas.forEach(function (l) {
+        var x = l && EXIGIDO_PREVIA[l.id];
+        if (!x || l.avaliacao !== 'EQP1' || l.exigido) return;
+        l.exigido = exigidoDe(x[0], x[1], x[2]);
+        mudou = true;
+      });
+      if (mudou) gravar(linhas);
+      gravarChave(CHAVES.sementeParte2, 1);
+    }
+
+    // Avatares fictícios na ficha (Ana, Carla, Diego, Marta e Renata) e em algumas respostas; não troca foto já posta.
+    function semearFotos() {
+      var lsP = pessoas();
+      lsP.forEach(function (p) { if (!p.foto && AVATARES_PREVIA[p.telefone]) p.foto = AVATARES_PREVIA[p.telefone]; });
+      gravarPessoas(lsP);
+      var linhas = lerLista(CHAVE_ARMAZENAMENTO);
+      linhas.forEach(function (l) {
+        var tel = l && FOTO_RESPOSTA_PREVIA[l.id];
+        if (tel && !l.foto && normalizarTelefone(l.telefone) === tel) l.foto = AVATARES_PREVIA[tel];
+      });
+      gravar(linhas);
+      gravarChave(CHAVES.sementeFotos, 1);
     }
 
     // 25 grupos: ordem principal, trocando para a alternativa a cada "cada" grupos (perfil com nuances).
@@ -2239,6 +2475,8 @@
         gravarChave(CHAVES.semente, 0);
         gravarChave(CHAVES.sementeRelatorio, 0);
         gravarChave(CHAVES.sementeEquipe, 0);
+        gravarChave(CHAVES.sementeParte2, 0);
+        gravarChave(CHAVES.sementeFotos, 0);
         garantirSemente();
       },
       enviar: seguro(function (payload) {
@@ -2268,6 +2506,13 @@
         exigirToken(token);
         exigir(id, 'Candidato não informado.');
         return comSessao('atualizar', token, { id: id, campos: campos || {} });
+      }),
+      salvarMinhaFoto: seguro(function (token, dataUrl) {
+        return comSessao('usuarios.minhaFoto', token, { foto: dataUrl === undefined ? '' : dataUrl });
+      }),
+      removerFoto: seguro(function (token, id) {
+        exigir(id, 'Candidato não informado.');
+        return comSessao('respostas.removerFoto', token, { id: id });
       }),
       excluir: seguro(function (token, id) {
         exigirToken(token);
@@ -2394,7 +2639,7 @@
     'relatorioRascunho', 'relatorioSalvar', 'relatorioPublicar', 'relatorioDespublicar', 'relatoriosListar',
     'relatorioMelhorarTextos', 'relatorioPublico',
     'listarEquipe', 'salvarColaborador', 'moverColaborador', 'desligarColaborador', 'salvarRelacoes',
-    'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo'];
+    'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo', 'salvarMinhaFoto', 'removerFoto'];
 
   // Liga no lugar do DISC_API real quando CONFIG.API_URL === 'simulada' (o objeto continua o mesmo).
   function instalar(alvo, cfg, opcoes) {
@@ -2427,6 +2672,10 @@
     validarValidacao: validarValidacao,
     validarConfigProcesso: validarConfigProcesso,
     normalizarFormulario: normalizarFormulario,
+    fotoValida: fotoValida,
+    AVATARES_PREVIA: AVATARES_PREVIA,
+    exigidoValido: exigidoValido,
+    calcularExigido: calcularExigido,
     classificarCampo: classificarCampo,
     normalizarNomeCampo: normalizarNomeCampo,
     LISTAS_PREVIA: LISTAS_PREVIA,

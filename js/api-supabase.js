@@ -36,7 +36,8 @@
  *   salvarEmpresa(token, {id?, nome, cidade, observacoes, ativo}) -> {empresa} · excluirEmpresa(token, id) -> {id}
  *     (recusa com colaborador ativo: "Desligue ou mova os colaboradores antes.")
  *   listarEquipe(token, empresaId) -> {empresa, colaboradores:[{vinculoId, pessoaId, nome, telefone, cargo, area,
- *     status, inicio, fim, resultado:{percentuais, codigo}|null, respondidoEm}], relacoes:[{de, para, tipo}], historico:[…]}
+ *     status, inicio, fim, resultado:{percentuais, codigo}|null, respondidoEm,
+ *     exigido:{percentuais, codigo}|null (Parte 2 da resposta mais recente)}], relacoes:[{de, para, tipo}], historico:[…]}
  *   salvarColaborador(token, {empresaId, pessoaId? | nome + telefone, cargo, area}) -> {colaborador}
  *   moverColaborador(token, {pessoaId, empresaId, cargo, area}) -> {colaborador} · desligarColaborador(token, vinculoId) -> {id}
  *   salvarRelacoes(token, empresaId, [{de, para, tipo}]) -> {relacoes} (substitui o conjunto)
@@ -44,6 +45,13 @@
  *   salvarRelatorioModelo(token, {id?, modelo, empresaId?, pessoaId?, dados, publicar?}) -> {relatorio:{id, token,
  *     status, modelo, url?}} · listarRelatoriosModelo(token, {empresaId?, pessoaId?}) -> {relatorios:[…]}
  *   excluirRelatorioModelo(token, id) -> {id}. relatorioPublico devolve também o "modelo".
+ * Fotos (data URL "data:image/jpeg;base64,/9j/…", até 40 000 caracteres, guardada no banco; fotoValida(str)):
+ *   enviar: payload.foto ('' = sem foto), conforme formulario.campos.foto ('obrigatorio'|'opcional'|'oculto').
+ *   listar: item.foto (da resposta, '' sem foto) e item.pessoa.foto (da ficha). listarEquipe: colaborador.foto
+ *   (da ficha da pessoa). eu/sessaoAtual/login: usuario.foto. listarUsuarios: usuario.foto.
+ *   salvarMinhaFoto(token, dataUrl | '') -> {foto} (só a do próprio usuário; '' remove)
+ *   removerFoto(token, respostaId) -> {id, removidas} (LGPD: some da resposta, da ficha e das outras respostas
+ *     da pessoa; também por atualizar(token, id, {foto: ''})).
  *
  * No Node (testes): require('./js/api-supabase.js').criar({ supabase: libFalsa, url, chave, local?, timeoutMs? }).
  */
@@ -68,7 +76,11 @@
   var MSG_REDEFINIR = 'Com o Supabase cada pessoa cria a própria senha nova pelo "Esqueci minha senha", na tela de entrada.';
   var MODELOS_RELATORIO = ['equipe', 'lideranca', 'pessoa'];
   var TIPOS_RELACAO = ['lidera', 'direto', 'indireto'];
-  var MAX_DADOS_RELATORIO = 300000;     // ~300 KB de JSON (o banco recusa acima de ~350 mil caracteres)
+  var MAX_DADOS_RELATORIO = 1000000;    // ~1 MB de JSON (o banco recusa acima de 1,1 milhão de caracteres)
+  var MSG_REL_GRANDE = 'Relatório grande demais (máximo 1 MB).';
+  var FOTO_MAX = 40000;                 // data URL inteira (o banco recusa acima disso)
+  var RE_FOTO = /^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/=]+$/;
+  var MSG_FOTO_INVALIDA = 'Foto inválida ou grande demais. Escolha outra imagem.';
   var SENHA_MIN = 8;
   var SENHA_MAX = 100;
   var STATUS_VALIDOS = ['em_analise', 'aprovado', 'reprovado'];
@@ -155,11 +167,12 @@
   // Mesma regra de disc_interno.normalizar_formulario (banco) e de js/api-simulada.js.
   // ---------------------------------------------------------------------------
   var MODOS_CAMPO = ['obrigatorio', 'opcional', 'oculto'];
-  var CAMPOS_FORMULARIO = ['idade', 'funcao', 'empresa', 'email', 'cidade'];
-  var FORMULARIO_PADRAO = { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto' };
+  var CAMPOS_FORMULARIO = ['idade', 'funcao', 'empresa', 'email', 'cidade', 'foto'];
+  var FORMULARIO_PADRAO = { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto', foto: 'opcional' };
   var MAX_PERGUNTAS = 5;
 
-  /** {campos:{idade,funcao,empresa,email,cidade: 'obrigatorio'|'opcional'|'oculto'}, perguntas:[{id,texto,obrigatoria}]} */
+  /** {campos:{idade,funcao,empresa,email,cidade,foto: 'obrigatorio'|'opcional'|'oculto'}, perguntas:[{id,texto,obrigatoria}],
+   *  parte2:'desligada'|'ligada'} */
   function normalizarFormulario(f) {
     f = f && typeof f === 'object' && !Array.isArray(f) ? f : {};
     var origem = f.campos && typeof f.campos === 'object' && !Array.isArray(f.campos) ? f.campos : {};
@@ -183,8 +196,51 @@
       usados[id] = true;
       perguntas.push({ id: id, texto: texto, obrigatoria: p.obrigatoria === true });
     });
-    return { campos: campos, perguntas: perguntas };
+    return { campos: campos, perguntas: perguntas, parte2: f.parte2 === 'ligada' ? 'ligada' : 'desligada' };
   }
+  // ---------------------------------------------------------------------------
+  // Parte 2 (perfil exigido pelo trabalho): 40 dígitos, 10 grupos × 4 na ordem D,I,S,C, cada grupo uma
+  // permutação de 1..4. Usa DISC_EXIGIDO (js/disc-exigido.js) quando carregado; senão o cálculo mínimo
+  // com a mesma regra (total por letra nos 10 grupos = percentual; código = maior + segundo, empate D,I,S,C).
+  // ---------------------------------------------------------------------------
+  function moduloExigido() {
+    if (root && root.DISC_EXIGIDO) return root.DISC_EXIGIDO;
+    if (typeof require === 'function') {
+      try { return require('./disc-exigido.js'); } catch (e) { /* usa o cálculo local */ }
+    }
+    return null;
+  }
+  function exigidoValido(str) {
+    if (typeof str !== 'string' || !/^[1-4]{40}$/.test(str)) return false;
+    for (var g = 0; g < 10; g++) {
+      if (str.substr(g * 4, 4).split('').sort().join('') !== '1234') return false;
+    }
+    return true;
+  }
+  /** exigido (string) -> {percentuais:{D,I,S,C}, codigo} ou null se ausente/inválido. */
+  function calcularExigido(str) {
+    str = typeof str === 'string' ? str.replace(/\D/g, '') : '';
+    if (!exigidoValido(str)) return null;
+    var m = moduloExigido();
+    if (m && typeof m.calcular === 'function') {
+      try {
+        var r = m.calcular(str);
+        if (r && r.percentuais) return { percentuais: r.percentuais, codigo: r.codigo };
+      } catch (e) { /* usa o cálculo local */ }
+    }
+    var letras = ['D', 'I', 'S', 'C'];
+    var tot = { D: 0, I: 0, S: 0, C: 0 };
+    for (var i = 0; i < 40; i++) tot[letras[i % 4]] += Number(str[i]);
+    var ordem = letras.slice().sort(function (a, b) { return tot[b] - tot[a]; });
+    return { percentuais: { D: tot.D, I: tot.I, S: tot.S, C: tot.C }, codigo: ordem[0] + ordem[1] };
+  }
+
+  /** Foto aceita pelo servidor: data URL JPEG (base64 começando em "/9j/") com até 40 000 caracteres. */
+  function fotoValida(str) {
+    return typeof str === 'string' && str.length <= FOTO_MAX && RE_FOTO.test(str);
+  }
+  function fotoOuVazio(str) { return fotoValida(str) ? str : ''; }
+
   /** Mensagem de recusa se alguma pergunta extra pede dado sensível (sem exceções); senão ''. */
   function perguntaSensivel(f) {
     var lista = f && typeof f === 'object' && Array.isArray(f.perguntas) ? f.perguntas : [];
@@ -442,7 +498,7 @@
     return {
       id: String(p.id), nome: p.nome || '', telefone: String(p.telefone || '').replace(/\D/g, ''),
       idade: isFinite(idade) ? idade : null, funcao: p.funcao || '', empresa: p.empresa || '',
-      email: p.email || '', cidade: p.cidade || '', atualizadoEm: iso(p.atualizado_em)
+      email: p.email || '', cidade: p.cidade || '', foto: fotoOuVazio(p.foto), atualizadoEm: iso(p.atualizado_em)
     };
   }
   /** Respostas das perguntas extras gravadas: [{id, pergunta, resposta}] (o que não tiver esse formato sai). */
@@ -473,6 +529,9 @@
       duracaoSeg: numero(l.duracao_seg),
       respostas: respostas,
       resultado: calcularDisc(respostas, l, scoring),
+      exigido: exigidoValido(l.exigido) ? l.exigido : '',
+      resultadoExigido: calcularExigido(l.exigido),
+      foto: fotoOuVazio(l.foto),
       status: STATUS_VALIDOS.indexOf(l.status) >= 0 ? l.status : STATUS_PADRAO,
       observacoes: l.observacoes || '',
       recebidoEm: iso(l.recebido_em),
@@ -517,7 +576,9 @@
       vinculoId: String(v.id), pessoaId: String(v.pessoa_id || p.id || ''), nome: p.nome || '',
       telefone: String(p.telefone || '').replace(/\D/g, ''), cargo: v.cargo || '', area: v.area || '',
       status: v.status === 'desligado' ? 'desligado' : 'ativo', inicio: dataCurta(v.inicio), fim: dataCurta(v.fim),
-      resultado: resultado, respondidoEm: resultado && ultima ? iso(ultima.recebido_em) : ''
+      resultado: resultado, respondidoEm: resultado && ultima ? iso(ultima.recebido_em) : '',
+      exigido: ultima ? calcularExigido(ultima.exigido) : null,
+      foto: fotoOuVazio(p.foto)
     };
   }
   function colaboradorDaRpc(c) {
@@ -625,11 +686,15 @@
       var meta = u.user_metadata || {};
       var usuario = {
         id: String(u.id || ''), nome: limparTexto(meta.nome || meta.name || '', 120), email: String(u.email || ''),
-        papel: eAdmin ? 'admin' : '', empresaId: '', empresaNome: ''
+        papel: eAdmin ? 'admin' : '', empresaId: '', empresaNome: '', foto: ''
       };
       if (!eAdmin) return Promise.resolve(usuario);
-      return consulta(function (c) { return c.from('admins').select('nome').eq('user_id', usuario.id).maybeSingle(); })
-        .then(function (linha) { if (linha && linha.nome) usuario.nome = linha.nome; return usuario; },
+      return consulta(function (c) { return c.from('admins').select('nome, foto').eq('user_id', usuario.id).maybeSingle(); })
+        .then(function (linha) {
+          if (linha && linha.nome) usuario.nome = linha.nome;
+          if (linha) usuario.foto = fotoOuVazio(linha.foto);
+          return usuario;
+        },
           function () { return usuario; })
         .then(function (x) { if (!x.nome) x.nome = x.email; return x; });
     }
@@ -828,7 +893,7 @@
       return Promise.all([
         consulta(function (c) { return c.from('empresas').select('*').eq('id', empresaId).maybeSingle(); }),
         consulta(function (c) {
-          return c.from('vinculos').select('*, pessoas(id, nome, telefone, respostas(respostas, d, i, s, c, perfil, recebido_em))')
+          return c.from('vinculos').select('*, pessoas(id, nome, telefone, foto, respostas(respostas, exigido, d, i, s, c, perfil, recebido_em))')
             .eq('empresa_id', empresaId).order('inicio', { ascending: true });
         }),
         consulta(function (c) { return c.from('relacoes').select('de_pessoa, para_pessoa, tipo').eq('empresa_id', empresaId); })
@@ -879,7 +944,7 @@
       if (snap.modelo !== undefined && snap.modelo !== modelo) throw recusa('Os dados não são de um relatório "' + modelo + '".');
       var json;
       try { json = JSON.stringify(snap); } catch (e) { throw recusa('Dados do relatório inválidos.'); }
-      if (json.length > MAX_DADOS_RELATORIO) throw recusa('Relatório grande demais (máximo 300 KB).');
+      if (json.length > MAX_DADOS_RELATORIO) throw recusa(MSG_REL_GRANDE);
       snap = JSON.parse(json);
       snap.modelo = modelo;
       var linha = { modelo: modelo, empresa_id: empresaId || null, pessoa_id: pessoaId || null, dados: snap };
@@ -1018,7 +1083,7 @@
       listar: seguro(function (token) {
         return exigirSessao(token).then(function () {
           return listarTodas('respostas', '*, processos(nome, tipo, empresa, codigo), ' +
-            'pessoas(id, nome, telefone, idade, funcao, empresa, email, cidade, atualizado_em)', 'recebido_em');
+            'pessoas(id, nome, telefone, idade, funcao, empresa, email, cidade, foto, atualizado_em)', 'recebido_em');
         }).then(function (linhas) {
           var sc = scoring();
           return { ok: true, itens: linhas.map(function (l) { return itemDaLinha(l, sc); }) };
@@ -1037,13 +1102,34 @@
           mudar.status = st;
         }
         if (campos.observacoes !== undefined) mudar.observacoes = limparTextoLongo(campos.observacoes, 5000);
-        if (!Object.keys(mudar).length) throw recusa('Nada para atualizar.');
+        var tirarFoto = false;
+        if (campos.foto !== undefined) {
+          if (campos.foto !== '' && campos.foto !== null) throw recusa('A foto do participante só pode ser removida.');
+          tirarFoto = true;
+        }
+        if (!Object.keys(mudar).length && !tirarFoto) throw recusa('Nada para atualizar.');
         return exigirSessao(token).then(function () {
+          if (!Object.keys(mudar).length) return [{ id: id }];
           return consulta(function (c) { return c.from('respostas').update(mudar).eq('id', id).select('id'); });
         }).then(function (linhas) {
           if (!Array.isArray(linhas) || !linhas.length) throw recusa('Candidato não encontrado.');
-          return { ok: true, id: id };
+          if (!tirarFoto) return { ok: true, id: id };
+          return rpcOk('remover_foto', { p_resposta: id }).then(function () { return { ok: true, id: id }; });
         });
+      }),
+      removerFoto: seguro(function (token, idBruto) {
+        exigirToken(token);
+        exigir(idBruto, 'Candidato não informado.');
+        var id = limparTexto(idBruto, 80);
+        return exigirSessao(token).then(function () { return rpcOk('remover_foto', { p_resposta: id }); })
+          .then(function (r) { return { ok: true, id: id, removidas: numero(r.removidas) }; });
+      }),
+      salvarMinhaFoto: seguro(function (token, dataUrl) {
+        exigirToken(token);
+        var foto = dataUrl === null || dataUrl === undefined ? '' : (typeof dataUrl === 'string' ? dataUrl.trim() : null);
+        if (foto === null || (foto !== '' && !fotoValida(foto))) throw recusa(MSG_FOTO_INVALIDA);
+        return exigirSessao(token).then(function () { return rpcOk('salvar_minha_foto', { p_foto: foto }); })
+          .then(function (r) { return { ok: true, foto: fotoOuVazio(r.foto) }; });
       }),
       excluir: seguro(function (token, idBruto) {
         exigirToken(token);
@@ -1215,7 +1301,12 @@
       }),
 
       // --- usuários (Supabase Auth, pela Edge Function "admin") ---
-      listarUsuarios: seguro(function (token) { return admin(token, 'usuarios.listar'); }),
+      listarUsuarios: seguro(function (token) {
+        return admin(token, 'usuarios.listar').then(function (r) {
+          if (Array.isArray(r.usuarios)) r.usuarios.forEach(function (u) { if (u && typeof u === 'object') u.foto = fotoOuVazio(u.foto); });
+          return r;
+        });
+      }),
       convidarUsuario: seguro(function (token, usuario) {
         usuario = usuario || {};
         return admin(token, 'usuarios.convidar', { email: usuario.email, nome: usuario.nome }, prazoLongo);
@@ -1230,11 +1321,11 @@
           if (letrasContadas(nome) < 2) throw recusa('Informe o nome do usuário.');
           if (usuario.ativo === false) throw recusa('Para tirar o acesso de alguém, exclua o usuário.');
           if (!RE_UUID.test(id)) throw recusa('Usuário não encontrado.');
-          return consulta(function (c) { return c.from('admins').update({ nome: nome }).eq('user_id', id).select('user_id, nome, criado_em'); });
+          return consulta(function (c) { return c.from('admins').update({ nome: nome }).eq('user_id', id).select('user_id, nome, criado_em, foto'); });
         }).then(function (linhas) {
           var l = Array.isArray(linhas) ? linhas[0] : null;
           if (!l) throw recusa('Usuário não encontrado.');
-          return { ok: true, usuario: { id: String(l.user_id), nome: l.nome || '', email: limparTexto(usuario.email, 120), papel: 'admin', empresaId: '', empresaNome: '', ativo: true, criadoEm: iso(l.criado_em) } };
+          return { ok: true, usuario: { id: String(l.user_id), nome: l.nome || '', email: limparTexto(usuario.email, 120), papel: 'admin', empresaId: '', empresaNome: '', ativo: true, criadoEm: iso(l.criado_em), foto: fotoOuVazio(l.foto) } };
         });
       }),
       excluirUsuario: seguro(function (token, id) { return admin(token, 'usuarios.remover', { id: id }); }),
@@ -1324,7 +1415,7 @@
     'relatorioRascunho', 'relatorioSalvar', 'relatorioPublicar', 'relatorioDespublicar', 'relatoriosListar',
     'relatorioMelhorarTextos', 'relatorioPublico',
     'listarEquipe', 'salvarColaborador', 'moverColaborador', 'desligarColaborador', 'salvarRelacoes',
-    'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo'];
+    'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo', 'salvarMinhaFoto', 'removerFoto'];
 
   var DISC_API_SUPABASE = {
     METODOS: METODOS,
@@ -1339,7 +1430,11 @@
     normalizarFormulario: normalizarFormulario,
     FORMULARIO_PADRAO: FORMULARIO_PADRAO,
     processoPublico: processoPublico,
-    itemDaLinha: itemDaLinha
+    itemDaLinha: itemDaLinha,
+    exigidoValido: exigidoValido,
+    calcularExigido: calcularExigido,
+    fotoValida: fotoValida,
+    FOTO_MAX: FOTO_MAX
   };
 
   if (typeof module !== 'undefined' && module.exports) { module.exports = DISC_API_SUPABASE; return; }

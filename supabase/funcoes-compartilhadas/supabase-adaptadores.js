@@ -41,7 +41,7 @@ export function criarDb(sb) {
     },
     /** Respostas do DISC do processo (pelo processo_id; histórico importado só com o código também vale). */
     async respostasDoProcesso(proc) {
-      let q = sb.from('respostas').select('id, pessoa_id, telefone, respostas, validacao, protocolo, recebido_em');
+      let q = sb.from('respostas').select('id, pessoa_id, telefone, respostas, validacao, protocolo, recebido_em, foto, pessoas(foto)');
       q = /^[A-Z0-9]{4}$/.test(proc.codigo || '')
         ? q.or('processo_id.eq.' + proc.id + ',avaliacao.eq.' + proc.codigo)
         : q.eq('processo_id', proc.id);
@@ -86,7 +86,7 @@ export function criarDb(sb) {
       await dados(sb.from('configuracoes').upsert({ chave, valor }, { onConflict: 'chave' }));
     },
     async adminsListar() {
-      return (await dados(sb.from('admins').select('user_id, nome, criado_em').order('criado_em', { ascending: true }))) || [];
+      return (await dados(sb.from('admins').select('user_id, nome, criado_em, foto').order('criado_em', { ascending: true }))) || [];
     },
     async adminInserir(userId, nome) {
       await dados(sb.from('admins').upsert({ user_id: userId, nome }, { onConflict: 'user_id' }));

@@ -564,8 +564,17 @@ function itemDaResposta(l) {
   return {
     id: String(l.id), telefone: l.telefone || '', respostas: l.respostas || '', validacao,
     protocolo: normalizarProtocolo(l.protocolo), resultado,
-    pessoaId: l.pessoa_id ? String(l.pessoa_id) : '', recebidoEm: l.recebido_em ? String(l.recebido_em) : ''
+    pessoaId: l.pessoa_id ? String(l.pessoa_id) : '', recebidoEm: l.recebido_em ? String(l.recebido_em) : '',
+    foto: fotoDaLinha(l)
   };
+}
+
+/** Foto da resposta ou, sem ela, a da ficha da pessoa (pessoas embutida); '' se nenhuma válida. */
+function fotoDaLinha(l) {
+  const ok = (f) => typeof f === 'string' && f.length <= 40000 && /^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/=]+$/.test(f);
+  if (ok(l.foto)) return l.foto;
+  const p = Array.isArray(l.pessoas) ? l.pessoas[0] : l.pessoas;
+  return p && ok(p.foto) ? p.foto : '';
 }
 
 /**
@@ -661,11 +670,13 @@ async function cuMontarDadosProcesso(cu, proc, linhasRespostas, motorConfiabilid
     if (cuEhBriefing(t.name)) continue;
     const fones = telefones.map((c) => cuValorNaTarefa(t, c)).filter(Boolean);
     let disc = null;
+    let foto = '';
     for (const resp of respostas) {
       if (disc) break;
       if (usadas[resp.id]) continue;
       if (fones.some((f) => cuMesmoTelefone(f, resp.telefone))) {
         disc = cuDiscDaResposta(resp, motorConfiabilidade);
+        foto = resp.foto || '';
         usadas[resp.id] = true;
       }
     }
@@ -708,6 +719,7 @@ async function cuMontarDadosProcesso(cu, proc, linhasRespostas, motorConfiabilid
       disc,
       finalista
     };
+    if (foto) cand.foto = foto;
     if (antecedentes.length) {
       cand.antecedentes = antecedentes.map((c) => cuValorNaTarefa(t, c))
         .filter((v) => v !== null && v !== false).map(String).join('; ') || null;
@@ -791,14 +803,77 @@ function relNomeCurto(nome) {
   return partes[0] + ' ' + partes[partes.length - 1].charAt(0).toUpperCase() + '.';
 }
 
+// Fotos dos candidatos (data URL JPEG até 40 000 caracteres, a mesma regra do banco).
+const REL_FOTO_MAX = 40000;
+const REL_MAX_JSON_COM_FOTOS = 1500000;
+const RE_FOTO = /^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/=]+$/;
+function relFotoValida(f) { return typeof f === 'string' && f.length <= REL_FOTO_MAX && RE_FOTO.test(f); }
+
+const PARTICULAS = { de: 1, da: 1, das: 1, do: 1, dos: 1, e: 1, di: 1, du: 1, del: 1, van: 1, von: 1 };
+
+/**
+ * Mesmos nomes curtos que o motor usa nos candidatos (nomesCurtos de js/relatorio-motor.js, com o
+ * primeiroNome dele): {idDoCandidato: "Ana P."}. Serve para pôr a foto certa em cada linha do relatório.
+ */
+function relNomesCurtos(motor, candidatos) {
+  const mapa = {};
+  const usados = {};
+  const texto = (v) => (v === null || v === undefined ? '' : String(v));
+  const maiuscula = (v) => { v = texto(v); return v.charAt(0).toUpperCase() + v.slice(1); };
+  (candidatos || []).filter((c) => c && typeof c === 'object').forEach((c) => {
+    let curto = motor.primeiroNome(c.nome);
+    if (usados[curto]) {
+      const partes = texto(c.nome).split(/\s+/).filter((p) => p && !PARTICULAS[p.toLowerCase()]);
+      let alt = maiuscula(partes[0] || curto);
+      for (let i = 1; i < partes.length; i++) alt += ' ' + partes[i].charAt(0).toUpperCase() + '.';
+      curto = usados[alt] ? curto : alt;
+    }
+    const base = curto;
+    let n = 2;
+    while (usados[curto]) curto = base + ' (' + (n++) + ')';
+    usados[curto] = true;
+    mapa[c.id] = curto;
+  });
+  return mapa;
+}
+
+/**
+ * Põe "foto" em cada candidato do relatório (ranking.linhas e disc.quadro) a partir de candidatos[].foto.
+ * Só fotos válidas; sem foto o campo não aparece (a página mostra as iniciais). Se o JSON passar de
+ * REL_MAX_JSON_COM_FOTOS, as fotos que não couberem ficam de fora (na ordem do ranking).
+ */
+function relAplicarFotos(relatorio, motor, candidatos) {
+  if (!relatorio || !motor || typeof motor.primeiroNome !== 'function') return relatorio;
+  const curtos = relNomesCurtos(motor, candidatos);
+  const porNome = {};
+  (candidatos || []).forEach((c) => {
+    if (c && relFotoValida(c.foto) && curtos[c.id]) porNome[curtos[c.id]] = c.foto;
+  });
+  if (!Object.keys(porNome).length) return relatorio;
+  const linhas = (relatorio.ranking && Array.isArray(relatorio.ranking.linhas)) ? relatorio.ranking.linhas : [];
+  const quadro = (relatorio.disc && Array.isArray(relatorio.disc.quadro)) ? relatorio.disc.quadro : [];
+  let tamanho = JSON.stringify(relatorio).length;
+  const nomes = [];
+  linhas.concat(quadro).forEach((l) => { if (l && porNome[l.nome] && nomes.indexOf(l.nome) < 0) nomes.push(l.nome); });
+  nomes.forEach((nome) => {
+    const alvos = linhas.concat(quadro).filter((l) => l && l.nome === nome);
+    const custo = alvos.length * (porNome[nome].length + 10);
+    if (tamanho + custo > REL_MAX_JSON_COM_FOTOS) return;
+    alvos.forEach((l) => { l.foto = porNome[nome]; });
+    tamanho += custo;
+  });
+  return relatorio;
+}
+
 /**
  * Roda o motor com uma cópia dos dados SEM antecedentes e devolve o relatório. Garante, no fim, que
- * nenhum nome completo ficou no JSON (troca por "Nome S.") e tira o id da lista do ClickUp.
+ * nenhum nome completo ficou no JSON (troca por "Nome S.") e tira o id da lista do ClickUp. As fotos dos
+ * candidatos (candidatos[].foto) entram depois, em ranking.linhas[].foto e disc.quadro[].foto.
  */
 function relMontar(motor, dados, geradoEm) {
   if (!motor || typeof motor.montar !== 'function') throw new Error('Motor do relatório ausente nas Edge Functions (rode npm run montar:funcoes).');
   const copia = JSON.parse(JSON.stringify(dados));
-  (copia.candidatos || []).forEach((c) => { delete c.antecedentes; });
+  (copia.candidatos || []).forEach((c) => { delete c.antecedentes; delete c.foto; });
   const relatorio = motor.montar(copia, { geradoEm });
   if (relatorio && relatorio.processo) delete relatorio.processo.clickupListId;
   let json = JSON.stringify(relatorio);
@@ -810,7 +885,7 @@ function relMontar(motor, dados, geradoEm) {
     }
   });
   if (json.length > REL_MAX_JSON) throw new Error('Relatório grande demais para guardar.');
-  return JSON.parse(json);
+  return relAplicarFotos(JSON.parse(json), motor, dados.candidatos);
 }
 
 /**
@@ -1137,7 +1212,8 @@ function usuarioDaLista(admin, u, eu) {
     criadoEm: admin.criado_em || u.created_at || '',
     ultimoAcesso: u.last_sign_in_at || '',
     convitePendente: !!(u.invited_at && !u.last_sign_in_at),
-    voce: String(admin.user_id) === String(eu)
+    voce: String(admin.user_id) === String(eu),
+    foto: typeof admin.foto === 'string' && admin.foto.length <= 40000 && /^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/=]+$/.test(admin.foto) ? admin.foto : ''
   };
 }
 
@@ -1533,7 +1609,7 @@ function criarDb(sb) {
     },
     /** Respostas do DISC do processo (pelo processo_id; histórico importado só com o código também vale). */
     async respostasDoProcesso(proc) {
-      let q = sb.from('respostas').select('id, pessoa_id, telefone, respostas, validacao, protocolo, recebido_em');
+      let q = sb.from('respostas').select('id, pessoa_id, telefone, respostas, validacao, protocolo, recebido_em, foto, pessoas(foto)');
       q = /^[A-Z0-9]{4}$/.test(proc.codigo || '')
         ? q.or('processo_id.eq.' + proc.id + ',avaliacao.eq.' + proc.codigo)
         : q.eq('processo_id', proc.id);
@@ -1578,7 +1654,7 @@ function criarDb(sb) {
       await dados(sb.from('configuracoes').upsert({ chave, valor }, { onConflict: 'chave' }));
     },
     async adminsListar() {
-      return (await dados(sb.from('admins').select('user_id, nome, criado_em').order('criado_em', { ascending: true }))) || [];
+      return (await dados(sb.from('admins').select('user_id, nome, criado_em, foto').order('criado_em', { ascending: true }))) || [];
     },
     async adminInserir(userId, nome) {
       await dados(sb.from('admins').upsert({ user_id: userId, nome }, { onConflict: 'user_id' }));
@@ -1756,7 +1832,7 @@ const __motoresDisc = {};
  * Confiabilidade do resultado — calculada no painel (como o perfil), a partir das respostas e do
  * objeto `validacao` do payload (etapa de js/validacao.js). Nunca é mostrada ao participante.
  *
- * avaliar(respostasCompactas, validacao) -> { nivel: 'alta'|'media'|'baixa'|'indisponivel', pontos: 0..100,
+ * avaliar(respostasCompactas, validacao, opcoes?) -> { nivel: 'alta'|'media'|'baixa'|'indisponivel', pontos: 0..100,
  *                                             motivos: [string], detalhes: {...} }
  *
  * validacao = { versao: 1, pares: [[l1,l2] x3], escolhas: [letra x3], itens: [{id, letra, tipo, nota 1..5} x4],
@@ -1768,7 +1844,12 @@ const __motoresDisc = {};
  *    "só reconheceu o lado positivo" (leve); contraste >= 4 com força do 1º <= 2 = incoerente (forte).
  *  - Rapidez: grupos com 0 < seg < 3 em mais de 30% dos respondidos = forte.
  *  - Ordem aceita sem mexer em mais de 50% dos respondidos = leve.
- *  - Perfil achatado: maior% - menor% < 8 = leve.
+ *  - Perfil achatado: maior% - menor% < 8 OU todos os fatores entre 20% e 30% = leve (um só alerta).
+ *  - Fatores opostos altos: D e S >= 30% ou I e C >= 30% = leve. É um ponto para conversar (a pessoa
+ *    pode transitar entre estilos opostos ou ter respondido pensando em situações diferentes), não sinal de fraude.
+ *  - Tempo total < 4 min ou > 30 min = leve. Fonte, nesta ordem: opcoes.duracaoSeg (3º argumento,
+ *    ex.: payload.duracaoSeg), validacao.duracaoSeg, soma de gruposSeg (só quando os 25 grupos têm tempo;
+ *    sem a soma de telas fora dos grupos, por isso só vale para o limite inferior). Ignorado em demonstração.
  *  - Nível: baixa se acertos <= 1 ou 2+ fortes; alta se acertos >= 2, nenhum forte e no máx. 1 leve; senão média.
  */
 (function (root) {
@@ -1794,7 +1875,17 @@ const __motoresDisc = {};
     return null;
   }
 
-  function avaliar(respostasCompactas, validacao) {
+  var LIMIAR_OPOSTO = 30;
+  var TEMPO_MIN = 4 * 60;
+  var TEMPO_MAX = 30 * 60;
+
+  function minutos(seg) {
+    var m = Math.round(seg / 60);
+    return m <= 1 ? 'cerca de 1 minuto' : 'cerca de ' + m + ' minutos';
+  }
+
+  function avaliar(respostasCompactas, validacao, opcoes) {
+    opcoes = opcoes && typeof opcoes === 'object' ? opcoes : {};
     if (!validacao || typeof validacao !== 'object' || !Array.isArray(validacao.pares)) {
       return indisponivel('Respostas sem a etapa de confirmação (feitas antes dela existir).');
     }
@@ -1856,7 +1947,38 @@ const __motoresDisc = {};
     // 4) Perfil achatado
     var pcts = LETRAS.map(function (l) { return resultado.percentuais[l]; });
     var amplitude = Math.round((Math.max.apply(null, pcts) - Math.min.apply(null, pcts)) * 10) / 10;
-    if (amplitude < 8) leves.push('Perfil pouco definido (notas muito parecidas entre si).');
+    var pct = resultado.percentuais;
+    var faixaMedia = LETRAS.every(function (l) { return pct[l] >= 20 && pct[l] <= 30; });
+    var achatado = amplitude < 8 || faixaMedia;
+    if (achatado) leves.push('Perfil pouco definido (notas muito parecidas entre si).');
+
+    // 5) Fatores opostos altos (ritmo: D × S; foco: I × C)
+    var opostos = [];
+    if (pct.D >= LIMIAR_OPOSTO && pct.S >= LIMIAR_OPOSTO) opostos.push('DS');
+    if (pct.I >= LIMIAR_OPOSTO && pct.C >= LIMIAR_OPOSTO) opostos.push('IC');
+    if (opostos.length) {
+      leves.push('Dois estilos opostos aparecem altos ao mesmo tempo (' +
+        opostos.map(function (o) { return o === 'DS' ? 'agir rápido e manter a calma e a constância' : 'falar com as pessoas e se concentrar nos detalhes'; }).join('; ') +
+        '). Vale conversar: pode ser versatilidade real ou respostas pensadas em situações diferentes.');
+    }
+
+    // 6) Tempo total
+    var duracaoSeg = null, tempoFonte = null;
+    [[opcoes.duracaoSeg, 'payload'], [validacao.duracaoSeg, 'validacao']].forEach(function (c) {
+      var n = Number(c[0]);
+      if (duracaoSeg === null && c[0] !== null && c[0] !== undefined && c[0] !== '' && isFinite(n) && n > 0) { duracaoSeg = Math.round(n); tempoFonte = c[1]; }
+    });
+    if (duracaoSeg === null && respondidos >= SCORING.TOTAL_GRUPOS) {
+      duracaoSeg = Math.round(seg.reduce(function (a, s) { s = Number(s); return a + (s > 0 ? s : 0); }, 0));
+      tempoFonte = 'grupos';
+    }
+    var tempo = null;
+    if (duracaoSeg !== null && validacao.demonstracao !== true) {
+      if (duracaoSeg < TEMPO_MIN) tempo = 'curto';
+      else if (duracaoSeg > TEMPO_MAX && tempoFonte !== 'grupos') tempo = 'longo';
+    }
+    if (tempo === 'curto') leves.push('Fez o teste em ' + minutos(duracaoSeg) + ' (menos de 4 minutos é pouco para ler e ordenar os grupos com atenção).');
+    if (tempo === 'longo') leves.push('Levou ' + minutos(duracaoSeg) + ' para concluir (mais de 30 minutos): pode ter havido interrupções; vale confirmar na conversa.');
 
     // Nível
     var nivel;
@@ -1884,6 +2006,11 @@ const __motoresDisc = {};
         rapidos: rapidos,
         semMexer: semMexer,
         amplitude: amplitude,
+        achatado: achatado,
+        opostos: opostos,
+        duracaoSeg: duracaoSeg,
+        tempoFonte: tempoFonte,
+        tempo: tempo,
         alertasFortes: fortes,
         alertasLeves: leves,
         demonstracao: validacao.demonstracao === true

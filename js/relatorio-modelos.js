@@ -92,6 +92,97 @@
     return { percentuais: p, codigo: c };
   }
 
+  /* ------------------------------------------------------------------ peças da rodada 3 (Parte 2, régua, combinações, mapa)
+   * Todas degradam com elegância: sem o módulo (DISC_EXIGIDO, DISC_INTENSIDADE, DISC_COMBINACOES), o snapshot sai sem
+   * aquele bloco (ou com o cálculo numérico local), e a view simplesmente não desenha o que falta. */
+
+  // Foto: só data URL JPEG em base64 até 40 000 caracteres; outra coisa vira null (a view desenha as iniciais).
+  var RE_FOTO = /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/;
+  function fotoValida(f) { return typeof f === 'string' && f.length <= 40000 && RE_FOTO.test(f); }
+  function fotoDe(f) { return fotoValida(f) ? f : null; }
+
+  function arred1(n) { return Math.round(n * 10) / 10; }
+  function exigidoMod() { return dep('DISC_EXIGIDO', './disc-exigido.js'); }
+
+  // Eixos ritmo × foco na convenção de DISC_EXIGIDO.eixos / compatibilidade (ritmo + acelerado, foco + TAREFAS).
+  function eixosDe(percentuais) {
+    var X = exigidoMod();
+    if (X && typeof X.eixos === 'function') { var e = X.eixos(percentuais); return { ritmo: e.ritmo, foco: e.foco }; }
+    var p = percentuais, soma = 0;
+    LETRAS.forEach(function (l) { soma += p[l]; });
+    var q = {};
+    LETRAS.forEach(function (l) { q[l] = p[l] * 100 / soma; });
+    return { ritmo: arred1(q.D + q.I - q.S - q.C), foco: arred1(q.D + q.C - q.I - q.S) };
+  }
+
+  // Perfil exigido: string de 40 dígitos (calculada por DISC_EXIGIDO) ou {percentuais, codigo}. Inválido/ausente -> null.
+  function exigidoValido(x) {
+    if (x === null || x === undefined || x === '') return null;
+    if (typeof x === 'string') {
+      var X = exigidoMod();
+      if (!X || !X.validar(x)) return null;
+      try { var c = X.calcular(x); return resultadoValido({ percentuais: c.percentuais, codigo: c.codigo }); } catch (e) { return null; }
+    }
+    return resultadoValido(x);
+  }
+
+  // Bloco "natural × exigido" do snapshot. textos: 'pessoa' | 'lider' (DISC_EXIGIDO.adaptacao).
+  function blocoExigido(natural, exigido, quem, nome) {
+    if (!natural || !exigido) return null;
+    var X = exigidoMod();
+    var a = X && typeof X.adaptacao === 'function' ? X.adaptacao(natural, exigido, quem === 'lider' ? { nome: nome } : undefined) : null;
+    var porFator = {}, soma = 0;
+    LETRAS.forEach(function (l) { porFator[l] = arred1(exigido.percentuais[l] - natural.percentuais[l]); soma += Math.abs(porFator[l]); });
+    var indice = a ? a.indice : Math.round(soma / 2);
+    var faixa = a ? a.faixa : indice < 10 ? 'baixa' : indice < 20 ? 'moderada' : indice < 30 ? 'alta' : 'muito_alta';
+    return {
+      percentuais: copia(exigido.percentuais), codigo: exigido.codigo,
+      indice: indice, faixa: faixa, rotulo: a && a.rotulo ? a.rotulo : null,
+      porFator: a ? copia(a.porFator) : porFator,
+      maisCobrado: a ? a.maisCobrado : null, menosUsado: a ? a.menosUsado : null,
+      eixos: { natural: eixosDe(natural.percentuais), exigido: eixosDe(exigido.percentuais) },
+      textos: a && a.textos && Array.isArray(a.textos[quem]) ? a.textos[quem].slice() : []
+    };
+  }
+
+  // Régua de intensidade: faixa + rótulo + texto por fator (DISC_INTENSIDADE). Sem o módulo: faixa local, sem texto.
+  var LIMITES_PADRAO = [15, 22, 29, 36];
+  var ROTULOS_PADRAO = { muito_baixa: 'Muito baixa', baixa: 'Baixa', media: 'Média', alta: 'Alta', muito_alta: 'Muito alta' };
+  var FAIXAS_INT = ['muito_baixa', 'baixa', 'media', 'alta', 'muito_alta'];
+  function intensidadeMod() { return dep('DISC_INTENSIDADE', './disc-intensidade.js'); }
+  function regua() {
+    var I = intensidadeMod();
+    var lim = I && Array.isArray(I.LIMITES) && I.LIMITES.length === 4 ? I.LIMITES.slice() : LIMITES_PADRAO.slice();
+    var rot = {};
+    FAIXAS_INT.forEach(function (f) { rot[f] = I && I.ROTULOS && typeof I.ROTULOS[f] === 'string' ? I.ROTULOS[f] : ROTULOS_PADRAO[f]; });
+    return { limites: lim, min: 10, max: 40, rotulos: rot };
+  }
+  function intensidade(letra, pct, rg) {
+    var I = intensidadeMod();
+    var faixa = null;
+    if (I && typeof I.faixa === 'function') faixa = I.faixa(pct);
+    if (FAIXAS_INT.indexOf(faixa) < 0) {
+      faixa = FAIXAS_INT[4];
+      for (var i = 0; i < 4; i++) if (pct < rg.limites[i]) { faixa = FAIXAS_INT[i]; break; }
+    }
+    var t = null;
+    if (I && typeof I.texto === 'function') {
+      var x = I.texto(letra, faixa);
+      if (x && typeof x === 'object') t = { resumo: texto(x.resumo) || null, comportamento: texto(x.comportamento) || null, excesso: texto(x.excesso) || null, falta: texto(x.falta) || null };
+    }
+    return { faixa: faixa, faixaRotulo: rg.rotulos[faixa], texto: t };
+  }
+
+  // Nome Notus da combinação (DISC_COMBINACOES.nome). Sem o módulo ou sem nome: null.
+  function combinacao(codigo, percentuais) {
+    var CB = dep('DISC_COMBINACOES', './disc-combinacoes.js');
+    if (!CB || typeof CB.nome !== 'function' || !codigo) return null;
+    var c = null;
+    try { c = CB.nome(codigo, percentuais); } catch (e) { c = null; }
+    if (!c || typeof c !== 'object' || !texto(c.nome)) return null;
+    return { codigo: texto(c.codigo) || codigo, nome: texto(c.nome), frase: texto(c.frase) || null, descricao: texto(c.descricao) || null };
+  }
+
   function nivelHarmonia(n) {
     if (n === null || n === undefined) return 'indefinido';
     return n >= 70 ? 'fluido' : n >= 50 ? 'atencao' : 'tensao';
@@ -110,6 +201,80 @@
 
   /* ------------------------------------------------------------------ EQUIPE */
 
+  // Base de decisão pelo fator principal: D decide pelo resultado e pela intuição prática; I e S, ouvindo as pessoas;
+  // C, pelos dados. Ritmo: média dos eixos do time.
+  var BASE_DE = { D: 'intuicao', I: 'pessoas', S: 'pessoas', C: 'dados' };
+  var BASE_TXT = {
+    intuicao: { nome: 'Intuição e resultado', texto: 'boa parte do time decide pela experiência e pelo resultado que quer alcançar, sem esperar ter todas as informações' },
+    pessoas: { nome: 'Pessoas e acordo', texto: 'boa parte do time decide ouvindo quem será afetado e buscando acordo antes de seguir' },
+    dados: { nome: 'Dados e critério', texto: 'boa parte do time decide comparando informações, regras e riscos antes de escolher' }
+  };
+  var BASE_CUIDADO = {
+    intuicao: 'Para equilibrar, vale reservar um momento curto para checar números e ouvir quem executa antes de fechar decisões grandes.',
+    pessoas: 'Para equilibrar, vale definir quem dá a palavra final e um prazo, para que a busca de consenso não atrase o que é urgente.',
+    dados: 'Para equilibrar, vale combinar quanto de análise cada decisão merece, para que a busca da informação completa não segure o que pode andar.'
+  };
+  function decisaoGrupo(colabs) {
+    var com = colabs.filter(function (c) { return c.resultado; });
+    if (!com.length) return null;
+    var base = { dados: 0, pessoas: 0, intuicao: 0 }, soma = { ritmo: 0, foco: 0 };
+    com.forEach(function (c) {
+      base[BASE_DE[c.resultado.codigo.charAt(0)]]++;
+      var e = eixosDe(c.resultado.percentuais);
+      soma.ritmo += e.ritmo; soma.foco += e.foco;
+    });
+    var ritmo = arred1(soma.ritmo / com.length), focoM = arred1(soma.foco / com.length);
+    var ordem = ['dados', 'pessoas', 'intuicao'].sort(function (a, b) { return base[b] - base[a]; });
+    var pred = base[ordem[0]] > base[ordem[1]] ? ordem[0] : null;
+    var t = [];
+    t.push(ritmo >= 10 ? 'O time tende a decidir rápido: prefere agir e ajustar no caminho a esperar por todas as respostas.' :
+      ritmo <= -10 ? 'O time tende a decidir com cuidado: prefere pensar, consultar e ter segurança antes de mudar o rumo.' :
+        'O ritmo de decisão do time é equilibrado: há quem acelere e quem peça mais tempo, e isso pode ser uma força se os papéis forem combinados.');
+    t.push(focoM >= 10 ? 'Na hora de decidir, o olhar vai primeiro para a tarefa: prazos, metas e qualidade da entrega.' :
+      focoM <= -10 ? 'Na hora de decidir, o olhar vai primeiro para as pessoas: como cada um será afetado e como manter o grupo junto.' :
+        'Na hora de decidir, o time olha tanto para a tarefa quanto para as pessoas.');
+    if (pred) t.push(BASE_TXT[pred].nome + ': ' + BASE_TXT[pred].texto + '. ' + BASE_CUIDADO[pred]);
+    else t.push('Não há uma única base de decisão predominante: dados, pessoas e intuição aparecem no time. Combinar quem traz cada olhar ajuda a decidir melhor.');
+    return {
+      ritmo: ritmo, foco: focoM,
+      ritmoRotulo: ritmo >= 10 ? 'Rápido' : ritmo <= -10 ? 'Cuidadoso' : 'Equilibrado',
+      focoRotulo: focoM >= 10 ? 'Tarefas' : focoM <= -10 ? 'Pessoas' : 'Equilibrado',
+      base: base, basePredominante: pred,
+      bases: ['dados', 'pessoas', 'intuicao'].map(function (k) { return { chave: k, nome: BASE_TXT[k].nome, qtd: base[k] }; }),
+      textos: t
+    };
+  }
+
+  // Pressão média (Parte 2): só com colaboradores que responderam o perfil exigido.
+  function pressaoGrupo(colabs, colaboradores) {
+    var com = colaboradores.filter(function (c) { return c.exigido; });
+    if (!com.length) return null;
+    var soma = 0, porFaixa = { baixa: 0, moderada: 0, alta: 0, muito_alta: 0 }, cobrado = { D: 0, I: 0, S: 0, C: 0 };
+    com.forEach(function (c) {
+      soma += c.exigido.indice;
+      if (porFaixa[c.exigido.faixa] !== undefined) porFaixa[c.exigido.faixa]++;
+      if (c.exigido.maisCobrado) cobrado[c.exigido.maisCobrado]++;
+    });
+    var media = Math.round(soma / com.length);
+    var faixa = media < 10 ? 'baixa' : media < 20 ? 'moderada' : media < 30 ? 'alta' : 'muito_alta';
+    var maisCobrado = null;
+    LETRAS.forEach(function (l) { if (cobrado[l] && (!maisCobrado || cobrado[l] > cobrado[maisCobrado])) maisCobrado = l; });
+    var altos = porFaixa.alta + porFaixa.muito_alta;
+    var t = [];
+    t.push(faixa === 'baixa' ? 'Em média, o trabalho pede das pessoas algo próximo do jeito natural delas: pouco esforço de adaptação.' :
+      faixa === 'moderada' ? 'Em média, o trabalho pede ajustes moderados em relação ao jeito natural das pessoas.' :
+        'Em média, o trabalho pede um estilo bem diferente do natural das pessoas: vale olhar papéis, rotinas e apoios.');
+    if (altos) t.push(altos + ' de ' + com.length + ' pessoa' + (com.length > 1 ? 's' : '') + ' com esforço alto ou muito alto: são as primeiras conversas a ter sobre como distribuir tarefas.');
+    if (maisCobrado) t.push('Fator mais cobrado pelo trabalho: ' + NOMES[maisCobrado] + '.');
+    return {
+      comExigido: com.length, total: colabs.length, media: media, faixa: faixa, porFaixa: porFaixa, maisCobrado: maisCobrado,
+      pessoas: com.slice().sort(function (a, b) { return b.exigido.indice - a.exigido.indice; }).map(function (c) {
+        return { id: c.id, nome: c.nome, indice: c.exigido.indice, faixa: c.exigido.faixa, maisCobrado: c.exigido.maisCobrado };
+      }),
+      textos: t
+    };
+  }
+
   function equipe(entrada, opcoes) {
     entrada = entrada || {};
     var C = compat();
@@ -126,7 +291,8 @@
       refDe[idOrig] = ref;
       var r = resultadoValido(c.resultado);
       pessoas.push({ id: ref, nome: texto(c.nome), cargo: limitar(c.cargo, 120) || null, percentuais: r ? r.percentuais : null });
-      colabs.push({ ref: ref, nome: nomeCurto(c.nome), cargo: limitar(c.cargo, 120) || null, area: limitar(c.area, 120) || null, resultado: r });
+      colabs.push({ ref: ref, nome: nomeCurto(c.nome), cargo: limitar(c.cargo, 120) || null, area: limitar(c.area, 120) || null, resultado: r, foto: fotoDe(c.foto),
+        exigido: r ? exigidoValido(c.exigido !== undefined ? c.exigido : c.resultadoExigido) : null });
     });
     function mapRel(lista, extra) {
       var out = [];
@@ -165,10 +331,13 @@
 
     // ---- "como liderar" de cada colaborador (DISC_RELATORIO_LIDERANCA, resumido)
     var colaboradores = colabs.map(function (c) {
-      var item = { id: c.ref, nome: c.nome, cargo: c.cargo, area: c.area, codigo: null, percentuais: null, estilo: null, resumo: null, secoes: [] };
+      var item = { id: c.ref, nome: c.nome, cargo: c.cargo, area: c.area, foto: c.foto, codigo: null, percentuais: null, estilo: null, resumo: null, secoes: [] };
       if (!c.resultado) return item;
       item.codigo = c.resultado.codigo;
       item.percentuais = copia(c.resultado.percentuais);
+      item.combinacao = combinacao(c.resultado.codigo, c.resultado.percentuais);
+      var bx = blocoExigido(c.resultado, c.exigido, 'lider', c.nome);
+      if (bx) item.exigido = { percentuais: bx.percentuais, codigo: bx.codigo, indice: bx.indice, faixa: bx.faixa, rotulo: bx.rotulo, maisCobrado: bx.maisCobrado, menosUsado: bx.menosUsado };
       if (RL) {
         var g = RL.montar(c.resultado, { nome: c.nome, cargo: c.cargo, lider: null });
         item.estilo = g.pessoa.estilo;
@@ -181,9 +350,10 @@
     // O código mostrado é o do resultado (o mesmo dos blocos "como liderar").
     function codigoDe(ref, cod) { return porRef[ref] && porRef[ref].resultado ? porRef[ref].resultado.codigo : cod; }
     var organograma = organogramaLimpo(analise.organograma);
-    (function ajustar(nos) { nos.forEach(function (n) { n.codigo = codigoDe(n.id, n.codigo); n.primario = n.codigo ? n.codigo.charAt(0) : null; ajustar(n.filhos); }); })(organograma.raizes);
+    function fotoRef(ref) { return porRef[ref] ? porRef[ref].foto : null; }
+    (function ajustar(nos) { nos.forEach(function (n) { n.codigo = codigoDe(n.id, n.codigo); n.primario = n.codigo ? n.codigo.charAt(0) : null; n.foto = fotoRef(n.id); ajustar(n.filhos); }); })(organograma.raizes);
     pares.forEach(function (p) { if (p.codigos) p.codigos = [codigoDe(p.de, p.codigos[0]), codigoDe(p.para, p.codigos[1])]; });
-    liderancas.forEach(function (l) { l.codigo = codigoDe(l.id, l.codigo); l.liderados.forEach(function (x) { x.codigo = codigoDe(x.id, x.codigo); }); });
+    liderancas.forEach(function (l) { l.foto = fotoRef(l.id); l.codigo = codigoDe(l.id, l.codigo); l.liderados.forEach(function (x) { x.codigo = codigoDe(x.id, x.codigo); }); });
 
     // ---- equilíbrio
     var status = !eq.comTeste ? 'sem-dados' : eq.falta.length && eq.excesso.length ? 'lacunas-excesso' : eq.falta.length ? 'lacunas' : eq.excesso.length ? 'excesso' : 'equilibrado';
@@ -253,7 +423,7 @@
       var fo = a2.foco;
       var resumoPar = function (x) { return x ? { nome: x.nome, tipo: x.tipo, nivel: x.nivel, pontuacao: x.pontuacao } : null; };
       foco = {
-        nome: fo.nome, cargo: fo.cargo || null, codigo: rf ? rf.codigo : null, percentuais: rf ? copia(rf.percentuais) : null,
+        nome: fo.nome, cargo: fo.cargo || null, foto: fotoDe(f.foto), codigo: rf ? rf.codigo : null, percentuais: rf ? copia(rf.percentuais) : null,
         pontuacao: fo.pontuacao, nivel: fo.nivel,
         lider: resumoPar(fo.lider),
         liderados: fo.liderados.map(resumoPar), diretos: fo.diretos.map(resumoPar), indiretos: fo.indiretos.map(resumoPar),
@@ -262,8 +432,17 @@
         recomendacoes90: copia(fo.recomendacoes90),
         organograma: organogramaLimpo(a2.organograma, REF_FOCO)
       };
-      (function ajustar(nos) { nos.forEach(function (n) { if (n.id !== REF_FOCO) { n.codigo = codigoDe(n.id, n.codigo); n.primario = n.codigo ? n.codigo.charAt(0) : null; } else if (rf) { n.codigo = rf.codigo; n.primario = rf.codigo.charAt(0); } ajustar(n.filhos); }); })(foco.organograma.raizes);
+      (function ajustar(nos) { nos.forEach(function (n) { if (n.id !== REF_FOCO) { n.codigo = codigoDe(n.id, n.codigo); n.primario = n.codigo ? n.codigo.charAt(0) : null; n.foto = fotoRef(n.id); } else { n.foto = fotoDe(f.foto); if (rf) { n.codigo = rf.codigo; n.primario = rf.codigo.charAt(0); } } ajustar(n.filhos); }); })(foco.organograma.raizes);
     }
+
+    // ---- mapa ritmo × foco com todos (e o candidato em destaque), como o grupo decide e pressão média (Parte 2)
+    var pontos = colabs.filter(function (c) { return c.resultado; }).map(function (c) {
+      return { id: c.ref, nome: c.nome, codigo: c.resultado.codigo, natural: eixosDe(c.resultado.percentuais), exigido: c.exigido ? eixosDe(c.exigido.percentuais) : null };
+    });
+    if (foco && foco.percentuais) pontos.push({ id: 'foco', nome: foco.nome, codigo: foco.codigo, natural: eixosDe(foco.percentuais), exigido: null, destaque: true });
+    var mapa = { pontos: pontos };
+    var decisao = decisaoGrupo(colabs);
+    var pressao = pressaoGrupo(colabs, colaboradores);
 
     var nLid = liderancas.length;
     return {
@@ -281,6 +460,9 @@
       liderancas: liderancas,
       colaboradores: colaboradores,
       foco: foco,
+      mapa: mapa,
+      decisao: decisao,
+      pressao: pressao,
       avisos: { limites: C.AVISOS.slice(), observacoes: observacoes }
     };
   }
@@ -296,7 +478,10 @@
     if (!r) throw new Error('Resultado DISC inválido.');
     var l = entrada.lider && texto(entrada.lider.nome) ? entrada.lider : null;
     var rl = l ? resultadoValido(l.resultado) : null;
-    var g = RL.montar(r, { nome: p.nome, cargo: limitar(p.cargo, 120), lider: l && rl ? { nome: l.nome, percentuais: rl.percentuais } : null });
+    var ex = exigidoValido(p.exigido !== undefined ? p.exigido : p.resultadoExigido);
+    var ctx = { nome: p.nome, cargo: limitar(p.cargo, 120), lider: l && rl ? { nome: l.nome, percentuais: rl.percentuais } : null };
+    if (ex) ctx.exigido = { percentuais: ex.percentuais, codigo: ex.codigo };
+    var g = RL.montar(r, ctx);
     var relacao = null;
     if (l && rl) {
       var par = compat().analisarPar({ id: 'l', nome: l.nome, percentuais: rl.percentuais }, { id: 'p', nome: p.nome, percentuais: r.percentuais }, 'lidera');
@@ -310,10 +495,13 @@
       geradoEm: agora(opcoes, entrada),
       empresa: { nome: limitar(entrada.empresa && entrada.empresa.nome, 120) || null },
       consultor: limitar(entrada.consultor, 120) || null,
-      pessoa: { nome: nome, cargo: g.pessoa.cargo || null, codigo: g.pessoa.codigo, primario: g.pessoa.primario, secundario: g.pessoa.secundario,
+      pessoa: { nome: nome, cargo: g.pessoa.cargo || null, foto: fotoDe(p.foto), codigo: g.pessoa.codigo, primario: g.pessoa.primario, secundario: g.pessoa.secundario,
         estilo: g.pessoa.estilo, percentuais: copia(g.pessoa.percentuais), equilibrado: !!g.pessoa.equilibrado },
-      lider: l ? { nome: nomeCurto(l.nome), codigo: rl ? rl.codigo : null } : null,
+      lider: l ? { nome: nomeCurto(l.nome), codigo: rl ? rl.codigo : null, foto: fotoDe(l.foto) } : null,
       relacao: relacao,
+      combinacao: combinacao(g.pessoa.codigo, r.percentuais),
+      mapa: { pontos: [{ id: 'p1', nome: nome, codigo: g.pessoa.codigo, natural: eixosDe(r.percentuais), exigido: ex ? eixosDe(ex.percentuais) : null }] },
+      exigido: blocoExigido(r, ex, 'lider', nome),
       resumo: g.resumo,
       secoes: g.secoes.map(function (s) {
         var x = { chave: s.chave, titulo: s.titulo, itens: s.itens.slice() };
@@ -326,27 +514,94 @@
 
   /* ------------------------------------------------------------------ PESSOA (desenvolvimento) */
 
+  // Fatores com a régua de intensidade (faixa, rótulo e texto por fator).
+  function fatoresComRegua(fatores, rg) {
+    return (fatores || []).map(function (f) {
+      var x = { letra: f.letra, nome: f.nome, pct: f.pct, descricao: f.descricao || null };
+      var it = intensidade(f.letra, f.pct, rg);
+      x.faixa = f.faixa && FAIXAS_INT.indexOf(f.faixa) >= 0 ? f.faixa : it.faixa;
+      x.faixaRotulo = rg.rotulos[x.faixa];
+      x.texto = it.texto;
+      return x;
+    });
+  }
+
+  // Itens de uma lista do relatório simples: strings ou {titulo, texto} -> {titulo, texto}.
+  function itensSimples(lista, n) {
+    return (Array.isArray(lista) ? lista : []).map(function (it) {
+      if (typeof it === 'string') return { titulo: null, texto: texto(it) };
+      if (it && typeof it === 'object') return { titulo: texto(it.titulo) || null, texto: texto(it.texto || it.descricao) || null };
+      return null;
+    }).filter(function (it) { return it && (it.titulo || it.texto); }).slice(0, n);
+  }
+  function secaoDe(secoes, id) { return (secoes || []).filter(function (x) { return x && x.id === id; })[0] || null; }
+
+  // pessoa({ pessoa: {nome, resultado, exigido?}, consultor? }, opcoes?)  — opcoes.variante: 'completo' (padrão) | 'simples'
+  //   exigido: string de 40 dígitos (Parte 2) ou {percentuais, codigo} (resultadoExigido). Inválido: ignorado.
+  //   Completo -> + regua, fatores[].faixa/texto, combinacao, mapa, exigido (+ seção do RP "onde você está se esticando").
+  //   Simples  -> { variante: 'simples', frase, combinacao, fatores (com faixa), forcas[3], cuidados[3], habitos[3], mapa, exigido }
   function pessoa(entrada, opcoes) {
     entrada = entrada || {};
+    opcoes = opcoes || {};
     var RP = dep('DISC_RELATORIO_PESSOA', './relatorio-pessoa.js');
     if (!RP) throw new Error('DISC_RELATORIO_PESSOA não carregado.');
     var p = entrada.pessoa || {};
     var r = resultadoValido(p.resultado);
-    var m = r ? RP.montar(r, p.nome) : null;
+    var ex = exigidoValido(p.exigido !== undefined ? p.exigido : p.resultadoExigido);
+    var opRP = ex ? { exigido: { percentuais: ex.percentuais, codigo: ex.codigo } } : undefined;
+    var m = r ? RP.montar(r, p.nome, undefined, opRP) : null;
     if (!m) throw new Error('Resultado DISC inválido.');
+    var simples = opcoes.variante === 'simples';
     var nome = nomeCurto(p.nome);
-    return {
+    var rg = regua();
+    var bloco = blocoExigido(r, ex, 'pessoa');
+    var base = {
       modelo: 'pessoa',
       versao: VERSAO,
-      titulo: 'Seu perfil DISC — ' + nome,
+      variante: simples ? 'simples' : 'completo',
+      titulo: (simples ? 'Seu perfil DISC em resumo — ' : 'Seu perfil DISC — ') + nome,
       geradoEm: agora(opcoes, entrada),
       consultor: limitar(entrada.consultor, 120) || null,
-      pessoa: { nome: nome, primeiroNome: primeiroNome(p.nome), codigo: m.codigo, primario: copia(m.primario), secundario: copia(m.secundario) },
+      pessoa: { nome: nome, primeiroNome: primeiroNome(p.nome), foto: fotoDe(p.foto), codigo: m.codigo, primario: copia(m.primario), secundario: copia(m.secundario) },
       frase: m.frase,
-      fatores: copia(m.fatores),
-      secoes: copia(m.secoes),
+      combinacao: combinacao(m.codigo, r.percentuais),
+      regua: rg,
+      fatores: fatoresComRegua(m.fatores, rg),
+      mapa: { pontos: [{ id: 'p1', nome: nome, codigo: m.codigo, natural: eixosDe(r.percentuais), exigido: bloco ? bloco.eixos.exigido : null }] },
+      exigido: bloco,
       aviso: m.aviso
     };
+    if (!simples) {
+      base.secoes = copia(m.secoes);
+      return base;
+    }
+    // Versão simples (2 páginas): RP.montarSimples quando existir; senão, recorte do completo.
+    var sm = typeof RP.montarSimples === 'function' ? RP.montarSimples(r, p.nome, undefined, opRP) : null;
+    if (sm && typeof sm === 'object') {
+      if (sm.frase) base.frase = texto(sm.frase);
+      base.forcas = itensSimples(sm.forcas, 3);
+      base.cuidados = itensSimples(sm.cuidados, 3);
+      base.habitos = itensSimples(sm.habitos, 3);
+      if (Array.isArray(sm.fatores) && sm.fatores.length === 4) {
+        var porLetra = {};
+        sm.fatores.forEach(function (f) { if (f && f.letra) porLetra[f.letra] = f; });
+        base.fatores.forEach(function (f) {
+          var o = porLetra[f.letra];
+          if (o && FAIXAS_INT.indexOf(o.faixa) >= 0) { f.faixa = o.faixa; f.faixaRotulo = rg.rotulos[o.faixa]; }
+        });
+      }
+    }
+    if (!base.forcas || !base.forcas.length) base.forcas = itensSimples((secaoDe(m.secoes, 'fortes') || {}).itens, 3);
+    if (!base.cuidados || !base.cuidados.length) base.cuidados = itensSimples((secaoDe(m.secoes, 'atencao') || {}).itens, 3);
+    if (!base.habitos || !base.habitos.length) base.habitos = itensSimples((secaoDe(m.secoes, 'plano') || {}).itens, 3);
+    // No simples, a régua mostra só faixa (sem os textos longos).
+    base.fatores.forEach(function (f) { if (f.texto) f.texto = { resumo: f.texto.resumo, comportamento: null, excesso: null, falta: null }; });
+    if (bloco) bloco.textos = bloco.textos.slice(0, 2);
+    return base;
+  }
+
+  function pessoaSimples(entrada, opcoes) {
+    return pessoa(entrada, Object.assign({}, opcoes || {}, { variante: 'simples' }));
   }
 
   var DISC_RELATORIO_MODELOS = {
@@ -355,7 +610,11 @@
     equipe: equipe,
     lideranca: lideranca,
     pessoa: pessoa,
-    resultadoValido: resultadoValido
+    pessoaSimples: pessoaSimples,
+    resultadoValido: resultadoValido,
+    exigidoValido: exigidoValido,
+    fotoValida: fotoValida,
+    eixosDe: eixosDe
   };
   if (typeof module !== 'undefined' && module.exports) module.exports = DISC_RELATORIO_MODELOS;
   else root.DISC_RELATORIO_MODELOS = DISC_RELATORIO_MODELOS;

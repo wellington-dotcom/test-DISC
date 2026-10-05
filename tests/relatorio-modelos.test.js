@@ -154,7 +154,7 @@ test('lideranca: guia curto para o líder sobre uma pessoa', () => {
   assert.equal(d.geradoEm, GERADO);
   assert.equal(d.pessoa.nome, 'Bruno L.');
   assert.equal(d.pessoa.codigo, 'SC');
-  assert.deepEqual(d.lider, { nome: 'Ana S.', codigo: 'DI' });
+  assert.deepEqual(d.lider, { nome: 'Ana S.', codigo: 'DI', foto: null });
   assert.ok(['fluido', 'atencao', 'tensao'].includes(d.relacao.nivel));
   assert.ok(d.relacao.dicas.length >= 1);
   assert.ok(d.resumo.length > 20);
@@ -180,7 +180,8 @@ test('pessoa: documento de desenvolvimento, tom pessoal', () => {
   assert.equal(d.pessoa.primario.letra, 'C');
   assert.match(d.frase, /^Você tende a ser/);
   assert.deepEqual(d.fatores.map((f) => f.letra), ['D', 'I', 'S', 'C']);
-  assert.deepEqual(d.secoes.map((s) => s.id), ['fortes', 'atencao', 'pressao', 'comunicacao', 'plano']);
+  const ids = d.secoes.map((s) => s.id);
+  for (const id of ['fortes', 'atencao', 'pressao', 'comunicacao', 'plano']) assert.ok(ids.includes(id), id);
   assert.match(d.aviso, /não existe perfil certo ou errado/i);
 });
 
@@ -197,4 +198,123 @@ test('resultado inválido: lideranca/pessoa recusam; equipe trata como "sem test
   const v = M.equipe({}, { geradoEm: GERADO });
   assert.equal(v.numeros.pessoas, 0);
   assert.deepEqual(v.organograma.raizes, []);
+});
+
+/* ------------------------------------------------------------------ rodada 3: Parte 2, régua, combinação, mapa, simples, fotos */
+const EX = require('../js/disc-exigido.js');
+// exigido em string de 40 dígitos: cada grupo D,I,S,C; "4321" puxa para D/I (perfil exigido DI)
+const EXIGIDO_DI = '4321'.repeat(10);
+const FOTO = 'data:image/jpeg;base64,' + 'A'.repeat(200) + '==';
+
+test('pessoa completo sem exigido: régua, combinação e mapa; sem bloco da Parte 2', () => {
+  const d = M.pessoa({ pessoa: { nome: 'Carla Dias', resultado: R.CS } }, { geradoEm: GERADO });
+  assert.equal(d.variante, 'completo');
+  assert.equal(d.exigido, null);
+  assert.deepEqual(d.regua.limites, [15, 22, 29, 36]);
+  for (const f of d.fatores) {
+    assert.ok(['muito_baixa', 'baixa', 'media', 'alta', 'muito_alta'].includes(f.faixa), f.letra);
+    assert.ok(f.faixaRotulo);
+  }
+  assert.equal(d.fatores[3].faixa, 'muito_alta'); // C 50%
+  assert.equal(d.mapa.pontos.length, 1);
+  const p = d.mapa.pontos[0];
+  assert.deepEqual(p.natural, EX.eixos(R.CS.percentuais), 'mesma convenção do DISC_EXIGIDO (foco + = tarefas)');
+  assert.ok(p.natural.ritmo < 0, 'CS é cauteloso');
+  assert.equal(p.exigido, null);
+  if (d.combinacao) assert.ok(d.combinacao.nome.length > 2);
+});
+
+test('pessoa completo com exigido (40 dígitos ou objeto): índice, faixa, textos e seta no mapa', () => {
+  const a = M.pessoa({ pessoa: { nome: 'Carla Dias', resultado: R.CS, exigido: EXIGIDO_DI } }, { geradoEm: GERADO });
+  const b = M.pessoa({ pessoa: { nome: 'Carla Dias', resultado: R.CS, exigido: EX.calcular(EXIGIDO_DI) } }, { geradoEm: GERADO });
+  assert.equal(JSON.stringify(a), JSON.stringify(b));
+  assert.equal(a.exigido.codigo, 'DI');
+  const esperado = EX.adaptacao(R.CS, EX.calcular(EXIGIDO_DI));
+  assert.equal(a.exigido.indice, esperado.indice);
+  assert.equal(a.exigido.faixa, esperado.faixa);
+  assert.ok(a.exigido.textos.length >= 1);
+  assert.deepEqual(a.mapa.pontos[0].exigido, esperado.eixos.exigido);
+  // exigido inválido: ignorado
+  const c = M.pessoa({ pessoa: { nome: 'Carla Dias', resultado: R.CS, exigido: '1111'.repeat(10) } }, { geradoEm: GERADO });
+  assert.equal(c.exigido, null);
+});
+
+test('pessoaSimples: 3 forças, 3 cuidados, 3 hábitos, 4 fatores com faixa; sem seções longas', () => {
+  const d = M.pessoaSimples({ pessoa: { nome: 'Carla Dias', resultado: R.CS, exigido: EXIGIDO_DI }, consultor: 'W.' }, { geradoEm: GERADO });
+  assert.equal(d.modelo, 'pessoa');
+  assert.equal(d.variante, 'simples');
+  assert.match(d.titulo, /resumo/);
+  assert.equal(d.secoes, undefined);
+  for (const k of ['forcas', 'cuidados', 'habitos']) {
+    assert.equal(d[k].length, 3, k);
+    for (const it of d[k]) assert.ok(it.titulo || it.texto);
+  }
+  assert.equal(d.fatores.length, 4);
+  for (const f of d.fatores) assert.ok(f.faixa && (!f.texto || (f.texto.excesso === null && f.texto.falta === null)));
+  assert.ok(d.exigido.textos.length <= 2);
+  assert.deepEqual(M.pessoa({ pessoa: { nome: 'Carla Dias', resultado: R.CS } }, { geradoEm: GERADO, variante: 'simples' }).forcas,
+    M.pessoaSimples({ pessoa: { nome: 'Carla Dias', resultado: R.CS } }, { geradoEm: GERADO }).forcas);
+});
+
+test('liderança com exigido: bloco de esforço com textos do líder, mapa e combinação', () => {
+  const sem = M.lideranca({ pessoa: { nome: 'Bruno Lima', resultado: R.SC }, empresa: { nome: 'X' } }, { geradoEm: GERADO });
+  assert.equal(sem.exigido, null);
+  assert.equal(sem.mapa.pontos[0].exigido, null);
+  const d = M.lideranca({ pessoa: { nome: 'Bruno Lima', resultado: R.SC, exigido: EXIGIDO_DI }, empresa: { nome: 'X' } }, { geradoEm: GERADO });
+  assert.equal(d.exigido.codigo, 'DI');
+  assert.ok(d.exigido.indice >= 20);
+  assert.ok(d.exigido.textos.some((t) => /Bruno L\./.test(t)), 'textos do líder com o nome curto');
+  assert.ok(d.mapa.pontos[0].exigido);
+});
+
+test('equipe: mapa com todos, como o grupo decide, pressão média e combinações', () => {
+  const e = entradaEquipe(true);
+  const sem = M.equipe(e, { geradoEm: GERADO });
+  assert.equal(sem.pressao, null, 'sem Parte 2: sem pressão');
+  assert.equal(sem.mapa.pontos.length, 5, '4 com teste + candidato');
+  assert.ok(sem.mapa.pontos.find((p) => p.id === 'foco').destaque);
+  assert.ok(sem.decisao && sem.decisao.textos.length === 3);
+  assert.equal(sem.decisao.bases.reduce((t, b) => t + b.qtd, 0), 4);
+  e.colaboradores[0].exigido = EXIGIDO_DI;
+  e.colaboradores[1].exigido = { percentuais: { D: 35, I: 30, S: 15, C: 20 }, codigo: 'DI' };
+  const d = M.equipe(e, { geradoEm: GERADO });
+  assert.equal(d.pressao.comExigido, 2);
+  assert.ok(d.pressao.media >= 0 && d.pressao.media <= 100);
+  assert.equal(d.pressao.pessoas[0].indice >= d.pressao.pessoas[1].indice, true);
+  assert.ok(d.colaboradores[1].exigido.indice > 0);
+  assert.ok(d.mapa.pontos.find((p) => p.id === 'p2').exigido);
+  semSensiveis(d);
+});
+
+test('fotos: só data:image/jpeg válida entra no snapshot; senão null', () => {
+  const e = entradaEquipe(true);
+  e.colaboradores[0].foto = FOTO;
+  e.colaboradores[1].foto = 'https://exemplo.com/x.jpg';
+  e.colaboradores[2].foto = 'data:image/png;base64,AAAA';
+  e.foco.foto = FOTO;
+  const d = M.equipe(e, { geradoEm: GERADO });
+  assert.equal(d.colaboradores[0].foto, FOTO);
+  assert.equal(d.colaboradores[1].foto, null);
+  assert.equal(d.colaboradores[2].foto, null);
+  assert.equal(d.organograma.raizes[0].foto, FOTO);
+  assert.equal(d.liderancas.find((l) => l.nome === 'Ana P.').foto, FOTO);
+  assert.equal(d.foco.foto, FOTO);
+  assert.ok(!JSON.stringify(d).includes('exemplo.com'));
+  assert.equal(M.pessoa({ pessoa: { nome: 'Carla Dias', resultado: R.CS, foto: FOTO } }, { geradoEm: GERADO }).pessoa.foto, FOTO);
+  assert.equal(M.pessoa({ pessoa: { nome: 'Carla Dias', resultado: R.CS, foto: 'data:image/jpeg;base64,<x>' } }, { geradoEm: GERADO }).pessoa.foto, null);
+  assert.equal(M.pessoa({ pessoa: { nome: 'Carla Dias', resultado: R.CS, foto: 'data:image/jpeg;base64,' + 'A'.repeat(40001) } }, { geradoEm: GERADO }).pessoa.foto, null);
+  const l = M.lideranca({ pessoa: { nome: 'Bruno Lima', resultado: R.SC, foto: FOTO }, lider: { nome: 'Ana Souza', resultado: R.DI, foto: FOTO }, empresa: { nome: 'X' } }, { geradoEm: GERADO });
+  assert.equal(l.pessoa.foto, FOTO);
+  assert.equal(l.lider.foto, FOTO);
+});
+
+test('determinismo e sem dados sensíveis também com exigido e na versão simples', () => {
+  const ent = () => ({ pessoa: { nome: 'Carla Dias', telefone: '5595991112222', email: 'ana@exemplo.com', idade: 41, resultado: R.CS, exigido: EXIGIDO_DI } });
+  assert.equal(JSON.stringify(M.pessoa(ent(), { geradoEm: GERADO })), JSON.stringify(M.pessoa(ent(), { geradoEm: GERADO })));
+  assert.equal(JSON.stringify(M.pessoaSimples(ent(), { geradoEm: GERADO })), JSON.stringify(M.pessoaSimples(ent(), { geradoEm: GERADO })));
+  semSensiveis(M.pessoa(ent(), { geradoEm: GERADO }));
+  semSensiveis(M.pessoaSimples(ent(), { geradoEm: GERADO }));
+  const l = () => M.lideranca({ pessoa: { nome: 'Bruno Lima', telefone: '5595990000001', resultado: R.SC, exigido: EXIGIDO_DI }, empresa: { nome: 'X' } }, { geradoEm: GERADO });
+  assert.equal(JSON.stringify(l()), JSON.stringify(l()));
+  semSensiveis(l());
 });

@@ -26,14 +26,77 @@ export function relNomeCurto(nome) {
   return partes[0] + ' ' + partes[partes.length - 1].charAt(0).toUpperCase() + '.';
 }
 
+// Fotos dos candidatos (data URL JPEG até 40 000 caracteres, a mesma regra do banco).
+export const REL_FOTO_MAX = 40000;
+export const REL_MAX_JSON_COM_FOTOS = 1500000;
+const RE_FOTO = /^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/=]+$/;
+export function relFotoValida(f) { return typeof f === 'string' && f.length <= REL_FOTO_MAX && RE_FOTO.test(f); }
+
+const PARTICULAS = { de: 1, da: 1, das: 1, do: 1, dos: 1, e: 1, di: 1, du: 1, del: 1, van: 1, von: 1 };
+
+/**
+ * Mesmos nomes curtos que o motor usa nos candidatos (nomesCurtos de js/relatorio-motor.js, com o
+ * primeiroNome dele): {idDoCandidato: "Ana P."}. Serve para pôr a foto certa em cada linha do relatório.
+ */
+export function relNomesCurtos(motor, candidatos) {
+  const mapa = {};
+  const usados = {};
+  const texto = (v) => (v === null || v === undefined ? '' : String(v));
+  const maiuscula = (v) => { v = texto(v); return v.charAt(0).toUpperCase() + v.slice(1); };
+  (candidatos || []).filter((c) => c && typeof c === 'object').forEach((c) => {
+    let curto = motor.primeiroNome(c.nome);
+    if (usados[curto]) {
+      const partes = texto(c.nome).split(/\s+/).filter((p) => p && !PARTICULAS[p.toLowerCase()]);
+      let alt = maiuscula(partes[0] || curto);
+      for (let i = 1; i < partes.length; i++) alt += ' ' + partes[i].charAt(0).toUpperCase() + '.';
+      curto = usados[alt] ? curto : alt;
+    }
+    const base = curto;
+    let n = 2;
+    while (usados[curto]) curto = base + ' (' + (n++) + ')';
+    usados[curto] = true;
+    mapa[c.id] = curto;
+  });
+  return mapa;
+}
+
+/**
+ * Põe "foto" em cada candidato do relatório (ranking.linhas e disc.quadro) a partir de candidatos[].foto.
+ * Só fotos válidas; sem foto o campo não aparece (a página mostra as iniciais). Se o JSON passar de
+ * REL_MAX_JSON_COM_FOTOS, as fotos que não couberem ficam de fora (na ordem do ranking).
+ */
+export function relAplicarFotos(relatorio, motor, candidatos) {
+  if (!relatorio || !motor || typeof motor.primeiroNome !== 'function') return relatorio;
+  const curtos = relNomesCurtos(motor, candidatos);
+  const porNome = {};
+  (candidatos || []).forEach((c) => {
+    if (c && relFotoValida(c.foto) && curtos[c.id]) porNome[curtos[c.id]] = c.foto;
+  });
+  if (!Object.keys(porNome).length) return relatorio;
+  const linhas = (relatorio.ranking && Array.isArray(relatorio.ranking.linhas)) ? relatorio.ranking.linhas : [];
+  const quadro = (relatorio.disc && Array.isArray(relatorio.disc.quadro)) ? relatorio.disc.quadro : [];
+  let tamanho = JSON.stringify(relatorio).length;
+  const nomes = [];
+  linhas.concat(quadro).forEach((l) => { if (l && porNome[l.nome] && nomes.indexOf(l.nome) < 0) nomes.push(l.nome); });
+  nomes.forEach((nome) => {
+    const alvos = linhas.concat(quadro).filter((l) => l && l.nome === nome);
+    const custo = alvos.length * (porNome[nome].length + 10);
+    if (tamanho + custo > REL_MAX_JSON_COM_FOTOS) return;
+    alvos.forEach((l) => { l.foto = porNome[nome]; });
+    tamanho += custo;
+  });
+  return relatorio;
+}
+
 /**
  * Roda o motor com uma cópia dos dados SEM antecedentes e devolve o relatório. Garante, no fim, que
- * nenhum nome completo ficou no JSON (troca por "Nome S.") e tira o id da lista do ClickUp.
+ * nenhum nome completo ficou no JSON (troca por "Nome S.") e tira o id da lista do ClickUp. As fotos dos
+ * candidatos (candidatos[].foto) entram depois, em ranking.linhas[].foto e disc.quadro[].foto.
  */
 export function relMontar(motor, dados, geradoEm) {
   if (!motor || typeof motor.montar !== 'function') throw new Error('Motor do relatório ausente nas Edge Functions (rode npm run montar:funcoes).');
   const copia = JSON.parse(JSON.stringify(dados));
-  (copia.candidatos || []).forEach((c) => { delete c.antecedentes; });
+  (copia.candidatos || []).forEach((c) => { delete c.antecedentes; delete c.foto; });
   const relatorio = motor.montar(copia, { geradoEm });
   if (relatorio && relatorio.processo) delete relatorio.processo.clickupListId;
   let json = JSON.stringify(relatorio);
@@ -45,7 +108,7 @@ export function relMontar(motor, dados, geradoEm) {
     }
   });
   if (json.length > REL_MAX_JSON) throw new Error('Relatório grande demais para guardar.');
-  return JSON.parse(json);
+  return relAplicarFotos(JSON.parse(json), motor, dados.candidatos);
 }
 
 /**

@@ -110,9 +110,30 @@ async function responderConfirmacao(page, opcoes) {
   await expect(enviar).toBeEnabled();
 }
 
-// Faz o teste inteiro (25 grupos + confirmação) com a mesma ordem de preferência e para antes do envio:
-// o chamador toca em "Enviar e finalizar" ([data-acao="enviar"]).
-// opcoes: { caminho (padrão '/index.html'), confirmacao (opções de responderConfirmacao) }
+// Parte 2 (perfil exigido pelo trabalho), a partir da tela de transição: toca em "Começar" e responde os grupos
+// com a mesma ordem. n: grupos da Parte 2 (10; menos no modo demonstração). Termina no 1º passo da confirmação.
+async function responderParte2(page, ordem, n) {
+  const total = n || 10;
+  await expect(page.locator('.tela-parte2 h1')).toHaveText('Agora pense no seu trabalho');
+  await page.locator('[data-acao="parte2-comecar"]').click();
+  for (let k = 0; k < total; k++) {
+    await expect(page.locator('.progresso-topo')).toContainText('Parte 2 · Grupo ' + (k + 1) + ' de ' + total);
+    await responderGrupo(page, ordem);
+    await page.locator('[data-acao="proximo"]').click();
+  }
+}
+
+// Depois do último grupo da parte 1: a Parte 2 (transição) ou direto a confirmação? Retorna true se for a Parte 2.
+async function temParte2(page) {
+  const alvo = page.locator('[data-acao="parte2-comecar"], .tela-confirmacao, [data-acao="enviar"], .agradecimento, textarea#codigo').first();
+  await alvo.waitFor();
+  return (await page.locator('[data-acao="parte2-comecar"]').count()) > 0;
+}
+
+// Faz o teste inteiro (25 grupos + Parte 2, se o processo a tiver + confirmação) com a mesma ordem de preferência
+// e para antes do envio: o chamador toca em "Enviar e finalizar" ([data-acao="enviar"]).
+// opcoes: { caminho (padrão '/index.html'), confirmacao (opções de responderConfirmacao),
+//           parte2 (ordem da Parte 2; padrão = a mesma ordem) }
 async function fazerTesteCompleto(page, dados, ordem, opcoes) {
   const op = opcoes || {};
   await page.goto(op.caminho || '/index.html');
@@ -124,7 +145,8 @@ async function fazerTesteCompleto(page, dados, ordem, opcoes) {
     await responderGrupo(page, ordem);
     await page.locator('[data-acao="proximo"]').click();
   }
+  if (await temParte2(page)) await responderParte2(page, op.parte2 || ordem);
   await responderConfirmacao(page, op.confirmacao);
 }
 
-module.exports = { API_FALSA, coletarErros, configurar, simularApi, ordemNaTela, responderGrupo, preencherIdentificacao, responderConfirmacao, fazerTesteCompleto };
+module.exports = { API_FALSA, coletarErros, configurar, simularApi, ordemNaTela, responderGrupo, preencherIdentificacao, responderConfirmacao, responderParte2, temParte2, fazerTesteCompleto };
