@@ -100,7 +100,7 @@ Quando o candidato envia o teste, o servidor cria um **código curto e único** 
 - O código aparece em cada cartão da lista, no detalhe do candidato ("Código 47K") e na coluna **protocolo** do CSV e da planilha.
 - As letras **I** e **O** nunca são usadas (para não confundir com 1 e 0). São 2.400 códigos possíveis, sem repetição na mesma planilha. Se um dia todos estiverem em uso, o candidato vê "Limite de códigos atingido": exclua candidatos antigos ou de teste.
 - Se o candidato tocar em Enviar duas vezes, o servidor reconhece o mesmo envio e devolve **o mesmo código**.
-- **Planilha de antes desta versão:** não precisa fazer nada. Depois de reimplantar (seção 6), a coluna **protocolo** é criada sozinha no fim do cabeçalho da aba **Respostas**. Quem respondeu antes fica sem código (o painel mostra "—").
+- **Planilha de antes desta versão:** não precisa fazer nada. Depois de reimplantar (seção 6), as colunas novas (**protocolo**, **idade**, **funcao**, **empresa**) são criadas sozinhas no fim do cabeçalho da aba **Respostas**. Quem respondeu antes fica sem esses dados (o painel mostra "—").
 - **Sem servidor ou se o envio falhar**, não há código curto: o candidato vê um **Código de segurança** longo com o aviso "Não conseguimos enviar suas respostas. Envie este código ao recrutador pelo WhatsApp." Cole esse código na aba **Importar códigos** do painel (seção "Problemas comuns"). Candidatos importados assim no modo sem servidor aparecem sem código curto ("—").
 
 ### 6.2 Prévia sem servidor (demonstração)
@@ -158,7 +158,8 @@ Uso das outras opções:
 
 ## Referência técnica (para quem for mexer no código)
 
-- Aba `Respostas`, colunas: `id, recebidoEm, nome, telefone, vaga, inicio, fim, duracaoSeg, respostas, D, I, S, C, perfil, status, observacoes, payloadJson, protocolo`. Em planilhas antigas (17 colunas) a coluna `protocolo` é acrescentada automaticamente no primeiro acesso.
+- Aba `Respostas`, colunas: `id, recebidoEm, nome, telefone, vaga, inicio, fim, duracaoSeg, respostas, D, I, S, C, perfil, status, observacoes, payloadJson, protocolo, idade, funcao, empresa`. Em planilhas antigas as colunas que faltam (`protocolo`, `idade`, `funcao`, `empresa`) são acrescentadas automaticamente no fim, no primeiro acesso; as linhas antigas ficam com essas células vazias (o painel mostra "—").
+- `enviar` exige `idade` (inteiro de 14 a 99); sem ela responde `{ok:false, erro:'Idade não informada: …'}`. `funcao` e `empresa` são opcionais (aparadas, até 80 caracteres, protegidas contra fórmula).
 - Protocolo: `/^[0-9]{2}[A-HJ-NP-Z]$/` (2 algarismos + 1 letra maiúscula sem I/O; 2.400 combinações). Gerado na ação `enviar`, dentro do `LockService`: sorteia e confere contra a coluna `protocolo` até achar um livre (com a planilha quase cheia, sorteia entre os livres; sem nenhum, responde `{ok:false, erro:'Limite de códigos atingido…'}`). Resposta: `{ok:true, id, protocolo}`; id repetido: `{ok:true, duplicado:true, id, protocolo}` com o mesmo protocolo já gravado (linha antiga sem protocolo ganha um nesse momento). `listar` devolve `protocolo` em cada item (`''` quando não há). O payload do candidato não muda.
 - `API_URL: 'simulada'` (prévia): `js/api-simulada.js` troca o `DISC_API` por um backend falso em `localStorage` (`disc_planilha_simulada`) com as mesmas regras e mensagens deste arquivo, chave admin `previa` e latência de ~400 ms.
 - `doGet` → `{ok:true, servico:'DISC'}`. `doPost` recebe `text/plain` com JSON `{acao, ...}`; ações `enviar` (pública), `listar`, `atualizar`, `excluir`, `excluirTodos` (exigem `chave` = Script Property `ADMIN_KEY`).

@@ -25,7 +25,8 @@
 
 var NOME_ABA = 'Respostas';
 var CABECALHO = ['id', 'recebidoEm', 'nome', 'telefone', 'vaga', 'inicio', 'fim', 'duracaoSeg',
-  'respostas', 'D', 'I', 'S', 'C', 'perfil', 'status', 'observacoes', 'payloadJson', 'protocolo'];
+  'respostas', 'D', 'I', 'S', 'C', 'perfil', 'status', 'observacoes', 'payloadJson', 'protocolo',
+  'idade', 'funcao', 'empresa'];
 var COL = {}; // nome da coluna -> índice (0-based)
 CABECALHO.forEach(function (nome, i) { COL[nome] = i; });
 
@@ -38,7 +39,10 @@ var JANELA_ENVIOS_SEG = 600;   // janela de 10 minutos
 var STATUS_VALIDOS = ['em_analise', 'aprovado', 'reprovado'];
 var STATUS_PADRAO = 'em_analise';
 var COLUNAS_TEXTO = ['id', 'recebidoEm', 'nome', 'telefone', 'vaga', 'inicio', 'fim',
-  'respostas', 'perfil', 'status', 'observacoes', 'payloadJson', 'protocolo'];
+  'respostas', 'perfil', 'status', 'observacoes', 'payloadJson', 'protocolo', 'funcao', 'empresa'];
+var IDADE_MIN = 14;
+var IDADE_MAX = 99;
+var LIMITE_FUNCAO_EMPRESA = 80;
 
 // Protocolo: 2 algarismos + 1 letra (sem I e O, que se confundem com 1 e 0) -> 100 × 24 = 2.400 códigos.
 var LETRAS_PROTOCOLO = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -192,6 +196,28 @@ function nomeValido(nome) {
   return palavras.length >= 2 && letras >= 5;
 }
 
+/**
+ * Idade: inteiro de 14 a 99 (número ou texto só com dígitos).
+ * Retorna { ok:true, idade } ou { ok:false, erro } com mensagem em pt-BR.
+ */
+function validarIdadeServidor(v) {
+  if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) {
+    return erro_('Idade não informada: a idade é obrigatória (só números, de 14 a 99 anos).');
+  }
+  var s = typeof v === 'number' ? String(v) : (typeof v === 'string' ? v.trim() : '');
+  if (!/^[0-9]{1,3}$/.test(s)) return erro_('Idade inválida: use só números (entre 14 e 99 anos).');
+  var n = Number(s);
+  if (n < IDADE_MIN || n > IDADE_MAX) return erro_('Idade inválida: precisa ser entre 14 e 99 anos.');
+  return { ok: true, idade: n };
+}
+
+/** Lê a idade gravada na planilha (número, texto ou vazio). null quando não há idade válida. */
+function idadeDaCelula(v) {
+  if (v === null || v === undefined || v === '') return null;
+  var n = Number(String(v).replace(/^'/, '').trim());
+  return (isFinite(n) && Math.floor(n) === n && n >= IDADE_MIN && n <= IDADE_MAX) ? n : null;
+}
+
 function dataIsoOuVazio(v) {
   var s = limparTexto(v, 40);
   if (!s) return '';
@@ -215,6 +241,9 @@ function validarPayload(p) {
   var telefone = normalizarTelefone(p.telefone);
   if (!telefone) return erro_('Telefone inválido. Informe DDD + número.');
 
+  var idade = validarIdadeServidor(p.idade);
+  if (!idade.ok) return idade;
+
   if (p.consentimento !== true) return erro_('É necessário aceitar o uso dos dados para participar.');
 
   var respostas = typeof p.respostas === 'string' ? p.respostas.trim() : '';
@@ -235,6 +264,9 @@ function validarPayload(p) {
       id: id,
       nome: nome,
       telefone: telefone,
+      idade: idade.idade,
+      funcao: limparTexto(p.funcao, LIMITE_FUNCAO_EMPRESA),
+      empresa: limparTexto(p.empresa, LIMITE_FUNCAO_EMPRESA),
       vaga: limparTexto(p.vaga, 120),
       consentimento: true,
       inicio: inicio,
@@ -315,6 +347,9 @@ function montarLinha(payload, recebidoEm, protocolo) {
   linha[COL.observacoes] = '';
   linha[COL.payloadJson] = JSON.stringify(payload);
   linha[COL.protocolo] = normalizarProtocolo(protocolo);
+  linha[COL.idade] = payload.idade;
+  linha[COL.funcao] = payload.funcao || '';
+  linha[COL.empresa] = payload.empresa || '';
   return linha.map(function (v, i) {
     return COLUNAS_TEXTO.indexOf(CABECALHO[i]) >= 0 ? forcarTexto(v) : protegerCelula(v);
   });
@@ -356,7 +391,10 @@ function linhaParaItem(linha) {
     status: STATUS_VALIDOS.indexOf(txt('status')) >= 0 ? txt('status') : STATUS_PADRAO,
     observacoes: txt('observacoes'),
     recebidoEm: txt('recebidoEm'),
-    protocolo: normalizarProtocolo(txt('protocolo'))
+    protocolo: normalizarProtocolo(txt('protocolo')),
+    idade: idadeDaCelula(linha[COL.idade]),   // null em linhas antigas (sem a coluna)
+    funcao: txt('funcao'),
+    empresa: txt('empresa')
   };
   if (validarRespostasCompactas(respostas)) {
     var r = calcularDisc(respostas);
@@ -385,7 +423,7 @@ function obterAba_() {
 }
 
 /**
- * Planilhas criadas antes de uma coluna existir (ex.: "protocolo"): escreve o nome que falta no
+ * Planilhas criadas antes de uma coluna existir (ex.: "protocolo", "idade", "funcao", "empresa"): escreve o nome que falta no
  * cabeçalho e deixa a coluna em formato texto. As linhas antigas ficam com a célula vazia.
  */
 function garantirColunas_(aba) {
@@ -607,7 +645,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     doGet: doGet, doPost: doPost, setup: setup,
     validarRespostasCompactas: validarRespostasCompactas, calcularDisc: calcularDisc,
-    validarPayload: validarPayload, protegerCelula: protegerCelula, forcarTexto: forcarTexto, normalizarTelefone: normalizarTelefone,
+    validarPayload: validarPayload, validarIdadeServidor: validarIdadeServidor, protegerCelula: protegerCelula, forcarTexto: forcarTexto, normalizarTelefone: normalizarTelefone,
     montarLinha: montarLinha, linhaParaItem: linhaParaItem, CABECALHO: CABECALHO,
     protocoloValido: protocoloValido, normalizarProtocolo: normalizarProtocolo, gerarProtocolo: gerarProtocolo,
     LETRAS_PROTOCOLO: LETRAS_PROTOCOLO, TOTAL_PROTOCOLOS: TOTAL_PROTOCOLOS

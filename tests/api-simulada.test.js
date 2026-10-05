@@ -125,7 +125,8 @@ test('mesmas mensagens de erro do Code.gs para payloads inválidos', async () =>
   const { api } = nova();
   const casos = [
     { respostas: '4321'.repeat(24) }, { respostas: '4421'.repeat(25) }, { nome: 'Jo' }, { nome: 'Joãozinho' },
-    { telefone: '1234' }, { consentimento: false }, { consentimento: 'true' }, { id: 'a b' }, { id: '' }
+    { telefone: '1234' }, { consentimento: false }, { consentimento: 'true' }, { id: 'a b' }, { id: '' },
+    { idade: null }, { idade: '' }, { idade: 13 }, { idade: 100 }, { idade: 30.5 }, { idade: 'trinta' }
   ];
   for (const extra of casos) {
     const esperado = gas.post({ acao: 'enviar', payload: payloadValido(extra) });
@@ -143,6 +144,7 @@ test('mesmo comportamento do Code.gs num roteiro completo (fora protocolo e data
   const roteiro = [
     { acao: 'enviar', payload: payloadValido({ id: 'roteiro-0001', nome: '=HYPERLINK("x") Silva', vaga: '+SUM(A1)' }) },
     { acao: 'enviar', payload: payloadValido({ id: 'roteiro-0002', nome: 'Ana Paula Reis', respostas: S.compactar(respostasFixas(['C', 'S', 'I', 'D'])) }) },
+    { acao: 'enviar', payload: payloadValido({ id: 'roteiro-0003', idade: '52', funcao: '  -Gerente  ', empresa: 'E'.repeat(100) }) },
     { acao: 'enviar', payload: payloadValido({ id: 'roteiro-0001' }) },
     { acao: 'atualizar', chave: 'previa', id: 'roteiro-0001', campos: { status: 'reprovado', observacoes: '@nota' } },
     { acao: 'atualizar', chave: 'previa', id: 'roteiro-0002', campos: {} },
@@ -193,4 +195,28 @@ test('latência simulada padrão de ~400 ms', async () => {
   const t0 = Date.now();
   await api.enviar(payloadValido());
   assert.ok(Date.now() - t0 >= 25);
+});
+
+test('idade ausente: mesma recusa do Code.gs; listar devolve idade/funcao/empresa e "null" para linhas antigas', async () => {
+  const gas = carregarGas({ props: { ADMIN_KEY: 'k' } });
+  const { api, armazenamento } = nova();
+  const semIdade = payloadValido({ id: 'sem-idade-01' });
+  delete semIdade.idade;
+  const esperado = gas.post({ acao: 'enviar', payload: semIdade });
+  assert.equal(esperado.ok, false);
+  assert.match(esperado.erro, /Idade não informada/);
+  assert.deepEqual(api.processar({ acao: 'enviar', payload: semIdade }), esperado);
+
+  assert.equal((await api.enviar(payloadValido({ id: 'com-idade-01', idade: 33 }))).ok, true);
+  // Linha gravada por uma versão anterior da prévia (sem os campos novos)
+  const linhas = JSON.parse(armazenamento.getItem(SIM.CHAVE_ARMAZENAMENTO));
+  const antiga = Object.assign({}, linhas[0], { id: 'antiga-0001' });
+  delete antiga.idade; delete antiga.funcao; delete antiga.empresa;
+  linhas.push(antiga);
+  armazenamento.setItem(SIM.CHAVE_ARMAZENAMENTO, JSON.stringify(linhas));
+  const { itens } = await api.listar('previa');
+  assert.deepEqual(itens.map((i) => [i.id, i.idade, i.funcao, i.empresa]), [
+    ['com-idade-01', 33, 'Recepcionista', 'Loja Centro'],
+    ['antiga-0001', null, '', '']
+  ]);
 });

@@ -70,10 +70,14 @@ async function responderGrupo(page, ordem) {
   await expect(page.locator('[data-acao="proximo"]')).toBeEnabled();
 }
 
+// dados: { nome, telefone, idade? (padrão '30'; '' deixa vazio), funcao?, empresa?, vaga?, consentimento? }
 async function preencherIdentificacao(page, dados) {
   await page.fill('#nome', dados.nome);
   await page.fill('#telefone', '');
   await page.locator('#telefone').pressSequentially(dados.telefone);
+  await page.fill('#idade', dados.idade === undefined ? '30' : String(dados.idade));
+  if (dados.funcao) await page.fill('#funcao', dados.funcao);
+  if (dados.empresa) await page.fill('#empresa', dados.empresa);
   if (dados.vaga) await page.fill('#vaga', dados.vaga);
   if (dados.consentimento !== false) await page.check('#consentimento');
 }

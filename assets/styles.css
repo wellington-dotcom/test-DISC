@@ -121,6 +121,13 @@ body[data-etapa="boasvindas"] .conteudo { max-width: 1120px; }
 .consentimento .marcar { font-size: var(--t-rotulo); line-height: 1.55; color: var(--medio); }
 .consentimento strong { color: var(--tinta); }
 .formulario .acoes { margin-top: 6px; }
+/* Dois campos lado a lado no computador (telefone + idade; função + empresa); empilhados no celular.
+   align-items: start — um erro num campo não desloca o vizinho. */
+.campos-dupla { display: grid; gap: 18px; align-items: start; }
+@media (min-width: 640px) {
+  .campos-dupla { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
+  .campos-dupla--telefone { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+}
 
 /* ---------- Progresso (padrão BarraMeta do BI) ---------- */
 .progresso-topo { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; font-size: var(--t-rotulo); color: var(--medio); }

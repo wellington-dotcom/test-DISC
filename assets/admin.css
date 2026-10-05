@@ -209,6 +209,7 @@
 .card-nome:hover { text-decoration: underline; text-underline-offset: 3px; }
 .card-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: var(--t-rotulo); color: var(--medio); font-variant-numeric: tabular-nums; }
 .card-meta > * { min-width: 0; overflow-wrap: anywhere; }
+.card-experiencia { flex-basis: 100%; font-size: var(--t-nota); color: var(--suave); }
 .card-aviso { font-size: var(--t-rotulo); }
 .card-rodape { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; padding-top: 4px; }
 .card-invalido { background: var(--nevoa); }

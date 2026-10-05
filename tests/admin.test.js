@@ -142,3 +142,58 @@ test('admin.html carrega js/api-simulada.js logo depois de js/api.js', () => {
   assert.equal(scripts[scripts.indexOf('js/api.js') + 1], 'js/api-simulada.js');
   assert.match(html, /id="dica-previa"[^>]*hidden/);
 });
+
+test('validarImportado aceita códigos novos (com idade/função/empresa) e antigos (sem esses campos)', () => {
+  assert.equal(AD.validarImportado(payloadValido({ idade: 30, funcao: 'Vendedor', empresa: 'Loja X' })), '');
+  const antigo = payloadValido();
+  delete antigo.idade; delete antigo.funcao; delete antigo.empresa;
+  assert.equal(AD.validarImportado(antigo), '');
+  assert.match(AD.validarImportado(payloadValido({ idade: 120 })), /idade/);
+  assert.match(AD.validarImportado(payloadValido({ idade: 'abc' })), /idade/);
+});
+
+test('textoIdade e textoExperiencia ("—" e "" quando não há)', () => {
+  assert.equal(AD.textoIdade(30), '30 anos');
+  assert.equal(AD.textoIdade(undefined), '—');
+  assert.equal(AD.textoIdade(null), '—');
+  assert.equal(AD.textoIdade(''), '—');
+  assert.equal(AD.textoExperiencia({ funcao: 'Recepcionista', empresa: 'Loja Centro' }), 'Recepcionista · Loja Centro');
+  assert.equal(AD.textoExperiencia({ funcao: '', empresa: 'Loja Centro' }), 'Loja Centro');
+  assert.equal(AD.textoExperiencia({ funcao: 'Vendedor' }), 'Vendedor');
+  assert.equal(AD.textoExperiencia({}), '');
+});
+
+test('CSV ganha idade, funcao e empresa (vazios para registros antigos)', () => {
+  const antigo = payloadValido({ id: 'antigo-0001' });
+  delete antigo.idade; delete antigo.funcao; delete antigo.empresa;
+  const csv = AD.gerarCsv([AD.recalcular(payloadValido({ id: 'novo-0001', idade: 30, funcao: 'Vendedor', empresa: '=Loja' })), AD.recalcular(antigo)]);
+  const linhas = csv.slice(1).split('\r\n').map((l) => l.split(';'));
+  const [ii, fi, ei] = ['idade', 'funcao', 'empresa'].map((c) => linhas[0].indexOf(c));
+  assert.ok(ii > 0 && fi > 0 && ei > 0, 'colunas no cabeçalho');
+  assert.equal(linhas[1][ii], '30');
+  assert.equal(linhas[1][fi], 'Vendedor');
+  assert.equal(linhas[1][ei], "'=Loja", 'protegido contra fórmula');
+  assert.deepEqual([linhas[2][ii], linhas[2][fi], linhas[2][ei]], ['', '', '']);
+});
+
+test('busca encontra por função e empresa, mas não pela idade', () => {
+  const r = AD.recalcular(payloadValido({ idade: 47, funcao: 'Recepcionista', empresa: 'Clínica Boa Vista' }));
+  assert.equal(AD.correspondeBusca(r, 'recepcion'), true);
+  assert.equal(AD.correspondeBusca(r, 'boa vista'), true);
+  assert.equal(AD.correspondeBusca(r, '47'), false, 'idade não é critério de busca');
+  assert.equal(AD.correspondeBusca(r, '47 anos'), false);
+});
+
+test('idade só no detalhe: o card da lista, os resumos e os filtros não usam r.idade', () => {
+  const fonte = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'js', 'admin.js'), 'utf8');
+  const corpo = (nome) => {
+    const i = fonte.indexOf('function ' + nome + '(');
+    assert.ok(i !== -1, nome);
+    const prox = fonte.indexOf('\n  function ', i + 10);
+    return fonte.slice(i, prox === -1 ? undefined : prox);
+  };
+  ['renderizarLista', 'renderizarResumo', 'filtrados', 'correspondeBusca', 'textoExperiencia'].forEach((f) => {
+    assert.ok(!/\.idade\b|textoIdade/.test(corpo(f)), f + ' não deve usar a idade');
+  });
+  assert.ok(/textoIdade\(r\.idade\)/.test(corpo('renderizarDetalhe')), 'detalhe mostra a idade');
+});

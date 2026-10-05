@@ -86,11 +86,26 @@
   // Texto exibido: o código, ou "—" para quem não tem (importado por código longo, envio antigo).
   function textoProtocolo(v) { return normalizarProtocolo(v) || '—'; }
 
-  // Busca da lista: nome/vaga (texto), telefone (3+ dígitos) ou protocolo (ignora maiúsculas e espaços).
+  // Idade (só no detalhe do candidato — nunca na lista, nos resumos ou em filtros: evita discriminação
+  // por idade, Lei 9.029/95). Registros antigos sem idade mostram "—".
+  function textoIdade(v) {
+    var n = Number(v);
+    if (v === null || v === undefined || v === '' || !isFinite(n) || Math.floor(n) !== n || n < 14 || n > 99) return '—';
+    return n + ' anos';
+  }
+
+  // Linha discreta do card: "Função · Empresa" (só o que houver; '' se nenhum).
+  function textoExperiencia(r) {
+    return [r && r.funcao, r && r.empresa].map(function (x) { return String(x == null ? '' : x).trim(); })
+      .filter(Boolean).join(' · ');
+  }
+
+  // Busca da lista: nome/vaga/função/empresa (texto), telefone (3+ dígitos) ou protocolo (ignora maiúsculas e espaços).
+  // A idade NÃO entra na busca.
   function correspondeBusca(r, busca) {
     var termo = String(busca == null ? '' : busca).trim().toLowerCase();
     if (!termo) return true;
-    var alvo = (String(r.nome || '') + ' ' + String(r.vaga || '')).toLowerCase();
+    var alvo = [r.nome, r.vaga, r.funcao, r.empresa].map(function (x) { return String(x == null ? '' : x); }).join(' ').toLowerCase();
     if (alvo.indexOf(termo) !== -1) return true;
     var dig = soDigitos(termo);
     if (dig.length >= 3 && soDigitos(r.telefone).indexOf(dig) !== -1) return true;
@@ -138,6 +153,10 @@
     var d = soDigitos(p.telefone);
     var telOk = d.length === 10 || d.length === 11 || ((d.length === 12 || d.length === 13) && d.indexOf('55') === 0);
     if (!telOk) return 'telefone inválido.';
+    // Códigos antigos (sem idade) continuam aceitos; se a idade vier, precisa ser válida.
+    if (p.idade !== undefined && p.idade !== null && p.idade !== '' && textoIdade(p.idade) === '—') {
+      return 'idade inválida (precisa ser entre 14 e 99 anos).';
+    }
     return '';
   }
 
@@ -156,13 +175,14 @@
   }
 
   function gerarCsv(registros) {
-    var cab = ['id', 'protocolo', 'nome', 'telefone', 'vaga', 'data', 'duração', 'D %', 'I %', 'S %', 'C %', 'perfil', 'status', 'observações'];
+    var cab = ['id', 'protocolo', 'nome', 'telefone', 'vaga', 'idade', 'funcao', 'empresa', 'data', 'duração', 'D %', 'I %', 'S %', 'C %', 'perfil', 'status', 'observações'];
     var linhas = [cab.map(celulaCsv).join(';')];
     registros.forEach(function (r) {
       var p = r.calc ? r.calc.percentuais : {};
       function num(l) { return r.calc ? String(p[l]).replace('.', ',') : ''; }
       linhas.push([
         r.id, textoProtocolo(r.protocolo), r.nome, formatarTelefone(r.telefone), r.vaga || '',
+        textoIdade(r.idade) === '—' ? '' : String(r.idade), r.funcao || '', r.empresa || '',
         formatarData(r.fim || r.recebidoEm), formatarDuracao(r.duracaoSeg),
         num('D'), num('I'), num('S'), num('C'),
         r.calc ? r.calc.codigo : 'inválido',
@@ -216,6 +236,8 @@
     normalizarStatus: normalizarStatus,
     normalizarProtocolo: normalizarProtocolo,
     textoProtocolo: textoProtocolo,
+    textoIdade: textoIdade,
+    textoExperiencia: textoExperiencia,
     correspondeBusca: correspondeBusca,
     recalcular: recalcular,
     extrairCodigos: extrairCodigos,
@@ -703,6 +725,9 @@
       var meta = [linkTelefone(r)];
       if (r.vaga) meta.push(el('span', { texto: r.vaga }));
       meta.push(el('span', { classe: 'texto-suave', texto: formatarData(r.fim || r.recebidoEm) }));
+      // Função · Empresa (discreto). A idade fica só no detalhe.
+      var exp = textoExperiencia(r);
+      if (exp) meta.push(el('span', { classe: 'card-experiencia', texto: exp }));
       ul.appendChild(el('li', { classe: 'card caixa' + (animar ? ' surgir' : '') + (r.invalido ? ' card-invalido' : ''), estilo: animar ? { 'animation-delay': Math.min(i, 8) * 30 + 'ms' } : null }, [
         el('div', { classe: 'card-topo' }, [
           r.calc ? letraDisc(r.calc.primario, 'card-letra') : el('span', { classe: 'letra-disc card-letra card-letra--vazia', 'aria-hidden': 'true', texto: '?' }),
@@ -791,7 +816,10 @@
       el('h3', { classe: 'caixa__titulo', texto: 'Dados do candidato' }),
       el('dl', { classe: 'det-dl' }, [
         el('div', null, [el('dt', { texto: 'Telefone' }), el('dd', null, linkTelefone(r))]),
-        el('div', null, [el('dt', { texto: 'Vaga' }), el('dd', { texto: r.vaga || '—' })]),
+        el('div', null, [el('dt', { texto: 'Idade' }), el('dd', { id: 'det-idade', texto: textoIdade(r.idade) })]),
+        el('div', null, [el('dt', { texto: 'Vaga pretendida' }), el('dd', { texto: r.vaga || '—' })]),
+        el('div', null, [el('dt', { texto: 'Função atual/última' }), el('dd', { id: 'det-funcao', texto: r.funcao || '—' })]),
+        el('div', null, [el('dt', { texto: 'Empresa atual/última' }), el('dd', { id: 'det-empresa', texto: r.empresa || '—' })]),
         el('div', null, [el('dt', { texto: 'Concluído em' }), el('dd', { texto: formatarData(r.fim || r.recebidoEm) })]),
         el('div', null, [el('dt', { texto: 'Duração' }), el('dd', { texto: formatarDuracao(r.duracaoSeg) })]),
         el('div', null, [el('dt', { texto: 'Perfil' }), el('dd', { classe: 'det-perfil' }, [badgePerfil(r), r.calc ? ' ' + NOMES[r.calc.primario] + ' / ' + NOMES[r.calc.secundario] : ''])]),
@@ -1033,7 +1061,7 @@
       var p = v.p;
       if (acharRegistro(String(p.id))) { duplicados++; return; }
       var reg = {};
-      ['v', 'id', 'nome', 'telefone', 'vaga', 'consentimento', 'inicio', 'fim', 'duracaoSeg', 'respostas'].forEach(function (k) {
+      ['v', 'id', 'nome', 'telefone', 'idade', 'funcao', 'empresa', 'vaga', 'consentimento', 'inicio', 'fim', 'duracaoSeg', 'respostas'].forEach(function (k) {
         if (p[k] != null) reg[k] = typeof p[k] === 'object' ? JSON.stringify(p[k]) : p[k];
       });
       reg.id = String(reg.id);

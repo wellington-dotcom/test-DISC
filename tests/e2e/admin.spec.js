@@ -79,6 +79,10 @@ test.describe('Admin sem API (importar código)', () => {
     const det = page.locator('#vista-detalhe');
     await expect(det).toBeVisible();
     await expect(det.locator('h2')).toHaveText('Carla Nogueira Dias');
+    // Código antigo (sem idade/função/empresa) continua importável e mostra "—"
+    await expect(det.locator('#det-idade')).toHaveText('—');
+    await expect(det.locator('#det-funcao')).toHaveText('—');
+    await expect(det.locator('#det-empresa')).toHaveText('—');
     await expect(det.locator('svg.grafico')).toBeVisible();
     await expect(det.locator('svg.grafico rect')).toHaveCount(4);
     // Identidade nova: trilho liso (sem padrões hachurados) e cores dos tokens DISC
@@ -161,7 +165,7 @@ test.describe('Admin com API simulada', () => {
     const CHAVE = 'chave-e2e-123';
     await configurar(page, { API_URL: API_FALSA, EMPRESA: 'Empresa Teste' });
     const itens = [
-      Object.assign(payload({ id: 'api-item-001', nome: 'Rafael Moreira Lima' }), { status: 'em_analise', observacoes: '', recebidoEm: '2026-10-02T10:00:00.000Z', protocolo: '47K' }),
+      Object.assign(payload({ id: 'api-item-001', nome: 'Rafael Moreira Lima', idade: 34, funcao: 'Supervisor de vendas', empresa: 'Loja Centro' }), { status: 'em_analise', observacoes: '', recebidoEm: '2026-10-02T10:00:00.000Z', protocolo: '47K' }),
       Object.assign(payload({ id: 'api-item-002', nome: 'Beatriz Santos', respostas: '2143'.repeat(25), resultado: { codigo: 'DI' } }), { status: 'reprovado', observacoes: 'Sem disponibilidade', recebidoEm: '2026-10-03T10:00:00.000Z', protocolo: '03W' }),
       Object.assign(payload({ id: 'api-item-003', nome: 'Registro Corrompido', respostas: '1111' }), { status: 'em_analise', observacoes: '', recebidoEm: '2026-10-01T10:00:00.000Z' })
     ];
@@ -208,6 +212,26 @@ test.describe('Admin com API simulada', () => {
     await page.fill('#filtro-busca', '');
     await expect(page.locator('#lista-candidatos > li')).toHaveCount(3);
 
+    // Card da lista: "Função · Empresa" discreto, e NUNCA a idade (só no detalhe — Lei 9.029/95)
+    const cardRafael = page.locator('#lista-candidatos > li', { hasText: 'Rafael' });
+    await expect(cardRafael.locator('.card-experiencia')).toHaveText('Supervisor de vendas · Loja Centro');
+    await expect(cardRafael).not.toContainText('34 anos');
+    await expect(cardRafael).not.toContainText('Idade');
+    expect(await cardRafael.innerText()).not.toMatch(/\b34\b/);
+    await expect(page.locator('#lista-candidatos > li', { hasText: 'Beatriz' }).locator('.card-experiencia')).toHaveCount(0);
+    await expect(page.locator('#vista-lista')).not.toContainText('34 anos');
+    await expect(page.locator('#vista-lista')).not.toContainText('Idade');
+    // Busca por função/empresa encontra; pela idade, não
+    await page.fill('#filtro-busca', 'loja centro');
+    await expect(page.locator('#lista-candidatos > li')).toHaveCount(1);
+    await expect(page.locator('#lista-candidatos > li')).toContainText('Rafael Moreira Lima');
+    await page.fill('#filtro-busca', 'de vendas');
+    await expect(page.locator('#lista-candidatos > li')).toHaveCount(1);
+    await page.fill('#filtro-busca', '34');
+    await expect(page.locator('#lista-candidatos > li')).toHaveCount(0);
+    await page.fill('#filtro-busca', '');
+    await expect(page.locator('#lista-candidatos > li')).toHaveCount(3);
+
     // Filtro por status
     await escolher(page, '#filtro-status', 'reprovado');
     await expect(page.locator('#lista-candidatos > li')).toHaveCount(1);
@@ -217,6 +241,9 @@ test.describe('Admin com API simulada', () => {
     await page.locator('#lista-candidatos > li', { hasText: 'Rafael' }).getByRole('button', { name: /Ver detalhes/ }).click();
     await expect(page.locator('#vista-detalhe h2')).toHaveText('Rafael Moreira Lima');
     await expect(page.locator('#det-protocolo')).toHaveText('Código 47K');
+    await expect(page.locator('#det-idade')).toHaveText('34 anos');
+    await expect(page.locator('#det-funcao')).toHaveText('Supervisor de vendas');
+    await expect(page.locator('#det-empresa')).toHaveText('Loja Centro');
     await expect(page.locator('#vista-detalhe section.guia')).toContainText('Rafael');
     await escolher(page, '#det-status', 'aprovado');
     await expect(page.locator('#aviso-geral')).toContainText('Aprovado');
@@ -252,6 +279,10 @@ test.describe('Admin com API simulada', () => {
     expect(rafael).toContain('Ótima comunicação.');
     expect(rafael).toContain(';DI;');
     expect(rafael).toContain(';47K;');
+    expect(linhas[0]).toContain(';vaga;idade;funcao;empresa;');
+    expect(rafael).toContain(';Supervisora;34;Supervisor de vendas;Loja Centro;');
+    const beatriz = linhas.find((l) => l.indexOf('Beatriz Santos') !== -1);
+    expect(beatriz).toContain(';Supervisora;;;;');
 
     // Sair limpa a sessão
     await page.click('#btn-sair');
@@ -317,16 +348,19 @@ test('Admin na prévia (API_URL "simulada"): chave previa, protocolo gerado e bu
   await expect(page.locator('#contagem')).toHaveText('Nenhum candidato recebido ainda.');
 
   // Envio "do candidato" pela API simulada: o servidor falso devolve o protocolo
-  const r1 = await page.evaluate((p) => window.DISC_API.enviar(p), payload({ id: 'previa-envio-01', nome: 'Paula Mendes Rocha' }));
+  const r1 = await page.evaluate((p) => window.DISC_API.enviar(p), payload({ id: 'previa-envio-01', nome: 'Paula Mendes Rocha', idade: 28 }));
   expect(r1.protocolo).toMatch(/^[0-9]{2}[A-HJ-NP-Z]$/);
-  const r2 = await page.evaluate((p) => window.DISC_API.enviar(p), payload({ id: 'previa-envio-01', nome: 'Paula Mendes Rocha' }));
+  const r2 = await page.evaluate((p) => window.DISC_API.enviar(p), payload({ id: 'previa-envio-01', nome: 'Paula Mendes Rocha', idade: 28 }));
   expect(r2).toEqual({ ok: true, duplicado: true, id: 'previa-envio-01', protocolo: r1.protocolo });
 
   // Código importado na aba "Importar códigos" também ganha protocolo
   await page.locator('#aba-importar').click();
-  await page.fill('#campo-codigos', await gerarCodigo(page, payload({ id: 'previa-import-2', nome: 'Otávio Prado Lins', respostas: '1234'.repeat(25) })));
+  // Com servidor, código antigo sem idade é recusado pelo servidor (idade obrigatória) com mensagem clara
+  const antigoSemIdade = await gerarCodigo(page, payload({ id: 'previa-antigo-3', nome: 'Rui Antigo Melo' }));
+  await page.fill('#campo-codigos', await gerarCodigo(page, payload({ id: 'previa-import-2', nome: 'Otávio Prado Lins', idade: 61, respostas: '1234'.repeat(25) })) + '\n' + antigoSemIdade);
   await page.click('#btn-importar');
   await expect(page.locator('#resultado-importacao')).toContainText('1 importado');
+  await expect(page.locator('#resultado-importacao')).toContainText('Idade não informada');
 
   await page.locator('.aba[data-aba="lista"]').click();
   await expect(page.locator('#lista-candidatos > li')).toHaveCount(2);

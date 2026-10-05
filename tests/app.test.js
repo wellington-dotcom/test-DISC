@@ -88,16 +88,44 @@ test('montarPayload segue o contrato do SPEC', () => {
   const sel = [];
   for (let i = 0; i < 25; i++) sel.push(['C', 'S', 'I', 'D']);
   const fim = new Date('2026-10-01T12:10:00Z');
-  const p = A.montarPayload({ id: 'abc123-x', nome: ' Maria  Souza ', telefone: '11999998888', vaga: ' Caixa ',
+  const p = A.montarPayload({ id: 'abc123-x', nome: ' Maria  Souza ', telefone: '11999998888', idade: '27',
+    funcao: '  Recepcionista ', empresa: ' Clínica  Boa Vista ', vaga: ' Caixa ',
     consentimento: true, inicio: '2026-10-01T12:00:00Z' }, sel, fim);
   assert.equal(p.v, 1);
   assert.equal(p.nome, 'Maria Souza');
   assert.equal(p.telefone, '5511999998888');
   assert.equal(p.vaga, 'Caixa');
+  assert.equal(p.idade, 27, 'idade vai como número inteiro');
+  assert.equal(p.funcao, 'Recepcionista');
+  assert.equal(p.empresa, 'Clínica Boa Vista');
   assert.equal(p.consentimento, true);
   assert.equal(p.duracaoSeg, 600);
   assert.equal(p.respostas, '1234'.repeat(25));
   assert.deepEqual(p.resultado, { percentuais: S.calcular(S.descompactar(p.respostas)).percentuais, codigo: 'CS' });
+});
+
+test('montarPayload: função e empresa vazias viram "" e são cortadas em 80 caracteres', () => {
+  const sel = [];
+  for (let i = 0; i < 25; i++) sel.push(['C', 'S', 'I', 'D']);
+  const p = A.montarPayload({ id: 'abc123-y', nome: 'Maria Souza', telefone: '11999998888', idade: 40, consentimento: true }, sel);
+  assert.equal(p.idade, 40);
+  assert.equal(p.funcao, '');
+  assert.equal(p.empresa, '');
+  assert.equal(A.limparTextoCurto('x'.repeat(100)).length, 80);
+});
+
+test('validarIdade: obrigatória, só números, de 14 a 99', () => {
+  ['14', '30', '99', 45, ' 18 '].forEach((v) => assert.equal(A.validarIdade(v), '', String(v)));
+  ['', '   ', null, undefined, 'trinta', '3 0', '30a', '-20', '30.5', '1e2'].forEach((v) => {
+    assert.equal(A.validarIdade(v), 'Informe sua idade (só números).', String(v));
+  });
+  ['13', '0', '100', '150', 7].forEach((v) => {
+    assert.equal(A.validarIdade(v), 'Confira a idade: precisa ser entre 14 e 99 anos.', String(v));
+  });
+  assert.equal(A.limparIdade('3a0'), '30');
+  assert.equal(A.limparIdade('12345'), '123');
+  assert.equal(A.idadeParaSalvar('30'), 30);
+  assert.equal(A.idadeParaSalvar('abc'), null);
 });
 
 test('escapar', () => {

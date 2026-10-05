@@ -88,7 +88,7 @@ Abra `admin.html` (ex.: `https://seu-usuario.github.io/teste-disc/admin.html`).
 
 1. **Entrar:** com servidor, digite a chave de administrador (passo 3 da configuração). Ela fica guardada só até você fechar a aba. Sem servidor, o painel abre direto.
 2. **Importar códigos** (quando o candidato mandar um código): cole a mensagem ou o código e clique em **Importar**. Pode colar vários de uma vez.
-3. **Lista:** mostra nome, telefone (clique para abrir o WhatsApp), vaga, data, perfil e as barras D/I/S/C. Use a busca (nome ou telefone) e os filtros de perfil e de status.
+3. **Lista:** mostra nome, telefone (clique para abrir o WhatsApp), vaga, data, função e empresa (atual ou última), perfil e as barras D/I/S/C. Use a busca (nome, telefone, função ou empresa) e os filtros de perfil e de status. A **idade** do candidato aparece só nos **Detalhes**, de propósito: para não influenciar a triagem (a lei proíbe discriminar por idade).
 4. **Detalhes:** clique em **Ver detalhes** para ver o gráfico, as características do perfil e o **Guia para a Liderança**.
 5. **Aprovar:** no detalhe, mude o status para **Aprovado** (ou Reprovado / Em análise) e escreva observações, se quiser.
 6. **Gerar o guia para a liderança:** no detalhe do aprovado,

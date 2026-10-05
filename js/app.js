@@ -103,6 +103,29 @@
     return '';
   }
 
+  // Idade: obrigatória, inteiro de 14 a 99 (só dígitos). Retorna mensagem de erro ou ''.
+  var IDADE_MIN = 14, IDADE_MAX = 99;
+  function limparIdade(v) {
+    return String(v == null ? '' : v).replace(/\D/g, '').slice(0, 3);
+  }
+  function validarIdade(v) {
+    var s = String(v == null ? '' : v).trim();
+    if (!s || !/^[0-9]+$/.test(s)) return 'Informe sua idade (só números).';
+    var n = Number(s);
+    if (n < IDADE_MIN || n > IDADE_MAX) return 'Confira a idade: precisa ser entre 14 e 99 anos.';
+    return '';
+  }
+  // Idade como número inteiro para o payload (null se inválida).
+  function idadeParaSalvar(v) {
+    return validarIdade(v) ? null : Number(String(v).trim());
+  }
+
+  // Função/empresa atual ou última: texto livre opcional, até 80 caracteres.
+  var LIMITE_TEXTO_CURTO = 80;
+  function limparTextoCurto(v) {
+    return String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, LIMITE_TEXTO_CURTO).trim();
+  }
+
   // Máscara progressiva: (11) 9999-8888 ou (11) 99999-8888.
   function formatarTelefone(tel) {
     var d = limparTelefone(tel).slice(0, 11);
@@ -203,6 +226,9 @@
       id: dados.id,
       nome: normalizarNome(dados.nome),
       telefone: telefoneParaSalvar(dados.telefone),
+      idade: idadeParaSalvar(dados.idade),
+      funcao: limparTextoCurto(dados.funcao),
+      empresa: limparTextoCurto(dados.empresa),
       vaga: String(dados.vaga || '').trim(),
       consentimento: !!dados.consentimento,
       inicio: inicio.toISOString(),
@@ -279,6 +305,10 @@
     limparTelefone: limparTelefone,
     formatarTelefone: formatarTelefone,
     telefoneParaSalvar: telefoneParaSalvar,
+    validarIdade: validarIdade,
+    limparIdade: limparIdade,
+    idadeParaSalvar: idadeParaSalvar,
+    limparTextoCurto: limparTextoCurto,
     gerarId: gerarId,
     embaralhar: embaralhar,
     gerarPermutacoes: gerarPermutacoes,
@@ -327,6 +357,9 @@
       id: '',
       nome: '',
       telefone: '',
+      idade: '',
+      funcao: '',
+      empresa: '',
       vaga: '',
       consentimento: false,
       inicio: '',
@@ -527,23 +560,44 @@
               'aria-describedby="erro-nome" value="' + escapar(estado.nome) + '">' +
             '<p class="campo__erro erro" id="erro-nome" role="alert"></p>' +
           '</div>' +
-          '<div class="campo">' +
-            '<label class="campo__rotulo" for="telefone">Telefone (WhatsApp) com DDD <span class="obrigatorio" aria-hidden="true">*</span></label>' +
-            '<input class="entrada" id="telefone" name="telefone" type="tel" inputmode="numeric" autocomplete="tel-national" required maxlength="25" ' +
-              'placeholder="(11) 99999-8888" aria-describedby="dica-telefone erro-telefone" value="' + escapar(formatarTelefone(estado.telefone)) + '">' +
-            '<p class="campo__ajuda" id="dica-telefone">Somente números, com DDD.</p>' +
-            '<p class="campo__erro erro" id="erro-telefone" role="alert"></p>' +
+          '<div class="campos-dupla campos-dupla--telefone">' +
+            '<div class="campo">' +
+              '<label class="campo__rotulo" for="telefone">Telefone (WhatsApp) com DDD <span class="obrigatorio" aria-hidden="true">*</span></label>' +
+              '<input class="entrada" id="telefone" name="telefone" type="tel" inputmode="numeric" autocomplete="tel-national" required maxlength="25" ' +
+                'placeholder="(11) 99999-8888" aria-describedby="dica-telefone erro-telefone" value="' + escapar(formatarTelefone(estado.telefone)) + '">' +
+              '<p class="campo__ajuda" id="dica-telefone">Somente números, com DDD.</p>' +
+              '<p class="campo__erro erro" id="erro-telefone" role="alert"></p>' +
+            '</div>' +
+            '<div class="campo">' +
+              '<label class="campo__rotulo" for="idade">Idade <span class="obrigatorio" aria-hidden="true">*</span></label>' +
+              '<input class="entrada" id="idade" name="idade" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" required maxlength="3" ' +
+                'aria-describedby="dica-idade erro-idade" value="' + escapar(limparIdade(estado.idade)) + '">' +
+              '<p class="campo__ajuda" id="dica-idade">Em anos, só números.</p>' +
+              '<p class="campo__erro erro" id="erro-idade" role="alert"></p>' +
+            '</div>' +
           '</div>' +
           '<div class="campo">' +
-            '<label class="campo__rotulo" for="vaga">Vaga ou cargo <span class="texto-suave">(opcional)</span></label>' +
-            '<input class="entrada" id="vaga" name="vaga" type="text" autocomplete="organization-title" maxlength="80" value="' + escapar(estado.vaga) + '">' +
+            '<label class="campo__rotulo" for="vaga">Vaga pretendida neste processo <span class="texto-suave">(opcional)</span></label>' +
+            '<input class="entrada" id="vaga" name="vaga" type="text" autocomplete="off" maxlength="80" aria-describedby="dica-vaga" value="' + escapar(estado.vaga) + '">' +
+            '<p class="campo__ajuda" id="dica-vaga">A vaga a que você está se candidatando.</p>' +
+          '</div>' +
+          '<div class="campos-dupla">' +
+            '<div class="campo">' +
+              '<label class="campo__rotulo" for="funcao">Função atual ou última <span class="texto-suave">(opcional)</span></label>' +
+              '<input class="entrada" id="funcao" name="funcao" type="text" autocomplete="organization-title" maxlength="80" aria-describedby="dica-funcao" value="' + escapar(estado.funcao) + '">' +
+              '<p class="campo__ajuda" id="dica-funcao">Ex.: Recepcionista, Vendedor</p>' +
+            '</div>' +
+            '<div class="campo">' +
+              '<label class="campo__rotulo" for="empresa">Empresa atual ou última <span class="texto-suave">(opcional)</span></label>' +
+              '<input class="entrada" id="empresa" name="empresa" type="text" autocomplete="organization" maxlength="80" value="' + escapar(estado.empresa) + '">' +
+            '</div>' +
           '</div>' +
           '<div class="campo consentimento">' +
             '<label class="marcar" for="consentimento">' +
               '<input id="consentimento" name="consentimento" type="checkbox" required aria-describedby="erro-consentimento"' + (estado.consentimento ? ' checked' : '') + '>' +
-              '<span>Autorizo o uso dos meus dados (nome, telefone e respostas) <strong>apenas neste processo seletivo</strong>' +
+              '<span>Autorizo o uso dos meus dados (nome, telefone, idade, experiência e respostas) <strong>apenas neste processo seletivo</strong>' +
                 (nomeEmpresa() ? ' da ' + escapar(nomeEmpresa()) : '') +
-                '. Sei que eles serão <strong>excluídos ao final do processo</strong>, conforme a LGPD.</span>' +
+                '; a idade é usada só para fins cadastrais. Sei que eles serão <strong>excluídos ao final do processo</strong>, conforme a LGPD.</span>' +
             '</label>' +
             '<p class="campo__erro erro" id="erro-consentimento" role="alert"></p>' +
           '</div>' +
@@ -691,7 +745,10 @@
           '<dl>' +
             '<div><dt>Nome</dt><dd>' + escapar(normalizarNome(estado.nome)) + '</dd></div>' +
             '<div><dt>Telefone</dt><dd>' + escapar(formatarTelefone(estado.telefone)) + '</dd></div>' +
-            (estado.vaga ? '<div><dt>Vaga</dt><dd>' + escapar(estado.vaga) + '</dd></div>' : '') +
+            '<div><dt>Idade</dt><dd>' + escapar(limparIdade(estado.idade)) + ' anos</dd></div>' +
+            (estado.vaga ? '<div><dt>Vaga pretendida</dt><dd>' + escapar(estado.vaga) + '</dd></div>' : '') +
+            (estado.funcao ? '<div><dt>Função atual ou última</dt><dd>' + escapar(estado.funcao) + '</dd></div>' : '') +
+            (estado.empresa ? '<div><dt>Empresa atual ou última</dt><dd>' + escapar(estado.empresa) + '</dd></div>' : '') +
           '</dl>' +
           '<button type="button" class="botao botao--link botao--pequeno" data-acao="editar-dados">Alterar dados</button>' +
         '</div>' +
@@ -875,13 +932,18 @@
           try { tel.setSelectionRange(fmt.length, fmt.length); } catch (e) { /* ignora */ }
         }
       });
+      var idade = form.querySelector('#idade');
+      idade.addEventListener('input', function () {
+        var limpo = limparIdade(idade.value);
+        if (limpo !== idade.value) idade.value = limpo;
+      });
       form.addEventListener('submit', function (ev) {
         ev.preventDefault();
         enviarIdentificacao(form);
       });
-      ['nome', 'telefone', 'vaga'].forEach(function (campo) {
+      ['nome', 'telefone', 'idade', 'funcao', 'empresa', 'vaga'].forEach(function (campo) {
         form.querySelector('#' + campo).addEventListener('change', function () {
-          estado[campo] = campo === 'telefone' ? limparTelefone(this.value) : this.value;
+          estado[campo] = campo === 'telefone' ? limparTelefone(this.value) : campo === 'idade' ? limparIdade(this.value) : this.value;
           salvar();
         });
       });
@@ -907,18 +969,23 @@
   function enviarIdentificacao(form) {
     var nome = form.querySelector('#nome').value;
     var tel = form.querySelector('#telefone').value;
+    var idade = form.querySelector('#idade').value;
     var vaga = form.querySelector('#vaga').value;
     var cons = form.querySelector('#consentimento').checked;
     var okNome = mostrarErro(form, 'nome', validarNome(nome));
     var okTel = mostrarErro(form, 'telefone', validarTelefone(tel));
+    var okIdade = mostrarErro(form, 'idade', validarIdade(idade));
     var okCons = mostrarErro(form, 'consentimento', cons ? '' : 'Para continuar, marque a autorização de uso dos dados.');
-    if (!okNome || !okTel || !okCons) {
+    if (!okNome || !okTel || !okIdade || !okCons) {
       var primeiro = form.querySelector('[aria-invalid="true"]');
       if (primeiro) primeiro.focus();
       return;
     }
     estado.nome = normalizarNome(nome);
     estado.telefone = limparTelefone(tel);
+    estado.idade = limparIdade(idade);
+    estado.funcao = limparTextoCurto(form.querySelector('#funcao').value);
+    estado.empresa = limparTextoCurto(form.querySelector('#empresa').value);
     estado.vaga = String(vaga || '').trim();
     estado.consentimento = true;
     if (!estado.id) estado.id = gerarId();
@@ -956,6 +1023,11 @@
         if (estado.etapa === 'boasvindas' || estado.etapa === 'concluido') estado.etapa = 'identificacao';
         if (estado.etapa === 'enviando') estado.etapa = 'revisao';
         if (estado.etapa === 'teste' && !estado.permutacoes) estado.etapa = 'identificacao';
+        // Progresso de antes do campo idade: pede a idade antes de seguir.
+        if ((estado.etapa === 'teste' || estado.etapa === 'revisao') && validarIdade(estado.idade)) {
+          estado.voltarParaRevisao = estado.etapa === 'revisao';
+          estado.etapa = 'identificacao';
+        }
         render(true);
         break;
       case 'recomecar':
@@ -1046,6 +1118,9 @@
     if (!form) return;
     estado.nome = form.querySelector('#nome').value;
     estado.telefone = limparTelefone(form.querySelector('#telefone').value);
+    estado.idade = limparIdade(form.querySelector('#idade').value);
+    estado.funcao = form.querySelector('#funcao').value;
+    estado.empresa = form.querySelector('#empresa').value;
     estado.vaga = form.querySelector('#vaga').value;
     estado.consentimento = form.querySelector('#consentimento').checked;
   }
@@ -1364,6 +1439,7 @@
   function concluir() {
     if (envio.carregando) return;
     if (primeiroIncompleto() !== -1) { irPara('revisao'); return; }
+    if (validarIdade(estado.idade)) { estado.voltarParaRevisao = true; irPara('identificacao'); return; }
     completarDemonstracao();
     var payload;
     try {

@@ -26,7 +26,8 @@ test('enviar grava linha com cabeçalho e resultado recalculado (ignora resultad
   assert.ok(aba, 'aba Respostas criada');
   const cab = aba.linhas[0];
   assert.deepEqual(cab, ['id', 'recebidoEm', 'nome', 'telefone', 'vaga', 'inicio', 'fim', 'duracaoSeg',
-    'respostas', 'D', 'I', 'S', 'C', 'perfil', 'status', 'observacoes', 'payloadJson', 'protocolo']);
+    'respostas', 'D', 'I', 'S', 'C', 'perfil', 'status', 'observacoes', 'payloadJson', 'protocolo',
+    'idade', 'funcao', 'empresa']);
   assert.equal(aba.linhas.length, 2);
   const linha = aba.linhas[1];
   const col = (n) => linha[cab.indexOf(n)];
@@ -40,6 +41,9 @@ test('enviar grava linha com cabeçalho e resultado recalculado (ignora resultad
   assert.equal(col('status'), 'em_analise');
   assert.match(r.protocolo, /^[0-9]{2}[A-HJ-NP-Z]$/);
   assert.equal(String(col('protocolo')).replace(/^'/, ''), r.protocolo);
+  assert.equal(col('idade'), 30, 'idade gravada como número');
+  assert.equal(col('funcao'), 'Recepcionista');
+  assert.equal(col('empresa'), 'Loja Centro');
 });
 
 test('enviar normaliza telefone de 11 dígitos para 55 + número', () => {
@@ -382,8 +386,8 @@ test('reenvio com id duplicado devolve o mesmo protocolo e não grava de novo', 
 
 test('planilha antiga sem a coluna protocolo: a coluna é criada e os registros antigos continuam', () => {
   const ctx = novo();
-  const antigo = ctx.g.CABECALHO.filter((c) => c !== 'protocolo');
-  assert.equal(antigo.length, 17);
+  const antigo = ctx.g.CABECALHO.slice(0, 17);
+  assert.ok(antigo.indexOf('protocolo') === -1);
   const aba = ctx.g.SpreadsheetApp.getActiveSpreadsheet().insertSheet('Respostas');
   aba.linhas.push(antigo.slice());
   // linha gravada pela versão anterior do Code.gs (17 colunas)
@@ -419,14 +423,14 @@ test('planilha antiga sem a coluna protocolo: a coluna é criada e os registros 
 
 test('planilha antiga com só 17 colunas físicas: insere a coluna antes de escrever o cabeçalho', () => {
   const ctx = novo();
-  const antigo = ctx.g.CABECALHO.filter((c) => c !== 'protocolo');
+  const antigo = ctx.g.CABECALHO.slice(0, 17);
   const aba = ctx.g.SpreadsheetApp.getActiveSpreadsheet().insertSheet('Respostas');
   aba.maxColunas = 17; // dono apagou as colunas vazias R..Z
   aba.linhas.push(antigo.slice());
   const r = ctx.post({ acao: 'enviar', payload: payloadValido({ id: 'estreita-0001' }) });
   assert.equal(r.ok, true, r.erro);
   assert.match(r.protocolo, RE_PROTOCOLO);
-  assert.equal(aba.maxColunas, 18);
+  assert.equal(aba.maxColunas, ctx.g.CABECALHO.length);
   assert.deepEqual(aba.linhas[0], ctx.g.CABECALHO.slice());
 });
 
@@ -437,4 +441,89 @@ test('listar devolve protocolo em cada item (sem apóstrofo, maiúsculo)', () =>
   assert.equal(celula, "'" + r.protocolo, 'gravado como texto');
   const item = ctx.post({ acao: 'listar', chave: CHAVE }).itens[0];
   assert.equal(item.protocolo, r.protocolo);
+});
+
+test('idade: obrigatória, inteiro de 14 a 99; payload sem idade é recusado com mensagem clara', () => {
+  const ctx = novo();
+  const casos = [
+    [{ idade: undefined }, /Idade não informada/],
+    [{ idade: null }, /Idade não informada/],
+    [{ idade: '' }, /Idade não informada/],
+    [{ idade: 13 }, /entre 14 e 99/],
+    [{ idade: 100 }, /entre 14 e 99/],
+    [{ idade: 0 }, /entre 14 e 99/],
+    [{ idade: 30.5 }, /só números/],
+    [{ idade: -20 }, /só números/],
+    [{ idade: 'trinta' }, /só números/],
+    [{ idade: '3 0' }, /só números/],
+    [{ idade: true }, /só números/]
+  ];
+  casos.forEach(([extra, re]) => {
+    const p = payloadValido(extra);
+    if (extra.idade === undefined) delete p.idade;
+    const r = ctx.post({ acao: 'enviar', payload: p });
+    assert.equal(r.ok, false, JSON.stringify(extra));
+    assert.match(r.erro, re, JSON.stringify(extra));
+  });
+  assert.equal(ctx.aba() ? ctx.aba().linhas.length <= 1 : true, true, 'nada gravado');
+  // Limites e texto só com dígitos são aceitos
+  [14, 99, '45', ' 18 '].forEach((idade, i) => {
+    const r = ctx.post({ acao: 'enviar', payload: payloadValido({ id: 'idade-ok-' + i, idade }) });
+    assert.equal(r.ok, true, r.erro);
+  });
+  const itens = ctx.post({ acao: 'listar', chave: CHAVE }).itens;
+  assert.deepEqual(itens.map((i) => i.idade), [14, 99, 45, 18]);
+});
+
+test('função e empresa: opcionais, aparadas, limitadas a 80 e protegidas contra fórmula', () => {
+  const ctx = novo();
+  const longo = 'A'.repeat(120);
+  const p = payloadValido({ funcao: '  -Gerente   de\tloja ', empresa: '=HYPERLINK("http://x","clique")' });
+  const r = ctx.post({ acao: 'enviar', payload: p });
+  assert.equal(r.ok, true, r.erro);
+  const aba = ctx.aba();
+  const cab = aba.linhas[0];
+  const linha = aba.linhas[1];
+  assert.equal(linha[cab.indexOf('empresa')], '\'=HYPERLINK("http://x","clique")');
+  assert.equal(linha[cab.indexOf('funcao')], "'-Gerente de loja");
+  linha.forEach((v, i) => {
+    if (typeof v === 'string') assert.ok(!/^[=+\-@]/.test(v), 'célula ' + cab[i] + ' começa com fórmula: ' + v);
+  });
+  const r2 = ctx.post({ acao: 'enviar', payload: payloadValido({ id: 'sem-exp-0001', funcao: undefined, empresa: longo }) });
+  assert.equal(r2.ok, true, r2.erro);
+  const itens = ctx.post({ acao: 'listar', chave: CHAVE }).itens;
+  assert.equal(itens[0].empresa, '=HYPERLINK("http://x","clique")', 'apóstrofo removido na leitura');
+  assert.equal(itens[0].funcao, '-Gerente de loja');
+  assert.equal(itens[1].funcao, '');
+  assert.equal(itens[1].empresa, 'A'.repeat(80));
+});
+
+test('planilha antiga (até protocolo): ganha idade, funcao e empresa no fim; linhas antigas listam idade null', () => {
+  const ctx = novo();
+  const antigo = ctx.g.CABECALHO.slice(0, ctx.g.CABECALHO.indexOf('protocolo') + 1);
+  assert.equal(antigo.length, 18);
+  const aba = ctx.g.SpreadsheetApp.getActiveSpreadsheet().insertSheet('Respostas');
+  aba.maxColunas = 18; // sem colunas físicas sobrando
+  aba.linhas.push(antigo.slice());
+  const pAntigo = payloadValido({ id: 'antigo-000002', nome: 'Maria Antiga Souza' });
+  aba.linhas.push(ctx.g.montarLinha(pAntigo, '2026-09-01T10:00:00.000Z', '12A').slice(0, 18));
+
+  let l = ctx.post({ acao: 'listar', chave: CHAVE });
+  assert.equal(l.ok, true, l.erro);
+  assert.deepEqual(aba.linhas[0], ctx.g.CABECALHO.slice());
+  assert.deepEqual([...aba.linhas[0].slice(-4)], ['protocolo', 'idade', 'funcao', 'empresa']);
+  assert.equal(aba.maxColunas, 21);
+  assert.equal(l.itens[0].idade, null);
+  assert.equal(l.itens[0].funcao, '');
+  assert.equal(l.itens[0].empresa, '');
+  assert.equal(l.itens[0].protocolo, '12A');
+  // funcao (20) e empresa (21) em formato texto; idade é número
+  assert.ok(aba.formatos.some((f) => f.coluna === 20 && f.f === '@'));
+  assert.ok(aba.formatos.some((f) => f.coluna === 21 && f.f === '@'));
+  assert.ok(!aba.formatos.some((f) => f.coluna === 19));
+
+  const r = ctx.post({ acao: 'enviar', payload: payloadValido({ id: 'novo-0000002', idade: 41 }) });
+  assert.equal(r.ok, true, r.erro);
+  l = ctx.post({ acao: 'listar', chave: CHAVE });
+  assert.deepEqual(l.itens.map((i) => i.idade), [null, 41]);
 });

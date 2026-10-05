@@ -29,6 +29,9 @@
   var LETRAS_PROTOCOLO = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
   var TOTAL_PROTOCOLOS = 100 * LETRAS_PROTOCOLO.length;
   var TENTATIVAS_SORTEIO = 40;
+  var IDADE_MIN = 14;
+  var IDADE_MAX = 99;
+  var LIMITE_FUNCAO_EMPRESA = 80;
 
   /* ---------- Regras puras (espelho do Code.gs) ---------- */
 
@@ -67,6 +70,24 @@
   function nomeValido(nome) {
     var palavras = nome.split(' ').filter(function (p) { return letras(p).length > 0; });
     return palavras.length >= 2 && letras(nome).length >= 5;
+  }
+
+  // Mesmas regras e mensagens do validarIdadeServidor do Code.gs.
+  function validarIdade(v) {
+    if (v === null || v === undefined || (typeof v === 'string' && v.trim() === '')) {
+      return erro('Idade não informada: a idade é obrigatória (só números, de 14 a 99 anos).');
+    }
+    var s = typeof v === 'number' ? String(v) : (typeof v === 'string' ? v.trim() : '');
+    if (!/^[0-9]{1,3}$/.test(s)) return erro('Idade inválida: use só números (entre 14 e 99 anos).');
+    var n = Number(s);
+    if (n < IDADE_MIN || n > IDADE_MAX) return erro('Idade inválida: precisa ser entre 14 e 99 anos.');
+    return { ok: true, idade: n };
+  }
+
+  function idadeGravada(v) {
+    if (v === null || v === undefined || v === '') return null;
+    var n = Number(v);
+    return (isFinite(n) && Math.floor(n) === n && n >= IDADE_MIN && n <= IDADE_MAX) ? n : null;
   }
 
   function dataIsoOuVazio(v) {
@@ -168,6 +189,8 @@
       if (!nomeValido(nome)) return erro('Informe o nome completo (nome e sobrenome).');
       var telefone = normalizarTelefone(p.telefone);
       if (!telefone) return erro('Telefone inválido. Informe DDD + número.');
+      var idade = validarIdade(p.idade);
+      if (!idade.ok) return idade;
       if (p.consentimento !== true) return erro('É necessário aceitar o uso dos dados para participar.');
       var respostas = typeof p.respostas === 'string' ? p.respostas.trim() : '';
       if (!recalcular(respostas)) return erro('Respostas do teste inválidas ou incompletas.');
@@ -180,7 +203,9 @@
       return {
         ok: true,
         payload: {
-          v: 1, id: id, nome: nome, telefone: telefone, vaga: limparTexto(p.vaga, 120), consentimento: true,
+          v: 1, id: id, nome: nome, telefone: telefone, idade: idade.idade,
+          funcao: limparTexto(p.funcao, LIMITE_FUNCAO_EMPRESA), empresa: limparTexto(p.empresa, LIMITE_FUNCAO_EMPRESA),
+          vaga: limparTexto(p.vaga, 120), consentimento: true,
           inicio: inicio, fim: fim, duracaoSeg: Math.round(duracao), respostas: respostas
         }
       };
@@ -261,7 +286,10 @@
         status: status,
         observacoes: String(l.observacoes == null ? '' : l.observacoes),
         recebidoEm: String(l.recebidoEm || ''),
-        protocolo: normalizarProtocolo(l.protocolo)
+        protocolo: normalizarProtocolo(l.protocolo),
+        idade: idadeGravada(l.idade),
+        funcao: String(l.funcao == null ? '' : l.funcao),
+        empresa: String(l.empresa == null ? '' : l.empresa)
       };
     }
 

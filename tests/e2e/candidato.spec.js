@@ -18,6 +18,8 @@ test.describe('Candidato (celular, sem API)', () => {
     await enviar.click();
     await expect(page.locator('#erro-nome')).toHaveText('Informe seu nome completo.');
     await expect(page.locator('#erro-telefone')).toContainText('Informe seu telefone');
+    await expect(page.locator('#erro-idade')).toHaveText('Informe sua idade (só números).');
+    await expect(page.locator('#idade')).toHaveAttribute('aria-invalid', 'true');
     await expect(page.locator('#erro-consentimento')).toContainText('autorização');
     await expect(page.locator('#nome')).toHaveAttribute('aria-invalid', 'true');
 
@@ -28,13 +30,26 @@ test.describe('Candidato (celular, sem API)', () => {
     await expect(page.locator('#erro-nome')).toHaveText('Informe nome e sobrenome.');
     await expect(page.locator('#erro-telefone')).toContainText('Telefone inválido');
 
+    // Idade: só dígitos (letras são descartadas) e entre 14 e 99
+    await page.locator('#idade').pressSequentially('1a2');
+    await expect(page.locator('#idade')).toHaveValue('12');
+    await enviar.click();
+    await expect(page.locator('#erro-idade')).toHaveText('Confira a idade: precisa ser entre 14 e 99 anos.');
+    await page.fill('#idade', '100');
+    await enviar.click();
+    await expect(page.locator('#erro-idade')).toHaveText('Confira a idade: precisa ser entre 14 e 99 anos.');
+    await expect(page.locator('h1')).toHaveText('Sua identificação');
+
     // Dados válidos, mas sem consentimento
     await preencherIdentificacao(page, Object.assign({}, DADOS, { consentimento: false }));
     await expect(page.locator('#telefone')).toHaveValue('(11) 98765-4321');
     await enviar.click();
     await expect(page.locator('#erro-nome')).toHaveText('');
     await expect(page.locator('#erro-telefone')).toHaveText('');
+    await expect(page.locator('#erro-idade')).toHaveText('');
+    await expect(page.locator('#idade')).not.toHaveAttribute('aria-invalid', 'true');
     await expect(page.locator('#erro-consentimento')).not.toHaveText('');
+    await expect(page.locator('.consentimento')).toContainText('a idade é usada só para fins cadastrais');
     await expect(page.locator('h1')).toHaveText('Sua identificação');
 
     await page.check('#consentimento');
@@ -96,6 +111,9 @@ test.describe('Candidato (celular, sem API)', () => {
     expect(payload.nome).toBe('Maria Conceição Ávila');
     expect(payload.telefone).toBe('5511987654321');
     expect(payload.vaga).toBe('Atendimento');
+    expect(payload.idade).toBe(30);
+    expect(payload.funcao).toBe('');
+    expect(payload.empresa).toBe('');
     expect(payload.consentimento).toBe(true);
     expect(payload.respostas).toBe('1243'.repeat(25)); // D=1, I=2, S=4, C=3
     expect(payload.resultado.codigo).toBe('SC');
@@ -139,7 +157,11 @@ test.describe('Candidato (celular, com API simulada)', () => {
       return { ok: true, id: corpo.payload && corpo.payload.id, protocolo: '47K' };
     });
 
-    await fazerTesteCompleto(page, { nome: 'José Antônio Pereira', telefone: '2133334444' }, ['D', 'I', 'S', 'C']);
+    await fazerTesteCompleto(page, { nome: 'José Antônio Pereira', telefone: '2133334444', idade: '52', funcao: '  Auxiliar de caixa ', empresa: 'Mercado Bom Preço' }, ['D', 'I', 'S', 'C']);
+    // Revisão mostra idade, função e empresa no resumo de dados
+    await expect(page.locator('.resumo-dados')).toContainText('52 anos');
+    await expect(page.locator('.resumo-dados')).toContainText('Auxiliar de caixa');
+    await expect(page.locator('.resumo-dados')).toContainText('Mercado Bom Preço');
     await page.locator('[data-acao="enviar"]').click();
 
     // Primeira tentativa falha e mostra o erro; a segunda dá certo.
@@ -180,6 +202,9 @@ test.describe('Candidato (celular, com API simulada)', () => {
     expect(p.nome).toBe('José Antônio Pereira');
     expect(p.telefone).toBe('552133334444');
     expect(p.vaga).toBe('');
+    expect(p.idade).toBe(52);
+    expect(p.funcao).toBe('Auxiliar de caixa');
+    expect(p.empresa).toBe('Mercado Bom Preço');
     expect(p.consentimento).toBe(true);
     expect(p.respostas).toBe('4321'.repeat(25));
     expect(p.resultado).toEqual({ percentuais: { D: 40, I: 30, S: 20, C: 10 }, codigo: 'DI' });
@@ -245,6 +270,29 @@ test.describe('Candidato: telefone e textos', () => {
     await expect(page.locator('[data-acao="comecar"]')).toBeVisible();
     expect(await page.evaluate(() => localStorage.getItem('disc_progresso_v1'))).toBeNull();
     expect(await page.evaluate(() => localStorage.getItem('disc_concluido_v1'))).toBeNull();
+  });
+
+  test('progresso salvo antes do campo idade: ao continuar pede a idade e segue do mesmo grupo', async ({ page }) => {
+    const erros = coletarErros(page);
+    await page.goto('/index.html');
+    await page.evaluate(() => {
+      const agora = new Date().toISOString();
+      const ordens = []; const respondidos = [];
+      for (let i = 0; i < 25; i++) { ordens.push(i < 3 ? ['D', 'I', 'S', 'C'] : null); respondidos.push(i < 3); }
+      localStorage.setItem('disc_progresso_v1', JSON.stringify({ etapa: 'teste', id: 'abc123-antigo', nome: 'Fulano de Tal', telefone: '11999998888',
+        vaga: '', consentimento: true, ordens, respondidos, grupo: 3, inicio: agora, salvoEm: agora }));
+    });
+    await page.reload();
+    await page.locator('[data-acao="continuar"]').click();
+    await expect(page.locator('h1')).toHaveText('Sua identificação');
+    await expect(page.locator('#nome')).toHaveValue('Fulano de Tal');
+    await expect(page.locator('#idade')).toHaveValue('');
+    await page.locator('#form-identificacao button[type="submit"]').click();
+    await expect(page.locator('#erro-idade')).toHaveText('Informe sua idade (só números).');
+    await page.fill('#idade', '35');
+    await page.locator('#form-identificacao button[type="submit"]').click();
+    await expect(page.locator('.progresso-topo')).toContainText('Grupo 4 de 25');
+    expect(erros).toEqual([]);
   });
 });
 
