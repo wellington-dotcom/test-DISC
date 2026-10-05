@@ -195,7 +195,7 @@ test('idade só no detalhe: o card da lista, os resumos e os filtros não usam r
   ['renderizarLista', 'renderizarResumo', 'filtrados', 'correspondeBusca', 'textoExperiencia'].forEach((f) => {
     assert.ok(!/\.idade\b|textoIdade/.test(corpo(f)), f + ' não deve usar a idade');
   });
-  assert.ok(/textoIdade\(r\.idade\)/.test(corpo('renderizarDetalhe')), 'detalhe mostra a idade');
+  assert.ok(/textoIdade\(ficha\.idade\)/.test(corpo('renderizarDetalhe')), 'detalhe mostra a idade (da ficha da pessoa)');
 });
 
 /* ---------- Logins, papéis, avaliações e confiabilidade ---------- */
@@ -242,7 +242,7 @@ test('recalcular calcula a confiabilidade (objeto ou texto JSON) e o selo do car
 });
 
 test('abas e permissões: só o administrador usa o painel (gestor desativado nesta versão)', () => {
-  assert.deepEqual(AD.abasDoPapel('admin', true), ['lista', 'processos', 'usuarios', 'comparativo', 'importar']);
+  assert.deepEqual(AD.abasDoPapel('admin', true), ['lista', 'processos', 'empresas', 'usuarios', 'comparativo', 'importar']);
   assert.deepEqual(AD.abasDoPapel('gestor', true), [], 'gestor não vê nada');
   assert.deepEqual(AD.abasDoPapel('', true), []);
   assert.deepEqual(AD.abasDoPapel('', false), ['lista', 'comparativo', 'importar'], 'modo local, sem login');
@@ -388,12 +388,12 @@ test('resumoValidacao: retratos escolhidos e frases com nota, nomeando os perfis
   assert.equal(AD.resumoValidacao(validacaoDI(), null), null);
 });
 
-test('CSV ganha avaliação, empresa da avaliação e confiabilidade no fim', () => {
+test('CSV ganha avaliação, empresa da avaliação e confiabilidade (antes de e-mail, cidade e extras)', () => {
   const csv = AD.gerarCsv([AD.recalcular(payloadValido({ avaliacao: 'SEL1', avaliacaoNome: 'Recepcionista 2026', empresaNome: 'Clínica Exemplo', validacao: validacaoDI() }))]);
   const linhas = csv.slice(1).split('\r\n').map((l) => l.split(';'));
-  const fim = linhas[0].slice(-3);
+  const fim = linhas[0].slice(-6, -3);
   assert.deepEqual(fim, ['avaliação', 'empresa da avaliação', 'confiabilidade']);
-  assert.deepEqual(linhas[1].slice(-3), ['Recepcionista 2026', 'Clínica Exemplo', 'Alta']);
+  assert.deepEqual(linhas[1].slice(-6, -3), ['Recepcionista 2026', 'Clínica Exemplo', 'Alta']);
 });
 
 test('guia copiado leva o aviso quando a confiabilidade é baixa', () => {
@@ -403,7 +403,7 @@ test('guia copiado leva o aviso quando a confiabilidade é baixa', () => {
   assert.equal(AD.AVISO_GUIA_BAIXA, 'Atenção: a confiabilidade deste resultado é baixa. Use o guia com cautela e confirme em entrevista.');
 });
 
-test('admin.html: login por e-mail e senha, sem a tela de chave, carrega validacao/confiabilidade/relatorio-view antes do admin.js e não tem Empresas', () => {
+test('admin.html: login por e-mail e senha, sem a tela de chave, carrega validacao/confiabilidade/relatorio-view antes do admin.js e tem a aba Empresas', () => {
   const fs = require('node:fs');
   const path = require('node:path');
   const html = fs.readFileSync(path.join(__dirname, '..', 'admin.html'), 'utf8');
@@ -420,7 +420,9 @@ test('admin.html: login por e-mail e senha, sem a tela de chave, carrega validac
   assert.match(html, /Prévia: <span class="negrito">admin@previa\.com<\/span>, senha <span class="negrito">previa123<\/span>/);
   assert.doesNotMatch(html, /gestor@previa/);
   assert.match(html, /data-aba="processos"[^>]*>Processos</);
-  assert.doesNotMatch(html, /data-aba="(empresas|avaliacoes)"/);
+  assert.doesNotMatch(html, /data-aba="avaliacoes"/);
+  assert.match(html, /data-aba="empresas"[^>]*>Empresas</);
+  assert.match(html, /id="vista-empresas"/);
   assert.match(html, /id="vista-processos"/);
 });
 
@@ -467,4 +469,219 @@ test('admin.html: carrega supabase-js e api-supabase depois das APIs e tem os fl
   }
   assert.match(html, /id="btn-esqueci"[^>]*hidden/);
   assert.match(html, /id="form-nova-senha"[^>]*hidden/);
+});
+
+/* ---------- Formulário do processo e pessoas ---------- */
+
+test('formulário do processo: padrão, normalização (ids p1..p5, até 5) e config nova', () => {
+  assert.deepEqual(AD.formularioPadrao(), { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto' }, perguntas: [] });
+  assert.deepEqual(AD.normalizarFormulario(null), AD.formularioPadrao());
+  assert.deepEqual(AD.normalizarFormulario({ campos: { idade: 'xx', email: 'obrigatorio' } }).campos,
+    { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'obrigatorio', cidade: 'oculto' });
+  const n = AD.normalizarFormulario({ perguntas: [
+    { id: 'p2', texto: '  Pretensão   salarial? ', obrigatoria: true },
+    { id: 'p2', texto: 'Disponibilidade de horário?' },
+    { texto: '' }, { id: 'Ruim!', texto: 'Tem CNH?' }, { texto: 'Quatro?' }, { texto: 'Cinco?' }, { texto: 'Seis?' }
+  ] });
+  assert.equal(n.perguntas.length, 5);
+  assert.deepEqual(n.perguntas.map((q) => q.id), ['p2', 'p1', 'p3', 'p4', 'p5']);
+  assert.deepEqual(n.perguntas[0], { id: 'p2', texto: 'Pretensão salarial?', obrigatoria: true });
+  assert.equal(n.perguntas[1].obrigatoria, false);
+  assert.deepEqual(AD.configPadrao().formulario, AD.formularioPadrao());
+  assert.equal(AD.validarConfig(AD.configPadrao()), '');
+});
+
+test('formulário: pergunta com dado sensível é recusada com a mensagem do contrato', () => {
+  const base = AD.configPadrao();
+  const com = (perguntas) => Object.assign({}, base, { formulario: { campos: base.formulario.campos, perguntas } });
+  assert.equal(AD.validarConfig(com([{ texto: 'Qual sua pretensão salarial?', obrigatoria: false }])), '');
+  assert.equal(AD.validarConfig(com([{ texto: 'Você tem filhos?' }])), 'A pergunta "Você tem filhos?" pede um dado sensível e não pode ser usada.');
+  assert.equal(AD.validarConfig(com([{ texto: 'Qual seu estado civil?' }])), 'A pergunta "Qual seu estado civil?" pede um dado sensível e não pode ser usada.');
+  assert.equal(AD.validarConfig(com([{ texto: 'Qual a sua religião?' }])), 'A pergunta "Qual a sua religião?" pede um dado sensível e não pode ser usada.');
+  assert.equal(AD.validarConfig(com([{ texto: 'Tem algum problema de saúde?' }])), 'A pergunta "Tem algum problema de saúde?" pede um dado sensível e não pode ser usada.');
+  // Começo de palavra (como classificar_campo): "embaraçado" não é "raça"
+  assert.equal(AD.perguntaSensivel('Já ficou embaraçado no atendimento?'), false);
+  assert.equal(AD.perguntaSensivel('Gênero (opcional)'), true);
+  assert.equal(AD.validarConfig(com([{ texto: 'Oi' }])), 'Escreva a pergunta extra 1 (de 3 a 200 caracteres).');
+  assert.equal(AD.validarConfig(com(Array.from({ length: 6 }, (_, i) => ({ texto: 'Pergunta ' + i })))), 'Use no máximo 5 perguntas extras.');
+  assert.equal(AD.validarConfig(Object.assign({}, base, { formulario: { campos: { email: 'talvez' }, perguntas: [] } })),
+    'Escolha se "E-mail" é obrigatória, opcional ou não perguntada.');
+});
+
+test('resumo do formulário: Nome e WhatsApp sempre, campos e perguntas extras', () => {
+  const r = AD.resumoFormulario({ campos: { idade: 'oculto', email: 'obrigatorio' }, perguntas: [{ texto: 'Pretensão salarial?', obrigatoria: true }] });
+  assert.deepEqual(r.slice(0, 2).map((x) => x.texto), ['Sempre pedido', 'Sempre pedido']);
+  assert.equal(r.find((x) => x.rotulo === 'Idade').texto, 'Não perguntar');
+  assert.equal(r.find((x) => x.rotulo === 'E-mail').texto, 'Obrigatória');
+  assert.deepEqual(r[r.length - 1], { rotulo: 'Pretensão salarial?', modo: 'obrigatorio', texto: 'Obrigatória', extra: true });
+});
+
+test('pessoas: agrupa por pessoaId ou WhatsApp (só dígitos), mais recente primeiro', () => {
+  const rec = (id, fim, extra) => AD.recalcular(payloadValido(Object.assign({ id, fim }, extra)));
+  const a1 = rec('a1', '2026-10-01T10:00:00Z', { telefone: '(11) 99999-8888' });
+  const a2 = rec('a2', '2026-10-03T10:00:00Z', { telefone: '5511999998888' });
+  const b1 = rec('b1', '2026-10-02T10:00:00Z', { telefone: '5511977776666', pessoaId: 'uuid-b' });
+  const b2 = rec('b2', '2026-09-01T10:00:00Z', { telefone: '5511000000000', pessoaId: 'uuid-b' });
+  assert.equal(AD.chavePessoa(a1), AD.chavePessoa(a2));
+  const g = AD.agruparPessoas([a1, b1, a2, b2]);
+  assert.equal(g.length, 2);
+  assert.equal(g[0].atual.id, 'a2');
+  assert.deepEqual(g[0].respostas.map((r) => r.id), ['a2', 'a1']);
+  assert.equal(g[1].total, 2);
+  assert.equal(g[1].atual.id, 'b1');
+  assert.equal(AD.agruparPessoas([rec('x', '', { telefone: '' }), rec('y', '', { telefone: '' })]).length, 2, 'sem telefone: cada resposta é uma pessoa');
+});
+
+test('pessoas: ficha usa r.pessoa quando existe; idade null mostra "—"; extras e consistência', () => {
+  const r = AD.recalcular(payloadValido({ idade: null, funcao: 'Caixa', pessoa: { id: 'p', nome: 'Nome Novo', idade: null, funcao: '', email: 'a@b.com', cidade: 'Boa Vista' } }));
+  const f = AD.fichaPessoa(r);
+  assert.equal(f.nome, 'Nome Novo');
+  assert.equal(f.funcao, 'Caixa', 'campo vazio na ficha cai no da resposta');
+  assert.equal(f.email, 'a@b.com');
+  assert.equal(AD.textoIdade(f.idade), '—');
+  assert.equal(AD.fichaPessoa(AD.recalcular(payloadValido({ cidade: 'Manaus' }))).cidade, 'Manaus');
+  assert.deepEqual(AD.lerExtras('[{"id":"p1","pergunta":"Pretensão?","resposta":"3000"},{"id":"x"}]'), [{ id: 'p1', pergunta: 'Pretensão?', resposta: '3000' }]);
+  assert.deepEqual(AD.lerExtras(null), []);
+  const di = AD.recalcular(payloadValido({ id: 'c1' }));
+  const di2 = AD.recalcular(payloadValido({ id: 'c2' }));
+  const sc = AD.recalcular(payloadValido({ id: 'c3', respostas: '1234'.repeat(25) }));
+  assert.equal(AD.consistenciaPerfil([di]), null);
+  assert.deepEqual(AD.consistenciaPerfil([di, di2]), { total: 2, igual: true, texto: 'O perfil se manteve nas 2 respostas.' });
+  assert.equal(AD.consistenciaPerfil([di, sc]).texto, 'O perfil mudou entre as respostas: vale conversar sobre o momento de cada uma.');
+});
+
+test('CSV ganha e-mail, cidade e perguntas extras no fim', () => {
+  const csv = AD.gerarCsv([AD.recalcular(payloadValido({ email: 'ana@x.com', cidade: 'Boa Vista', idade: null,
+    extras: [{ id: 'p1', pergunta: 'Pretensão?', resposta: '3000' }, { id: 'p2', pergunta: 'CNH?', resposta: '' }] }))]);
+  const linhas = csv.slice(1).split('\r\n').map((l) => l.split(';'));
+  const cab = linhas[0];
+  assert.deepEqual(cab.slice(-3), ['e-mail', 'cidade', 'perguntas extras']);
+  assert.deepEqual(linhas[1].slice(-3), ['ana@x.com', 'Boa Vista', 'Pretensão?: 3000 | CNH?: —']);
+  assert.equal(linhas[1][cab.indexOf('idade')], '', 'idade null fica vazia');
+});
+
+/* ---------- Fase 2: empresas, colaboradores, ligações e relatórios dos modelos ---------- */
+
+test('admin.html carrega compatibilidade, relatórios dos modelos e a view antes do admin.js, na ordem certa', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'admin.html'), 'utf8');
+  const scripts = [...html.matchAll(/<script src="([^"]+)"/g)].map((m) => m[1]);
+  const i = (s) => scripts.indexOf(s);
+  for (const s of ['js/compatibilidade.js', 'js/relatorio-lideranca.js', 'js/relatorio-pessoa.js', 'js/relatorio-modelos.js', 'js/relatorio-view.js']) {
+    assert.ok(i(s) !== -1 && i(s) < i('js/admin.js'), s);
+  }
+  assert.ok(i('js/lideranca.js') < i('js/compatibilidade.js'));
+  assert.ok(i('js/compatibilidade.js') < i('js/relatorio-modelos.js'));
+  assert.ok(i('js/relatorio-lideranca.js') < i('js/relatorio-modelos.js'));
+  assert.ok(i('js/relatorio-pessoa.js') < i('js/relatorio-modelos.js'));
+});
+
+test('modoEmpresas: Supabase e prévia usam; Apps Script mostra aviso; sem API não tem', () => {
+  assert.equal(AD.modoEmpresas(true, true, false), 'ok');
+  assert.equal(AD.modoEmpresas(true, false, true), 'ok');
+  assert.equal(AD.modoEmpresas(true, false, false), 'legado');
+  assert.equal(AD.modoEmpresas(false, false, false), 'local');
+});
+
+test('filtrarOpcoes e filtrarEmpresas: sem acento, todas as palavras, ativas primeiro por nome', () => {
+  const ops = [{ valor: '1', rotulo: 'José Álvaro', sub: 'Gerente' }, { valor: '2', rotulo: 'Ana Souza', sub: 'Caixa', busca: '5511988887777' }];
+  assert.deepEqual(AD.filtrarOpcoes(ops, 'jose').map((o) => o.valor), ['1']);
+  assert.deepEqual(AD.filtrarOpcoes(ops, 'alvaro gerente').map((o) => o.valor), ['1']);
+  assert.deepEqual(AD.filtrarOpcoes(ops, '98888').map((o) => o.valor), ['2']);
+  assert.equal(AD.filtrarOpcoes(ops, '  ').length, 2);
+  const emps = [{ id: 'c', nome: 'Zeta', ativo: true }, { id: 'a', nome: 'Árvore', ativo: false, cidade: 'Natal' }, { id: 'b', nome: 'Beta', ativo: true }];
+  assert.deepEqual(AD.filtrarEmpresas(emps, '').map((e) => e.id), ['b', 'c', 'a']);
+  assert.deepEqual(AD.filtrarEmpresas(emps, 'natal').map((e) => e.id), ['a']);
+});
+
+test('ligacoesDe: líder, liderados, diretos e indiretos nos dois sentidos', () => {
+  const rel = [
+    { de: 'a', para: 'b', tipo: 'lidera' }, { de: 'b', para: 'c', tipo: 'lidera' },
+    { de: 'c', para: 'b', tipo: 'direto' }, { de: 'd', para: 'b', tipo: 'indireto' }, { de: 'b', para: 'e', tipo: 'direto' }
+  ];
+  assert.deepEqual(AD.ligacoesDe(rel, 'b'), { lider: 'a', diretos: ['c', 'e'], indiretos: ['d'], liderados: ['c'] });
+  assert.deepEqual(AD.ligacoesDe(rel, 'z'), { lider: '', diretos: [], indiretos: [], liderados: [] });
+});
+
+test('aplicarLigacoes: troca líder/diretos/indiretos da pessoa, mantém quem ela lidera e as relações dos outros', () => {
+  const rel = [
+    { de: 'a', para: 'b', tipo: 'lidera' }, { de: 'b', para: 'c', tipo: 'lidera' },
+    { de: 'b', para: 'd', tipo: 'direto' }, { de: 'c', para: 'd', tipo: 'indireto' }
+  ];
+  const novo = AD.aplicarLigacoes(rel, 'b', { lider: 'e', diretos: ['d', 'e', 'b', 'f'], indiretos: ['f', 'g'] });
+  assert.deepEqual(novo, [
+    { de: 'b', para: 'c', tipo: 'lidera' },
+    { de: 'c', para: 'd', tipo: 'indireto' },
+    { de: 'e', para: 'b', tipo: 'lidera' },
+    { de: 'b', para: 'd', tipo: 'direto' },
+    { de: 'b', para: 'f', tipo: 'direto' },
+    { de: 'b', para: 'g', tipo: 'indireto' }
+  ]);
+  // Escolher como líder alguém que ela lidera desfaz o sentido antigo (sem ciclo de 2)
+  const troca = AD.aplicarLigacoes(rel, 'b', { lider: 'c' });
+  assert.ok(!troca.some((r) => r.de === 'b' && r.para === 'c' && r.tipo === 'lidera'));
+  assert.ok(troca.some((r) => r.de === 'c' && r.para === 'b' && r.tipo === 'lidera'));
+  // Sem líder e sem colegas: some tudo da pessoa, menos os liderados
+  assert.deepEqual(AD.aplicarLigacoes(rel, 'b', {}), [{ de: 'b', para: 'c', tipo: 'lidera' }, { de: 'c', para: 'd', tipo: 'indireto' }]);
+  assert.deepEqual(AD.aplicarLigacoes(rel, 'b', { lider: 'b' }).filter((r) => r.para === 'b'), [], 'não lidera a si mesma');
+});
+
+test('relacoesEntre descarta quem saiu', () => {
+  const rel = [{ de: 'a', para: 'b', tipo: 'lidera' }, { de: 'b', para: 'c', tipo: 'direto' }];
+  assert.deepEqual(AD.relacoesEntre(rel, ['a', 'b']), [{ de: 'a', para: 'b', tipo: 'lidera' }]);
+});
+
+test('entradaCompatibilidade: pessoas por pessoaId, sem teste = null, candidato em foco com líder e colegas', () => {
+  const colabs = [
+    { pessoaId: 'p1', nome: 'Ana Souza', cargo: 'Gerente', telefone: '5511999990000', resultado: { percentuais: { D: 40, I: 30, S: 20, C: 10 }, codigo: 'DI' } },
+    { pessoaId: 'p2', nome: 'Bruno Lima', cargo: 'Caixa', resultado: null }
+  ];
+  const e = AD.entradaCompatibilidade({ nome: 'Loja' }, colabs, [{ de: 'p1', para: 'p2', tipo: 'lidera' }]);
+  assert.deepEqual(e.pessoas.map((p) => p.id), ['p1', 'p2']);
+  assert.equal(e.pessoas[1].percentuais, null);
+  assert.ok(!('telefone' in e.pessoas[0]), 'telefone não entra');
+  assert.equal(e.foco, undefined);
+  const f = AD.entradaCompatibilidade({ nome: 'Loja' }, colabs, [], { nome: 'Carla', resultado: { percentuais: { D: 10, I: 20, S: 40, C: 30 } }, liderId: 'p1', diretos: ['p2', 'p1'] });
+  assert.equal(f.foco, 'foco');
+  assert.deepEqual(f.relacoes, [{ de: 'p1', para: 'foco', tipo: 'lidera' }, { de: 'foco', para: 'p2', tipo: 'direto' }]);
+  const C = require('../js/compatibilidade.js');
+  const r = C.montar(f);
+  assert.ok(r.foco, 'compatibilidade analisa o candidato em foco');
+  assert.equal(r.organograma.raizes[0].nome, 'Ana S.');
+});
+
+test('pessoasDasRespostas: uma por pessoa (a mais recente), com resultado do registro', () => {
+  const regs = [
+    AD.recalcular(payloadValido({ id: 'r1', pessoaId: 'p1', nome: 'Ana Antiga', fim: '2026-01-01T10:00:00Z' })),
+    AD.recalcular(payloadValido({ id: 'r2', pessoaId: 'p1', nome: 'Ana Nova', fim: '2026-05-01T10:00:00Z' })),
+    AD.recalcular(payloadValido({ id: 'r3', nome: 'Sem Pessoa' }))
+  ];
+  const ps = AD.pessoasDasRespostas(regs);
+  assert.equal(ps.length, 1);
+  assert.equal(ps[0].pessoaId, 'p1');
+  assert.equal(ps[0].nome, 'Ana Nova');
+  assert.equal(ps[0].registroId, 'r2');
+  assert.deepEqual(Object.keys(ps[0].resultado), ['percentuais', 'codigo']);
+  assert.equal(AD.resultadoDoRegistro({ calc: null }), null);
+});
+
+test('link e mensagem dos relatórios dos modelos (relatorio.html#r-TOKEN)', () => {
+  const url = AD.linkRelatorioModelo('https://x.com/painel/admin.html?a=1#topo', 'tk_123');
+  assert.equal(url, 'https://x.com/painel/relatorio.html#r-tk_123');
+  const eq = AD.mensagemRelatorioModelo('equipe', { empresa: 'Loja Modelo', consultor: 'Wellington' }, url);
+  assert.match(eq, /relatório da equipe da Loja Modelo/);
+  assert.match(eq, /Wellington · Notus Agência$/);
+  assert.ok(eq.includes(url));
+  assert.match(AD.mensagemRelatorioModelo('lideranca', { pessoa: 'Bruno Lima', empresa: 'Loja' }, url), /como liderar Bruno \(Loja\)/);
+  assert.match(AD.mensagemRelatorioModelo('pessoa', { pessoa: 'Carla Dias' }, url), /^Olá, Carla! O seu relatório/);
+  assert.match(AD.textoEquipeEmpresa('Loja Modelo'), /cadastro da empresa Loja Modelo.*compartilhado com a empresa/);
+});
+
+test('painel: sem <select> nativo nem confirm/prompt do navegador nas telas novas', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const js = fs.readFileSync(path.join(__dirname, '..', 'js', 'admin.js'), 'utf8');
+  assert.doesNotMatch(js, /createElement\('select'\)|el\('select'/);
+  assert.doesNotMatch(js, /\b(window|root)\.(confirm|prompt|alert)\(/);
 });

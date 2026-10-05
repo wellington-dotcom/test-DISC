@@ -248,6 +248,8 @@ test('textosAvaliacao: sem link, seleção e equipe', () => {
   assert.equal(eq.mostrarVaga, false);
   assert.equal(eq.mostrarEmpresaAtual, false);
   assert.equal(eq.rotuloFuncao, 'Seu cargo/função');
+  assert.match(eq.escopo, /compartilhado com a empresa/);
+  assert.match(eq.usoDados, /cadastro da equipe/);
   assert.match(eq.enviado, /avaliação da equipe/);
 });
 
@@ -344,4 +346,89 @@ test('deveMostrarDemo: só no primeiro grupo e até ser vista', () => {
   assert.equal(A.deveMostrarDemo({ etapa: 'teste', grupo: 1, demoVista: false }), false);
   assert.equal(A.deveMostrarDemo({ etapa: 'identificacao', grupo: 0 }), false);
   assert.equal(A.deveMostrarDemo(null), false);
+});
+
+test('normalizarFormulario: padrão, modos válidos, perguntas (texto, id, sensível, máximo 5)', () => {
+  const padrao = { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto' }, perguntas: [] };
+  assert.deepEqual(A.normalizarFormulario(undefined), padrao);
+  assert.deepEqual(A.normalizarFormulario('lixo'), padrao);
+  assert.deepEqual(A.normalizarFormulario({ campos: { idade: 'talvez', email: 'obrigatorio' } }).campos,
+    Object.assign({}, padrao.campos, { email: 'obrigatorio' }));
+  const f = A.normalizarFormulario({ perguntas: [
+    { id: 'p1', texto: '  Qual sua   pretensão salarial? ', obrigatoria: true },
+    { id: 'p1', texto: 'Como soube da vaga?' },               // id repetido -> gera outro
+    { id: 'X Y', texto: 'Tem disponibilidade aos sábados?', obrigatoria: 'sim' },
+    { texto: 'Oi' },                                            // curto demais
+    { texto: 'Qual seu estado civil?' },                        // sensível
+    { texto: 'Você tem filhos?' },                              // sensível
+    { texto: 'Pergunta quatro?' }, { texto: 'Pergunta cinco?' }, { texto: 'Pergunta seis?' }
+  ] });
+  assert.equal(f.perguntas.length, 5);
+  assert.deepEqual(f.perguntas[0], { id: 'p1', texto: 'Qual sua pretensão salarial?', obrigatoria: true });
+  assert.equal(f.perguntas[1].id, 'p2');
+  assert.equal(f.perguntas[2].obrigatoria, false);
+  assert.ok(/^[a-z0-9_]{1,20}$/.test(f.perguntas[2].id));
+  assert.equal(new Set(f.perguntas.map((p) => p.id)).size, 5);
+  assert.ok(!f.perguntas.some((p) => /civil|filhos/.test(p.texto)));
+  // Equipe: empresa opcional some; obrigatória continua
+  assert.equal(A.formularioEfetivo(undefined, 'equipe').campos.empresa, 'oculto');
+  assert.equal(A.formularioEfetivo({ campos: { empresa: 'obrigatorio' } }, 'equipe').campos.empresa, 'obrigatorio');
+  assert.equal(A.formularioEfetivo(undefined, 'selecao').campos.empresa, 'opcional');
+});
+
+test('validarCamposFormulario e camposDoPayload seguem o formulário', () => {
+  const form = { campos: { idade: 'opcional', funcao: 'oculto', empresa: 'obrigatorio', email: 'obrigatorio', cidade: 'opcional' },
+    perguntas: [{ id: 'p1', texto: 'Qual sua pretensão?', obrigatoria: true }, { id: 'p2', texto: 'Algo mais?', obrigatoria: false }] };
+  assert.deepEqual(A.validarCamposFormulario({}, form), {
+    empresa: 'Informe a empresa atual ou última.', email: 'Informe o e-mail.', 'extra-p1': 'Responda esta pergunta.'
+  });
+  const erros = A.validarCamposFormulario({ idade: '12', empresa: 'X', email: 'a@b', extras: { p1: '   ' } }, form);
+  assert.equal(erros.idade, 'Confira a idade: precisa ser entre 14 e 99 anos.');
+  assert.equal(erros.email, 'Confira o e-mail, ex.: nome@exemplo.com.');
+  assert.equal(erros['extra-p1'], 'Responda esta pergunta.');
+  assert.deepEqual(A.validarCamposFormulario({ empresa: 'Loja', email: 'ana@loja.com.br', extras: { p1: 'R$ 2 mil' } }, form), {});
+  // Padrão: idade obrigatória (como antes)
+  assert.equal(A.validarCamposFormulario({}, undefined).idade, 'Informe sua idade (só números).');
+
+  const c = A.camposDoPayload({ idade: '', funcao: 'Caixa', empresa: '  Loja  Azul ', email: ' ana@loja.com.br ', cidade: 'Campinas',
+    extras: { p1: '  R$ 2 mil ', p2: '', p9: 'não existe' } }, form);
+  assert.deepEqual(c, { idade: null, funcao: '', empresa: 'Loja Azul', email: 'ana@loja.com.br', cidade: 'Campinas',
+    extras: [{ id: 'p1', pergunta: 'Qual sua pretensão?', resposta: 'R$ 2 mil' }] });
+  assert.equal(A.limparResposta('x'.repeat(600)).length, 500);
+  // Ocultos não vão, mesmo com valor salvo
+  const oculto = A.camposDoPayload({ idade: '30', email: 'a@b.com', cidade: 'X' }, { campos: { idade: 'oculto' } });
+  assert.equal(oculto.idade, null);
+  assert.equal(oculto.email, '');
+  assert.equal(oculto.cidade, '');
+
+  const sel = [];
+  for (let i = 0; i < 25; i++) sel.push(['C', 'S', 'I', 'D']);
+  const p = A.montarPayload({ id: 'abc123-z', nome: 'Ana Souza', telefone: '11999998888', email: 'ana@loja.com.br', empresa: 'Loja',
+    extras: { p1: 'Sim' }, consentimento: true }, sel, null, form);
+  assert.equal(p.idade, null);
+  assert.equal(p.email, 'ana@loja.com.br');
+  assert.deepEqual(p.extras, [{ id: 'p1', pergunta: 'Qual sua pretensão?', resposta: 'Sim' }]);
+  const padrao = A.montarPayload({ id: 'abc123-w', nome: 'Ana Souza', telefone: '11999998888', idade: '30', email: 'x@y.com', consentimento: true }, sel);
+  assert.equal(padrao.idade, 30);
+  assert.equal(padrao.email, '', 'e-mail oculto no padrão');
+  assert.deepEqual(padrao.extras, []);
+});
+
+test('etapaRetomada: sem revisão; progresso antigo cai num destino válido', () => {
+  const ordens = Array.from({ length: 25 }, () => ['D', 'I', 'S', 'C']);
+  const todos = Array.from({ length: 25 }, () => true);
+  const perm = ordens;
+  assert.deepEqual(A.etapaRetomada({ etapa: 'revisao', ordens, respondidos: todos, permutacoes: perm, grupo: 24 }, 25, true),
+    { etapa: 'confirmacao', grupo: 24, confTela: 1 });
+  assert.deepEqual(A.etapaRetomada({ etapa: 'revisao', ordens, respondidos: todos, grupo: 3 }, 25, false),
+    { etapa: 'teste', grupo: 24, confTela: 1 });
+  const faltando = todos.slice(); faltando[7] = false;
+  assert.equal(A.etapaRetomada({ etapa: 'enviando', ordens, respondidos: faltando }, 25, true).grupo, 7);
+  assert.equal(A.etapaRetomada({ etapa: 'revisao', ordens, respondidos: faltando }, 25, true).etapa, 'teste');
+  assert.equal(A.etapaRetomada({ etapa: 'concluido' }, 25, true).etapa, 'identificacao');
+  assert.equal(A.etapaRetomada({ etapa: 'teste', grupo: 4 }, 25, true).etapa, 'identificacao', 'sem permutações');
+  assert.deepEqual(A.etapaRetomada({ etapa: 'teste', grupo: 4, permutacoes: perm }, 25, true), { etapa: 'teste', grupo: 4, confTela: 1 });
+  assert.equal(A.etapaRetomada({ etapa: 'confirmacao', confTela: 2, ordens, respondidos: todos }, 25, true).confTela, 2);
+  // Modo demonstração: só os N primeiros contam
+  assert.equal(A.etapaRetomada({ etapa: 'revisao', ordens, respondidos: faltando }, 3, true).etapa, 'confirmacao');
 });

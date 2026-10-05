@@ -10,6 +10,17 @@ const { payloadValido, respostasFixas, prng } = require('./helpers/fixtures.js')
 
 const RE_PROTOCOLO = /^[0-9]{2}[A-HJ-NP-Z]$/;
 
+// Novidades da simulada que o Code.gs (legado) não tem: config.formulario / avaliacao.formulario e, nos
+// itens de "listar", a pessoa (pessoaId, pessoa) e os campos novos do formulário (email, cidade, extras).
+const CAMPOS_NOVOS_ITEM = ['pessoaId', 'pessoa', 'email', 'cidade', 'extras'];
+// Empresas (rodada empresas/equipes): cidade, observações, ativo e contagem de colaboradores.
+const CAMPOS_NOVOS_EMPRESA = ['cidade', 'observacoes', 'ativo', 'atualizadoEm', 'colaboradores'];
+function semNovidades(dono, k) {
+  if (k === 'formulario') return true;
+  if (dono && typeof dono === 'object' && !Array.isArray(dono) && 'colaboradores' in dono && CAMPOS_NOVOS_EMPRESA.includes(k)) return true;
+  return !!(dono && typeof dono === 'object' && !Array.isArray(dono) && 'pessoaId' in dono && 'respostas' in dono && CAMPOS_NOVOS_ITEM.includes(k));
+}
+
 function localStorageFalso(inicial) {
   const dados = Object.assign({}, inicial || {});
   return {
@@ -153,7 +164,7 @@ test('mesmo comportamento do Code.gs num roteiro completo (fora protocolo e data
     { acao: 'listar', chave: 'previa' },
     { acao: 'listar', token: 'nao' }
   ];
-  const limpar = (r) => JSON.parse(JSON.stringify(r, (k, v) => (k === 'protocolo' || k === 'recebidoEm' ? undefined : v)));
+  const limpar = (r) => JSON.parse(JSON.stringify(r, function (k, v) { return (k === 'protocolo' || k === 'recebidoEm' || semNovidades(this, k) ? undefined : v); }));
   for (const corpo of roteiro) {
     assert.deepEqual(limpar(api.processar(corpo)), limpar(gas.post(corpo)), corpo.acao + ' ' + ((corpo.payload && corpo.payload.id) || ''));
   }
@@ -166,7 +177,7 @@ test('sem localStorage (navegação privada) funciona só em memória', async ()
   assert.match(r.protocolo, RE_PROTOCOLO);
   const login = await api.login('admin@previa.com', 'previa123');
   const { itens } = await api.listar(login.token);
-  assert.equal(itens.length, 5, '4 exemplos da semente + o envio');
+  assert.equal(itens.length, 10, '9 exemplos da semente + o envio');
   // conteúdo corrompido no armazenamento não derruba
   const lsRuim = localStorageFalso({ disc_planilha_simulada: '{não é json', disc_simulada_semente: '1' });
   const api2 = SIM.criar({ armazenamento: lsRuim, scoring: S, latenciaMs: 0 });
@@ -243,7 +254,7 @@ test('hash de senha igual ao do Code.gs (SHA-256 em JS puro conferido com o do N
   assert.equal(SIM.hashSenha('previa123', 'sal-abc'), gas.g.hashSenha('previa123', 'sal-abc'));
 });
 
-test('semente da prévia: admin e gestor, Clínica Exemplo, SEL1/EQP1 e 4 respostas com validação variada', async () => {
+test('semente da prévia: admin e gestor, Clínica Exemplo, SEL1/EQP1/ATD1 e 9 respostas (a mesma pessoa em 2) com validação variada', async () => {
   const armazenamento = localStorageFalso();
   const api = SIM.criar({ armazenamento, scoring: S, latenciaMs: 0 });
   const adm = await api.login('admin@previa.com', 'previa123');
@@ -255,11 +266,24 @@ test('semente da prévia: admin e gestor, Clínica Exemplo, SEL1/EQP1 e 4 respos
   const avs = (await api.listarAvaliacoes(adm.token)).avaliacoes;
   assert.deepEqual(avs.map((a) => [a.codigo, a.nome, a.tipo, a.mostrarResultado, a.ativa, a.empresaNome, a.respostas]), [
     ['SEL1', 'Recepcionista 2026', 'selecao', false, true, 'Clínica Exemplo', 2],
-    ['EQP1', 'Equipe comercial', 'equipe', true, true, 'Clínica Exemplo', 2],
-    ['CRT1', 'Cartório Exemplo — Escrevente', 'selecao', false, true, 'Cartório Exemplo', 0]
+    ['EQP1', 'Equipe comercial', 'equipe', true, true, 'Clínica Exemplo', 6],
+    ['ATD1', 'Atendimento ao cliente', 'selecao', true, true, 'Clínica Exemplo', 1],
+    ['CRT1', 'Cartório Exemplo — Escrevente', 'selecao', true, true, 'Cartório Exemplo', 0]
   ]);
   const { itens } = await api.listar(adm.token);
-  assert.equal(itens.length, 4);
+  assert.equal(itens.length, 9);
+  // A Ana respondeu 2 vezes (SEL1 e ATD1): mesma pessoa, ficha com os dados mais recentes.
+  const ana = itens.filter((i) => i.nome === 'Ana Exemplo Prévia');
+  assert.equal(ana.length, 2);
+  assert.ok(ana[0].pessoaId && ana[0].pessoaId === ana[1].pessoaId);
+  assert.equal(new Set(itens.map((i) => i.pessoaId)).size, 8);
+  assert.equal(ana[0].pessoa.email, 'ana.exemplo@exemplo.com');
+  const atd = itens.find((i) => i.avaliacao === 'ATD1');
+  assert.deepEqual([atd.email, atd.cidade, atd.extras.length], ['ana.exemplo@exemplo.com', 'Boa Vista / RR', 1]);
+  const formAtd = (await api.avaliacaoPublica('ATD1')).avaliacao.formulario;
+  assert.equal(formAtd.campos.email, 'obrigatorio');
+  assert.deepEqual(formAtd.perguntas, [{ id: 'p1', texto: 'Qual sua disponibilidade de horário?', obrigatoria: true }]);
+  assert.equal((await api.avaliacaoPublica('CRT1')).avaliacao.mostrarResultado, true, 'a prévia mostra o relatório ao candidato');
   itens.forEach((i) => {
     assert.ok(i.resultado, i.nome);
     assert.match(i.protocolo, RE_PROTOCOLO);
@@ -277,20 +301,21 @@ test('semente da prévia: admin e gestor, Clínica Exemplo, SEL1/EQP1 e 4 respos
   }
   // a semente só é criada uma vez (recarregar a página não duplica)
   const api2 = SIM.criar({ armazenamento, scoring: S, latenciaMs: 0 });
-  assert.equal((await api2.listar(adm.token)).itens.length, 4, 'sessão continua valendo depois de recarregar');
+  assert.equal((await api2.listar(adm.token)).itens.length, 9, 'sessão continua valendo depois de recarregar');
   assert.equal((await api2.listarUsuarios(adm.token)).usuarios.length, 2);
   // reiniciar volta ao estado inicial
   await api2.excluirTodos(adm.token);
   api2.reiniciar();
   const nova2 = await api2.login('admin@previa.com', 'previa123');
-  assert.equal((await api2.listar(nova2.token)).itens.length, 4);
+  assert.equal((await api2.listar(nova2.token)).itens.length, 9);
   assert.ok(!JSON.stringify(armazenamento.dados).includes('previa123'), 'senha nunca guardada');
 });
 
 test('prévia: avaliacaoPublica, enviar com código ativo/inativo/inexistente e gestor só da própria empresa', async () => {
   const api = SIM.criar({ armazenamento: localStorageFalso(), scoring: S, latenciaMs: 0 });
   const pub = await api.avaliacaoPublica('eqp1');
-  assert.deepEqual(pub.avaliacao, { codigo: 'EQP1', nome: 'Equipe comercial', tipo: 'equipe', empresaNome: 'Clínica Exemplo', mostrarResultado: true });
+  assert.deepEqual(pub.avaliacao, { codigo: 'EQP1', nome: 'Equipe comercial', tipo: 'equipe', empresaNome: 'Clínica Exemplo', mostrarResultado: true,
+    formulario: { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto' }, perguntas: [] } });
   await assert.rejects(api.avaliacaoPublica('NADA'), { message: 'Link inválido ou avaliação encerrada. Fale com quem enviou o link.' });
   const r = await api.enviar(payloadValido({ id: 'link-sel1-0001', avaliacao: 'SEL1' }));
   assert.match(r.protocolo, RE_PROTOCOLO);
@@ -310,7 +335,7 @@ test('prévia: avaliacaoPublica, enviar com código ativo/inativo/inexistente e 
   const vis = (await api.listar(TG)).itens.map((i) => i.id);
   assert.ok(vis.includes('link-sel1-0001'));
   assert.ok(!vis.includes('outra-emp-0001') && !vis.includes('geral-semcod-01'));
-  assert.deepEqual((await api.listarAvaliacoes(TG)).avaliacoes.map((a) => a.codigo), ['SEL1', 'EQP1']);
+  assert.deepEqual((await api.listarAvaliacoes(TG)).avaliacoes.map((a) => a.codigo), ['SEL1', 'EQP1', 'ATD1']);
   await assert.rejects(api.atualizar(TG, 'outra-emp-0001', { status: 'aprovado' }), { message: 'Sem permissão.' });
   await assert.rejects(api.excluir(TG, 'link-sel1-0001'), { message: 'Sem permissão.' });
   await assert.rejects(api.listarUsuarios(TG), { message: 'Sem permissão.' });
@@ -355,7 +380,7 @@ test('mesmo comportamento do Code.gs no roteiro de logins, empresas, avaliaçõe
     return v;
   };
   const normalizar = (r, vars) => {
-    let txt = JSON.stringify(r, (k, v) => (['protocolo', 'recebidoEm', 'criadaEm', 'criadoEm', 'token'].includes(k) ? undefined : v));
+    let txt = JSON.stringify(r, function (k, v) { return (['protocolo', 'recebidoEm', 'criadaEm', 'criadoEm', 'token'].includes(k) || semNovidades(this, k) ? undefined : v); });
     Object.entries(vars).forEach(([n, val]) => { if (typeof val === 'string' && val.length >= 4) txt = txt.split(val).join('$' + n); });
     return JSON.parse(txt);
   };
@@ -617,7 +642,7 @@ test('prévia antiga (só a semente base) ganha o processo de exemplo e o relat�
   delete armazenamento.dados.disc_simulada_relatorios;
   delete armazenamento.dados.disc_simulada_semente_relatorio;
   const api2 = SIM.criar({ armazenamento, scoring: S, latenciaMs: 0 });
-  assert.equal((await api2.listar(T)).itens.length, 4);
+  assert.equal((await api2.listar(T)).itens.length, 9);
   assert.ok((await api2.processosListar(T)).processos.some((p) => p.codigo === 'CRT1'));
   assert.equal((await api2.relatorioPublico('exemplo-cartorio')).ok, true);
   // reiniciar recria tudo
@@ -639,7 +664,7 @@ test('mesmo comportamento do Code.gs em processos.* (sem ClickUp) e nas recusas 
     return v;
   };
   const normalizar = (r, vars) => {
-    let txt = JSON.stringify(r, (k, v) => (['criadaEm', 'criadoEm', 'token', 'codigo', 'id'].includes(k) ? undefined : v));
+    let txt = JSON.stringify(r, function (k, v) { return (['criadaEm', 'criadoEm', 'token', 'codigo', 'id'].includes(k) || semNovidades(this, k) ? undefined : v); });
     Object.entries(vars).forEach(([n, val]) => { if (typeof val === 'string' && val.length >= 4) txt = txt.split(val).join('$' + n); });
     return JSON.parse(txt);
   };
@@ -735,4 +760,197 @@ test('js/api.js: ações novas mandam o corpo do contrato (token da sessão + re
     global.fetch = fetchAntigo;
     API.definirUrl(null);
   }
+});
+
+/* ---------- Formulário do processo e pessoas (mesmo comportamento do Supabase) ---------- */
+
+test('formulário do processo: obrigatórios, ocultos, e-mail, perguntas extras e pergunta sensível recusada', async () => {
+  const { api, T } = nova();
+  await assert.rejects(api.processosSalvar(T, { nome: 'Atendimento', config: { formulario: { perguntas: [{ texto: 'Você tem filhos?' }] } } }),
+    { message: 'A pergunta "Você tem filhos?" pede um dado sensível e não pode ser usada.' });
+  const proc = (await api.processosSalvar(T, { nome: 'Atendimento', config: { formulario: {
+    campos: { idade: 'oculto', email: 'obrigatorio', cidade: 'opcional' },
+    perguntas: [{ id: 'p1', texto: 'Qual sua pretensão salarial?', obrigatoria: true }, { texto: 'Tem carro?' }]
+  } } })).processo;
+  assert.deepEqual(proc.config.formulario.perguntas.map((p) => p.id), ['p1', 'p2']);
+  assert.deepEqual((await api.avaliacaoPublica(proc.codigo)).avaliacao.formulario, proc.config.formulario);
+  const env = (extra) => api.enviar(payloadValido(Object.assign({ id: 'form-' + Math.random().toString(36).slice(2, 10), avaliacao: proc.codigo }, extra)));
+  await assert.rejects(env({ extras: [{ id: 'p1', resposta: 'R$ 3.000' }] }), { message: 'Informe o e-mail.' });
+  await assert.rejects(env({ email: 'x@', extras: [{ id: 'p1', resposta: 'R$ 3.000' }] }), { message: 'E-mail inválido.' });
+  await assert.rejects(env({ email: 'a@b.co' }), { message: 'Responda a pergunta "Qual sua pretensão salarial?".' });
+  const ok = await env({ idade: 'abc', email: ' A@B.CO ', cidade: ' Campinas ', extras: [{ id: 'p1', pergunta: 'velha', resposta: ' R$ 3.000 ' }, { id: 'zz', resposta: 'x' }] });
+  assert.equal(ok.ok, true);
+  const it = (await api.listar(T)).itens.find((i) => i.id === ok.id);
+  assert.deepEqual([it.idade, it.email, it.cidade, it.extras], [null, 'a@b.co', 'Campinas',
+    [{ id: 'p1', pergunta: 'Qual sua pretensão salarial?', resposta: 'R$ 3.000' }]]);
+  // Sem link: padrão (idade obrigatória, e-mail oculto)
+  await assert.rejects(api.enviar(payloadValido({ id: 'geral-sem-idade', idade: null })), /Idade não informada/);
+  const geral = await api.enviar(payloadValido({ id: 'geral-com-email', email: 'ignorado@x.com' }));
+  assert.equal((await api.listar(T)).itens.find((i) => i.id === geral.id).email, '');
+});
+
+test('pessoas: agrupadas pelo WhatsApp, ficha atualizada sem apagar com vazio e excluída com a última resposta', async () => {
+  const { api, armazenamento, T } = nova();
+  await api.enviar(payloadValido({ id: 'pessoa-0001', telefone: '(11) 97777-6666', funcao: 'Caixa', empresa: 'Mercado' }));
+  await api.enviar(payloadValido({ id: 'pessoa-0002', telefone: '11977776666', nome: 'João Pedro da Silva', funcao: '', empresa: '', idade: 31 }));
+  await api.enviar(payloadValido({ id: 'pessoa-0003', telefone: '21966665555', nome: 'Maria Lima Souza' }));
+  let itens = (await api.listar(T)).itens;
+  const [a, b, c] = itens;
+  assert.ok(a.pessoaId && a.pessoaId === b.pessoaId && c.pessoaId !== a.pessoaId);
+  assert.deepEqual([a.pessoa.nome, a.pessoa.idade, a.pessoa.funcao, a.pessoa.empresa, a.pessoa.telefone],
+    ['João Pedro da Silva', 31, 'Caixa', 'Mercado', '5511977776666']);
+  assert.match(a.pessoa.atualizadoEm, /^\d{4}-\d{2}-\d{2}T/);
+  // Linha antiga (sem pessoa) é ligada à pessoa do mesmo telefone ao listar.
+  const linhas = JSON.parse(armazenamento.getItem(SIM.CHAVE_ARMAZENAMENTO));
+  linhas.push(Object.assign({}, linhas[2], { id: 'antiga-0009', pessoaId: undefined, telefone: '5521966665555' }));
+  armazenamento.setItem(SIM.CHAVE_ARMAZENAMENTO, JSON.stringify(linhas));
+  itens = (await api.listar(T)).itens;
+  assert.equal(itens.find((i) => i.id === 'antiga-0009').pessoaId, c.pessoaId);
+  // Exclusão: a ficha sai junto com a última resposta da pessoa.
+  const fichas = () => JSON.parse(armazenamento.getItem('disc_simulada_pessoas')).map((p) => p.id).sort();
+  await api.excluir(T, 'pessoa-0001');
+  assert.deepEqual(fichas(), [a.pessoaId, c.pessoaId].sort());
+  await api.excluir(T, 'pessoa-0002');
+  assert.deepEqual(fichas(), [c.pessoaId]);
+  await api.excluirTodos(T);
+  assert.deepEqual(fichas(), []);
+});
+
+/* ---------- Rodada empresas/equipes: colaboradores, organograma e relatórios por modelo ---------- */
+
+test('semente: Clínica Exemplo com 7 colaboradores ativos (1 sem teste), organograma de 3 níveis e 1 desligado', async () => {
+  const { api, T, armazenamento } = await previa();
+  const emps = (await api.listarEmpresas(T)).empresas;
+  const clinica = emps.find((x) => x.nome === 'Clínica Exemplo');
+  assert.deepEqual([clinica.cidade, clinica.ativo, clinica.colaboradores], ['Boa Vista / RR', true, 7]);
+  const procs = (await api.processosListar(T)).processos;
+  assert.equal(procs.find((p) => p.codigo === 'SEL1').empresaId, clinica.id);
+  assert.deepEqual([procs.find((p) => p.codigo === 'EQP1').empresaId, procs.find((p) => p.codigo === 'EQP1').tipo], [clinica.id, 'equipe']);
+
+  const eq = await api.listarEquipe(T, clinica.id);
+  assert.equal(eq.colaboradores.length, 7);
+  assert.deepEqual(eq.colaboradores.filter((c) => !c.resultado).map((c) => c.nome), ['Tiago Modelo Sem Teste']);
+  const codigos = eq.colaboradores.filter((c) => c.resultado).map((c) => c.resultado.codigo[0]);
+  assert.deepEqual([...new Set(codigos)].sort(), ['C', 'D', 'I', 'S'], 'DISC variados: as 4 letras aparecem como primárias');
+  eq.colaboradores.forEach((c) => {
+    assert.ok(/Exemplo|Fictício|Modelo/.test(c.nome), 'nome fictício: ' + c.nome);
+    assert.equal(c.status, 'ativo');
+    assert.match(c.inicio, /^\d{4}-\d{2}-\d{2}$/);
+  });
+  assert.deepEqual(eq.historico.map((c) => [c.nome, c.status, !!c.fim]), [['Bruno Teste Fictício', 'desligado', true]]);
+  assert.equal(eq.relacoes.length, 9);
+  assert.deepEqual([...new Set(eq.relacoes.map((r) => r.tipo))].sort(), ['direto', 'indireto', 'lidera']);
+  // o motor de compatibilidade monta o organograma de 3 níveis com a Marta no topo
+  const C = require('../js/compatibilidade.js');
+  const m = C.montar({ empresa: { nome: clinica.nome }, foco: null, relacoes: eq.relacoes,
+    pessoas: eq.colaboradores.map((c) => ({ id: c.pessoaId, nome: c.nome, cargo: c.cargo, percentuais: c.resultado ? c.resultado.percentuais : null })) });
+  assert.equal(m.organograma.profundidade, 2, '3 níveis (0, 1 e 2)');
+  assert.equal(m.organograma.raizes.length, 1);
+  // a semente da equipe não duplica ao recarregar; prévia antiga (sem a marca da equipe) ganha a equipe uma vez só
+  delete armazenamento.dados.disc_simulada_semente_equipe;
+  const api2 = SIM.criar({ armazenamento, scoring: S, latenciaMs: 0 });
+  const eq2 = await api2.listarEquipe(T, clinica.id);
+  assert.deepEqual([eq2.colaboradores.length, eq2.historico.length, eq2.relacoes.length], [7, 1, 9]);
+  assert.equal((await api2.listar(T)).itens.length, 9);
+});
+
+test('colaboradores: sem teste pelo WhatsApp, 1 vínculo ativo por pessoa, mover e desligar limpam as relações', async () => {
+  const { api, T } = nova();
+  const a = (await api.salvarEmpresa(T, { nome: 'Clínica Alfa', cidade: 'Manaus', observacoes: 'obs' })).empresa;
+  const b = (await api.salvarEmpresa(T, { nome: 'Loja Beta' })).empresa;
+  assert.deepEqual([a.cidade, a.observacoes, a.ativo, a.colaboradores], ['Manaus', 'obs', true, 0]);
+  const c1 = (await api.salvarColaborador(T, { empresaId: a.id, nome: '  Lia  Lider Souza', telefone: '(11) 92222-0001', cargo: 'Diretora', area: 'Diretoria' })).colaborador;
+  assert.deepEqual([c1.nome, c1.telefone, c1.cargo, c1.status, c1.fim], ['Lia Lider Souza', '5511922220001', 'Diretora', 'ativo', '']);
+  const c2 = (await api.salvarColaborador(T, { empresaId: a.id, nome: 'Pedro Liderado Um', telefone: '11922220002', cargo: 'Vendedor' })).colaborador;
+  // mesmo WhatsApp: mesma pessoa e mesmo vínculo (atualiza cargo)
+  const c2b = (await api.salvarColaborador(T, { empresaId: a.id, nome: 'Outro Nome Aqui', telefone: '5511922220002', cargo: 'Gerente' })).colaborador;
+  assert.deepEqual([c2b.vinculoId, c2b.pessoaId, c2b.nome, c2b.cargo], [c2.vinculoId, c2.pessoaId, 'Pedro Liderado Um', 'Gerente']);
+  await assert.rejects(api.salvarColaborador(T, { empresaId: b.id, pessoaId: c2.pessoaId }), /outra empresa \(Clínica Alfa\)\. Use "Mover"/);
+  await assert.rejects(api.salvarColaborador(T, { empresaId: a.id, nome: 'Só', telefone: '11922220003' }), /nome completo/);
+  await assert.rejects(api.salvarColaborador(T, { empresaId: a.id, nome: 'Nome Completo', telefone: '12' }), /Telefone inválido/);
+  await assert.rejects(api.salvarColaborador(T, { empresaId: 'emp_x', nome: 'Nome Completo', telefone: '11922220003' }), /Empresa não encontrada/);
+
+  const c3 = (await api.salvarColaborador(T, { empresaId: a.id, nome: 'Paula Liderada Dois', telefone: '11922220003' })).colaborador;
+  await api.salvarRelacoes(T, a.id, [
+    { de: c1.pessoaId, para: c2.pessoaId, tipo: 'lidera' }, { de: c1.pessoaId, para: c3.pessoaId, tipo: 'lidera' },
+    { de: c2.pessoaId, para: c3.pessoaId, tipo: 'direto' }, { de: c2.pessoaId, para: c3.pessoaId, tipo: 'indireto' }]);
+  let eq = await api.listarEquipe(T, a.id);
+  assert.equal(eq.relacoes.length, 3, 'repetida: vale a última');
+  assert.equal(eq.relacoes.find((r) => r.de === c2.pessoaId).tipo, 'indireto');
+  await assert.rejects(api.salvarRelacoes(T, a.id, [{ de: c1.pessoaId, para: c1.pessoaId, tipo: 'direto' }]), /ela mesma/);
+  await assert.rejects(api.salvarRelacoes(T, a.id, [{ de: c1.pessoaId, para: c2.pessoaId, tipo: 'chefe' }]), /Tipo de relação inválido/);
+  assert.equal((await api.listarEquipe(T, a.id)).relacoes.length, 3, 'erro não muda nada');
+
+  // mover Pedro para B: vínculo antigo desligado (fim = hoje) e relações dele em A somem
+  const mv = (await api.moverColaborador(T, { pessoaId: c2.pessoaId, empresaId: b.id, cargo: 'Gerente', area: 'Loja' })).colaborador;
+  assert.deepEqual([mv.empresaId, mv.status, mv.cargo], [b.id, 'ativo', 'Gerente']);
+  eq = await api.listarEquipe(T, a.id);
+  assert.deepEqual(eq.colaboradores.map((c) => c.nome), ['Lia Lider Souza', 'Paula Liderada Dois']);
+  assert.deepEqual(eq.relacoes, [{ de: c1.pessoaId, para: c3.pessoaId, tipo: 'lidera' }]);
+  assert.deepEqual(eq.historico.map((c) => [c.nome, c.status, c.fim.length]), [['Pedro Liderado Um', 'desligado', 10]]);
+  await assert.rejects(api.salvarRelacoes(T, a.id, [{ de: c1.pessoaId, para: c2.pessoaId, tipo: 'lidera' }]), /colaboradoras ativas desta empresa/);
+  assert.equal((await api.listarEmpresas(T)).empresas.find((x) => x.id === b.id).colaboradores, 1);
+
+  // desligar Paula: relação some; empresa só é excluída sem colaborador ativo
+  await api.desligarColaborador(T, c3.vinculoId);
+  assert.deepEqual((await api.listarEquipe(T, a.id)).relacoes, []);
+  await assert.rejects(api.desligarColaborador(T, c3.vinculoId), /já desligado/);
+  await assert.rejects(api.excluirEmpresa(T, a.id), /Desligue ou mova os colaboradores antes\./);
+  await api.desligarColaborador(T, c1.vinculoId);
+  assert.deepEqual(await api.excluirEmpresa(T, a.id), { ok: true, id: a.id });
+  await assert.rejects(api.listarEquipe(T, a.id), /Empresa não encontrada/);
+});
+
+test('envio pelo link de equipe ligado à empresa cria o vínculo; colaborador ativo continua sem as respostas', async () => {
+  const { api, T } = nova();
+  const a = (await api.salvarEmpresa(T, { nome: 'Clínica Equipe' })).empresa;
+  const b = (await api.salvarEmpresa(T, { nome: 'Outra Clínica' })).empresa;
+  const eqp = (await api.processosSalvar(T, { nome: 'Equipe X', tipo: 'equipe', empresaId: a.id })).processo;
+  const sel = (await api.processosSalvar(T, { nome: 'Seleção X', tipo: 'selecao', empresaId: a.id })).processo;
+  assert.equal(eqp.empresaId, a.id);
+  await api.enviar(payloadValido({ id: 'eqp-000001', avaliacao: eqp.codigo, telefone: '11944440001', nome: 'Rita Equipe Souza', funcao: 'Recepcionista' }));
+  await api.enviar(payloadValido({ id: 'eqp-000002', avaliacao: eqp.codigo, telefone: '11944440001', nome: 'Rita Equipe Souza', funcao: 'Gerente' }));
+  await api.enviar(payloadValido({ id: 'sel-000001', avaliacao: sel.codigo, telefone: '11944440003', nome: 'Sem Vinculo Teste' }));
+  const caio = (await api.salvarColaborador(T, { empresaId: b.id, nome: 'Caio Outra Lima', telefone: '11944440002' })).colaborador;
+  await api.enviar(payloadValido({ id: 'eqp-000003', avaliacao: eqp.codigo, telefone: '11944440002', nome: 'Caio Outra Lima' }));
+  const eq = await api.listarEquipe(T, a.id);
+  assert.deepEqual(eq.colaboradores.map((c) => [c.nome, c.cargo, !!c.resultado]), [['Rita Equipe Souza', 'Recepcionista', true]]);
+  assert.match(eq.colaboradores[0].respondidoEm, /^\d{4}-/);
+  assert.deepEqual((await api.listarEquipe(T, b.id)).colaboradores.map((c) => c.pessoaId), [caio.pessoaId], 'ativo em outra: não mexe');
+  // excluir todas as respostas: quem é colaborador ativo continua (sem resultado)
+  await api.excluirTodos(T);
+  const depois = await api.listarEquipe(T, a.id);
+  assert.deepEqual(depois.colaboradores.map((c) => [c.nome, c.resultado]), [['Rita Equipe Souza', null]]);
+});
+
+test('relatórios por modelo: salvar, publicar (link), página pública com o modelo, listar e excluir', async () => {
+  const { api, T } = await previa();
+  const clinica = (await api.listarEmpresas(T)).empresas.find((x) => x.nome === 'Clínica Exemplo');
+  const eq = await api.listarEquipe(T, clinica.id);
+  const dados = { modelo: 'equipe', versao: 1, titulo: 'Equipe da Clínica Exemplo', geradoEm: '2026-10-05T10:00:00.000Z' };
+  const r1 = (await api.salvarRelatorioModelo(T, { modelo: 'equipe', empresaId: clinica.id, dados })).relatorio;
+  assert.deepEqual([r1.status, r1.modelo, r1.url], ['rascunho', 'equipe', undefined]);
+  assert.match(r1.token, /^[0-9a-f]{64}$/);
+  await assert.rejects(api.relatorioPublico(r1.token), /Relatório não encontrado ou fora do ar/);
+  const r2 = (await api.salvarRelatorioModelo(T, { id: r1.id, modelo: 'equipe', empresaId: clinica.id, dados, publicar: true, baseUrl: 'https://x.github.io/site/admin.html' })).relatorio;
+  assert.equal(r2.url, 'https://x.github.io/site/relatorio.html?r=' + r1.token);
+  assert.deepEqual(await api.relatorioPublico(r1.token), { ok: true, modelo: 'equipe', relatorio: dados, publicadoEm: (await api.relatorioPublico(r1.token)).publicadoEm });
+  const marta = eq.colaboradores.find((c) => /Marta/.test(c.nome));
+  // grande demais passa do limite do corpo comum (20 mil) mas fica abaixo de 300 KB: aceito
+  const grande = { titulo: 'Como liderar a Marta', texto: 'x'.repeat(60000) };
+  const r3 = (await api.salvarRelatorioModelo(T, { modelo: 'lideranca', pessoaId: marta.pessoaId, empresaId: clinica.id, dados: grande })).relatorio;
+  await assert.rejects(api.salvarRelatorioModelo(T, { modelo: 'pessoa', dados: {} }), /Escolha a pessoa do relatório/);
+  await assert.rejects(api.salvarRelatorioModelo(T, { modelo: 'equipe', empresaId: clinica.id, dados: { modelo: 'pessoa' } }), /não são de um relatório "equipe"/);
+  await assert.rejects(api.salvarRelatorioModelo(T, { modelo: 'x', empresaId: clinica.id, dados: {} }), /Modelo de relatório inválido/);
+  const lista = (await api.listarRelatoriosModelo(T, { empresaId: clinica.id })).relatorios;
+  assert.deepEqual(lista.map((x) => [x.modelo, x.titulo, x.status]).sort(),
+    [['equipe', 'Equipe da Clínica Exemplo', 'publicado'], ['lideranca', 'Como liderar a Marta', 'rascunho']]);
+  assert.deepEqual((await api.listarRelatoriosModelo(T, { pessoaId: marta.pessoaId })).relatorios.map((x) => x.id), [r3.id]);
+  // a lista de relatórios de processo e as ações dele não enxergam os modelos novos
+  assert.ok((await api.relatoriosListar(T)).relatorios.every((x) => x.token !== r1.token));
+  await assert.rejects(api.relatorioDespublicar(T, r1.token), /Relatório não encontrado/);
+  await assert.rejects(api.relatorioMelhorarTextos(T, r1.token), /Relatório não encontrado/);
+  assert.equal((await api.relatorioPublico('exemplo-cartorio')).modelo, 'processo');
+  assert.deepEqual(await api.excluirRelatorioModelo(T, r3.id), { ok: true, id: r3.id });
+  await assert.rejects(api.excluirRelatorioModelo(T, r3.id), /Relatório não encontrado/);
 });

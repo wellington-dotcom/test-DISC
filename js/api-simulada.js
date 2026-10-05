@@ -13,11 +13,23 @@
  *
  * Semente da prévia (criada sozinha na primeira carga):
  *   admin  admin@previa.com  / previa123   ·  gestor  gestor@previa.com / previa123 (Clínica Exemplo)
- *   avaliações SEL1 (Recepcionista 2026, seleção) e EQP1 (Equipe comercial, equipe, mostra resultado)
- *   4 respostas de exemplo (2 em cada avaliação). Chave de primeiro acesso da prévia: "previa".
+ *   avaliações SEL1 (Recepcionista 2026, seleção), EQP1 (Equipe comercial, equipe, mostra resultado) e
+ *   ATD1 (Atendimento ao cliente, mostra resultado, formulário próprio: e-mail obrigatório, cidade opcional
+ *   e 1 pergunta extra). 5 respostas de exemplo: a "Ana Exemplo Prévia" respondeu 2 vezes (SEL1 e ATD1), a
+ *   mesma pessoa no painel. Chave de primeiro acesso da prévia: "previa".
+ *
+ * Pessoas (como public.pessoas do Supabase): cada resposta é ligada à pessoa do mesmo WhatsApp (chave
+ * disc_simulada_pessoas); o envio atualiza a ficha (campo vazio não apaga) e a pessoa que fica sem
+ * respostas é excluída junto. O formulário de cada processo (config.formulario) decide o que é pedido.
  *   Processo "Cartório Exemplo — Escrevente" (código CRT1) ligado à lista fictícia do ClickUp da fixture
  *   (tests/fixtures/processo-exemplo.json, embutida em js/fixture-processo-exemplo.js) e um relatório
  *   JÁ PUBLICADO com o token fixo "exemplo-cartorio" (relatorio.html#r-exemplo-cartorio).
+ *
+ * Empresas e equipes (como public.empresas/vinculos/relacoes do Supabase): colaboradores (vínculo pessoa x
+ * empresa, no máximo 1 ativo por pessoa), mover/desligar (relações da pessoa somem), organograma e
+ * relatórios por modelo (equipe/lideranca/pessoa). Semente: a "Clínica Exemplo" tem 7 colaboradores ativos
+ * em 3 níveis (Marta dirige; Diego e Paulo lideram áreas; Carla, Lucas, Renata e Tiago — sem teste — são
+ * liderados), relações direto/indireto e o Bruno desligado no histórico; SEL1 e EQP1 (equipe) são dela.
  *
  * Processos, ClickUp e relatórios (rodada ClickUp): o ClickUp NUNCA é chamado. "processo.dados" devolve a
  * fixture (com os dados do processo gravado), "relatorio.rascunho" roda o MESMO motor do servidor
@@ -38,8 +50,12 @@
     avaliacoes: 'disc_simulada_avaliacoes',
     sessoes: 'disc_simulada_sessoes',
     relatorios: 'disc_simulada_relatorios',
+    pessoas: 'disc_simulada_pessoas',
+    vinculos: 'disc_simulada_vinculos',
+    relacoes: 'disc_simulada_relacoes',
     semente: 'disc_simulada_semente',
-    sementeRelatorio: 'disc_simulada_semente_relatorio'
+    sementeRelatorio: 'disc_simulada_semente_relatorio',
+    sementeEquipe: 'disc_simulada_semente_equipe'
   };
   var CHAVE_ADMIN = 'previa';
   var LATENCIA_MS = 400;
@@ -47,7 +63,7 @@
     chave: CHAVE_ADMIN,
     admin: { email: 'admin@previa.com', senha: 'previa123' },
     gestor: { email: 'gestor@previa.com', senha: 'previa123' },
-    avaliacoes: ['SEL1', 'EQP1'],
+    avaliacoes: ['SEL1', 'EQP1', 'ATD1'],
     processo: { id: 'ava_previa_cartorio', codigo: 'CRT1', nome: 'Cartório Exemplo — Escrevente' },
     relatorioToken: 'exemplo-cartorio'
   };
@@ -55,7 +71,10 @@
   // Mesmos valores do Code.gs
   var LIMITE_CORPO = 20000;
   var LIMITE_CORPO_RELATORIO = 450000;      // só "relatorio.salvar" (o relatório inteiro volta do painel)
-  var ACOES_CORPO_GRANDE = ['relatorio.salvar'];
+  var ACOES_CORPO_GRANDE = ['relatorio.salvar', 'relatorioModelo.salvar'];
+  var MODELOS_RELATORIO = ['equipe', 'lideranca', 'pessoa'];
+  var TIPOS_RELACAO = ['lidera', 'direto', 'indireto'];
+  var MAX_DADOS_RELATORIO = 300000;          // mesmo limite do js/api-supabase.js (~300 KB de JSON)
   var REL_MAX_TEXTO = 4000;
   var REL_MAX_TEXTOS_IA = 80;
   var PREFIXO_IA = '[IA] ';
@@ -412,6 +431,50 @@
     return /^[A-Za-z0-9_-]{1,40}$/.test(s) ? s : prefixo + (i + 1);
   }
 
+  /* ---------- Formulário do processo (config.formulario) — mesma regra do banco e do js/api-supabase.js ---------- */
+
+  var MODOS_CAMPO = ['obrigatorio', 'opcional', 'oculto'];
+  var CAMPOS_FORMULARIO = ['idade', 'funcao', 'empresa', 'email', 'cidade'];
+  var FORMULARIO_PADRAO = { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto' };
+  var MAX_PERGUNTAS = 5;
+
+  function normalizarFormulario(f) {
+    f = f && typeof f === 'object' && !Array.isArray(f) ? f : {};
+    var origem = f.campos && typeof f.campos === 'object' && !Array.isArray(f.campos) ? f.campos : {};
+    var campos = {};
+    CAMPOS_FORMULARIO.forEach(function (k) {
+      campos[k] = typeof origem[k] === 'string' && MODOS_CAMPO.indexOf(origem[k]) >= 0 ? origem[k] : FORMULARIO_PADRAO[k];
+    });
+    var perguntas = [];
+    var usados = {};
+    (Array.isArray(f.perguntas) ? f.perguntas : []).forEach(function (p) {
+      if (perguntas.length >= MAX_PERGUNTAS) return;
+      if (!p || typeof p !== 'object' || Array.isArray(p)) return;
+      var texto = limparTexto(p.texto, 200);
+      if (texto.length < 3) return;
+      var id = typeof p.id === 'string' ? p.id : '';
+      if (!/^[a-z0-9_]{1,20}$/.test(id) || usados[id]) {
+        var n = 1;
+        while (usados['p' + n]) n++;
+        id = 'p' + n;
+      }
+      usados[id] = true;
+      perguntas.push({ id: id, texto: texto, obrigatoria: p.obrigatoria === true });
+    });
+    return { campos: campos, perguntas: perguntas };
+  }
+
+  function perguntaSensivel(f) {
+    var lista = f && typeof f === 'object' && Array.isArray(f.perguntas) ? f.perguntas : [];
+    for (var i = 0; i < lista.length; i++) {
+      var p = lista[i];
+      if (!p || typeof p !== 'object' || Array.isArray(p)) continue;
+      var texto = limparTexto(p.texto, 200);
+      if (texto && classificarCampo(texto, {}) !== '') return 'A pergunta "' + texto + '" pede um dado sensível e não pode ser usada.';
+    }
+    return '';
+  }
+
   function validarConfigProcesso(c) {
     if (c === undefined || c === null) c = {};
     if (typeof c !== 'object' || Array.isArray(c)) return erro('Configuração do processo inválida.');
@@ -460,6 +523,8 @@
       return { id: idUnico(b.id, 'bonus', i), nome: limparTexto(b.nome, 80) || ('Bônus ' + (i + 1)), campo: campo(b.campo), regra: r };
     });
     if (problema) return erro(problema);
+    var sensivel = perguntaSensivel(c.formulario);
+    if (sensivel) return erro(sensivel);
     var corte = numeroOu(c.corte, 70, 0, 200);
     var faixa = numeroOu(c.faixaAvaliar, 55, 0, 200);
     if (faixa > corte) return erro('A faixa "avaliar" precisa ser menor ou igual à nota de corte.');
@@ -475,7 +540,8 @@
         statusFinalistas: (Array.isArray(c.statusFinalistas) ? c.statusFinalistas : []).slice(0, 30)
           .map(function (x) { return limparTexto(x, 80); }).filter(Boolean),
         permitirAntecedentes: permitirAntecedentes,
-        permitirSaude: c.permitirSaude === true
+        permitirSaude: c.permitirSaude === true,
+        formulario: normalizarFormulario(c.formulario)
       }
     };
   }
@@ -576,8 +642,10 @@
       return { percentuais: c.percentuais, codigo: c.codigo };
     }
 
-    // Mesmo texto e mesma ordem de verificação do validarPayload do Code.gs.
-    function validarPayload(p) {
+    // Mesmo texto e mesma ordem de verificação do validarPayload do Code.gs, mais o formulário do processo
+    // (sem processo = formulário padrão, que dá o mesmo resultado do Code.gs).
+    function validarPayload(p, formulario) {
+      var form = normalizarFormulario(formulario);
       if (!p || typeof p !== 'object' || Array.isArray(p)) return erro('Dados do teste ausentes.');
       var id = limparTexto(p.id, 80);
       if (!/^[A-Za-z0-9_-]{6,64}$/.test(id)) return erro('Identificador do envio inválido.');
@@ -585,8 +653,38 @@
       if (!nomeValido(nome)) return erro('Informe o nome completo (nome e sobrenome).');
       var telefone = normalizarTelefone(p.telefone);
       if (!telefone) return erro('Telefone inválido. Informe DDD + número.');
-      var idade = validarIdade(p.idade);
-      if (!idade.ok) return idade;
+      var idade = { ok: true, idade: null };
+      var vazia = p.idade === null || p.idade === undefined || (typeof p.idade === 'string' && p.idade.trim() === '');
+      if (form.campos.idade === 'obrigatorio' || (form.campos.idade === 'opcional' && !vazia)) {
+        idade = validarIdade(p.idade);
+        if (!idade.ok) return idade;
+      }
+      function campo(k, max) { return form.campos[k] === 'oculto' ? '' : limparTexto(p[k], max); }
+      var funcao = campo('funcao', LIMITE_FUNCAO_EMPRESA);
+      if (!funcao && form.campos.funcao === 'obrigatorio') return erro('Informe a função atual ou última.');
+      var empresa = campo('empresa', LIMITE_FUNCAO_EMPRESA);
+      if (!empresa && form.campos.empresa === 'obrigatorio') return erro('Informe a empresa atual ou última.');
+      var email = campo('email', 120).toLowerCase();
+      if (!email && form.campos.email === 'obrigatorio') return erro('Informe o e-mail.');
+      if (email && !emailValido(email)) return erro('E-mail inválido.');
+      var cidade = campo('cidade', 80);
+      if (!cidade && form.campos.cidade === 'obrigatorio') return erro('Informe a cidade onde mora.');
+      var extras = [];
+      var enviados = Array.isArray(p.extras) ? p.extras : [];
+      for (var q = 0; q < form.perguntas.length; q++) {
+        var pergunta = form.perguntas[q];
+        var achado = null;
+        for (var e = 0; e < enviados.length; e++) {
+          var x = enviados[e];
+          if (x && typeof x === 'object' && !Array.isArray(x) && typeof x.id === 'string' && x.id === pergunta.id) { achado = x; break; }
+        }
+        var resposta = achado ? limparTexto(achado.resposta, 500) : '';
+        if (!resposta) {
+          if (pergunta.obrigatoria) return erro('Responda a pergunta "' + pergunta.texto + '".');
+          continue;
+        }
+        extras.push({ id: pergunta.id, pergunta: pergunta.texto, resposta: resposta });
+      }
       if (p.consentimento !== true) return erro('É necessário aceitar o uso dos dados para participar.');
       var respostas = typeof p.respostas === 'string' ? p.respostas.trim() : '';
       if (!recalcular(respostas)) return erro('Respostas do teste inválidas ou incompletas.');
@@ -607,7 +705,7 @@
         ok: true,
         payload: {
           v: 1, id: id, nome: nome, telefone: telefone, idade: idade.idade,
-          funcao: limparTexto(p.funcao, LIMITE_FUNCAO_EMPRESA), empresa: limparTexto(p.empresa, LIMITE_FUNCAO_EMPRESA),
+          funcao: funcao, empresa: empresa, email: email, cidade: cidade, extras: extras,
           vaga: limparTexto(p.vaga, 120), consentimento: true,
           inicio: inicio, fim: fim, duracaoSeg: Math.round(duracao), respostas: respostas,
           avaliacao: avaliacao, validacao: validacao.validacao
@@ -641,6 +739,8 @@
     function empresas() { garantirSemente(); return lerLista(CHAVES.empresas); }
     function avaliacoes() { garantirSemente(); return lerLista(CHAVES.avaliacoes); }
     function relatoriosSalvos() { garantirSemente(); return lerLista(CHAVES.relatorios); }
+    function vinculos() { return lerLista(CHAVES.vinculos); }
+    function relacoesTodas() { return lerLista(CHAVES.relacoes); }
     function obterMotor() { return opcoes.motor || exigirModulo('DISC_RELATORIO', './relatorio-motor.js'); }
     function obterFixture() { return opcoes.fixture || exigirModulo('DISC_FIXTURE_PROCESSO', './fixture-processo-exemplo.js'); }
     function mapaEmpresas() {
@@ -717,8 +817,76 @@
 
     /* ----- ações públicas ----- */
 
+    /* ----- pessoas (mesma pessoa = mesmo WhatsApp normalizado) ----- */
+
+    function pessoas() { return lerLista(CHAVES.pessoas); }
+    function gravarPessoas(lista) { gravarChave(CHAVES.pessoas, lista); }
+
+    // Acha/cria a ficha pelo telefone. sobrescrever=true (envio): nome do envio e campos não vazios do envio;
+    // false (linha antiga sem pessoa): só preenche o que estiver vazio na ficha.
+    function pessoaDoEnvio(lista, dados, sobrescrever, quando) {
+      var tel = normalizarTelefone(dados.telefone);
+      if (!tel) return null;
+      var p = buscarPor(lista, 'telefone', tel);
+      if (!p) {
+        p = { id: novoId('pes'), telefone: tel, nome: '', idade: null, funcao: '', empresa: '', email: '', cidade: '',
+          criadoEm: quando, atualizadoEm: quando };
+        lista.push(p);
+        sobrescrever = true;
+      }
+      ['nome', 'funcao', 'empresa', 'email', 'cidade'].forEach(function (k) {
+        var v = String(dados[k] == null ? '' : dados[k]);
+        if (v && (sobrescrever || !p[k])) p[k] = v;
+      });
+      var idade = idadeGravada(dados.idade);
+      if (idade !== null && (sobrescrever || p.idade === null || p.idade === undefined)) p.idade = idade;
+      if (sobrescrever) p.atualizadoEm = quando;
+      return p;
+    }
+
+    // Linhas gravadas antes das pessoas (prévia antiga): liga cada uma à pessoa do mesmo telefone.
+    function ligarPessoas(linhas) {
+      var semPessoa = linhas.filter(function (l) { return !l.pessoaId && normalizarTelefone(l.telefone); });
+      if (!semPessoa.length) return false;
+      var lista = pessoas();
+      semPessoa.slice().sort(function (a, b) { return String(b.recebidoEm || '').localeCompare(String(a.recebidoEm || '')); })
+        .forEach(function (l) {
+          var p = pessoaDoEnvio(lista, l, false, String(l.recebidoEm || agoraIso()));
+          if (p) l.pessoaId = p.id;
+        });
+      gravarPessoas(lista);
+      return true;
+    }
+
+    // Exclusão: a pessoa que ficou sem respostas sai junto (LGPD).
+    // Menos quem é colaborador ATIVO de alguma empresa (continua no time, sem resultado).
+    function apagarPessoasOrfas(linhas) {
+      var comResposta = {};
+      linhas.forEach(function (l) { if (l.pessoaId) comResposta[l.pessoaId] = true; });
+      vinculos().forEach(function (v) { if (v.status === 'ativo') comResposta[v.pessoaId] = true; });
+      var lista = pessoas();
+      var ficam = lista.filter(function (p) { return comResposta[p.id]; });
+      if (ficam.length === lista.length) return;
+      gravarPessoas(ficam);
+      // "on delete cascade": vínculos, relações e relatórios das pessoas excluídas saem junto
+      var vivas = {};
+      ficam.forEach(function (p) { vivas[p.id] = true; });
+      gravarChave(CHAVES.vinculos, vinculos().filter(function (v) { return vivas[v.pessoaId]; }));
+      gravarChave(CHAVES.relacoes, relacoesTodas().filter(function (r) { return vivas[r.de] && vivas[r.para]; }));
+      gravarChave(CHAVES.relatorios, relatoriosSalvos().filter(function (r) { return !r.pessoaId || vivas[r.pessoaId]; }));
+    }
+
+    function formularioDoProcesso(av) { return av ? configDoProcesso(av).formulario : normalizarFormulario(null); }
+
     function acaoEnviar(bruto) {
-      var v = validarPayload(bruto);
+      // Formulário do processo do link (link inexistente/desativado: padrão; a recusa vem depois, como no servidor).
+      var form = null;
+      if (bruto && typeof bruto === 'object' && !Array.isArray(bruto)) {
+        var cod = normalizarCodigoAvaliacao(bruto.avaliacao);
+        var avForm = cod ? buscarPor(avaliacoes(), 'codigo', cod) : null;
+        if (avForm && avForm.ativa) form = formularioDoProcesso(avForm);
+      }
+      var v = validarPayload(bruto, form);
       if (!v.ok) return v;
       var payload = v.payload;
       var linhas = ler();
@@ -733,8 +901,9 @@
         return { ok: true, duplicado: true, id: payload.id, protocolo: gravado };
       }
       payload.empresaId = '';
+      var av = null;
       if (payload.avaliacao) {
-        var av = buscarPor(avaliacoes(), 'codigo', payload.avaliacao);
+        av = buscarPor(avaliacoes(), 'codigo', payload.avaliacao);
         if (!av || !av.ativa) return erro(MSG_LINK_INATIVO);
         payload.empresaId = av.empresaId;
       }
@@ -748,8 +917,21 @@
       linha.status = STATUS_PADRAO;
       linha.observacoes = '';
       linha.protocolo = protocolo;
+      var lsPessoas = pessoas();
+      var pessoa = pessoaDoEnvio(lsPessoas, payload, true, linha.recebidoEm);
+      linha.pessoaId = pessoa ? pessoa.id : '';
+      gravarPessoas(lsPessoas);
       linhas.push(linha);
       gravar(linhas);
+      // Teste de equipe: link de processo 'equipe' ligado a uma empresa cria o vínculo ativo (cargo = função),
+      // se a pessoa ainda não tiver vínculo ativo em NENHUMA empresa.
+      if (pessoa && av && av.tipo === 'equipe' && av.empresaId && buscarPor(empresas(), 'id', av.empresaId)) {
+        var lsV = vinculos();
+        if (!lsV.some(function (x) { return x.pessoaId === pessoa.id && x.status === 'ativo'; })) {
+          lsV.push(novoVinculo(pessoa.id, av.empresaId, payload.funcao, ''));
+          gravarChave(CHAVES.vinculos, lsV);
+        }
+      }
       return { ok: true, id: payload.id, protocolo: protocolo };
     }
 
@@ -760,7 +942,8 @@
       if (!av || !av.ativa) return erro(MSG_LINK_INVALIDO);
       return {
         ok: true,
-        avaliacao: { codigo: av.codigo, nome: av.nome, tipo: av.tipo, empresaNome: mapaEmpresas()[av.empresaId] || av.empresa || '', mostrarResultado: av.mostrarResultado === true }
+        avaliacao: { codigo: av.codigo, nome: av.nome, tipo: av.tipo, empresaNome: mapaEmpresas()[av.empresaId] || av.empresa || '', mostrarResultado: av.mostrarResultado === true,
+          formulario: formularioDoProcesso(av) }
       };
     }
 
@@ -875,8 +1058,20 @@
         empresa: String(l.empresa == null ? '' : l.empresa),
         avaliacao: normalizarCodigoAvaliacao(l.avaliacao),
         empresaId: String(l.empresaId == null ? '' : l.empresaId),
-        validacao: (l.validacao && typeof l.validacao === 'object' && !Array.isArray(l.validacao)) ? l.validacao : null
+        validacao: (l.validacao && typeof l.validacao === 'object' && !Array.isArray(l.validacao)) ? l.validacao : null,
+        pessoaId: String(l.pessoaId || ''),
+        pessoa: null,
+        email: String(l.email == null ? '' : l.email),
+        cidade: String(l.cidade == null ? '' : l.cidade),
+        extras: (Array.isArray(l.extras) ? l.extras : []).filter(function (e) { return e && typeof e === 'object' && !Array.isArray(e); })
+          .map(function (e) { return { id: String(e.id || ''), pergunta: String(e.pergunta || ''), resposta: String(e.resposta || '') }; })
       };
+    }
+
+    function pessoaPublica(p) {
+      if (!p) return null;
+      return { id: p.id, nome: p.nome || '', telefone: p.telefone || '', idade: idadeGravada(p.idade), funcao: p.funcao || '',
+        empresa: p.empresa || '', email: p.email || '', cidade: p.cidade || '', atualizadoEm: p.atualizadoEm || '' };
     }
 
     function acaoListar(u) {
@@ -884,9 +1079,15 @@
       var avs = {};
       avaliacoes().forEach(function (a) { avs[a.codigo] = a; });
       var itens = [];
-      ler().forEach(function (l) {
+      var linhas = ler();
+      if (ligarPessoas(linhas)) gravar(linhas);
+      var fichas = {};
+      pessoas().forEach(function (p) { fichas[p.id] = p; });
+      linhas.forEach(function (l) {
         if (!String(l.id || '').trim()) return;
         var item = linhaParaItem(l);
+        item.pessoa = pessoaPublica(fichas[item.pessoaId]);
+        if (!item.pessoa) item.pessoaId = '';
         if (!podeVerEmpresa(u, item.empresaId)) return;
         var av = avs[item.avaliacao];
         item.empresaNome = emp[item.empresaId] || '';
@@ -926,6 +1127,7 @@
       if (i === -1) return erro('Candidato não encontrado.');
       linhas.splice(i, 1);
       gravar(linhas);
+      apagarPessoasOrfas(linhas);
       return { ok: true, id: id };
     }
 
@@ -934,17 +1136,33 @@
       var codigo = filtrar ? normalizarCodigoAvaliacao(avaliacaoBruta) : '';
       if (filtrar && !codigo) return erro('Código de avaliação inválido.');
       var linhas = ler();
-      if (!filtrar) { gravar([]); return { ok: true, excluidos: linhas.length }; }
+      if (!filtrar) { gravar([]); apagarPessoasOrfas([]); return { ok: true, excluidos: linhas.length }; }
       var ficam = linhas.filter(function (l) { return normalizarCodigoAvaliacao(l.avaliacao) !== codigo; });
       gravar(ficam);
+      apagarPessoasOrfas(ficam);
       return { ok: true, excluidos: linhas.length - ficam.length, avaliacao: codigo };
     }
 
-    function empresaPublica(e) { return { id: e.id, nome: e.nome, criadaEm: e.criadaEm }; }
+    // criadaEm (nome do Code.gs) e criadoEm (nome do Supabase) com o mesmo valor.
+    function empresaPublica(e, ativos) {
+      var n = ativos ? (ativos[e.id] || 0) : vinculos().filter(function (v) { return v.empresaId === e.id && v.status === 'ativo'; }).length;
+      return { id: e.id, nome: e.nome, criadaEm: e.criadaEm, cidade: e.cidade || '', observacoes: e.observacoes || '',
+        ativo: e.ativo !== false, criadoEm: e.criadaEm || '', atualizadoEm: e.atualizadoEm || e.criadaEm || '', colaboradores: n };
+    }
+    function contagemAtivos() {
+      var m = {};
+      vinculos().forEach(function (v) { if (v.status === 'ativo') m[v.empresaId] = (m[v.empresaId] || 0) + 1; });
+      return m;
+    }
+    function acaoEmpresasListar() {
+      var n = contagemAtivos();
+      return { ok: true, empresas: empresas().map(function (e) { return empresaPublica(e, n); }) };
+    }
 
     function acaoEmpresasSalvar(dados) {
       if (!dados || typeof dados !== 'object') return erro('Dados da empresa ausentes.');
-      var nome = limparTexto(dados.nome, 80);
+      function veio(k) { return Object.prototype.hasOwnProperty.call(dados, k) && dados[k] !== undefined; }
+      var nome = limparTexto(dados.nome, 120);
       if (letrasContadas(nome) < 2) return erro('Informe o nome da empresa.');
       var id = limparTexto(dados.id, 40);
       var lista = empresas();
@@ -956,10 +1174,14 @@
         e = buscarPor(lista, 'id', id);
         if (!e) return erro('Empresa não encontrada.');
         e.nome = nome;
+        e.atualizadoEm = agoraIso();
       } else {
-        e = { id: novoId('emp'), nome: nome, criadaEm: agoraIso() };
+        e = { id: novoId('emp'), nome: nome, criadaEm: agoraIso(), cidade: '', observacoes: '', ativo: true };
         lista.push(e);
       }
+      if (veio('cidade')) e.cidade = limparTexto(dados.cidade, 120);
+      if (veio('observacoes')) e.observacoes = limparTextoLongo(dados.observacoes, 2000);
+      if (veio('ativo')) e.ativo = dados.ativo !== false;
       gravarChave(CHAVES.empresas, lista);
       return { ok: true, empresa: empresaPublica(e) };
     }
@@ -969,9 +1191,236 @@
       var lista = empresas();
       var e = id && buscarPor(lista, 'id', id);
       if (!e) return erro('Empresa não encontrada.');
+      if (vinculos().some(function (v) { return v.empresaId === id && v.status === 'ativo'; })) return erro('Desligue ou mova os colaboradores antes.');
       if (buscarPor(avaliacoes(), 'empresaId', id)) return erro('Esta empresa tem avaliações. Exclua as avaliações dela antes.');
       if (buscarPor(usuarios(), 'empresaId', id)) return erro('Esta empresa tem gestores ligados a ela. Exclua ou mude esses gestores antes.');
       gravarChave(CHAVES.empresas, lista.filter(function (x) { return x.id !== id; }));
+      // "on delete cascade": histórico, relações e relatórios de equipe da empresa
+      gravarChave(CHAVES.vinculos, vinculos().filter(function (v) { return v.empresaId !== id; }));
+      gravarChave(CHAVES.relacoes, relacoesTodas().filter(function (r) { return r.empresaId !== id; }));
+      gravarChave(CHAVES.relatorios, relatoriosSalvos().filter(function (r) { return !(r.modelo === 'equipe' && r.empresaId === id); }));
+      return { ok: true, id: id };
+    }
+
+    /* ----- colaboradores (vínculos) e organograma — mesmas regras das funções do banco ----- */
+
+    function dataHoje() { return agoraIso().slice(0, 10); }
+    function novoVinculo(pessoaId, empresaId, cargo, area) {
+      return { id: novoId('vin'), pessoaId: pessoaId, empresaId: empresaId, cargo: limparTexto(cargo, 120),
+        area: limparTexto(area, 120), status: 'ativo', inicio: dataHoje(), fim: '', criadoEm: agoraIso() };
+    }
+    // Desliga o vínculo (fim = hoje) e apaga as relações da pessoa naquela empresa.
+    function desligar(v) {
+      v.status = 'desligado';
+      v.fim = v.fim || dataHoje();
+      gravarChave(CHAVES.relacoes, relacoesTodas().filter(function (r) {
+        return !(r.empresaId === v.empresaId && (r.de === v.pessoaId || r.para === v.pessoaId));
+      }));
+    }
+    function colaboradorPublico(v, fichas) {
+      var p = fichas[v.pessoaId] || {};
+      return { vinculoId: v.id, pessoaId: v.pessoaId, empresaId: v.empresaId, nome: p.nome || '', telefone: p.telefone || '',
+        cargo: v.cargo || '', area: v.area || '', status: v.status === 'desligado' ? 'desligado' : 'ativo',
+        inicio: v.inicio || '', fim: v.fim || '' };
+    }
+    function mapaPessoas() { var m = {}; pessoas().forEach(function (p) { m[p.id] = p; }); return m; }
+
+    function acaoEquipeListar(empresaIdBruto) {
+      var empresaId = limparTexto(empresaIdBruto, 40);
+      var e = empresaId && buscarPor(empresas(), 'id', empresaId);
+      if (!e) return erro('Empresa não encontrada.');
+      var linhas = ler();
+      if (ligarPessoas(linhas)) gravar(linhas);
+      var fichas = mapaPessoas();
+      var ultima = {};
+      linhas.forEach(function (l) {
+        if (!l.pessoaId) return;
+        if (!ultima[l.pessoaId] || String(l.recebidoEm) > String(ultima[l.pessoaId].recebidoEm)) ultima[l.pessoaId] = l;
+      });
+      var todos = vinculos().filter(function (v) { return v.empresaId === empresaId; }).map(function (v) {
+        var c = colaboradorPublico(v, fichas);
+        delete c.empresaId;
+        var l = ultima[v.pessoaId];
+        c.resultado = l ? recalcular(String(l.respostas || '')) : null;
+        c.respondidoEm = c.resultado ? String(l.recebidoEm || '') : '';
+        return c;
+      });
+      var porNome = function (a, b) { return String(a.nome).localeCompare(String(b.nome), 'pt-BR'); };
+      var ativos = todos.filter(function (c) { return c.status === 'ativo'; }).sort(porNome);
+      var historico = todos.filter(function (c) { return c.status !== 'ativo'; })
+        .sort(function (a, b) { return String(b.fim).localeCompare(String(a.fim)); });
+      var ids = {};
+      ativos.forEach(function (c) { ids[c.pessoaId] = true; });
+      var relacoes = relacoesTodas().filter(function (r) { return r.empresaId === empresaId && ids[r.de] && ids[r.para]; })
+        .map(function (r) { return { de: r.de, para: r.para, tipo: r.tipo }; });
+      var emp = empresaPublica(e);
+      emp.colaboradores = ativos.length;
+      return { ok: true, empresa: emp, colaboradores: ativos, relacoes: relacoes, historico: historico };
+    }
+
+    function acaoColaboradorSalvar(dados) {
+      if (!dados || typeof dados !== 'object') return erro('Dados do colaborador ausentes.');
+      var empresaId = limparTexto(dados.empresaId, 40);
+      if (!empresaId || !buscarPor(empresas(), 'id', empresaId)) return erro('Empresa não encontrada.');
+      var cargo = limparTexto(dados.cargo, 120);
+      var area = limparTexto(dados.area, 120);
+      var lsP = pessoas();
+      var pessoa;
+      if (limparTexto(dados.pessoaId, 40)) {
+        pessoa = buscarPor(lsP, 'id', limparTexto(dados.pessoaId, 40));
+        if (!pessoa) return erro('Pessoa não encontrada.');
+      } else {
+        var nome = limparTexto(dados.nome, 120);
+        if (!nomeValido(nome)) return erro('Informe o nome completo (nome e sobrenome).');
+        if (!normalizarTelefone(dados.telefone)) return erro('Telefone inválido. Informe DDD + número.');
+        pessoa = pessoaDoEnvio(lsP, { telefone: dados.telefone, nome: nome, funcao: cargo }, false, agoraIso());
+        gravarPessoas(lsP);
+      }
+      var lsV = vinculos();
+      var atual = null;
+      lsV.forEach(function (v) { if (v.pessoaId === pessoa.id && v.status === 'ativo') atual = v; });
+      if (atual && atual.empresaId !== empresaId) {
+        var outra = buscarPor(empresas(), 'id', atual.empresaId);
+        return erro('Esta pessoa já é colaboradora ativa de outra empresa (' + (outra ? outra.nome : '?') + '). Use "Mover" para trocar de empresa.');
+      }
+      if (atual) { atual.cargo = cargo; atual.area = area; }
+      else { atual = novoVinculo(pessoa.id, empresaId, cargo, area); lsV.push(atual); }
+      gravarChave(CHAVES.vinculos, lsV);
+      return { ok: true, colaborador: colaboradorPublico(atual, mapaPessoas()) };
+    }
+
+    function acaoColaboradorMover(dados) {
+      if (!dados || typeof dados !== 'object') return erro('Dados do colaborador ausentes.');
+      var pessoaId = limparTexto(dados.pessoaId, 40);
+      if (!pessoaId || !buscarPor(pessoas(), 'id', pessoaId)) return erro('Pessoa não encontrada.');
+      var empresaId = limparTexto(dados.empresaId, 40);
+      if (!empresaId || !buscarPor(empresas(), 'id', empresaId)) return erro('Empresa não encontrada.');
+      var cargo = limparTexto(dados.cargo, 120);
+      var area = limparTexto(dados.area, 120);
+      var lsV = vinculos();
+      var atual = null;
+      lsV.forEach(function (v) { if (v.pessoaId === pessoaId && v.status === 'ativo') atual = v; });
+      if (atual && atual.empresaId === empresaId) {
+        atual.cargo = cargo;
+        atual.area = area;
+      } else {
+        if (atual) desligar(atual);
+        atual = novoVinculo(pessoaId, empresaId, cargo, area);
+        lsV.push(atual);
+      }
+      gravarChave(CHAVES.vinculos, lsV);
+      return { ok: true, colaborador: colaboradorPublico(atual, mapaPessoas()) };
+    }
+
+    function acaoColaboradorDesligar(idBruto) {
+      var id = limparTexto(idBruto, 40);
+      var lsV = vinculos();
+      var v = id && buscarPor(lsV, 'id', id);
+      if (!v || v.status !== 'ativo') return erro('Colaborador não encontrado ou já desligado.');
+      desligar(v);
+      gravarChave(CHAVES.vinculos, lsV);
+      return { ok: true, id: id };
+    }
+
+    function acaoRelacoesSalvar(empresaIdBruto, lista) {
+      var empresaId = limparTexto(empresaIdBruto, 40);
+      if (!empresaId || !buscarPor(empresas(), 'id', empresaId)) return erro('Empresa não encontrada.');
+      if (!Array.isArray(lista)) return erro('Relações inválidas.');
+      if (lista.length > 2000) return erro('Relações demais.');
+      var ativos = {};
+      vinculos().forEach(function (v) { if (v.empresaId === empresaId && v.status === 'ativo') ativos[v.pessoaId] = true; });
+      var novas = [];
+      for (var i = 0; i < lista.length; i++) {
+        var r = lista[i];
+        if (!r || typeof r !== 'object' || Array.isArray(r)) return erro('Relações inválidas.');
+        var de = limparTexto(r.de, 40);
+        var para = limparTexto(r.para, 40);
+        var tipo = limparTexto(r.tipo, 20);
+        if (!de || !para) return erro('Relações inválidas.');
+        if (TIPOS_RELACAO.indexOf(tipo) === -1) return erro('Tipo de relação inválido. Use: lidera, direto ou indireto.');
+        if (de === para) return erro('Uma pessoa não pode ter relação com ela mesma.');
+        if (!ativos[de] || !ativos[para]) return erro('As duas pessoas da relação precisam ser colaboradoras ativas desta empresa.');
+        var repetida = null;
+        novas.forEach(function (n) { if (n.de === de && n.para === para) repetida = n; });
+        if (repetida) repetida.tipo = tipo; // repetida: vale a última
+        else novas.push({ empresaId: empresaId, de: de, para: para, tipo: tipo });
+      }
+      gravarChave(CHAVES.relacoes, relacoesTodas().filter(function (r) { return r.empresaId !== empresaId; }).concat(novas));
+      return { ok: true, relacoes: novas.map(function (r) { return { de: r.de, para: r.para, tipo: r.tipo }; }) };
+    }
+
+    /* ----- relatórios por modelo (equipe, liderança, pessoa): snapshot pronto vindo do painel ----- */
+
+    function urlRelatorio(token, baseUrl) {
+      var base = baseSite(baseUrl);
+      if (!base) { try { base = baseSite(root && root.location ? String(root.location.href) : ''); } catch (e) { base = ''; } }
+      return base + 'relatorio.html?r=' + token;
+    }
+    function relModeloPublico(r) {
+      var x = { id: r.id, token: r.token, modelo: r.modelo, status: r.status === 'publicado' ? 'publicado' : 'rascunho',
+        titulo: r.relatorio && typeof r.relatorio.titulo === 'string' ? r.relatorio.titulo : '',
+        empresaId: r.empresaId || '', pessoaId: r.pessoaId || '',
+        criadoEm: r.criadoEm || '', atualizadoEm: r.atualizadoEm || '', publicadoEm: r.publicadoEm || '' };
+      if (x.status === 'publicado') x.url = urlRelatorio(r.token);
+      return x;
+    }
+
+    function acaoRelatorioModeloSalvar(dados) {
+      if (!dados || typeof dados !== 'object') return erro('Dados do relatório ausentes.');
+      var modelo = limparTexto(dados.modelo, 20);
+      if (MODELOS_RELATORIO.indexOf(modelo) === -1) return erro('Modelo de relatório inválido. Use: equipe, lideranca ou pessoa.');
+      var empresaId = limparTexto(dados.empresaId, 40);
+      var pessoaId = limparTexto(dados.pessoaId, 40);
+      if (empresaId && !buscarPor(empresas(), 'id', empresaId)) return erro('Empresa não encontrada.');
+      if (pessoaId && !buscarPor(pessoas(), 'id', pessoaId)) return erro('Pessoa não encontrada.');
+      if (modelo === 'equipe' && !empresaId) return erro('Escolha a empresa do relatório.');
+      if (modelo !== 'equipe' && !pessoaId) return erro('Escolha a pessoa do relatório.');
+      var snap = dados.dados;
+      if (!snap || typeof snap !== 'object' || Array.isArray(snap)) return erro('Relatório vazio: gere o relatório antes de salvar.');
+      if (snap.modelo !== undefined && snap.modelo !== modelo) return erro('Os dados não são de um relatório "' + modelo + '".');
+      if (JSON.stringify(snap).length > MAX_DADOS_RELATORIO) return erro('Relatório grande demais (máximo 300 KB).');
+      snap = copiar(snap);
+      snap.modelo = modelo;
+      var lista = relatoriosSalvos();
+      var id = limparTexto(dados.id, 40);
+      var t = agoraIso();
+      var reg;
+      if (id) {
+        reg = buscarPor(lista, 'id', id);
+        if (!reg || !reg.modelo || reg.modelo === 'processo') return erro('Relatório não encontrado.');
+      } else {
+        reg = { id: novoId('rel'), token: hexAleatorio(32), criadoEm: t, status: 'rascunho', publicadoEm: '' };
+        lista.push(reg);
+      }
+      reg.modelo = modelo;
+      reg.empresaId = empresaId;
+      reg.pessoaId = pessoaId;
+      reg.relatorio = snap;
+      reg.atualizadoEm = t;
+      if (dados.publicar === true) { reg.status = 'publicado'; reg.publicadoEm = reg.publicadoEm || t; }
+      else if (dados.publicar === false) { reg.status = 'rascunho'; reg.publicadoEm = ''; }
+      gravarChave(CHAVES.relatorios, lista);
+      var r = { id: reg.id, token: reg.token, status: reg.status, modelo: modelo };
+      if (reg.status === 'publicado') r.url = urlRelatorio(reg.token, dados.baseUrl);
+      return { ok: true, relatorio: r };
+    }
+
+    function acaoRelatoriosModeloListar(filtro) {
+      filtro = filtro && typeof filtro === 'object' ? filtro : {};
+      var empresaId = limparTexto(filtro.empresaId, 40);
+      var pessoaId = limparTexto(filtro.pessoaId, 40);
+      var lista = relatoriosSalvos().filter(function (r) {
+        return r.modelo && r.modelo !== 'processo' && (!empresaId || r.empresaId === empresaId) && (!pessoaId || r.pessoaId === pessoaId);
+      }).map(relModeloPublico).sort(function (a, b) { return String(b.criadoEm).localeCompare(String(a.criadoEm)); });
+      return { ok: true, relatorios: lista };
+    }
+
+    function acaoRelatorioModeloExcluir(idBruto) {
+      var id = limparTexto(idBruto, 40);
+      var lista = relatoriosSalvos();
+      var reg = id && buscarPor(lista, 'id', id);
+      if (!reg || !reg.modelo || reg.modelo === 'processo') return erro('Relatório não encontrado.');
+      gravarChave(CHAVES.relatorios, lista.filter(function (r) { return r !== reg; }));
       return { ok: true, id: id };
     }
 
@@ -1178,6 +1627,12 @@
       return { lista: lista, reg: reg };
     }
 
+    // Ações do relatório de PROCESSO (editar textos, publicar, IA): não valem para os modelos novos.
+    function relLerProcesso(token) {
+      var lido = relLer(token);
+      return lido && (!lido.reg.modelo || lido.reg.modelo === 'processo') ? lido : null;
+    }
+
     function relGravar(lido) {
       lido.reg.atualizadoEm = agoraIso();
       gravarChave(CHAVES.relatorios, lido.lista);
@@ -1204,7 +1659,7 @@
     function acaoRelatorioSalvar(corpo) {
       var novos = (corpo.relatorio && typeof corpo.relatorio === 'object' && corpo.relatorio.textos) || corpo.textos;
       if (!novos || typeof novos !== 'object' || Array.isArray(novos)) return erro('Nada para salvar.');
-      var lido = relLer(corpo.relatorioToken);
+      var lido = relLerProcesso(corpo.relatorioToken);
       if (!lido) return erro('Relatório não encontrado.');
       var textos = lido.reg.relatorio.textos || {};
       var alterados = 0;
@@ -1232,7 +1687,7 @@
     }
 
     function acaoRelatorioPublicar(token, baseUrl) {
-      var lido = relLer(token);
+      var lido = relLerProcesso(token);
       if (!lido) return erro('Relatório não encontrado.');
       lido.reg.status = 'publicado';
       lido.reg.publicadoEm = lido.reg.publicadoEm || agoraIso();
@@ -1245,7 +1700,7 @@
       if (!relTokenValido(token)) return erro('Relatório não encontrado.');
       var lista = relatoriosSalvos();
       var reg = buscarPor(lista, 'token', token);
-      if (!reg) return erro('Relatório não encontrado.');
+      if (!reg || (reg.modelo && reg.modelo !== 'processo')) return erro('Relatório não encontrado.');
       reg.status = 'rascunho';
       reg.publicadoEm = '';
       relGravar({ lista: lista, reg: reg });
@@ -1254,7 +1709,9 @@
 
     function acaoRelatoriosListar(processoId) {
       var filtro = limparTexto(processoId, 40);
-      var lista = relatoriosSalvos().filter(function (r) { return !filtro || r.processoId === filtro; }).map(function (r) {
+      var lista = relatoriosSalvos().filter(function (r) {
+        return (!r.modelo || r.modelo === 'processo') && (!filtro || r.processoId === filtro);
+      }).map(function (r) {
         return { token: r.token, processoId: r.processoId, status: r.status === 'publicado' ? 'publicado' : 'rascunho',
           criadoEm: r.criadoEm, publicadoEm: r.publicadoEm || '', atualizadoEm: r.atualizadoEm };
       }).sort(function (a, b) { return String(b.criadoEm).localeCompare(String(a.criadoEm)); });
@@ -1263,7 +1720,7 @@
 
     // IA simulada: só marca os textos escolhidos com "[IA] " e origem 'ia' (nenhuma chamada externa).
     function acaoRelatorioMelhorarTextos(token, ids) {
-      var lido = relLer(token);
+      var lido = relLerProcesso(token);
       if (!lido) return erro('Relatório não encontrado.');
       var textos = lido.reg.relatorio.textos || {};
       var escolhidos = Array.isArray(ids) && ids.length
@@ -1287,7 +1744,8 @@
       if (!lido || lido.reg.status !== 'publicado') return erro(MSG_REL_NAO_ENCONTRADO);
       var relatorio = copiar(lido.reg.relatorio);
       if (relatorio && relatorio.processo) delete relatorio.processo.clickupListId;
-      return { ok: true, relatorio: relatorio, publicadoEm: lido.reg.publicadoEm };
+      var modelo = MODELOS_RELATORIO.indexOf(lido.reg.modelo) >= 0 ? lido.reg.modelo : 'processo';
+      return { ok: true, modelo: modelo, relatorio: relatorio, publicadoEm: lido.reg.publicadoEm };
     }
 
     function acaoAvaliacoesExcluir(idBruto) {
@@ -1388,7 +1846,15 @@
       'atualizar': { fn: function (u, c) { return acaoAtualizar(c.id, c.campos, u); } },
       'excluir': { soAdmin: true, fn: function (u, c) { return acaoExcluir(c.id); } },
       'excluirTodos': { soAdmin: true, fn: function (u, c) { return acaoExcluirTodos(c.avaliacao); } },
-      'empresas.listar': { soAdmin: true, fn: function () { return { ok: true, empresas: empresas().map(empresaPublica) }; } },
+      'empresas.listar': { soAdmin: true, fn: function () { return acaoEmpresasListar(); } },
+      'equipe.listar': { soAdmin: true, fn: function (u, c) { return acaoEquipeListar(c.empresaId); } },
+      'colaboradores.salvar': { soAdmin: true, fn: function (u, c) { return acaoColaboradorSalvar(c.colaborador); } },
+      'colaboradores.mover': { soAdmin: true, fn: function (u, c) { return acaoColaboradorMover(c.colaborador); } },
+      'colaboradores.desligar': { soAdmin: true, fn: function (u, c) { return acaoColaboradorDesligar(c.id); } },
+      'relacoes.salvar': { soAdmin: true, fn: function (u, c) { return acaoRelacoesSalvar(c.empresaId, c.relacoes); } },
+      'relatorioModelo.salvar': { soAdmin: true, fn: function (u, c) { return acaoRelatorioModeloSalvar(c.relatorio); } },
+      'relatoriosModelo.listar': { soAdmin: true, fn: function (u, c) { return acaoRelatoriosModeloListar(c.filtro); } },
+      'relatorioModelo.excluir': { soAdmin: true, fn: function (u, c) { return acaoRelatorioModeloExcluir(c.id); } },
       'empresas.salvar': { soAdmin: true, fn: function (u, c) { return acaoEmpresasSalvar(c.empresa); } },
       'empresas.excluir': { soAdmin: true, fn: function (u, c) { return acaoEmpresasExcluir(c.id); } },
       'avaliacoes.listar': { fn: function (u) { return acaoAvaliacoesListar(u); } },
@@ -1447,11 +1913,13 @@
       if (!comSemente || semeando) return;
       var base = !!lerChave(CHAVES.semente, null);
       var rel = !!lerChave(CHAVES.sementeRelatorio, null);
-      if (base && rel) return;
+      var equipe = !!lerChave(CHAVES.sementeEquipe, null);
+      if (base && rel && equipe) return;
       semeando = true;
       try {
-        if (!base && temScoring()) semear(); // sem scoring.js (página do relatório) fica para a próxima página
+        if (!base && temScoring()) { semear(); base = true; } // sem scoring.js (página do relatório) fica para a próxima página
         if (!rel) semearProcessoExemplo(); // prévias antigas (só com a semente base) ganham o processo de exemplo
+        if (base && !equipe && temScoring()) semearEquipe(); // e a equipe da Clínica Exemplo
       } finally { semeando = false; }
     }
 
@@ -1468,7 +1936,7 @@
         var cfg = validarConfigProcesso((fx && fx.config) || {});
         lsAv.push({
           id: PREVIA.processo.id, codigo: PREVIA.processo.codigo, empresaId: '', nome: PREVIA.processo.nome, tipo: 'selecao',
-          mostrarResultado: false, ativa: true, criadaEm: new Date(t - 30 * dia).toISOString(),
+          mostrarResultado: true, ativa: true, criadaEm: new Date(t - 30 * dia).toISOString(),
           empresa: 'Cartório Exemplo', vaga: fp.vaga || 'Escrevente de atendimento', cidade: fp.cidade || 'Boa Vista / RR',
           consultor: fp.consultor || 'Consultor Exemplo', contratante: fp.contratante || 'Responsável Exemplo',
           periodoInicio: (fp.periodo && fp.periodo.inicio) || '', periodoFim: (fp.periodo && fp.periodo.fim) || '',
@@ -1485,6 +1953,97 @@
         gravarChave(CHAVES.relatorios, lsRel);
       }
       gravarChave(CHAVES.sementeRelatorio, 1);
+    }
+
+    // Equipe da Clínica Exemplo: 4 colaboradores que responderam pelo link de equipe (EQP1), 1 sem teste,
+    // organograma de 3 níveis e o Bruno (respondeu SEL1) desligado no histórico. Não duplica nada.
+    function semearEquipe() {
+      var t = agora();
+      var dia = 24 * 3600 * 1000;
+      var EMP = 'emp_previa_clinica';
+      var lsEmp = lerLista(CHAVES.empresas);
+      var emp = buscarPor(lsEmp, 'id', EMP);
+      if (!emp) { gravarChave(CHAVES.sementeEquipe, 1); return; }
+      if (emp.cidade === undefined) emp.cidade = 'Boa Vista / RR';
+      if (emp.observacoes === undefined) emp.observacoes = 'Empresa fictícia da prévia: clínica com recepção, atendimento e equipe comercial.';
+      if (emp.ativo === undefined) emp.ativo = true;
+      gravarChave(CHAVES.empresas, lsEmp);
+
+      var novos = [
+        { id: 'previa-exemplo-06', nome: 'Marta Exemplo Diretora', telefone: '5511900000006', idade: 48, funcao: 'Diretora geral',
+          respostas: respostasDe(['D', 'C', 'I', 'S'], ['C', 'D', 'S', 'I'], 3), validacao: { acertos: 3, notas: [5, 4, 4, 1], rapido: false, semMexer: 1 }, protocolo: '13F', dias: 9, duracao: 700 },
+        { id: 'previa-exemplo-07', nome: 'Paulo Modelo Fictício', telefone: '5511900000007', idade: 39, funcao: 'Coordenador de atendimento',
+          respostas: respostasDe(['C', 'S', 'D', 'I'], ['S', 'C', 'I', 'D'], 4), validacao: { acertos: 3, notas: [5, 3, 4, 2], rapido: false, semMexer: 2 }, protocolo: '24G', dias: 8, duracao: 820 },
+        { id: 'previa-exemplo-08', nome: 'Lucas Fictício Exemplo', telefone: '5511900000008', idade: 26, funcao: 'Vendedor',
+          respostas: respostasDe(['I', 'D', 'S', 'C'], ['D', 'I', 'C', 'S'], 3), validacao: { acertos: 2, notas: [4, 3, 4, 2], rapido: false, semMexer: 3 }, protocolo: '35H', dias: 7, duracao: 610 },
+        { id: 'previa-exemplo-09', nome: 'Renata Exemplo Fictícia', telefone: '5511900000009', idade: 33, funcao: 'Recepcionista',
+          respostas: respostasDe(['S', 'I', 'C', 'D'], ['I', 'S', 'D', 'C'], 4), validacao: { acertos: 3, notas: [5, 4, 4, 1], rapido: false, semMexer: 1 }, protocolo: '46J', dias: 5, duracao: 760 }
+      ];
+      var linhas = lerLista(CHAVE_ARMAZENAMENTO);
+      var ocupados = usados(linhas);
+      var lsPessoas = pessoas();
+      novos.forEach(function (x) {
+        if (indice(linhas, x.id) !== -1) return;
+        var fim = t - x.dias * dia;
+        var protocolo = ocupados[x.protocolo] ? gerarProtocolo(ocupados, aleatorio) : x.protocolo;
+        ocupados[protocolo] = true;
+        var linha = {
+          v: 1, id: x.id, nome: x.nome, telefone: x.telefone, idade: x.idade, funcao: x.funcao, empresa: '',
+          email: '', cidade: '', extras: [], vaga: '', consentimento: true,
+          inicio: new Date(fim - x.duracao * 1000).toISOString(), fim: new Date(fim).toISOString(),
+          duracaoSeg: x.duracao, respostas: x.respostas, avaliacao: 'EQP1', empresaId: EMP,
+          validacao: validacaoDe(x.respostas, x.validacao),
+          recebidoEm: new Date(fim + 2000).toISOString(), status: 'em_analise', observacoes: '', protocolo: protocolo
+        };
+        var p = pessoaDoEnvio(lsPessoas, linha, true, linha.recebidoEm);
+        linha.pessoaId = p ? p.id : '';
+        linhas.push(linha);
+      });
+      // Colaborador ainda sem teste (cadastrado só com nome e WhatsApp).
+      pessoaDoEnvio(lsPessoas, { telefone: '5511900000010', nome: 'Tiago Modelo Sem Teste', funcao: 'Auxiliar administrativo' }, false,
+        new Date(t - 30 * dia).toISOString());
+      gravarPessoas(lsPessoas);
+      gravar(linhas);
+
+      var porTel = {};
+      lsPessoas.forEach(function (p) { porTel[p.telefone] = p.id; });
+      var lsV = lerLista(CHAVES.vinculos);
+      [
+        ['5511900000006', 'Diretora geral', 'Diretoria', 'ativo', 900],
+        ['5511900000004', 'Supervisor de vendas', 'Comercial', 'ativo', 500],
+        ['5511900000007', 'Coordenador de atendimento', 'Atendimento', 'ativo', 420],
+        ['5511900000003', 'Vendedora', 'Comercial', 'ativo', 300],
+        ['5511900000008', 'Vendedor', 'Comercial', 'ativo', 120],
+        ['5511900000009', 'Recepcionista', 'Atendimento', 'ativo', 200],
+        ['5511900000010', 'Auxiliar administrativo', 'Atendimento', 'ativo', 30],
+        ['5511900000002', 'Auxiliar administrativo', 'Atendimento', 'desligado', 400]
+      ].forEach(function (x, n) {
+        var pid = porTel[x[0]];
+        if (!pid) return;
+        if (lsV.some(function (v) { return v.pessoaId === pid && v.empresaId === EMP; })) return;
+        if (x[3] === 'ativo' && lsV.some(function (v) { return v.pessoaId === pid && v.status === 'ativo'; })) return;
+        var inicio = new Date(t - x[4] * dia).toISOString();
+        lsV.push({ id: 'vin_previa_' + (n + 1), pessoaId: pid, empresaId: EMP, cargo: x[1], area: x[2], status: x[3],
+          inicio: inicio.slice(0, 10), fim: x[3] === 'desligado' ? new Date(t - 60 * dia).toISOString().slice(0, 10) : '', criadoEm: inicio });
+      });
+      gravarChave(CHAVES.vinculos, lsV);
+
+      var lsR = lerLista(CHAVES.relacoes);
+      [
+        ['5511900000006', '5511900000004', 'lidera'], ['5511900000006', '5511900000007', 'lidera'],
+        ['5511900000004', '5511900000003', 'lidera'], ['5511900000004', '5511900000008', 'lidera'],
+        ['5511900000007', '5511900000009', 'lidera'], ['5511900000007', '5511900000010', 'lidera'],
+        ['5511900000004', '5511900000007', 'direto'], ['5511900000003', '5511900000008', 'direto'],
+        ['5511900000008', '5511900000009', 'indireto']
+      ].forEach(function (x) {
+        var de = porTel[x[0]];
+        var para = porTel[x[1]];
+        if (!de || !para) return;
+        if (lsR.some(function (r) { return r.empresaId === EMP && r.de === de && r.para === para; })) return;
+        lsR.push({ empresaId: EMP, de: de, para: para, tipo: x[2] });
+      });
+      gravarChave(CHAVES.relacoes, lsR);
+      gravarChave(CHAVES.sementeEquipe, 1);
     }
 
     // 25 grupos: ordem principal, trocando para a alternativa a cada "cada" grupos (perfil com nuances).
@@ -1528,14 +2087,22 @@
     function semear() {
       var t = agora();
       var dia = 24 * 3600 * 1000;
-      var emp = { id: 'emp_previa_clinica', nome: 'Clínica Exemplo', criadaEm: new Date(t - 20 * dia).toISOString() };
+      var emp = { id: 'emp_previa_clinica', nome: 'Clínica Exemplo', criadaEm: new Date(t - 20 * dia).toISOString(),
+        cidade: 'Boa Vista / RR', observacoes: 'Empresa fictícia da prévia: clínica com recepção, atendimento e equipe comercial.', ativo: true };
       var lsEmp = lerLista(CHAVES.empresas);
       if (!buscarPor(lsEmp, 'id', emp.id)) { lsEmp.push(emp); gravarChave(CHAVES.empresas, lsEmp); }
 
       var lsAv = lerLista(CHAVES.avaliacoes);
       [
         { id: 'ava_previa_sel1', codigo: 'SEL1', empresaId: emp.id, nome: 'Recepcionista 2026', tipo: 'selecao', mostrarResultado: false, ativa: true, criadaEm: new Date(t - 15 * dia).toISOString() },
-        { id: 'ava_previa_eqp1', codigo: 'EQP1', empresaId: emp.id, nome: 'Equipe comercial', tipo: 'equipe', mostrarResultado: true, ativa: true, criadaEm: new Date(t - 10 * dia).toISOString() }
+        { id: 'ava_previa_eqp1', codigo: 'EQP1', empresaId: emp.id, nome: 'Equipe comercial', tipo: 'equipe', mostrarResultado: true, ativa: true, criadaEm: new Date(t - 10 * dia).toISOString() },
+        // Formulário próprio: e-mail obrigatório, cidade opcional e uma pergunta extra obrigatória.
+        { id: 'ava_previa_atd1', codigo: 'ATD1', empresaId: emp.id, nome: 'Atendimento ao cliente', tipo: 'selecao', mostrarResultado: true, ativa: true, criadaEm: new Date(t - 8 * dia).toISOString(),
+          empresa: 'Clínica Exemplo', vaga: 'Atendente',
+          config: JSON.stringify(validarConfigProcesso({ formulario: {
+            campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'obrigatorio', cidade: 'opcional' },
+            perguntas: [{ id: 'p1', texto: 'Qual sua disponibilidade de horário?', obrigatoria: true }]
+          } }).config) }
       ].forEach(function (a) { if (!buscarPor(lsAv, 'codigo', a.codigo)) lsAv.push(a); });
       gravarChave(CHAVES.avaliacoes, lsAv);
 
@@ -1563,23 +2130,41 @@
           validacao: { acertos: 2, notas: [5, 2, 4, 2], rapido: false, semMexer: 14 }, protocolo: '56C', dias: 2, duracao: 720 },
         { id: 'previa-exemplo-04', nome: 'Diego Exemplo Simulado', avaliacao: 'EQP1', idade: 30, vaga: '', funcao: 'Supervisor de vendas', empresa: '',
           respostas: respostasDe(['D', 'I', 'C', 'S'], ['I', 'D', 'S', 'C'], 4), status: 'em_analise', observacoes: '',
-          validacao: { acertos: 3, notas: [4, 4, 5, 1], rapido: false, semMexer: 0 }, protocolo: '78D', dias: 1, duracao: 660 }
+          validacao: { acertos: 3, notas: [4, 4, 5, 1], rapido: false, semMexer: 0 }, protocolo: '78D', dias: 1, duracao: 660 },
+        // A Ana de novo (mesmo WhatsApp): o painel junta as 2 respostas na mesma pessoa.
+        { id: 'previa-exemplo-05', nome: 'Ana Exemplo Prévia', telefone: '5511900000001', avaliacao: 'ATD1', idade: 27, vaga: 'Atendente', funcao: 'Atendente', empresa: 'Padaria Fictícia',
+          email: 'ana.exemplo@exemplo.com', cidade: 'Boa Vista / RR',
+          extras: [{ id: 'p1', pergunta: 'Qual sua disponibilidade de horário?', resposta: 'Manhã e tarde, de segunda a sábado.' }],
+          respostas: respostasDe(['I', 'S', 'C', 'D'], ['S', 'I', 'D', 'C'], 4), status: 'em_analise', observacoes: '',
+          validacao: { acertos: 3, notas: [5, 3, 4, 2], rapido: false, semMexer: 2 }, protocolo: '90E', dias: 2, duracao: 780 }
       ];
       var linhas = lerLista(CHAVE_ARMAZENAMENTO);
       var ocupados = usados(linhas);
+      var lsPessoas = pessoas();
       exemplos.forEach(function (x, n) {
         if (indice(linhas, x.id) !== -1) return;
         var fim = t - x.dias * dia;
         var protocolo = ocupados[x.protocolo] ? gerarProtocolo(ocupados, aleatorio) : x.protocolo;
         ocupados[protocolo] = true;
-        linhas.push({
-          v: 1, id: x.id, nome: x.nome, telefone: '551190000000' + (n + 1), idade: x.idade, funcao: x.funcao, empresa: x.empresa,
+        var linha = {
+          v: 1, id: x.id, nome: x.nome, telefone: x.telefone || ('551190000000' + (n + 1)), idade: x.idade, funcao: x.funcao, empresa: x.empresa,
+          email: x.email || '', cidade: x.cidade || '', extras: x.extras || [],
           vaga: x.vaga, consentimento: true, inicio: new Date(fim - x.duracao * 1000).toISOString(), fim: new Date(fim).toISOString(),
           duracaoSeg: x.duracao, respostas: x.respostas, avaliacao: x.avaliacao, empresaId: emp.id,
           validacao: validacaoDe(x.respostas, x.validacao),
           recebidoEm: new Date(fim + 2000).toISOString(), status: x.status, observacoes: x.observacoes, protocolo: protocolo
-        });
+        };
+        var pessoa = pessoaDoEnvio(lsPessoas, linha, false, linha.recebidoEm);
+        linha.pessoaId = pessoa ? pessoa.id : '';
+        linhas.push(linha);
       });
+      // Ficha com os dados do envio mais recente (como o servidor faria com os envios em ordem).
+      lsPessoas.forEach(function (p) {
+        linhas.filter(function (l) { return l.pessoaId === p.id; })
+          .sort(function (a, b) { return String(a.recebidoEm).localeCompare(String(b.recebidoEm)); })
+          .forEach(function (l) { pessoaDoEnvio(lsPessoas, l, true, l.recebidoEm); });
+      });
+      gravarPessoas(lsPessoas);
       gravar(linhas);
       gravarChave(CHAVES.semente, 1);
       semearProcessoExemplo();
@@ -1644,14 +2229,16 @@
       PREVIA: PREVIA,
       processar: processar,
       ler: ler,
-      limpar: function () { gravar([]); },
+      limpar: function () { gravar([]); gravarPessoas([]); gravarChave(CHAVES.vinculos, []); gravarChave(CHAVES.relacoes, []); },
       // Volta a prévia ao estado inicial (apaga tudo e recria a semente).
       reiniciar: function () {
-        [CHAVE_ARMAZENAMENTO, CHAVES.usuarios, CHAVES.empresas, CHAVES.avaliacoes, CHAVES.sessoes, CHAVES.relatorios].forEach(function (k) {
+        [CHAVE_ARMAZENAMENTO, CHAVES.usuarios, CHAVES.empresas, CHAVES.avaliacoes, CHAVES.sessoes, CHAVES.relatorios, CHAVES.pessoas,
+          CHAVES.vinculos, CHAVES.relacoes].forEach(function (k) {
           gravarChave(k, k === CHAVES.sessoes ? {} : []);
         });
         gravarChave(CHAVES.semente, 0);
         gravarChave(CHAVES.sementeRelatorio, 0);
+        gravarChave(CHAVES.sementeEquipe, 0);
         garantirSemente();
       },
       enviar: seguro(function (payload) {
@@ -1757,6 +2344,44 @@
       relatorioPublico: seguro(function (relatorioToken) {
         exigir(relatorioToken, MSG_REL_NAO_ENCONTRADO);
         return chamar({ acao: 'relatorioPublico', token: relatorioToken });
+      }),
+      // Empresas/colaboradores/organograma e relatórios por modelo (mesmo contrato do js/api-supabase.js).
+      listarEquipe: seguro(function (token, empresaId) {
+        exigirToken(token);
+        exigir(empresaId, 'Empresa não informada.');
+        return comSessao('equipe.listar', token, { empresaId: empresaId });
+      }),
+      salvarColaborador: seguro(function (token, colaborador) {
+        exigirToken(token);
+        exigir(colaborador && colaborador.empresaId, 'Empresa não informada.');
+        return comSessao('colaboradores.salvar', token, { colaborador: colaborador });
+      }),
+      moverColaborador: seguro(function (token, dados) {
+        exigirToken(token);
+        exigir(dados && dados.pessoaId, 'Colaborador não informado.');
+        exigir(dados && dados.empresaId, 'Escolha a empresa de destino.');
+        return comSessao('colaboradores.mover', token, { colaborador: dados });
+      }),
+      desligarColaborador: seguro(function (token, vinculoId) {
+        exigirToken(token);
+        exigir(vinculoId, 'Colaborador não informado.');
+        return comSessao('colaboradores.desligar', token, { id: vinculoId });
+      }),
+      salvarRelacoes: seguro(function (token, empresaId, relacoes) {
+        exigirToken(token);
+        exigir(empresaId, 'Empresa não informada.');
+        return comSessao('relacoes.salvar', token, { empresaId: empresaId, relacoes: relacoes });
+      }),
+      salvarRelatorioModelo: seguro(function (token, dados) {
+        return comSessao('relatorioModelo.salvar', token, { relatorio: dados || {} });
+      }),
+      listarRelatoriosModelo: seguro(function (token, filtro) {
+        return comSessao('relatoriosModelo.listar', token, { filtro: filtro || {} });
+      }),
+      excluirRelatorioModelo: seguro(function (token, id) {
+        exigirToken(token);
+        exigir(id, 'Relatório não informado.');
+        return comSessao('relatorioModelo.excluir', token, { id: id });
       })
     };
   }
@@ -1767,7 +2392,9 @@
     'excluirUsuario', 'redefinirSenha',
     'processosListar', 'processosSalvar', 'processosExcluir', 'processoDados', 'clickupStatus', 'clickupListas',
     'relatorioRascunho', 'relatorioSalvar', 'relatorioPublicar', 'relatorioDespublicar', 'relatoriosListar',
-    'relatorioMelhorarTextos', 'relatorioPublico'];
+    'relatorioMelhorarTextos', 'relatorioPublico',
+    'listarEquipe', 'salvarColaborador', 'moverColaborador', 'desligarColaborador', 'salvarRelacoes',
+    'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo'];
 
   // Liga no lugar do DISC_API real quando CONFIG.API_URL === 'simulada' (o objeto continua o mesmo).
   function instalar(alvo, cfg, opcoes) {
@@ -1799,6 +2426,7 @@
     gerarCodigoAvaliacao: gerarCodigoAvaliacao,
     validarValidacao: validarValidacao,
     validarConfigProcesso: validarConfigProcesso,
+    normalizarFormulario: normalizarFormulario,
     classificarCampo: classificarCampo,
     normalizarNomeCampo: normalizarNomeCampo,
     LISTAS_PREVIA: LISTAS_PREVIA,

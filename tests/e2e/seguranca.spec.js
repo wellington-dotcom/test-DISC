@@ -48,7 +48,8 @@ test('XSS: nomes e textos com HTML aparecem como texto no painel, no relatório 
 
   await page.reload();
   await expect(page.locator('#tela-painel')).toBeVisible({ timeout: 15000 });
-  await expect(page.locator('#lista-candidatos > li')).toHaveCount(5);
+  // Uma linha por pessoa (o seed da prévia muda com o tempo): basta a linha da participante com o nome malicioso.
+  await expect(page.locator('#lista-candidatos > li').filter({ hasText: 'Ana ' + XSS })).toHaveCount(1);
   for (const aba of ['lista', 'processos', 'usuarios', 'comparativo', 'importar']) {
     await page.locator('.aba[data-aba="' + aba + '"]').click();
     await page.waitForTimeout(150);

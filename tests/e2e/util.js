@@ -70,13 +70,16 @@ async function responderGrupo(page, ordem) {
   await expect(page.locator('[data-acao="proximo"]')).toBeEnabled();
 }
 
-// dados: { nome, telefone, idade? (padrão '30'; '' deixa vazio), funcao?, empresa?, vaga?, consentimento? }
+// dados: { nome, telefone, idade? (padrão '30'; '' deixa vazio), funcao?, empresa?, email?, cidade?, vaga?, consentimento? }
+// Campos ocultos pelo formulário do processo são ignorados.
 async function preencherIdentificacao(page, dados) {
   await page.fill('#nome', dados.nome);
   await page.fill('#telefone', '');
   await page.locator('#telefone').pressSequentially(dados.telefone);
-  await page.fill('#idade', dados.idade === undefined ? '30' : String(dados.idade));
+  if (await page.locator('#idade').count()) await page.fill('#idade', dados.idade === undefined ? '30' : String(dados.idade));
   if (dados.funcao) await page.fill('#funcao', dados.funcao);
+  if (dados.email && await page.locator('#email').count()) await page.fill('#email', dados.email);
+  if (dados.cidade && await page.locator('#cidade').count()) await page.fill('#cidade', dados.cidade);
   if (dados.empresa && await page.locator('#empresa').count()) await page.fill('#empresa', dados.empresa);
   if (dados.vaga && await page.locator('#vaga').count()) await page.fill('#vaga', dados.vaga);
   if (dados.consentimento !== false) await page.check('#consentimento');
@@ -84,7 +87,7 @@ async function preencherIdentificacao(page, dados) {
 
 // Etapa de confirmação (depois do último grupo): escolhe um retrato em cada rodada e dá nota às 4 frases.
 // opcoes.escolher(par, rodada) -> letra (padrão: a primeira do par); opcoes.nota(item) -> 1..5 (padrão: 4).
-// Termina na revisão.
+// Termina na 2ª tela, com "Enviar e finalizar" ([data-acao="enviar"]) liberado (sem tela de revisão).
 async function responderConfirmacao(page, opcoes) {
   const op = opcoes || {};
   await expect(page.locator('.progresso-topo')).toContainText('Confirmação 1 de 2');
@@ -102,11 +105,13 @@ async function responderConfirmacao(page, opcoes) {
     const nota = op.nota ? op.nota(itens[k], k) : 4;
     await page.locator('.escala-opcao[data-item="' + k + '"][data-nota="' + nota + '"]').click();
   }
-  await page.locator('[data-acao="conf-proximo"]').click();
-  await expect(page.locator('h1')).toHaveText('Revise suas respostas');
+  const enviar = page.locator('[data-acao="enviar"]');
+  await expect(enviar).toHaveText('Enviar e finalizar');
+  await expect(enviar).toBeEnabled();
 }
 
-// Faz o teste inteiro (25 grupos + confirmação) com a mesma ordem de preferência e chega à revisão.
+// Faz o teste inteiro (25 grupos + confirmação) com a mesma ordem de preferência e para antes do envio:
+// o chamador toca em "Enviar e finalizar" ([data-acao="enviar"]).
 // opcoes: { caminho (padrão '/index.html'), confirmacao (opções de responderConfirmacao) }
 async function fazerTesteCompleto(page, dados, ordem, opcoes) {
   const op = opcoes || {};

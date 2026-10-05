@@ -25,7 +25,12 @@ function libFalsa(opcoes) {
     admins: opcoes.admins || [{ user_id: UID, nome: 'Dona do Sistema', criado_em: '2026-10-01T10:00:00+00:00' }],
     tabelas: {
       processos: opcoes.processos || [],
-      respostas: opcoes.respostas || []
+      respostas: opcoes.respostas || [],
+      pessoas: opcoes.pessoas || [],
+      empresas: opcoes.empresas || [],
+      vinculos: opcoes.vinculos || [],
+      relacoes: opcoes.relacoes || [],
+      relatorios: opcoes.relatorios || []
     },
     rpc: opcoes.rpc || {},
     funcoes: opcoes.funcoes || {},
@@ -45,6 +50,16 @@ function libFalsa(opcoes) {
       const p = estado.tabelas.processos.find((x) => x.id === linha.processo_id);
       r.processos = p ? { nome: p.nome, tipo: p.tipo, empresa: p.empresa, codigo: p.codigo } : null;
     }
+    if (/pessoas\(/.test(colunas) && tabela === 'respostas') {
+      const pe = estado.tabelas.pessoas.find((x) => x.id === linha.pessoa_id);
+      r.pessoas = pe ? Object.assign({}, pe) : null;
+    }
+    if (/pessoas\(/.test(colunas) && tabela === 'vinculos') {
+      const pe = estado.tabelas.pessoas.find((x) => x.id === linha.pessoa_id);
+      r.pessoas = pe ? Object.assign({}, pe) : null;
+      if (pe && /respostas\(/.test(colunas)) r.pessoas.respostas = estado.tabelas.respostas.filter((x) => x.pessoa_id === pe.id);
+    }
+    if (/titulo:dados->>titulo/.test(colunas)) { r.titulo = linha.dados && linha.dados.titulo; delete r.dados; }
     return r;
   }
 
@@ -66,7 +81,7 @@ function libFalsa(opcoes) {
   }
 
   function executar(q) {
-    estado.chamadas.push({ tabela: q.tabela, op: q.op, dados: q.dados, eqs: q.eqs || [] });
+    estado.chamadas.push({ tabela: q.tabela, op: q.op, dados: q.dados, eqs: q.eqs || [], colunas: q.colunas });
     if (estado.falhaRede) throw new TypeError('Failed to fetch');
     if (!estado.sessao) return { data: q.op === 'select' ? [] : [], error: null }; // RLS: anon não vê nada
     if (opcoes.erroBanco && opcoes.erroBanco[q.tabela + '.' + q.op]) return { data: null, error: opcoes.erroBanco[q.tabela + '.' + q.op] };
@@ -78,7 +93,8 @@ function libFalsa(opcoes) {
       if (q.ordem) res = res.slice().sort((a, b) => String(a[q.ordem]).localeCompare(String(b[q.ordem])));
       if (q.intervalo) res = res.slice(q.intervalo[0], q.intervalo[1] + 1);
     } else if (q.op === 'insert') {
-      const nova = Object.assign({ id: '33333333-3333-4333-8333-33333333333' + linhas.length, codigo: 'K7QZ', criado_em: '2026-10-05T12:00:00+00:00' }, q.dados);
+      const nova = Object.assign({ id: '33333333-3333-4333-8333-33333333333' + linhas.length, codigo: 'K7QZ', criado_em: '2026-10-05T12:00:00+00:00' },
+        q.tabela === 'relatorios' ? { token: 'f'.repeat(63) + linhas.length } : {}, q.dados);
       linhas.push(nova);
       res = [nova];
     } else if (q.op === 'update') {
@@ -263,14 +279,18 @@ test('avaliacaoPublica e relatorioPublico: formatos {ok, avaliacao} e {ok, relat
       avaliacao_publica: (a) => a.p_codigo === 'SEL1'
         ? { data: { ok: true, avaliacao: { codigo: 'SEL1', nome: 'Recepcionista', tipo: 'selecao', empresaNome: 'Clínica', mostrarResultado: false }, codigo: 'SEL1' }, error: null }
         : { data: { ok: false, erro: 'Link inválido ou avaliação encerrada. Fale com quem enviou o link.' }, error: null },
-      relatorio_publico: () => ({ data: { ok: true, relatorio: { titulo: 'R' }, publicadoEm: '2026-10-05T12:00:00.000Z' }, error: null })
+      relatorio_publico: (a) => ({ data: Object.assign({ ok: true, relatorio: { titulo: 'R' }, publicadoEm: '2026-10-05T12:00:00.000Z' },
+        a.p_token === 'b'.repeat(64) ? { modelo: 'equipe' } : {}), error: null })
     }
   });
-  assert.deepEqual(await api.avaliacaoPublica('SEL1'), { ok: true, avaliacao: { codigo: 'SEL1', nome: 'Recepcionista', tipo: 'selecao', empresaNome: 'Clínica', mostrarResultado: false } });
+  assert.deepEqual(await api.avaliacaoPublica('SEL1'), { ok: true, avaliacao: { codigo: 'SEL1', nome: 'Recepcionista', tipo: 'selecao', empresaNome: 'Clínica', mostrarResultado: false,
+    formulario: { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto' }, perguntas: [] } } });
   await assert.rejects(api.avaliacaoPublica('ZZZZ'), /Link inválido ou avaliação encerrada/);
   await assert.rejects(api.avaliacaoPublica(''), /Link inválido/);
   const t = 'a'.repeat(64);
-  assert.deepEqual(await api.relatorioPublico(t), { ok: true, relatorio: { titulo: 'R' }, publicadoEm: '2026-10-05T12:00:00.000Z' });
+  // banco antigo (sem "modelo") = relatório de processo
+  assert.deepEqual(await api.relatorioPublico(t), { ok: true, modelo: 'processo', relatorio: { titulo: 'R' }, publicadoEm: '2026-10-05T12:00:00.000Z' });
+  assert.equal((await api.relatorioPublico('b'.repeat(64))).modelo, 'equipe');
   assert.deepEqual(e.chamadas.filter((c) => c.rpc === 'relatorio_publico')[0].args, { p_token: t });
   await assert.rejects(api.relatorioPublico(''), /Relatório não encontrado ou fora do ar/);
 });
@@ -359,7 +379,15 @@ test('recuperarSenha manda o link para admin.html; linkDeAcesso lê #type=recove
 });
 
 test('listar: itens no formato do Code.gs (resultado recalculado, processo embutido, datas ISO)', async () => {
-  const { api, T } = await logado({ processos: [processo()], respostas: [resposta({ validacao: { versao: 1 } }), resposta({ id: 'antigo-sem-processo', processo_id: null, avaliacao: '', protocolo: null, idade: null, recebido_em: '2026-09-01T10:00:00+00:00' })] });
+  const PESSOA = '44444444-4444-4444-8444-444444444444';
+  const { api, T, e } = await logado({
+    processos: [processo()],
+    pessoas: [{ id: PESSOA, telefone: '5511999998888', nome: 'João da Silva', idade: 30, funcao: 'Recepcionista', empresa: 'Loja Centro',
+      email: 'joao@x.com', cidade: 'Campinas', criado_em: '2026-09-01T10:00:00+00:00', atualizado_em: '2026-10-01T12:10:02.5+00:00' }],
+    respostas: [resposta({ validacao: { versao: 1 }, pessoa_id: PESSOA, email: 'joao@x.com', cidade: 'Campinas',
+      extras: [{ id: 'p1', pergunta: 'Pretensão?', resposta: 'R$ 3.000' }, 'lixo'] }),
+    resposta({ id: 'antigo-sem-processo', processo_id: null, avaliacao: '', protocolo: null, idade: null, recebido_em: '2026-09-01T10:00:00+00:00' })]
+  });
   const r = await api.listar(T);
   assert.equal(r.ok, true);
   assert.equal(r.itens.length, 2);
@@ -371,8 +399,17 @@ test('listar: itens no formato do Code.gs (resultado recalculado, processo embut
     resultado: { percentuais: p.resultado.percentuais, codigo: p.resultado.codigo },
     status: 'em_analise', observacoes: '', recebidoEm: '2026-10-01T12:10:02.500Z', protocolo: '47K', idade: 30,
     funcao: p.funcao, empresa: p.empresa, avaliacao: 'SEL1', empresaId: '', validacao: { versao: 1 },
-    processoId: PID, empresaNome: 'Clínica Exemplo', avaliacaoNome: 'Recepcionista 2026', avaliacaoTipo: 'selecao'
+    processoId: PID, empresaNome: 'Clínica Exemplo', avaliacaoNome: 'Recepcionista 2026', avaliacaoTipo: 'selecao',
+    pessoaId: PESSOA,
+    pessoa: { id: PESSOA, nome: 'João da Silva', telefone: '5511999998888', idade: 30, funcao: 'Recepcionista', empresa: 'Loja Centro',
+      email: 'joao@x.com', cidade: 'Campinas', atualizadoEm: '2026-10-01T12:10:02.500Z' },
+    email: 'joao@x.com', cidade: 'Campinas', extras: [{ id: 'p1', pergunta: 'Pretensão?', resposta: 'R$ 3.000' }]
   });
+  assert.equal(antigo.pessoaId, '');
+  assert.equal(antigo.pessoa, null);
+  assert.deepEqual([antigo.email, antigo.cidade, antigo.extras], ['', '', []]);
+  // A consulta embute a ficha da pessoa (FK respostas.pessoa_id).
+  assert.match(e.chamadas.find((c) => c.tabela === 'respostas' && c.op === 'select').colunas, /pessoas\(id, nome, telefone/);
   assert.equal(antigo.protocolo, '');
   assert.equal(antigo.idade, null);
   assert.equal(antigo.avaliacaoTipo, 'selecao');
@@ -515,12 +552,247 @@ test('Edge Function: sessaoExpirada da função e HTTP 401 levam ao login; 404 e
   await assert.rejects(api.clickupStatus(T), /demorou demais/);
 });
 
-test('salvarUsuario com id só muda o nome; listarEmpresas vazio e salvarEmpresa explica', async () => {
+test('salvarUsuario com id só muda o nome', async () => {
   const { api, T, e } = await logado();
   const r = await api.salvarUsuario(T, { id: UID, nome: 'Dona Renomeada', email: 'dona@empresa.com', papel: 'admin', ativo: true });
   assert.equal(r.usuario.nome, 'Dona Renomeada');
   assert.equal(e.admins[0].nome, 'Dona Renomeada');
   await assert.rejects(api.salvarUsuario(T, { id: UID, nome: 'Dona', ativo: false }), /exclua o usuário/);
-  assert.deepEqual(await api.listarEmpresas(T), { ok: true, empresas: [] });
-  await assert.rejects(api.salvarEmpresa(T, { nome: 'X' }), /a empresa agora é um texto no processo/);
+});
+
+test('formulário do processo: validarConfigProcesso normaliza config.formulario e recusa pergunta sensível', async () => {
+  const padrao = { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto' }, perguntas: [] };
+  assert.deepEqual(SB.validarConfigProcesso({}).config.formulario, padrao);
+  assert.deepEqual(SB.normalizarFormulario('x'), padrao);
+  assert.deepEqual(SB.normalizarFormulario({
+    campos: { idade: 'oculto', email: 'obrigatorio', cidade: 'opcional', funcao: 'talvez' },
+    perguntas: [
+      { id: 'p1', texto: '  Qual sua   pretensão salarial?  ', obrigatoria: true },
+      { id: 'p1', texto: 'Tem disponibilidade aos sábados?', obrigatoria: 'sim' },
+      { id: 'Inválido!', texto: 'Como soube da vaga?' },
+      { texto: 'ok' }, 'texto solto', null,
+      { id: 'carro', texto: 'Tem carro próprio?', obrigatoria: false },
+      { texto: 'Pergunta seis aqui?' }, { texto: 'Pergunta sete aqui?' }
+    ]
+  }), {
+    // mesmo resultado de disc_interno.normalizar_formulario (tests/supabase/banco.test.js)
+    campos: { idade: 'oculto', funcao: 'opcional', empresa: 'opcional', email: 'obrigatorio', cidade: 'opcional' },
+    perguntas: [
+      { id: 'p1', texto: 'Qual sua pretensão salarial?', obrigatoria: true },
+      { id: 'p2', texto: 'Tem disponibilidade aos sábados?', obrigatoria: false },
+      { id: 'p3', texto: 'Como soube da vaga?', obrigatoria: false },
+      { id: 'carro', texto: 'Tem carro próprio?', obrigatoria: false },
+      { id: 'p4', texto: 'Pergunta seis aqui?', obrigatoria: false }
+    ]
+  });
+  assert.deepEqual(SB.validarConfigProcesso({ permitirSaude: true, formulario: { perguntas: [{ texto: 'Você tem filhos?' }] } }),
+    { ok: false, erro: 'A pergunta "Você tem filhos?" pede um dado sensível e não pode ser usada.' });
+  assert.match(SB.validarConfigProcesso({ permitirSaude: true, formulario: { perguntas: [{ texto: 'Como está sua saúde?' }] } }).erro, /dado sensível/);
+
+  const { api, T, e } = await logado({ processos: [processo({ config: { formulario: { campos: { email: 'obrigatorio' } } } })] });
+  const l = await api.processosListar(T);
+  assert.equal(l.processos[0].config.formulario.campos.email, 'obrigatorio');
+  await assert.rejects(api.processosSalvar(T, { id: PID, nome: 'Recepcionista 2026', config: { formulario: { perguntas: [{ texto: 'Qual seu estado civil?' }] } } }),
+    { message: 'A pergunta "Qual seu estado civil?" pede um dado sensível e não pode ser usada.' });
+  const ok = await api.processosSalvar(T, { id: PID, nome: 'Recepcionista 2026', config: { formulario: { campos: { cidade: 'opcional' }, perguntas: [{ texto: 'Pretensão salarial?', obrigatoria: true }] } } });
+  assert.deepEqual(ok.processo.config.formulario.perguntas, [{ id: 'p1', texto: 'Pretensão salarial?', obrigatoria: true }]);
+  const upd = e.chamadas.filter((c) => c.tabela === 'processos' && c.op === 'update').pop().dados;
+  assert.equal(upd.config.formulario.campos.cidade, 'opcional');
+});
+
+// ---------------------------------------------------------------------------
+// Empresas, colaboradores, organograma e relatórios por modelo (rodada empresas/equipes)
+// ---------------------------------------------------------------------------
+
+const EMP = '44444444-4444-4444-8444-444444444444';
+const EMP2 = '44444444-4444-4444-8444-444444444445';
+const P1 = '55555555-5555-4555-8555-555555555551';
+const P2 = '55555555-5555-4555-8555-555555555552';
+const P3 = '55555555-5555-4555-8555-555555555553';
+const V1 = '66666666-6666-4666-8666-666666666661';
+function empresa(extra) {
+  return Object.assign({ id: EMP, nome: 'Clínica Exemplo', cidade: 'Boa Vista', observacoes: '', ativo: true,
+    criado_em: '2026-10-01T10:00:00+00:00', atualizado_em: '2026-10-02T10:00:00+00:00' }, extra || {});
+}
+function equipeBase() {
+  return {
+    empresas: [empresa(), empresa({ id: EMP2, nome: 'Loja Beta', ativo: false })],
+    pessoas: [
+      { id: P1, telefone: '5511900000001', nome: 'Marta Diretora Souza', idade: 40 },
+      { id: P2, telefone: '5511900000002', nome: 'Lucas Vendedor Lima', idade: 25 },
+      { id: P3, telefone: '5511900000003', nome: 'Bruno Antigo Reis', idade: 30 }
+    ],
+    respostas: [
+      resposta({ id: 'r-antiga', pessoa_id: P1, recebido_em: '2026-09-01T10:00:00+00:00', respostas: '1234'.repeat(25) }),
+      resposta({ id: 'r-nova', pessoa_id: P1, recebido_em: '2026-10-01T10:00:00+00:00' })
+    ],
+    vinculos: [
+      { id: V1, pessoa_id: P1, empresa_id: EMP, cargo: 'Diretora', area: 'Diretoria', status: 'ativo', inicio: '2024-01-01', fim: null },
+      { id: '66666666-6666-4666-8666-666666666662', pessoa_id: P2, empresa_id: EMP, cargo: 'Vendedor', area: 'Comercial', status: 'ativo', inicio: '2025-01-01', fim: null },
+      { id: '66666666-6666-4666-8666-666666666663', pessoa_id: P3, empresa_id: EMP, cargo: 'Auxiliar', area: '', status: 'desligado', inicio: '2023-01-01', fim: '2026-08-01' }
+    ],
+    relacoes: [
+      { empresa_id: EMP, de_pessoa: P1, para_pessoa: P2, tipo: 'lidera' },
+      { empresa_id: EMP, de_pessoa: P1, para_pessoa: P3, tipo: 'lidera' } // pessoa desligada: não sai
+    ]
+  };
+}
+
+test('listarEmpresas conta colaboradores ativos; salvarEmpresa valida e recusa nome repetido; excluirEmpresa', async () => {
+  const { api, T, e } = await logado(equipeBase());
+  const l = await api.listarEmpresas(T);
+  assert.deepEqual(l.empresas[0], { id: EMP, nome: 'Clínica Exemplo', cidade: 'Boa Vista', observacoes: '', ativo: true,
+    criadoEm: '2026-10-01T10:00:00.000Z', atualizadoEm: '2026-10-02T10:00:00.000Z', colaboradores: 2 });
+  assert.deepEqual(l.empresas.map((x) => [x.nome, x.colaboradores, x.ativo]), [['Clínica Exemplo', 2, true], ['Loja Beta', 0, false]]);
+
+  const nova = await api.salvarEmpresa(T, { nome: '  Padaria   Gama ', cidade: 'Manaus', observacoes: 'Cliente\nnovo' });
+  assert.equal(nova.empresa.nome, 'Padaria Gama');
+  assert.equal(nova.empresa.colaboradores, 0);
+  const ins = e.chamadas.filter((c) => c.tabela === 'empresas' && c.op === 'insert').pop().dados;
+  assert.deepEqual(ins, { nome: 'Padaria Gama', cidade: 'Manaus', observacoes: 'Cliente\nnovo', ativo: true });
+  const ed = await api.salvarEmpresa(T, { id: EMP, nome: 'Clínica Exemplo', ativo: false });
+  assert.equal(ed.empresa.ativo, false);
+  assert.equal(ed.empresa.colaboradores, 2);
+  assert.deepEqual(e.chamadas.filter((c) => c.tabela === 'empresas' && c.op === 'update').pop().dados, { nome: 'Clínica Exemplo', ativo: false },
+    'edição só manda o que veio');
+  await assert.rejects(api.salvarEmpresa(T, { nome: 'loja beta' }), /Já existe uma empresa com esse nome\./);
+  await assert.rejects(api.salvarEmpresa(T, { nome: '  ' }), /Informe o nome da empresa\./);
+  await assert.rejects(api.salvarEmpresa(T, { id: 'x', nome: 'Outra' }), /Empresa não encontrada\./);
+
+  assert.deepEqual(await api.excluirEmpresa(T, EMP2), { ok: true, id: EMP2 });
+  await assert.rejects(api.excluirEmpresa(T, EMP2), /Empresa não encontrada\./);
+  await assert.rejects(api.excluirEmpresa(T, 'nada'), /Empresa não encontrada\./);
+  // recusa do gatilho do banco passa como está
+  const b = await logado(Object.assign(equipeBase(), { erroBanco: { 'empresas.delete': { code: 'P0001', message: 'Desligue ou mova os colaboradores antes.' } } }));
+  await assert.rejects(b.api.excluirEmpresa(b.T, EMP), { message: 'Desligue ou mova os colaboradores antes.' });
+  // sem sessão
+  await assert.rejects(api.listarEmpresas(''), (err) => err.sessaoExpirada === true);
+});
+
+test('listarEquipe: ativos com o resultado mais recente, relações só entre ativos e histórico dos desligados', async () => {
+  const { api, T, e } = await logado(equipeBase());
+  const r = await api.listarEquipe(T, EMP);
+  assert.equal(r.ok, true);
+  assert.equal(r.empresa.nome, 'Clínica Exemplo');
+  assert.equal(r.empresa.colaboradores, 2);
+  assert.deepEqual(r.colaboradores.map((c) => c.nome), ['Lucas Vendedor Lima', 'Marta Diretora Souza']);
+  const marta = r.colaboradores[1];
+  const esperado = S.calcular(S.descompactar(payloadValido().respostas));
+  assert.deepEqual(marta, { vinculoId: V1, pessoaId: P1, nome: 'Marta Diretora Souza', telefone: '5511900000001', cargo: 'Diretora',
+    area: 'Diretoria', status: 'ativo', inicio: '2024-01-01', fim: '', resultado: { percentuais: esperado.percentuais, codigo: esperado.codigo },
+    respondidoEm: '2026-10-01T10:00:00.000Z' });
+  assert.equal(r.colaboradores[0].resultado, null, 'sem teste');
+  assert.equal(r.colaboradores[0].respondidoEm, '');
+  assert.deepEqual(r.relacoes, [{ de: P1, para: P2, tipo: 'lidera' }]);
+  assert.deepEqual(r.historico.map((c) => [c.nome, c.status, c.fim]), [['Bruno Antigo Reis', 'desligado', '2026-08-01']]);
+  assert.ok(!JSON.stringify(r).includes('"idade"'), 'nada de idade na equipe');
+  const sel = e.chamadas.find((c) => c.tabela === 'vinculos' && c.op === 'select' && /respostas\(/.test(c.colunas));
+  assert.deepEqual(sel.eqs, [['empresa_id', EMP]]);
+  await assert.rejects(api.listarEquipe(T, EMP2.replace('5', '9')), /Empresa não encontrada\./);
+  await assert.rejects(api.listarEquipe(T, 'xyz'), /Empresa não encontrada\./);
+  await assert.rejects(api.listarEquipe(T, ''), /Empresa não informada\./);
+});
+
+test('salvarColaborador, moverColaborador e salvarRelacoes chamam as funções do banco; desligarColaborador atualiza o vínculo', async () => {
+  const colab = { vinculoId: V1, pessoaId: P1, empresaId: EMP, nome: 'Marta Diretora Souza', telefone: '5511900000001', cargo: 'Diretora',
+    area: 'Diretoria', status: 'ativo', inicio: '2026-10-05', fim: '' };
+  const { api, T, e } = await logado(Object.assign(equipeBase(), {
+    rpc: {
+      salvar_colaborador: (a) => (a.p_dados.telefone === '1'
+        ? { data: { ok: false, erro: 'Telefone inválido. Informe DDD + número.' }, error: null }
+        : { data: { ok: true, colaborador: colab }, error: null }),
+      mover_colaborador: () => ({ data: { ok: true, colaborador: Object.assign({}, colab, { empresaId: EMP2 }) }, error: null }),
+      salvar_relacoes: (a) => ({ data: { ok: true, relacoes: a.p_relacoes }, error: null })
+    }
+  }));
+  const s1 = await api.salvarColaborador(T, { empresaId: EMP, nome: ' Marta  Diretora Souza ', telefone: '(11) 90000-0001', cargo: 'Diretora', area: 'Diretoria', idade: 40 });
+  assert.deepEqual(s1, { ok: true, colaborador: colab });
+  assert.deepEqual(e.chamadas.filter((c) => c.rpc === 'salvar_colaborador').pop().args,
+    { p_dados: { empresaId: EMP, cargo: 'Diretora', area: 'Diretoria', nome: 'Marta Diretora Souza', telefone: '(11) 90000-0001' } });
+  await api.salvarColaborador(T, { empresaId: EMP, pessoaId: P1, cargo: 'CEO' });
+  assert.deepEqual(e.chamadas.filter((c) => c.rpc === 'salvar_colaborador').pop().args, { p_dados: { empresaId: EMP, cargo: 'CEO', area: '', pessoaId: P1 } });
+  await assert.rejects(api.salvarColaborador(T, { empresaId: EMP, nome: 'A B', telefone: '1' }), /Telefone inválido/);
+  await assert.rejects(api.salvarColaborador(T, { nome: 'A B' }), /Empresa não informada\./);
+
+  const m = await api.moverColaborador(T, { pessoaId: P1, empresaId: EMP2, cargo: 'Gerente', area: 'Loja' });
+  assert.equal(m.colaborador.empresaId, EMP2);
+  assert.deepEqual(e.chamadas.filter((c) => c.rpc === 'mover_colaborador').pop().args, { p_dados: { pessoaId: P1, empresaId: EMP2, cargo: 'Gerente', area: 'Loja' } });
+  await assert.rejects(api.moverColaborador(T, { pessoaId: P1 }), /Escolha a empresa de destino\./);
+
+  const rel = await api.salvarRelacoes(T, EMP, [{ de: P1, para: P2, tipo: 'lidera', extra: 'x' }]);
+  assert.deepEqual(rel, { ok: true, relacoes: [{ de: P1, para: P2, tipo: 'lidera' }] });
+  assert.deepEqual(e.chamadas.filter((c) => c.rpc === 'salvar_relacoes').pop().args, { p_empresa: EMP, p_relacoes: [{ de: P1, para: P2, tipo: 'lidera' }] });
+  await assert.rejects(api.salvarRelacoes(T, EMP, 'x'), /Relações inválidas\./);
+
+  assert.deepEqual(await api.desligarColaborador(T, V1), { ok: true, id: V1 });
+  const up = e.chamadas.filter((c) => c.tabela === 'vinculos' && c.op === 'update').pop();
+  assert.deepEqual([up.dados, up.eqs], [{ status: 'desligado' }, [['id', V1], ['status', 'ativo']]]);
+  await assert.rejects(api.desligarColaborador(T, V1), /já desligado/);
+  await assert.rejects(api.desligarColaborador(T, 'x'), /Colaborador não encontrado\./);
+});
+
+test('relatórios por modelo: salvar (rascunho/publicar com link), listar com título e excluir; nunca mexe nos de processo', async () => {
+  const local = { origin: 'https://exemplo.github.io', pathname: '/test-DISC/admin.html', hash: '', search: '' };
+  const base = equipeBase();
+  base.relatorios = [{ id: '77777777-7777-4777-8777-777777777771', token: 'c'.repeat(64), modelo: 'processo', processo_id: PID, status: 'publicado',
+    dados: { titulo: 'Processo' }, criado_em: '2026-09-01T10:00:00+00:00' }];
+  const { api, T, e } = await logado(base, { local });
+  const dados = { modelo: 'equipe', versao: 1, titulo: 'Equipe da Clínica', geradoEm: '2026-10-05T10:00:00.000Z' };
+  const r1 = await api.salvarRelatorioModelo(T, { modelo: 'equipe', empresaId: EMP, dados });
+  assert.equal(r1.relatorio.status, 'rascunho');
+  assert.equal(r1.relatorio.modelo, 'equipe');
+  assert.equal(r1.relatorio.url, undefined);
+  assert.deepEqual(Object.keys(r1.relatorio).sort(), ['id', 'modelo', 'status', 'token']);
+  const ins = e.chamadas.filter((c) => c.tabela === 'relatorios' && c.op === 'insert').pop().dados;
+  assert.deepEqual(ins, { modelo: 'equipe', empresa_id: EMP, pessoa_id: null, dados, status: 'rascunho' });
+
+  const r2 = await api.salvarRelatorioModelo(T, { id: r1.relatorio.id, modelo: 'equipe', empresaId: EMP, dados, publicar: true });
+  assert.equal(r2.relatorio.status, 'publicado');
+  assert.equal(r2.relatorio.url, 'https://exemplo.github.io/test-DISC/relatorio.html?r=' + r1.relatorio.token);
+  const upd = e.chamadas.filter((c) => c.tabela === 'relatorios' && c.op === 'update').pop();
+  assert.deepEqual(upd.eqs, [['id', r1.relatorio.id]]);
+  // lideranca/pessoa precisam da pessoa; dados conferidos
+  const r3 = await api.salvarRelatorioModelo(T, { modelo: 'lideranca', pessoaId: P2, empresaId: EMP, dados: { titulo: 'Como liderar o Lucas' } });
+  assert.equal(e.tabelas.relatorios.find((x) => x.id === r3.relatorio.id).dados.modelo, 'lideranca', 'modelo gravado nos dados');
+  await assert.rejects(api.salvarRelatorioModelo(T, { modelo: 'pessoa', dados: {} }), /Escolha a pessoa do relatório\./);
+  await assert.rejects(api.salvarRelatorioModelo(T, { modelo: 'equipe', dados: {} }), /Escolha a empresa do relatório\./);
+  await assert.rejects(api.salvarRelatorioModelo(T, { modelo: 'processo', empresaId: EMP, dados: {} }), /Modelo de relatório inválido/);
+  await assert.rejects(api.salvarRelatorioModelo(T, { modelo: 'equipe', empresaId: EMP, dados: [] }), /Relatório vazio/);
+  await assert.rejects(api.salvarRelatorioModelo(T, { modelo: 'equipe', empresaId: EMP, dados: { modelo: 'pessoa' } }), /não são de um relatório "equipe"/);
+  await assert.rejects(api.salvarRelatorioModelo(T, { modelo: 'equipe', empresaId: EMP, dados: { t: 'x'.repeat(300001) } }), /grande demais/);
+  // id de relatório de processo: o update filtra modelo <> processo
+  await assert.rejects(api.salvarRelatorioModelo(T, { id: '77777777-7777-4777-8777-777777777771', modelo: 'equipe', empresaId: EMP, dados }), /Relatório não encontrado\./);
+  assert.equal(e.tabelas.relatorios[0].modelo, 'processo');
+
+  const l = await api.listarRelatoriosModelo(T, { empresaId: EMP });
+  assert.deepEqual(l.relatorios.map((x) => [x.modelo, x.titulo, x.status, !!x.url]),
+    [['equipe', 'Equipe da Clínica', 'publicado', true], ['lideranca', 'Como liderar o Lucas', 'rascunho', false]]);
+  assert.deepEqual((await api.listarRelatoriosModelo(T, { pessoaId: P2 })).relatorios.map((x) => x.modelo), ['lideranca']);
+  assert.equal((await api.listarRelatoriosModelo(T)).relatorios.length, 2, 'o de processo não aparece');
+  assert.deepEqual(await api.listarRelatoriosModelo(T, { empresaId: 'x' }), { ok: true, relatorios: [] });
+
+  assert.deepEqual(await api.excluirRelatorioModelo(T, r3.relatorio.id), { ok: true, id: r3.relatorio.id });
+  await assert.rejects(api.excluirRelatorioModelo(T, '77777777-7777-4777-8777-777777777771'), /Relatório não encontrado\./);
+  assert.equal(e.tabelas.relatorios.length, 2);
+});
+
+test('processos: empresaId vai e volta (empresa_id); vazio desliga; inválido recusa', async () => {
+  const { api, T, e } = await logado({ processos: [processo({ empresa_id: EMP })] });
+  const l = await api.processosListar(T);
+  assert.equal(l.processos[0].empresaId, EMP);
+  assert.equal((await api.listarAvaliacoes(T)).avaliacoes[0].empresaId, EMP);
+  await api.processosSalvar(T, { id: PID, nome: 'Recepcionista 2026', empresaId: EMP2 });
+  assert.equal(e.chamadas.filter((c) => c.tabela === 'processos' && c.op === 'update').pop().dados.empresa_id, EMP2);
+  await api.processosSalvar(T, { id: PID, nome: 'Recepcionista 2026', empresaId: '' });
+  assert.equal(e.chamadas.filter((c) => c.tabela === 'processos' && c.op === 'update').pop().dados.empresa_id, null);
+  await api.processosSalvar(T, { id: PID, nome: 'Recepcionista 2026' });
+  assert.ok(!('empresa_id' in e.chamadas.filter((c) => c.tabela === 'processos' && c.op === 'update').pop().dados), 'sem empresaId não mexe');
+  await assert.rejects(api.processosSalvar(T, { nome: 'Novo', empresaId: 'emp_x' }), /Escolha uma empresa válida\./);
+});
+
+test('api.js (Apps Script legado): métodos novos recusam com "Disponível só com o servidor Supabase."', async () => {
+  for (const m of ['listarEquipe', 'salvarColaborador', 'moverColaborador', 'desligarColaborador', 'salvarRelacoes',
+    'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo']) {
+    await assert.rejects(API[m]('token', {}), (err) => err.message === 'Disponível só com o servidor Supabase.' && err.resposta.ok === false, m);
+  }
 });

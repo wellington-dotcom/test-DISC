@@ -112,6 +112,7 @@ https://seu-usuario.github.io/teste-disc/?a=K7QM
 - **Tipo "Processo seletivo"** (`selecao`): o participante é tratado como candidato e informa a vaga pretendida.
 - **Tipo "Avaliação de equipe"** (`equipe`): para quem já trabalha na empresa; o teste pede o cargo/função e não pergunta a empresa (ela já é conhecida).
 - **Mostrar resultado ao participante**: se marcado, a pessoa vê um resumo do próprio perfil no fim (nunca o Guia para a Liderança nem a confiabilidade).
+- **Formulário por processo e fichas de pessoas** (o que perguntar na identificação, perguntas extras, respostas da mesma pessoa juntas) existem só no servidor Supabase (`docs/SUPABASE.md`). Com o Apps Script (legado) o candidato vê sempre o formulário padrão e o painel agrupa as respostas pelo telefone.
 - **Desativar** uma avaliação faz o link parar de aceitar respostas ("Este link de avaliação não está mais ativo."); quem abrir o link vê "Link inválido ou avaliação encerrada. Fale com quem enviou o link.". As respostas já recebidas continuam no painel.
 - Uma avaliação **com respostas** não pode ser excluída: desative-a (ou apague as respostas dela antes, em **Excluir todos** daquela avaliação).
 - Uma empresa com avaliações ou com gestores ligados não pode ser excluída.

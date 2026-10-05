@@ -551,6 +551,179 @@ em { font-family: var(--ff-serif); font-style: italic; font-weight: 400; letter-
 
 @media (prefers-reduced-motion: reduce) { .indice__t { transition: none; } }
 
+/* =====================================================================
+ * Modelos da fase 2: equipe, liderança (individual) e pessoa (desenvolvimento).
+ * Mesma variante editorial; só tokens. Cores DISC: --disc-D/I/S/C (notus.css).
+ * ===================================================================== */
+.doc .mt16 { margin-top: 16px; }
+.capa__num--texto .capa__num-valor { font-size: var(--f-h3); line-height: 1.15; letter-spacing: -.02em; overflow-wrap: break-word; }
+.doc .mini-num__valor--texto { white-space: normal; overflow-wrap: break-word; font-size: var(--f-h3); line-height: 1.15; letter-spacing: -.02em; }
+.mini-num__valor small { font-size: var(--f-forte); color: var(--mudo); letter-spacing: 0; margin-left: 2px; }
+.h4doc { font-weight: 600; font-size: var(--f-h4); line-height: 1.2; margin: 0 0 10px; }
+
+/* Fundos e barras por fator DISC */
+.disc-fundo-D { background: var(--disc-D); color: var(--branco-doc, #fff); }
+.disc-fundo-I { background: var(--disc-I); color: var(--preto); }
+.disc-fundo-S { background: var(--disc-S); color: var(--preto); }
+.disc-fundo-C { background: var(--disc-C); color: var(--branco-doc, #fff); }
+.barra--disc-D .barra__feito { background: var(--disc-D); }
+.barra--disc-I .barra__feito { background: var(--disc-I); }
+.barra--disc-S .barra__feito { background: var(--disc-S); }
+.barra--disc-C .barra__feito { background: var(--disc-C); }
+
+/* Listas de itens (sinergias, riscos, dicas, guias) */
+.itens-doc { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.itens-doc li { position: relative; padding-left: 16px; font-size: var(--f-corpo); line-height: 1.5; overflow-wrap: break-word; }
+.itens-doc li::before { content: ''; position: absolute; left: 0; top: .62em; width: 6px; height: 6px; border-radius: 1px; background: var(--laranja); }
+.itens-doc--escuro li { color: rgba(255,255,255,.82); font-size: var(--f-rotulo); }
+.obs .itens-doc { margin-top: 4px; }
+.obs-pilha { display: grid; gap: 12px; margin-top: 12px; }
+.obs-pilha .obs__tit { font-family: var(--ff-mono); font-size: var(--f-eixo); letter-spacing: .1em; color: var(--mudo); }
+.obs-pilha .obs--alerta .obs__tit::before { content: ''; }
+
+/* Selos e barras por nível de relação: fluido (azul-escuro), atenção (âmbar), tensão (laranja) */
+.selo-doc--nv-fluido { background: var(--tinta); color: var(--branco-doc); }
+.selo-doc--nv-atencao { background: rgba(255,159,64,.22); color: var(--preto); }
+.selo-doc--nv-tensao { background: var(--branco-doc); color: var(--notus-forte); box-shadow: inset 0 0 0 1px rgba(243,68,5,.45); }
+.selo-doc--nv-indefinido { background: transparent; color: var(--mudo); box-shadow: inset 0 0 0 1px var(--linha-doc); }
+.rec .selo-doc--nv-fluido, .rec .selo-doc--nv-atencao, .rec .selo-doc--nv-indefinido { background: rgba(255,255,255,.1); color: var(--branco-doc); box-shadow: none; }
+.rec .selo-doc--nv-tensao { background: rgba(255,255,255,.1); color: var(--ambar); box-shadow: none; }
+.barra--nv-fluido .barra__feito { background: var(--tinta); }
+.barra--nv-atencao .barra__feito { background: var(--ambar); }
+.barra--nv-tensao .barra__feito { background: var(--notus); }
+
+/* Contagem por nível */
+.niveis-doc { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 24px; }
+.nivel-doc { background: var(--branco-doc); border: 1px solid var(--linha-doc); border-top: 3px solid var(--tinta); border-radius: 2px; padding: 14px 12px; min-width: 0; }
+.nivel-doc--atencao { border-top-color: var(--ambar); }
+.nivel-doc--tensao { border-top-color: var(--notus); }
+.nivel-doc__valor { font-family: var(--ff-titulo); font-weight: 600; font-size: var(--f-indicador); line-height: 1; letter-spacing: -.03em; }
+.nivel-doc__rot { margin-top: 6px; font-family: var(--ff-mono); font-size: var(--f-eixo); letter-spacing: .1em; text-transform: uppercase; color: var(--mudo); }
+
+/* Pares (mapa de relações) */
+.pares-doc { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.par-doc { background: var(--branco-doc); border: 1px solid var(--linha-doc); border-left: 3px solid var(--linha-doc); border-radius: 2px; padding: 18px; min-width: 0; }
+.par-doc--fluido { border-left-color: var(--tinta); }
+.par-doc--atencao { border-left-color: var(--ambar); }
+.par-doc--tensao { border-left-color: var(--notus); }
+.par-doc__cab { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; margin-bottom: 8px; }
+.par-doc__nomes { font-size: var(--f-forte); min-width: 0; overflow-wrap: anywhere; }
+.par-doc__nomes strong { font-family: var(--ff-titulo); font-weight: 600; }
+.par-doc__tipo { font-family: var(--ff-mono); font-size: var(--f-eixo); letter-spacing: .08em; text-transform: uppercase; color: var(--mudo); }
+.par-doc__cods { font-family: var(--ff-mono); font-size: var(--f-nota); color: var(--mudo); margin-bottom: 8px; }
+.par-doc .barra { height: 6px; margin-bottom: 16px; }
+.par-doc__grade { display: grid; gap: 16px; }
+.par-doc__grade .rotulo-doc { margin-bottom: 8px; }
+.par-doc__grade .itens-doc li { font-size: var(--f-rotulo); }
+@media (min-width: 640px), print { .par-doc { padding: 22px 24px; } .par-doc__grade { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; } }
+
+/* Guia por líder */
+.lider-doc { margin-top: 32px; padding-top: 32px; border-top: 1px solid var(--linha-doc); }
+.lider-doc:first-of-type { margin-top: 8px; }
+.lider-doc__cab .org-cartao { max-width: 360px; }
+.lider-doc__estilo { margin: 16px 0 !important; font-family: var(--ff-serif); font-style: italic; font-size: var(--f-lede); line-height: 1.4; max-width: 760px; }
+.lider-doc .obs { margin-bottom: 16px; }
+.liderados-doc { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.liderado-doc { background: var(--branco-doc); border: 1px solid var(--linha-doc); border-radius: 2px; padding: 18px; min-width: 0; }
+.liderado-doc__cab { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin-bottom: 8px; }
+.liderado-doc__cab strong { font-family: var(--ff-titulo); font-weight: 600; font-size: var(--f-forte); }
+.liderado-doc__estilo { font-size: var(--f-rotulo); color: var(--mudo); }
+.liderado-doc p { font-size: var(--f-corpo); }
+.liderado-doc .rotulo-doc { margin-bottom: 8px; }
+@media (min-width: 900px) { .liderados-doc { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; } }
+
+/* Como liderar cada pessoa */
+.pessoas-doc { display: grid; gap: 16px; }
+.pessoa-doc { background: var(--branco-doc); border: 1px solid var(--linha-doc); border-radius: 2px; padding: 20px; min-width: 0; display: grid; gap: 14px; align-content: start; }
+.pessoa-doc .org-cartao { border: 0; padding: 0; background: none; }
+.pessoa-doc__estilo { font-family: var(--ff-mono); font-size: var(--f-eixo); letter-spacing: .12em; text-transform: uppercase; color: var(--notus-forte); }
+.pessoa-doc__resumo { font-family: var(--ff-serif); font-style: italic; font-size: var(--f-forte); line-height: 1.45; }
+.pessoa-doc__sec .rotulo-doc { margin-bottom: 6px; }
+.pessoa-doc__sec .itens-doc li { font-size: var(--f-rotulo); }
+.pessoa-doc .disc-pilha { height: 20px; }
+@media (min-width: 900px), print { .pessoas-doc { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; } }
+
+/* Encaixe do candidato */
+.ranklista__pos--txt { font-family: var(--ff-mono); font-size: var(--f-eixo); font-weight: 500; letter-spacing: .08em; text-transform: uppercase; color: var(--mudo); }
+.ranklista li:has(.ranklista__pos--txt) { grid-template-columns: 110px minmax(0, 1fr) auto; }
+.etapas90 { display: grid; gap: 12px; }
+@media (min-width: 640px), print { .etapas90 { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; } }
+.etapas90 .itens-doc li { font-size: var(--f-rotulo); }
+
+/* Guia de liderança individual */
+.guia-doc { display: grid; gap: 16px; }
+.guia-doc__sec { background: var(--branco-doc); border: 1px solid var(--linha-doc); border-radius: 2px; padding: 22px 20px; min-width: 0; }
+.guia-doc__etapa + .guia-doc__etapa { margin-top: 16px; }
+.guia-doc__etapa .rotulo-doc { margin-bottom: 8px; }
+@media (min-width: 900px), print { .guia-doc { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; } .guia-doc__sec--larga { grid-column: 1 / -1; } }
+
+/* Relatório da pessoa */
+.chips-doc { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 8px; }
+.chips-doc li { background: var(--branco-doc); border: 1px solid var(--linha-doc); border-radius: 999px; padding: 6px 14px; font-size: var(--f-rotulo); }
+.disc-defs--3 { grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 640px), print { .disc-defs--3 { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.plano-doc { list-style: none; padding: 0; margin: 0; }
+.plano-doc li { display: grid; grid-template-columns: 76px minmax(0, 1fr); gap: 12px; padding: 16px 0; border-bottom: 1px solid var(--linha-doc); }
+.plano-doc li:first-child { border-top: 1px solid var(--linha-doc); }
+.plano-doc__prazo { font-family: var(--ff-mono); font-size: var(--f-nota); font-weight: 600; color: var(--notus-forte); letter-spacing: .04em; padding-top: 3px; }
+.plano-doc strong { display: block; font-family: var(--ff-titulo); font-weight: 600; font-size: var(--f-h4); letter-spacing: -.01em; margin-bottom: 4px; }
+.plano-doc__txt { display: block; font-size: var(--f-corpo); }
+.passos__t--texto { font-family: var(--ff-texto); font-size: var(--f-corpo); line-height: 1.5; color: rgba(255,255,255,.88); }
+.doc .final__dica { margin-top: 16px; font-size: var(--f-forte); line-height: 1.55; color: rgba(255,255,255,.82); max-width: 680px; }
+
+/* ---------- Organograma (bloco independente: o painel pode reaproveitar só estas regras) ----------
+ * Celular: lista recuada por nível, com fios. Computador e A4: os liderados diretos do topo
+ * (até 4, classe org__filhos--linha) ficam lado a lado, ligados por linhas; níveis abaixo descem em lista. */
+.org { --org-fio: var(--ardosia-clara); --org-recuo: 18px; min-width: 0; }
+.org ul { list-style: none; margin: 0; padding: 0; }
+.org__arvore + .org__arvore, .org__arvore + .org__soltos { margin-top: 24px; }
+.org-cartao {
+  display: grid; grid-template-columns: 36px minmax(0, 1fr); gap: 10px; align-items: center;
+  background: var(--branco-doc, #fff); border: 1px solid var(--linha-doc, #d6cfc1); border-radius: 2px; padding: 8px 10px; min-width: 0;
+  position: relative; z-index: 1;
+}
+.org-cartao--foco { box-shadow: inset 0 0 0 1px var(--notus); border-color: var(--notus); }
+.org-cartao--foco .org-cartao__cod { color: var(--notus-forte); }
+.org-cartao__letra {
+  display: flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 2px;
+  font-family: var(--ff-titulo, inherit); font-weight: 700; font-size: var(--f-forte, 16px); line-height: 1;
+}
+.org-cartao--sem .org-cartao__letra { background: transparent; color: var(--mudo, #6b6960); box-shadow: inset 0 0 0 1px var(--linha-doc, #d6cfc1); }
+.org-cartao__txt { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
+.org-cartao__nome { font-family: var(--ff-titulo, inherit); font-weight: 600; font-size: var(--f-rotulo, 13px); overflow-wrap: anywhere; }
+.org-cartao__cargo { font-size: var(--f-nota, 12px); color: var(--mudo, #6b6960); overflow-wrap: anywhere; }
+.org-cartao__cod { font-family: var(--ff-mono, inherit); font-size: var(--f-eixo, 11px); letter-spacing: .06em; text-transform: uppercase; color: var(--mudo, #6b6960); }
+/* Lista recuada (padrão; e sempre abaixo do 1º nível) */
+.org__filhos { position: relative; padding-left: var(--org-recuo) !important; }
+.org__filhos > li { position: relative; padding: 10px 0 0 16px; }
+.org__filhos > li::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; border-left: 1px solid var(--org-fio); }
+.org__filhos > li:last-child::before { bottom: auto; height: 38px; }
+.org__filhos > li::after { content: ''; position: absolute; left: 0; top: 38px; width: 16px; border-top: 1px solid var(--org-fio); }
+.org__soltos-tit { font-family: var(--ff-mono, inherit); font-size: var(--f-eixo, 11px); letter-spacing: .14em; text-transform: uppercase; color: var(--mudo, #6b6960); margin-bottom: 10px; }
+.org__grade { display: grid; gap: 8px; }
+@media (min-width: 640px), print { .org__grade { grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); } }
+.org__legenda { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; margin: 20px 0 0 !important; font-size: var(--f-nota, 12px); color: var(--mudo, #6b6960); }
+.org__legenda span { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 2px; font-family: var(--ff-titulo, inherit); font-weight: 700; font-size: var(--f-eixo, 11px); }
+.org__legenda span + span, .org__legenda span:not(:first-child) { margin-left: 6px; }
+/* Árvore horizontal no topo (computador e A4) */
+@media (min-width: 720px), print {
+  .org__arvore > .org__no > .org-cartao { max-width: 260px; margin: 0 auto; }
+  .org__arvore > .org__no > .org__filhos--linha { display: flex; padding: 24px 0 0 !important; }
+  .org__arvore > .org__no > .org__filhos--linha::before { content: ''; position: absolute; top: 0; left: 50%; height: 24px; border-left: 1px solid var(--org-fio); }
+  .org__filhos--linha > li { flex: 1 1 0; min-width: 0; padding: 24px 6px 0; }
+  .org__filhos--linha > li::before, .org__filhos--linha > li::after {
+    content: ''; position: absolute; top: 0; bottom: auto; height: 24px; width: 50%; border: 0; border-top: 1px solid var(--org-fio);
+  }
+  .org__filhos--linha > li::before { left: 0; right: auto; }
+  .org__filhos--linha > li::after { left: 50%; right: auto; border-left: 1px solid var(--org-fio); }
+  .org__filhos--linha > li:first-child::before, .org__filhos--linha > li:last-child::after { border-top: 0; }
+  .org__filhos--linha > li:last-child::before { height: 24px; }
+  .org__filhos--linha > li > .org-cartao { grid-template-columns: 32px minmax(0, 1fr); gap: 8px; }
+  .org__filhos--linha > li > .org-cartao .org-cartao__letra { width: 32px; height: 32px; }
+  .org__filhos--linha > li > .org__filhos { padding-left: 14px !important; }
+  .org__arvore { break-inside: avoid; }
+}
+
 /* ---------- Impressão A4 ---------- */
 @page { size: A4; margin: 14mm 0; background: #f5f1ea; }
 @page :first { margin: 0; }
@@ -569,6 +742,8 @@ em { font-family: var(--ff-serif); font-style: italic; font-weight: 400; letter-
   .etapa__cab, .h3, .h2doc, .rotulo-doc { break-after: avoid; }
   .indice__lista a { text-decoration: none; }
   .rodape-doc { break-inside: avoid; }
+  .par-doc, .liderado-doc, .pessoa-doc, .guia-doc__sec, .nivel-doc, .plano-doc li, .org-cartao, .lider-doc__cab { break-inside: avoid; }
+  .lider-doc { break-before: auto; }
   .passos li { padding: 10px 0; }
   .passos-cab { margin-top: 32px; }
   .assina { margin-top: 32px; }

@@ -124,6 +124,9 @@ body[data-etapa="boasvindas"] .conteudo { max-width: 1120px; }
 /* Dois campos lado a lado no computador (telefone + idade; função + empresa); empilhados no celular.
    align-items: start — um erro num campo não desloca o vizinho. */
 .campos-dupla { display: grid; gap: 18px; align-items: start; }
+/* Perguntas extras do processo: texto livre com contador discreto */
+textarea.entrada--texto { min-height: 88px; line-height: 1.45; }
+.campo__contador { margin-top: 4px; font-size: var(--t-eixo); color: var(--suave); text-align: right; font-variant-numeric: tabular-nums; }
 @media (min-width: 640px) {
   .campos-dupla { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; }
   .campos-dupla--telefone { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
@@ -340,6 +343,8 @@ body[data-etapa="boasvindas"] .conteudo { max-width: 1120px; }
 }
 .barra-botoes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
 .barra-botoes .botao { width: 100%; min-width: 0; padding-left: 12px; padding-right: 12px; }
+/* Lugar reservado do "Voltar" na 1ª tela da confirmação: o botão de avançar não muda de posição */
+.barra-vazio { visibility: hidden; }
 body[data-etapa="teste"] .conteudo,
 body[data-etapa="confirmacao"] .conteudo { padding-bottom: calc(132px + env(safe-area-inset-bottom)); }
 
@@ -485,6 +490,30 @@ body[data-etapa="confirmacao"] .conteudo { padding-bottom: calc(132px + env(safe
 .tags { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
 .tags .selo { white-space: normal; padding: 4px 12px; font-size: var(--t-rotulo); color: var(--tinta); }
 
+/* ---------- Relatório DISC da pessoa ("modelo pessoa", dados de js/relatorio-pessoa.js; render em js/app.js) ---------- */
+.relatorio-candidato { display: grid; gap: 12px; }
+.rel-titulo { margin-top: 8px; font-size: var(--t-titulo); font-weight: 600; line-height: 1.3; }
+.rel-intro { margin-top: 10px; font-size: var(--t-corpo); color: var(--medio); line-height: 1.55; }
+.rel-h3 { margin-top: 20px; font-size: var(--t-rotulo); font-weight: 600; color: var(--tinta); letter-spacing: 0; }
+.rel-nota { margin-top: -4px; font-size: var(--t-nota); color: var(--suave); line-height: 1.45; }
+.rel-h3 + .rel-nota { margin-top: 4px; }
+.rel-barras { margin-top: 14px; gap: 16px; }
+.rel-barras .barra-linha { grid-template-columns: 32px minmax(0, 1fr) 52px; }
+.rel-fator-nome { display: block; font-size: var(--t-corpo); font-weight: 600; color: var(--tinta); }
+.rel-fator-desc { display: block; font-size: var(--t-nota); color: var(--suave); line-height: 1.4; }
+.rel-pct { font-size: var(--t-corpo); font-weight: 600; color: var(--tinta); }
+.rel-acoes { margin-top: 20px; }
+.rel-secao .tags { margin-top: 14px; }
+.rel-itens { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
+.rel-item { padding: 14px 16px; border-radius: 16px; background: var(--nevoa); min-width: 0; }
+.rel-item-titulo { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; font-size: var(--t-corpo); font-weight: 600; color: var(--tinta); }
+.rel-item-texto { margin-top: 4px; font-size: var(--t-rotulo); color: var(--medio); line-height: 1.5; }
+.rel-item .perfil-sub { display: inline; }
+.letra-disc--mini { width: 24px; height: 24px; font-size: var(--t-eixo); }
+.rel-itens--plano .rel-item { background: var(--branco); box-shadow: inset 0 0 0 1px var(--linha); }
+.rel-prazo { display: inline-block; margin-bottom: 6px; font-size: var(--t-eixo); font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--notus-forte); font-variant-numeric: tabular-nums; }
+.rel-aviso { padding: 4px 8px 0; font-size: var(--t-nota); color: var(--suave); line-height: 1.5; text-align: center; }
+
 /* ---------- Telas maiores ---------- */
 @media (min-width: 480px) {
   .acoes { flex-direction: row; justify-content: flex-end; }
@@ -506,6 +535,10 @@ body[data-etapa="confirmacao"] .conteudo { padding-bottom: calc(132px + env(safe
   .codigo-bloco .acoes-coluna > .botao { width: auto; }
   .protocolo-acoes.acoes-coluna { flex-direction: row; justify-content: flex-start; }
   .protocolo-acoes.acoes-coluna > .botao { width: auto; }
+  .rel-titulo { font-size: var(--t-indicador); }
+  .rel-acoes { justify-content: flex-start; }
+  .rel-itens { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .rel-secao[data-secao="comunicacao"] .rel-itens { grid-template-columns: minmax(0, 1fr); }
 
   .ordenar { --linha-alt: 60px; --vao: 8px; --passo: 68px; --rotulo-alt: 22px; --rotulo-vao: 8px; grid-template-columns: 28px minmax(0, 1fr); column-gap: 12px; margin-top: 16px; }
   .cartao, .demo-cartao { padding: 0 14px 0 10px; gap: 10px; border-radius: 16px; }
@@ -520,7 +553,7 @@ body[data-etapa="confirmacao"] .conteudo { padding-bottom: calc(132px + env(safe
   .barra-nav > * { max-width: none; margin: 0; }
   .barra-dica { flex: 1; min-width: 0; text-align: left; margin: 0; }
   .barra-botoes { display: flex; flex: none; }
-  .barra-botoes .botao { width: 176px; }
+  .barra-botoes .botao, .barra-botoes .barra-vazio { width: 176px; flex: none; }
   body[data-etapa="teste"] .conteudo,
   body[data-etapa="confirmacao"] .conteudo { padding-bottom: 64px; }
 
@@ -589,6 +622,14 @@ body[data-etapa="confirmacao"] .conteudo { padding-bottom: calc(132px + env(safe
 @media print {
   .topo, .acoes, .barra-nav, .confirmar, .rodape .botao, .info, .dica-janela, .demo, .ver-demo { display: none !important; }
   body { background: var(--branco); }
+  /* Relatório ao candidato ("Salvar em PDF"): só o relatório, cores preservadas, cartões sem quebrar no meio */
+  @page { margin: 14mm; }
+  body[data-etapa="concluido"] .pilha-telas > :not(.relatorio-candidato) { display: none !important; }
+  body[data-etapa="concluido"] .conteudo { max-width: none; padding: 0; }
+  .relatorio-candidato .caixa { animation: none; border: 1px solid var(--linha); padding: 20px; break-inside: avoid; page-break-inside: avoid; }
+  .relatorio-candidato .rel-item, .relatorio-candidato .barra-linha { break-inside: avoid; page-break-inside: avoid; }
+  .relatorio-candidato, .relatorio-candidato * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .rel-itens { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 }
 
 /* Link discreto para o painel (login do recrutador) */

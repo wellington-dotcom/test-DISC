@@ -193,7 +193,7 @@
   // Com API, só o administrador usa o painel (gestor desativado nesta versão).
   function abasDoPapel(papel, modoApi) {
     if (!modoApi) return ['lista', 'comparativo', 'importar'];
-    if (papel === 'admin') return ['lista', 'processos', 'usuarios', 'comparativo', 'importar'];
+    if (papel === 'admin') return ['lista', 'processos', 'empresas', 'usuarios', 'comparativo', 'importar'];
     return [];
   }
 
@@ -381,12 +381,174 @@
     if (!isFinite(corte) || corte < 0 || c.corte === null || c.corte === '') return 'Informe a nota de corte.';
     if (!isFinite(faixa) || faixa < 0 || c.faixaAvaliar === null || c.faixaAvaliar === '') return 'Informe a nota da faixa "avaliar".';
     if (faixa > corte) return 'A faixa "avaliar" precisa ser menor ou igual à nota de corte.';
-    return '';
+    return validarFormulario(c.formulario);
   }
 
   // Config vazia de um processo novo (o servidor completa com os mesmos padrões).
   function configPadrao() {
-    return { perfilIdeal: '', explicacaoPerfil: '', etapas: [], bonus: [], corte: 70, faixaAvaliar: 55, statusFinalistas: [], permitirAntecedentes: false };
+    return { perfilIdeal: '', explicacaoPerfil: '', etapas: [], bonus: [], corte: 70, faixaAvaliar: 55, statusFinalistas: [], permitirAntecedentes: false,
+      formulario: formularioPadrao() };
+  }
+
+  /* ---------- Formulário do processo: o que perguntar ao candidato (config.formulario) ---------- */
+
+  // Nome completo e WhatsApp são sempre pedidos (não configuráveis).
+  var CAMPOS_FORMULARIO = [
+    { chave: 'idade', rotulo: 'Idade' },
+    { chave: 'funcao', rotulo: 'Função atual ou última' },
+    { chave: 'empresa', rotulo: 'Empresa atual ou última' },
+    { chave: 'email', rotulo: 'E-mail' },
+    { chave: 'cidade', rotulo: 'Cidade onde mora' }
+  ];
+  var MODOS_CAMPO = { obrigatorio: 'Obrigatória', opcional: 'Opcional', oculto: 'Não perguntar' };
+  var MAX_PERGUNTAS = 5;
+
+  // Padrão = comportamento antigo: idade obrigatória, função e empresa opcionais, e-mail e cidade não perguntados.
+  function formularioPadrao() {
+    return { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto' }, perguntas: [] };
+  }
+
+  // Mesma regra de classificar_campo do servidor: termo sensível no começo de uma palavra (sem acento, sem pontuação).
+  // Pergunta ao candidato nunca tem exceção (nem saúde nem antecedentes).
+  function perguntaSensivel(texto) {
+    var n = ' ' + normalizarNome(texto).replace(/[^a-z0-9%]+/g, ' ').trim();
+    if (!n.trim()) return false;
+    return TERMOS_SENSIVEIS.some(function (t) { return n.indexOf(' ' + t) !== -1; });
+  }
+
+  function msgPerguntaSensivel(texto) {
+    return 'A pergunta "' + String(texto == null ? '' : texto).trim() + '" pede um dado sensível e não pode ser usada.';
+  }
+
+  // Ausente/inválido -> padrão. Perguntas: texto aparado, vazias saem, até 5, id ^[a-z0-9_]{1,20}$ (p1..p5 se faltar/repetir).
+  function normalizarFormulario(f) {
+    var pad = formularioPadrao();
+    var out = { campos: {}, perguntas: [] };
+    var campos = f && typeof f === 'object' && f.campos && typeof f.campos === 'object' ? f.campos : {};
+    CAMPOS_FORMULARIO.forEach(function (c) {
+      out.campos[c.chave] = Object.prototype.hasOwnProperty.call(MODOS_CAMPO, campos[c.chave]) ? campos[c.chave] : pad.campos[c.chave];
+    });
+    var lista = f && Array.isArray(f.perguntas) ? f.perguntas : [];
+    var usados = {};
+    lista.forEach(function (p) {
+      if (!p || typeof p !== 'object' || out.perguntas.length >= MAX_PERGUNTAS) return;
+      var texto = String(p.texto == null ? '' : p.texto).replace(/\s+/g, ' ').trim();
+      if (!texto) return;
+      var id = String(p.id == null ? '' : p.id);
+      if (!/^[a-z0-9_]{1,20}$/.test(id) || usados[id]) id = '';
+      out.perguntas.push({ id: id, texto: texto, obrigatoria: p.obrigatoria === true });
+      if (id) usados[id] = true;
+    });
+    out.perguntas.forEach(function (p) {
+      if (p.id) return;
+      var k = 1;
+      while (usados['p' + k]) k++;
+      p.id = 'p' + k;
+      usados[p.id] = true;
+    });
+    return out;
+  }
+
+  // '' se ok, senão a mensagem (mesmas regras do servidor).
+  function validarFormulario(f) {
+    if (f == null) return '';
+    if (typeof f !== 'object') return 'Formulário do processo inválido.';
+    var campos = f.campos || {};
+    for (var i = 0; i < CAMPOS_FORMULARIO.length; i++) {
+      var v = campos[CAMPOS_FORMULARIO[i].chave];
+      if (v != null && !Object.prototype.hasOwnProperty.call(MODOS_CAMPO, v)) return 'Escolha se "' + CAMPOS_FORMULARIO[i].rotulo + '" é obrigatória, opcional ou não perguntada.';
+    }
+    var lista = Array.isArray(f.perguntas) ? f.perguntas : [];
+    if (lista.length > MAX_PERGUNTAS) return 'Use no máximo ' + MAX_PERGUNTAS + ' perguntas extras.';
+    for (var j = 0; j < lista.length; j++) {
+      var texto = String((lista[j] && lista[j].texto) || '').replace(/\s+/g, ' ').trim();
+      if (texto.length < 3 || texto.length > 200) return 'Escreva a pergunta extra ' + (j + 1) + ' (de 3 a 200 caracteres).';
+      if (perguntaSensivel(texto)) return msgPerguntaSensivel(texto);
+    }
+    return '';
+  }
+
+  // Resumo do que o candidato responde: [{rotulo, modo, texto}] na ordem do formulário (Nome e WhatsApp sempre).
+  function resumoFormulario(f) {
+    var n = normalizarFormulario(f);
+    var out = [
+      { rotulo: 'Nome completo', modo: 'sempre', texto: 'Sempre pedido' },
+      { rotulo: 'WhatsApp', modo: 'sempre', texto: 'Sempre pedido' }
+    ];
+    CAMPOS_FORMULARIO.forEach(function (c) {
+      var m = n.campos[c.chave];
+      out.push({ rotulo: c.rotulo, modo: m, texto: MODOS_CAMPO[m] });
+    });
+    n.perguntas.forEach(function (p) {
+      out.push({ rotulo: p.texto, modo: p.obrigatoria ? 'obrigatorio' : 'opcional', texto: p.obrigatoria ? 'Obrigatória' : 'Opcional', extra: true });
+    });
+    return out;
+  }
+
+  /* ---------- Pessoas: várias respostas da mesma pessoa (mesmo WhatsApp) ---------- */
+
+  // Respostas extras: [{id, pergunta, resposta}] (aceita texto JSON); só as que têm pergunta.
+  function lerExtras(v) {
+    if (typeof v === 'string' && v) { try { v = JSON.parse(v); } catch (e) { return []; } }
+    if (!Array.isArray(v)) return [];
+    return v.filter(function (x) { return x && typeof x === 'object' && String(x.pergunta || '').trim(); }).map(function (x) {
+      return { id: String(x.id == null ? '' : x.id), pergunta: String(x.pergunta).trim(), resposta: String(x.resposta == null ? '' : x.resposta).trim() };
+    });
+  }
+
+  // Chave da pessoa: pessoaId (Supabase) ou o WhatsApp só com dígitos (Apps Script antigo). Sem nenhum: a própria resposta.
+  function chavePessoa(r) {
+    if (!r) return '';
+    if (r.pessoaId) return 'p:' + String(r.pessoaId);
+    var d = soDigitos(r.telefone);
+    if ((d.length === 10 || d.length === 11) && d.indexOf('55') !== 0) d = '55' + d;
+    return d ? 't:' + d : 'r:' + String(r.id);
+  }
+
+  function dataDe(r) { return String((r && (r.fim || r.recebidoEm)) || ''); }
+
+  // Agrupa respostas por pessoa: [{chave, respostas (mais recente primeiro), atual (a mais recente), total}],
+  // na ordem da resposta mais recente de cada pessoa.
+  function agruparPessoas(registros) {
+    var mapa = {};
+    var grupos = [];
+    (registros || []).forEach(function (r) {
+      var k = chavePessoa(r);
+      if (!mapa[k]) { mapa[k] = { chave: k, respostas: [] }; grupos.push(mapa[k]); }
+      mapa[k].respostas.push(r);
+    });
+    grupos.forEach(function (g) {
+      g.respostas.sort(function (a, b) { return dataDe(b).localeCompare(dataDe(a)); });
+      g.atual = g.respostas[0];
+      g.total = g.respostas.length;
+    });
+    grupos.sort(function (a, b) { return dataDe(b.atual).localeCompare(dataDe(a.atual)); });
+    return grupos;
+  }
+
+  // Ficha da pessoa: dados de r.pessoa (quando existe e não vazio), senão os da resposta.
+  function fichaPessoa(r) {
+    var p = (r && r.pessoa && typeof r.pessoa === 'object') ? r.pessoa : {};
+    var out = {};
+    ['nome', 'telefone', 'idade', 'funcao', 'empresa', 'email', 'cidade'].forEach(function (k) {
+      var v = p[k];
+      out[k] = (v !== undefined && v !== null && v !== '') ? v : (r ? r[k] : undefined);
+    });
+    return out;
+  }
+
+  // Perfil principal entre as respostas válidas: null com menos de 2; senão {total, igual, texto}.
+  function consistenciaPerfil(registros) {
+    var validos = (registros || []).filter(function (r) { return r && r.calc; });
+    if (validos.length < 2) return null;
+    var primeiro = validos[0].calc.primario;
+    var igual = validos.every(function (r) { return r.calc.primario === primeiro; });
+    return {
+      total: validos.length,
+      igual: igual,
+      texto: igual ? 'O perfil se manteve nas ' + validos.length + ' respostas.'
+        : 'O perfil mudou entre as respostas: vale conversar sobre o momento de cada uma.'
+    };
   }
 
   // Aceita o ID puro ou o endereço da lista copiado do ClickUp (…/v/li/901234…).
@@ -538,7 +700,7 @@
 
   function gerarCsv(registros) {
     var cab = ['id', 'protocolo', 'nome', 'telefone', 'vaga', 'idade', 'funcao', 'empresa', 'data', 'duração', 'D %', 'I %', 'S %', 'C %', 'perfil', 'status', 'observações',
-      'avaliação', 'empresa da avaliação', 'confiabilidade'];
+      'avaliação', 'empresa da avaliação', 'confiabilidade', 'e-mail', 'cidade', 'perguntas extras'];
     var linhas = [cab.map(celulaCsv).join(';')];
     registros.forEach(function (r) {
       var p = r.calc ? r.calc.percentuais : {};
@@ -552,7 +714,9 @@
         r.calc ? r.calc.codigo : 'inválido',
         r.invalido ? STATUS.invalido : STATUS[r.status],
         r.observacoes || '',
-        r.avaliacaoNome || r.avaliacao || '', r.empresaNome || '', conf
+        r.avaliacaoNome || r.avaliacao || '', r.empresaNome || '', conf,
+        r.email || '', r.cidade || '',
+        lerExtras(r.extras).map(function (x) { return x.pergunta + ': ' + (x.resposta || '—'); }).join(' | ')
       ].map(celulaCsv).join(';'));
     });
     return '﻿' + linhas.join('\r\n');
@@ -628,7 +792,179 @@
     return String(href || '').split('#')[0].split('?')[0];
   }
 
+  /* ---------- Empresas, colaboradores e ligações (funções puras) ---------- */
+
+  // Onde a aba Empresas funciona: 'ok' (Supabase ou prévia simulada), 'legado' (Apps Script) ou 'local' (sem API).
+  function modoEmpresas(modoApi, supabase, simulada) {
+    if (!modoApi) return 'local';
+    return supabase || simulada ? 'ok' : 'legado';
+  }
+
+  // Filtra opções {rotulo, sub?} pela busca (sem acento, sem maiúsculas; todas as palavras precisam aparecer).
+  function filtrarOpcoes(opcoes, busca) {
+    var termos = normalizarNome(busca).split(' ').filter(Boolean);
+    if (!termos.length) return (opcoes || []).slice();
+    return (opcoes || []).filter(function (o) {
+      var alvo = normalizarNome([o.rotulo, o.sub, o.busca].filter(Boolean).join(' '));
+      return termos.every(function (t) { return alvo.indexOf(t) !== -1; });
+    });
+  }
+
+  // Empresas na ordem de nome; arquivadas no fim; busca por nome e cidade.
+  function filtrarEmpresas(empresas, busca) {
+    var lista = (empresas || []).map(function (e) { return { e: e, rotulo: e.nome, sub: e.cidade }; });
+    return filtrarOpcoes(lista, busca).map(function (x) { return x.e; }).sort(function (a, b) {
+      if ((a.ativo !== false) !== (b.ativo !== false)) return a.ativo !== false ? -1 : 1;
+      return normalizarNome(a.nome).localeCompare(normalizarNome(b.nome));
+    });
+  }
+
+  // Ligações de uma pessoa a partir do conjunto de relações da empresa.
+  // -> { lider: id|'' , diretos: [ids], indiretos: [ids], liderados: [ids] }
+  function ligacoesDe(relacoes, id) {
+    var out = { lider: '', diretos: [], indiretos: [], liderados: [] };
+    id = String(id);
+    (relacoes || []).forEach(function (r) {
+      var de = String(r.de), para = String(r.para);
+      if (r.tipo === 'lidera') {
+        if (para === id && !out.lider) out.lider = de;
+        else if (de === id) out.liderados.push(para);
+        return;
+      }
+      var outro = de === id ? para : (para === id ? de : '');
+      if (!outro) return;
+      var lista = r.tipo === 'direto' ? out.diretos : (r.tipo === 'indireto' ? out.indiretos : null);
+      if (lista && lista.indexOf(outro) === -1) lista.push(outro);
+    });
+    out.indiretos = out.indiretos.filter(function (x) { return out.diretos.indexOf(x) === -1; });
+    return out;
+  }
+
+  // Troca as ligações de uma pessoa (líder, diretos e indiretos) e devolve o novo conjunto de relações.
+  // Quem ela lidera continua. Sem duplicadas, sem ligação consigo mesma; o líder não entra como direto/indireto.
+  function aplicarLigacoes(relacoes, id, lig) {
+    id = String(id);
+    lig = lig || {};
+    var lider = lig.lider ? String(lig.lider) : '';
+    if (lider === id) lider = '';
+    var resto = (relacoes || []).filter(function (r) {
+      var de = String(r.de), para = String(r.para);
+      if (r.tipo === 'lidera') {
+        if (para === id) return false;
+        if (lider && de === id && para === lider) return false; // evita "um lidera o outro" nos dois sentidos
+        return true;
+      }
+      return de !== id && para !== id;
+    }).map(function (r) { return { de: String(r.de), para: String(r.para), tipo: r.tipo }; });
+    if (lider) resto.push({ de: lider, para: id, tipo: 'lidera' });
+    var usados = {};
+    usados[id] = true;
+    if (lider) usados[lider] = true;
+    ['diretos', 'indiretos'].forEach(function (k) {
+      (lig[k] || []).forEach(function (x) {
+        x = String(x);
+        if (!x || usados[x]) return;
+        usados[x] = true;
+        resto.push({ de: id, para: x, tipo: k === 'diretos' ? 'direto' : 'indireto' });
+      });
+    });
+    return resto;
+  }
+
+  // Relações só entre quem está na lista de ids (ex.: depois de desligar alguém).
+  function relacoesEntre(relacoes, ids) {
+    var ok = {};
+    (ids || []).forEach(function (i) { ok[String(i)] = true; });
+    return (relacoes || []).filter(function (r) { return ok[String(r.de)] && ok[String(r.para)] && String(r.de) !== String(r.para); });
+  }
+
+  // Resultado {percentuais, codigo} de um registro já recalculado (ou null).
+  function resultadoDoRegistro(r) {
+    return r && r.calc ? { percentuais: r.calc.percentuais, codigo: r.calc.codigo } : null;
+  }
+
+  // Entrada de DISC_COMPATIBILIDADE.montar a partir de listarEquipe (+ candidato em foco, opcional).
+  function entradaCompatibilidade(empresa, colaboradores, relacoes, foco) {
+    var pessoas = (colaboradores || []).map(function (c) {
+      return { id: String(c.pessoaId), nome: c.nome, cargo: c.cargo || '', percentuais: c.resultado && c.resultado.percentuais ? c.resultado.percentuais : null };
+    });
+    var rels = (relacoes || []).map(function (r) { return { de: String(r.de), para: String(r.para), tipo: r.tipo }; });
+    var out = { empresa: { nome: (empresa && empresa.nome) || '' }, pessoas: pessoas, relacoes: rels };
+    if (foco) {
+      pessoas.push({ id: ID_FOCO, nome: foco.nome, cargo: foco.cargo || '', percentuais: foco.resultado ? foco.resultado.percentuais : null });
+      out.relacoes = rels.concat(relacoesDoFoco(foco));
+      out.foco = ID_FOCO;
+    }
+    return out;
+  }
+  var ID_FOCO = 'foco';
+
+  // Relações do candidato em foco: o líder escolhido lidera o candidato; os colegas trabalham diretamente com ele.
+  function relacoesDoFoco(foco) {
+    var rels = [];
+    if (foco && foco.liderId) rels.push({ de: String(foco.liderId), para: ID_FOCO, tipo: 'lidera' });
+    ((foco && foco.diretos) || []).forEach(function (id) {
+      if (String(id) !== String(foco.liderId || '')) rels.push({ de: ID_FOCO, para: String(id), tipo: 'direto' });
+    });
+    return rels;
+  }
+
+  // Pessoas que já responderam (uma por pessoa, a resposta mais recente), para escolher num seletor.
+  function pessoasDasRespostas(registros) {
+    return agruparPessoas((registros || []).filter(function (r) { return r && r.pessoaId; })).map(function (g) {
+      var r = g.atual;
+      return { pessoaId: String(r.pessoaId), nome: String((r.pessoa && r.pessoa.nome) || r.nome || ''), telefone: String((r.pessoa && r.pessoa.telefone) || r.telefone || ''),
+        resultado: resultadoDoRegistro(r), registroId: r.id };
+    });
+  }
+
+  // Link público dos relatórios novos (equipe, liderança, pessoa): relatorio.html#r-TOKEN.
+  function linkRelatorioModelo(href, token) {
+    var base = String(href || '').split('#')[0].split('?')[0].replace(/[^/]*$/, '');
+    return base + 'relatorio.html#r-' + encodeURIComponent(String(token || ''));
+  }
+
+  var MODELOS_REL = { equipe: 'Relatório da equipe', lideranca: 'Como liderar', pessoa: 'Relatório da pessoa (desenvolvimento)' };
+
+  function primeiroNome(nome) { return String(nome || '').trim().split(/\s+/)[0] || ''; }
+
+  // Mensagem de WhatsApp para enviar o relatório publicado.
+  function mensagemRelatorioModelo(modelo, ctx, url) {
+    ctx = ctx || {};
+    var empresa = String(ctx.empresa || '').trim();
+    var pessoa = primeiroNome(ctx.pessoa);
+    var rodape = '\n\nAbre no celular ou no computador e dá para salvar em PDF. Qualquer dúvida, estou à disposição.\n' +
+      (ctx.consultor ? String(ctx.consultor).trim() + ' · ' : '') + 'Notus Agência';
+    if (modelo === 'pessoa') {
+      return 'Olá' + (pessoa ? ', ' + pessoa : '') + '! O seu relatório de perfil DISC, com sugestões para o seu desenvolvimento, está pronto:\n' + url + rodape;
+    }
+    if (modelo === 'lideranca') {
+      return 'Olá! O guia de como liderar ' + (pessoa || 'o colaborador') + (empresa ? ' (' + empresa + ')' : '') + ', a partir do perfil DISC, está pronto:\n' + url + rodape;
+    }
+    return 'Olá! O relatório da equipe' + (empresa ? ' da ' + empresa : '') + ' (organograma, perfis DISC e compatibilidade) está pronto:\n' + url + rodape;
+  }
+
+  // Texto do processo de equipe ligado a uma empresa cadastrada.
+  function textoEquipeEmpresa(nomeEmpresa) {
+    return 'As respostas deste link entram no cadastro da empresa' + (nomeEmpresa ? ' ' + nomeEmpresa : '') +
+      ' como colaboradores (quem ainda não está nela entra com o cargo informado). Antes de começar, o colaborador é avisado de que o resultado é compartilhado com a empresa.';
+  }
+
   var util = {
+    modoEmpresas: modoEmpresas,
+    filtrarOpcoes: filtrarOpcoes,
+    filtrarEmpresas: filtrarEmpresas,
+    ligacoesDe: ligacoesDe,
+    aplicarLigacoes: aplicarLigacoes,
+    relacoesEntre: relacoesEntre,
+    resultadoDoRegistro: resultadoDoRegistro,
+    entradaCompatibilidade: entradaCompatibilidade,
+    relacoesDoFoco: relacoesDoFoco,
+    pessoasDasRespostas: pessoasDasRespostas,
+    linkRelatorioModelo: linkRelatorioModelo,
+    mensagemRelatorioModelo: mensagemRelatorioModelo,
+    textoEquipeEmpresa: textoEquipeEmpresa,
+    MODELOS_REL: MODELOS_REL,
     modoSupabase: modoSupabase,
     lerRetornoAuth: lerRetornoAuth,
     enderecoPainel: enderecoPainel,
@@ -666,6 +1002,18 @@
     idSimples: idSimples,
     validarConfig: validarConfig,
     configPadrao: configPadrao,
+    CAMPOS_FORMULARIO: CAMPOS_FORMULARIO,
+    MODOS_CAMPO: MODOS_CAMPO,
+    formularioPadrao: formularioPadrao,
+    normalizarFormulario: normalizarFormulario,
+    validarFormulario: validarFormulario,
+    perguntaSensivel: perguntaSensivel,
+    resumoFormulario: resumoFormulario,
+    lerExtras: lerExtras,
+    chavePessoa: chavePessoa,
+    agruparPessoas: agruparPessoas,
+    fichaPessoa: fichaPessoa,
+    consistenciaPerfil: consistenciaPerfil,
     textosEditaveis: textosEditaveis,
     editarTexto: editarTexto,
     idListaDoTexto: idListaDoTexto,
@@ -709,7 +1057,8 @@
     // Tela dentro da aba Processos: 'lista' | 'form' | 'pagina' | 'editor'
     proc: { tela: 'lista', id: null },
     relatorios: {},   // processoId -> [{token, status, criadoEm, publicadoEm}]
-    editor: null      // {processoId, token, relatorio, avisos, status, url, sujo}
+    editor: null,     // {processoId, token, relatorio, avisos, status, url, sujo}
+    emp: null         // aba Empresas: ver novoEstadoEmpresas()
   };
 
   function $(id) { return document.getElementById(id); }
@@ -865,6 +1214,8 @@
         iaConfigurada: cu.iaConfigurada === true, avisos: Array.isArray(cu.avisos) ? cu.avisos : [], carregado: !!rs[3] };
       montarFiltros();
       renderizarTudo();
+      // Empresas (Supabase/prévia): carrega à parte; se falhar, a aba mostra o erro e o resto do painel segue.
+      if (empresasOk()) { esquecerEquipes(); return carregarEmpresas(); }
     }).catch(function (e) {
       $('contagem').textContent = '';
       falhou(e);
@@ -1324,25 +1675,31 @@
   /* ---------- Lista ---------- */
 
   // Cartões de resumo no padrão do Início do BI: todos brancos; "Aprovados" em destaque (número em laranja).
+  // "Pessoas" conta quem respondeu (mesmo WhatsApp = mesma pessoa); os outros contam respostas.
   function renderizarResumo(animar) {
     var box = $('resumo-lista');
     limpar(box);
     var regs = estado.registros;
     var conta = function (f) { return regs.filter(f).length; };
+    var pessoas = agruparPessoas(regs).length;
     var cartoes = [
-      { rotulo: 'Participantes', valor: regs.length, estilo: '' },
-      { rotulo: 'Aprovados', valor: conta(function (r) { return !r.invalido && r.status === 'aprovado'; }), estilo: 'caixa--destaque' },
-      { rotulo: 'Em análise', valor: conta(function (r) { return !r.invalido && r.status === 'em_analise'; }), estilo: '' },
-      { rotulo: 'Confiabilidade baixa', valor: conta(function (r) { return r.conf && r.conf.nivel === 'baixa'; }), estilo: '' }
+      { rotulo: 'Pessoas', valor: pessoas, nota: regs.length + ' resposta' + (regs.length === 1 ? '' : 's') + ' no total', estilo: '', id: 'resumo-pessoas' },
+      { rotulo: 'Aprovados', valor: conta(function (r) { return !r.invalido && r.status === 'aprovado'; }), nota: 'respostas aprovadas', estilo: 'caixa--destaque' },
+      { rotulo: 'Em análise', valor: conta(function (r) { return !r.invalido && r.status === 'em_analise'; }), nota: 'respostas em análise', estilo: '' },
+      { rotulo: 'Confiabilidade baixa', valor: conta(function (r) { return r.conf && r.conf.nivel === 'baixa'; }), nota: 'respostas', estilo: '' }
     ];
     cartoes.forEach(function (c, i) {
-      box.appendChild(el('div', { classe: 'caixa caixa--compacta resumo__cartao ' + c.estilo + (animar ? ' surgir' : ''), estilo: animar ? { 'animation-delay': (i * 40) + 'ms' } : null }, [
+      box.appendChild(el('div', { classe: 'caixa caixa--compacta resumo__cartao ' + c.estilo + (animar ? ' surgir' : ''), id: c.id || null, estilo: animar ? { 'animation-delay': (i * 40) + 'ms' } : null }, [
         el('span', { classe: 'resumo__rotulo', texto: c.rotulo }),
-        el('span', { classe: 'resumo__valor t-numero-grande valor-destaque', texto: String(c.valor) })
+        el('span', { classe: 'resumo__numeros' }, [
+          el('span', { classe: 'resumo__valor t-numero-grande valor-destaque', texto: String(c.valor) }),
+          el('span', { classe: 'resumo__nota', texto: c.nota })
+        ])
       ]));
     });
   }
 
+  // Uma linha por pessoa (a resposta mais recente entre as filtradas) e o selo "N respostas" quando houver mais de uma.
   function renderizarLista() {
     var ul = $('lista-candidatos');
     limpar(ul);
@@ -1351,18 +1708,24 @@
     estado.listaMostrada = true;
     renderizarResumo(animar);
     var itens = filtrados();
-    var total = estado.registros.length;
-    $('contagem').textContent = total === 0
+    var grupos = agruparPessoas(itens);
+    var total = agruparPessoas(estado.registros).length;
+    var nResp = estado.registros.length;
+    $('contagem').textContent = nResp === 0
       ? (MODO_API ? 'Nenhuma resposta recebida ainda.' : 'Nenhum participante importado. Use a aba "Importar códigos".')
-      : itens.length + ' de ' + total + ' participante' + (total === 1 ? '' : 's');
-    itens.forEach(function (r, i) {
+      : grupos.length + ' de ' + total + ' participante' + (total === 1 ? '' : 's') +
+        (itens.length !== grupos.length || nResp !== total ? ' (' + itens.length + ' de ' + nResp + ' respostas)' : '');
+    grupos.forEach(function (g, i) {
+      var r = g.atual;
       var meta = [linkTelefone(r)];
       if (r.vaga && r.avaliacaoTipo !== 'equipe') meta.push(el('span', { texto: r.vaga }));
       meta.push(el('span', { classe: 'texto-suave', texto: formatarData(r.fim || r.recebidoEm) }));
       // Função · Empresa (discreto). A idade fica só no detalhe.
       var exp = textoExperiencia(r);
       if (exp) meta.push(el('span', { classe: 'card-experiencia', texto: exp }));
-      ul.appendChild(el('li', { classe: 'card caixa' + (animar ? ' surgir' : '') + (r.invalido ? ' card-invalido' : ''), 'data-id': r.id, estilo: animar ? { 'animation-delay': Math.min(i, 8) * 30 + 'ms' } : null }, [
+      var selos = [badgePerfil(r), badgeStatus(r), badgeConfiabilidade(r)];
+      if (g.total > 1) selos.push(el('span', { classe: 'selo selo--noite selo-respostas', title: 'Respostas desta pessoa' + (estado.filtros.processo ? ' neste filtro' : ''), texto: g.total + ' respostas' }));
+      ul.appendChild(el('li', { classe: 'card caixa' + (animar ? ' surgir' : '') + (r.invalido ? ' card-invalido' : ''), 'data-id': r.id, 'data-pessoa': g.chave, 'data-respostas': String(g.total), estilo: animar ? { 'animation-delay': Math.min(i, 8) * 30 + 'ms' } : null }, [
         el('div', { classe: 'card-topo' }, [
           r.calc ? letraDisc(r.calc.primario, 'card-letra') : el('span', { classe: 'letra-disc card-letra card-letra--vazia', 'aria-hidden': 'true', texto: '?' }),
           el('button', { type: 'button', classe: 'card-nome', texto: r.nome || '(sem nome)',
@@ -1373,7 +1736,7 @@
         el('div', { classe: 'card-meta' }, meta),
         r.calc ? miniBarras(r.calc.percentuais) : el('p', { classe: 'aviso aviso--erro card-aviso', texto: 'Respostas inválidas — resultado não pode ser calculado.' }),
         el('div', { classe: 'card-rodape' }, [
-          el('div', { classe: 'card-selos' }, [badgePerfil(r), badgeStatus(r), badgeConfiabilidade(r)]),
+          el('div', { classe: 'card-selos' }, selos),
           el('button', { type: 'button', classe: 'botao botao--claro botao--pequeno', texto: 'Ver detalhes',
             'aria-label': 'Ver detalhes de ' + (r.nome || 'participante'), onclick: function () { abrirDetalhe(r.id); } })
         ])
@@ -1384,7 +1747,7 @@
   /* ---------- Detalhe ---------- */
 
   function esconderVistas() {
-    ['vista-lista', 'vista-processos', 'vista-usuarios', 'vista-comparativo', 'vista-importar']
+    ['vista-lista', 'vista-processos', 'vista-empresas', 'vista-usuarios', 'vista-comparativo', 'vista-importar']
       .forEach(function (id) { $(id).hidden = true; });
   }
 
@@ -1482,6 +1845,56 @@
     ]);
   }
 
+  // Respostas do formulário desta resposta: e-mail, cidade e perguntas extras (null se não há nada).
+  function blocoFormulario(r, ficha) {
+    var extras = lerExtras(r.extras);
+    var email = r.email || ficha.email || '';
+    var cidade = r.cidade || ficha.cidade || '';
+    if (!email && !cidade && !extras.length) return null;
+    var itens = [];
+    if (email) itens.push(el('div', null, [el('dt', { texto: 'E-mail' }), el('dd', { id: 'det-email', texto: String(email) })]));
+    if (cidade) itens.push(el('div', null, [el('dt', { texto: 'Cidade onde mora' }), el('dd', { id: 'det-cidade', texto: String(cidade) })]));
+    extras.forEach(function (x) {
+      itens.push(el('div', { classe: 'det-dl__largo det-extra', 'data-pergunta': x.id }, [
+        el('dt', { texto: x.pergunta }), el('dd', { classe: x.resposta ? '' : 'texto-suave', texto: x.resposta || 'Sem resposta' })
+      ]));
+    });
+    return el('section', { classe: 'caixa det-formulario surgir', id: 'det-formulario' }, [
+      el('h3', { classe: 'caixa__titulo', texto: 'Respostas do formulário' }),
+      el('dl', { classe: 'det-dl' }, itens)
+    ]);
+  }
+
+  // Histórico desta pessoa: todas as respostas (data, processo, perfil, mini barras, código), com troca entre elas
+  // e o aviso de consistência do perfil principal (null com uma resposta só).
+  function blocoHistorico(r, respostas) {
+    if (!respostas || respostas.length < 2) return null;
+    var cons = consistenciaPerfil(respostas);
+    return el('section', { classe: 'caixa det-historico surgir nao-imprimir', id: 'det-historico' }, [
+      el('h3', { classe: 'caixa__titulo', texto: 'Histórico desta pessoa' }),
+      el('p', { classe: 'conf-nota conf-nota--topo', texto: respostas.length + ' respostas com o mesmo WhatsApp, da mais recente para a mais antiga.' }),
+      cons ? el('p', { classe: 'aviso hist-consistencia ' + (cons.igual ? 'aviso--ok' : ''), id: 'det-consistencia', 'data-igual': cons.igual ? 'sim' : 'nao', role: 'note' }, [
+        el('span', { classe: 'seminegrito', texto: cons.texto }),
+        el('span', { classe: 'hist-consistencia__nota', texto: ' Repetir o mesmo perfil em momentos diferentes também é um sinal de confiabilidade.' })
+      ]) : null,
+      el('ol', { classe: 'hist-lista', id: 'det-historico-lista' }, respostas.map(function (x) {
+        var atual = x.id === r.id;
+        return el('li', { classe: 'hist-item' + (atual ? ' hist-item--atual' : ''), 'data-id': x.id, 'aria-current': atual ? 'true' : null }, [
+          el('div', { classe: 'hist-item__topo' }, [
+            x.calc ? badgePerfil(x) : el('span', { classe: 'badge badge--invalido', texto: 'Inválido' }),
+            el('span', { classe: 'hist-item__data tabular', texto: formatarData(x.fim || x.recebidoEm) }),
+            seloProtocolo(x, 'hist-item__protocolo')
+          ]),
+          el('p', { classe: 'hist-item__origem', texto: textoOrigem(x) || (x.vaga || '') }),
+          x.calc ? miniBarras(x.calc.percentuais) : null,
+          atual ? el('span', { classe: 'selo selo--noite hist-item__agora', texto: 'Vendo esta resposta' })
+            : botao('botao--claro botao--pequeno hist-item__ver', 'Ver esta resposta', function () { abrirDetalhe(x.id); },
+              { 'data-acao': 'ver-resposta', 'aria-label': 'Ver a resposta de ' + formatarData(x.fim || x.recebidoEm) })
+        ]);
+      }))
+    ]);
+  }
+
   function renderizarDetalhe() {
     var art = $('vista-detalhe');
     limpar(art);
@@ -1513,15 +1926,16 @@
       ])
     ]));
 
-    // Dados do participante (equipe: sem vaga nem empresa anterior; "Cargo/função")
-    var dados = el('section', { classe: 'caixa det-dados surgir' }, [
-      el('h3', { classe: 'caixa__titulo', texto: equipe ? 'Dados do colaborador' : 'Dados do candidato' }),
+    // Ficha da pessoa (dados de r.pessoa quando existe; senão os da resposta). Equipe: sem vaga nem empresa anterior.
+    var ficha = fichaPessoa(r);
+    var dados = el('section', { classe: 'caixa det-dados surgir', id: 'det-ficha' }, [
+      el('h3', { classe: 'caixa__titulo', texto: equipe ? 'Ficha do colaborador' : 'Ficha do candidato' }),
       el('dl', { classe: 'det-dl' }, [
-        el('div', null, [el('dt', { texto: 'Telefone' }), el('dd', null, linkTelefone(r))]),
-        el('div', null, [el('dt', { texto: 'Idade' }), el('dd', { id: 'det-idade', texto: textoIdade(r.idade) })]),
+        el('div', null, [el('dt', { texto: 'Telefone' }), el('dd', null, linkTelefone({ telefone: ficha.telefone || r.telefone, nome: ficha.nome || r.nome }))]),
+        el('div', null, [el('dt', { texto: 'Idade' }), el('dd', { id: 'det-idade', texto: textoIdade(ficha.idade) })]),
         equipe ? null : el('div', null, [el('dt', { texto: 'Vaga pretendida' }), el('dd', { texto: r.vaga || '—' })]),
-        el('div', null, [el('dt', { texto: equipe ? 'Cargo/função' : 'Função atual/última' }), el('dd', { id: 'det-funcao', texto: r.funcao || '—' })]),
-        equipe ? null : el('div', null, [el('dt', { texto: 'Empresa atual/última' }), el('dd', { id: 'det-empresa', texto: r.empresa || '—' })]),
+        el('div', null, [el('dt', { texto: equipe ? 'Cargo/função' : 'Função atual/última' }), el('dd', { id: 'det-funcao', texto: ficha.funcao || '—' })]),
+        equipe ? null : el('div', null, [el('dt', { texto: 'Empresa atual/última' }), el('dd', { id: 'det-empresa', texto: ficha.empresa || '—' })]),
         MODO_API ? el('div', { classe: 'det-dl__largo' }, [el('dt', { texto: 'Processo' }), el('dd', { id: 'det-avaliacao', texto: textoOrigem(r) })]) : null,
         el('div', null, [el('dt', { texto: 'Concluído em' }), el('dd', { texto: formatarData(r.fim || r.recebidoEm) })]),
         el('div', null, [el('dt', { texto: 'Duração' }), el('dd', { texto: formatarDuracao(r.duracaoSeg) })]),
@@ -1529,6 +1943,11 @@
         el('div', null, [el('dt', { texto: 'Status' }), el('dd', { id: 'det-status-selo' }, badgeStatus(r))])
       ])
     ]);
+
+    // Todas as respostas desta pessoa (sem filtro), mais recente primeiro.
+    var chave = chavePessoa(r);
+    var doGrupo = agruparPessoas(estado.registros.filter(function (x) { return chavePessoa(x) === chave; }))[0];
+    var daPessoa = doGrupo ? doGrupo.respostas : [r];
 
     // Status e observações (admin e gestor); excluir só admin
     var escStatus = criarEscolha({
@@ -1556,29 +1975,63 @@
         avisar('Observações salvas.', 'ok'); obsImpressa.textContent = taObs.value;
       }).catch(falhou).then(function () { btnObs.disabled = false; });
     });
-    var btnExcluir = null;
+    var btnExcluir = null, btnExcluirPessoa = null;
     if (pode('excluir')) {
-      btnExcluir = el('button', { type: 'button', classe: 'botao botao--perigo', id: 'btn-excluir-participante', texto: 'Excluir participante' });
+      var varias = daPessoa.length > 1;
+      var quem = ficha.nome || r.nome || 'esta pessoa';
+      btnExcluir = el('button', { type: 'button', classe: 'botao botao--perigo', id: 'btn-excluir-participante', texto: varias ? 'Excluir só esta resposta' : 'Excluir participante' });
       btnExcluir.addEventListener('click', function () {
-        confirmar({ titulo: 'Excluir este participante?', texto: 'Os dados de ' + (r.nome || 'este participante') + ' serão apagados definitivamente.', botao: 'Excluir participante' }).then(function (ok) {
+        var outras = daPessoa.length - 1;
+        confirmar({
+          titulo: varias ? 'Excluir só esta resposta?' : 'Excluir este participante?',
+          texto: varias
+            ? 'Apaga definitivamente a resposta de ' + formatarData(r.fim || r.recebidoEm) + ' (código ' + textoProtocolo(r.protocolo) + '). As outras ' + outras + ' resposta' + (outras === 1 ? '' : 's') + ' de ' + quem + ' continuam.'
+            : 'A resposta e a ficha de ' + quem + ' serão apagadas definitivamente.',
+          botao: varias ? 'Excluir esta resposta' : 'Excluir participante'
+        }).then(function (ok) {
           if (!ok) return;
           excluirRegistro(r.id).then(function () {
-            avisar('Participante excluído.', 'ok'); fecharDetalhe(); renderizarTudo();
+            avisar(varias ? 'Resposta excluída. As outras respostas da pessoa continuam.' : 'Participante excluído.', 'ok');
+            var resto = daPessoa.filter(function (x) { return x.id !== r.id && acharRegistro(x.id); });
+            if (resto.length) { renderizarTudo(); abrirDetalhe(resto[0].id); } else { fecharDetalhe(); renderizarTudo(); }
           }).catch(falhou);
         });
       });
+      if (varias) {
+        btnExcluirPessoa = el('button', { type: 'button', classe: 'botao botao--perigo', id: 'btn-excluir-pessoa', texto: 'Excluir as ' + daPessoa.length + ' respostas da pessoa' });
+        btnExcluirPessoa.addEventListener('click', function () {
+          confirmar({
+            titulo: 'Excluir a pessoa e todas as respostas?',
+            texto: 'Apaga definitivamente as ' + daPessoa.length + ' respostas de ' + quem + ' e a ficha dela. Não dá para desfazer.',
+            exigir: 'EXCLUIR',
+            botao: 'Excluir tudo da pessoa'
+          }).then(function (ok) {
+            if (!ok) return;
+            var ids = daPessoa.map(function (x) { return x.id; });
+            var cadeia = Promise.resolve();
+            ids.forEach(function (id) { cadeia = cadeia.then(function () { return excluirRegistro(id); }); });
+            cadeia.then(function () { avisar('Pessoa excluída com as ' + ids.length + ' respostas.', 'ok'); }, falhou)
+              .then(function () { fecharDetalhe(); renderizarTudo(); });
+          });
+        });
+      }
     }
     var gestao = el('section', { classe: 'caixa nao-imprimir det-gestao surgir' }, [
       el('h3', { classe: 'caixa__titulo', texto: 'Avaliação do recrutador' }),
       el('div', { classe: 'campo' }, [el('span', { classe: 'campo__rotulo', id: 'det-status-rotulo', texto: 'Status' }), escStatus.caixa]),
       el('div', { classe: 'campo' }, [el('label', { classe: 'campo__rotulo', for: 'det-obs', texto: 'Observações' }), taObs]),
-      el('div', { classe: 'det-gestao__acoes' }, [btnObs, btnExcluir])
+      el('div', { classe: 'det-gestao__acoes' }, [btnObs, btnExcluir, btnExcluirPessoa])
     ]);
     var obsImpressa = el('p', { classe: 'obs-impressa', texto: r.observacoes || '' });
+
+    var formulario = blocoFormulario(r, ficha);
+    var historico = blocoHistorico(r, daPessoa);
+    var extrasDet = formulario || historico ? el('div', { classe: 'det-perfis det-pessoa-grade' }, [historico, formulario]) : null;
 
     if (!r.calc) {
       art.appendChild(el('div', { classe: 'det-grade det-grade--simples' }, [dados, gestao]));
       art.appendChild(el('section', { classe: 'so-imprimir det-obs-impressa' }, [el('h3', { texto: 'Observações' }), obsImpressa]));
+      if (extrasDet) art.appendChild(extrasDet);
       art.appendChild(el('p', { classe: 'aviso aviso--erro', texto: 'As respostas deste participante estão incompletas ou corrompidas; não é possível calcular o perfil.' }));
       return;
     }
@@ -1594,6 +2047,9 @@
     ]);
     art.appendChild(el('div', { classe: 'det-grade' }, [grafico, el('div', { classe: 'det-lado' }, [dados, gestao])]));
     art.appendChild(el('section', { classe: 'so-imprimir det-obs-impressa' }, [el('h3', { texto: 'Observações' }), obsImpressa]));
+    if (extrasDet) art.appendChild(extrasDet);
+    var relDet = blocoRelatoriosDetalhe(r, ficha);
+    if (relDet) art.appendChild(relDet);
 
     // Confiabilidade + respostas da confirmação
     var conf = blocoConfiabilidade(r);
@@ -1808,7 +2264,7 @@
           el('span', { classe: 'selo av-ativa ' + (p.ativa ? 'selo--verde' : ''), texto: p.ativa ? 'Ativo' : 'Desativado' }),
           el('span', { classe: 'selo proc-clickup', texto: p.clickupListId ? 'Lista do ClickUp ligada' : 'Sem lista do ClickUp' }),
           p.tipo === 'equipe' ? el('span', { classe: 'selo', texto: TIPOS.equipe }) : null,
-          p.mostrarResultado ? el('span', { classe: 'selo', texto: 'Mostra o resultado' }) : null
+          p.mostrarResultado ? el('span', { classe: 'selo', texto: 'Mostra o relatório ao participante' }) : null
         ]),
         el('p', { classe: 'av-link', texto: link }),
         el('div', { classe: 'gestao-card__acoes' }, acoes),
@@ -1871,6 +2327,33 @@
       })
     };
     var per = (p && p.periodo) || {};
+    var preset = (!p && estado.proc.preset) || {};
+
+    // Tipo do processo e empresa cadastrada (Supabase/prévia): equipe + empresa = link do teste da equipe.
+    var escTipo = criarEscolha({ id: 'proc-tipo', rotulo: 'Tipo', rotuloId: 'proc-tipo-rotulo', classe: 'escolha--campo escolha--larga',
+      valor: (p && p.tipo) || preset.tipo || 'selecao',
+      opcoes: ['selecao', 'equipe'].map(function (t) { return { valor: t, rotulo: TIPOS[t] }; }) });
+    var escEmpresa = null;
+    if (empresasOk()) {
+      var empsForm = (estado.emp.lista || []).filter(function (e) { return e.ativo !== false || (p && e.id === p.empresaId); });
+      escEmpresa = criarSeletorBusca({ id: 'proc-empresa-id', rotulo: 'Empresa cadastrada', rotuloId: 'proc-empresa-id-rotulo', vazio: 'Nenhuma (só o nome em texto)',
+        valor: (p && p.empresaId) || preset.empresaId || '', opcoes: empsForm.map(function (e) { return { valor: e.id, rotulo: e.nome, sub: e.cidade || '' }; }) });
+    }
+    var textoEquipe = el('p', { classe: 'form-secao__texto proc-equipe-texto', id: 'proc-equipe-texto', 'aria-live': 'polite' });
+    function atualizarTipo() {
+      var eqp = escTipo.botao.value === 'equipe';
+      var empId = escEmpresa ? escEmpresa.valor() : '';
+      textoEquipe.hidden = !eqp;
+      textoEquipe.textContent = !eqp ? '' : (empId ? textoEquipeEmpresa(nomeEmpresa(empId))
+        : (escEmpresa ? 'Escolha a empresa cadastrada para que as respostas entrem no cadastro dela como colaboradores.' : 'Avaliação de perfil dos colaboradores de uma empresa.'));
+    }
+    escTipo.botao.addEventListener('change', atualizarTipo);
+    if (escEmpresa) escEmpresa.aoMudar(function () {
+      var nome = nomeEmpresa(escEmpresa.valor());
+      var campoEmp = $('proc-empresa');
+      if (nome && campoEmp && !campoEmp.value.trim()) campoEmp.value = nome;
+      atualizarTipo();
+    });
 
     box.appendChild(cabecalhoVista(p ? 'Editar processo · código ' + p.codigo : 'Novo processo', p ? p.nome : 'Novo processo',
       'Preencha os dados, ligue a lista do ClickUp e diga como o relatório deve pontuar os candidatos.',
@@ -1882,7 +2365,7 @@
     form.appendChild(secaoForm('Dados do processo', null, [
       el('div', { classe: 'form-grade' }, [
         campoCom('proc-nome', 'Nome do processo', p && p.nome, { maxlength: 80, placeholder: 'Ex.: Escrevente de atendimento 2026' }),
-        campoCom('proc-empresa', 'Empresa contratante', p && empresaDe(p), { maxlength: 80 }),
+        campoCom('proc-empresa', 'Empresa contratante', (p && empresaDe(p)) || preset.empresa || '', { maxlength: 80 }),
         campoCom('proc-vaga', 'Vaga', p && p.vaga, { maxlength: 120 }),
         campoCom('proc-cidade', 'Cidade', p && p.cidade, { maxlength: 80, placeholder: 'Ex.: Boa Vista / RR' }),
         campoCom('proc-consultor', 'Consultor responsável', p && p.consultor, { maxlength: 80 }),
@@ -1890,11 +2373,68 @@
         campoCom('proc-inicio', 'Início', per.inicio, { type: 'date' }),
         campoCom('proc-fim', 'Fim', per.fim, { type: 'date' })
       ]),
+      el('div', { classe: 'form-grade' }, [
+        campoEscolha('Tipo', escTipo, 'proc-tipo-rotulo'),
+        escEmpresa ? campoEscolha('Empresa cadastrada', escEmpresa, 'proc-empresa-id-rotulo') : null
+      ]),
+      textoEquipe,
       el('div', { classe: 'form-marcas' }, [
         campoMarcar('proc-ativa', 'Processo ativo (o link aceita respostas)', p ? p.ativa : true),
-        campoMarcar('proc-mostrar', 'Mostrar resultado ao participante (resumo do perfil no final)', p ? p.mostrarResultado : false)
+        campoMarcar('proc-mostrar', 'Mostrar ao participante o relatório DISC completo dele no final (os 4 fatores, perfil principal e secundário e características; sem vaga, função ou aderência)', p ? p.mostrarResultado : false)
       ])
     ]));
+
+    // 1b. O que perguntar ao candidato (config.formulario)
+    var formBase = normalizarFormulario(cfgBase.formulario);
+    f.campos = formBase.campos;
+    f.perguntas = formBase.perguntas.map(function (q) { return { id: q.id, texto: q.texto, obrigatoria: q.obrigatoria }; });
+    var fixos = el('ul', { classe: 'pergunta-fixos', id: 'proc-campos-fixos' }, ['Nome completo', 'WhatsApp'].map(function (t) {
+      return el('li', { classe: 'pergunta-campo' }, [el('span', { classe: 'pergunta-campo__rotulo', texto: t }), el('span', { classe: 'selo selo--noite', texto: 'Sempre pedido' })]);
+    }));
+    var camposConfig = el('ul', { classe: 'pergunta-campos', id: 'proc-campos' }, CAMPOS_FORMULARIO.map(function (c) {
+      var rotuloId = 'proc-campo-' + c.chave + '-rotulo';
+      var esc = criarEscolha({ id: 'proc-campo-' + c.chave, rotulo: c.rotulo, rotuloId: rotuloId, classe: 'escolha--campo', valor: f.campos[c.chave],
+        opcoes: ['obrigatorio', 'opcional', 'oculto'].map(function (m) { return { valor: m, rotulo: MODOS_CAMPO[m] }; }) });
+      esc.botao.addEventListener('change', function () { f.campos[c.chave] = esc.botao.value; });
+      return el('li', { classe: 'pergunta-campo', 'data-campo': c.chave }, [el('span', { classe: 'pergunta-campo__rotulo', id: rotuloId, texto: c.rotulo }), esc.caixa]);
+    }));
+    var listaPerguntas = el('ol', { classe: 'config-lista', id: 'proc-perguntas' });
+    var btnAddPergunta = botao('botao--contorno', 'Adicionar pergunta', function () {
+      if (f.perguntas.length >= MAX_PERGUNTAS) return;
+      f.perguntas.push({ id: '', texto: '', obrigatoria: false });
+      desenharPerguntas();
+      var n = $('pergunta-texto-' + (f.perguntas.length - 1)); if (n) n.focus();
+    }, { id: 'btn-add-pergunta' });
+    var notaPerguntas = el('p', { classe: 'form-secao__texto', id: 'proc-perguntas-nota', 'aria-live': 'polite' });
+    function desenharPerguntas() {
+      limpar(listaPerguntas);
+      f.perguntas.forEach(function (q, i) {
+        var texto = campoCom('pergunta-texto-' + i, 'Pergunta ' + (i + 1), q.texto, { maxlength: 200, placeholder: 'Ex.: Qual sua pretensão salarial?' });
+        var entrada = texto.querySelector('input');
+        var erroQ = el('p', { classe: 'campo__erro pergunta-erro', id: 'pergunta-erro-' + i, role: 'alert' });
+        function conferir() { erroQ.textContent = perguntaSensivel(entrada.value) ? msgPerguntaSensivel(entrada.value) : ''; }
+        entrada.addEventListener('input', function () { q.texto = entrada.value; conferir(); });
+        var marca = campoMarcar('pergunta-obrig-' + i, 'Obrigatória', q.obrigatoria);
+        marca.querySelector('input').addEventListener('change', function (ev) { q.obrigatoria = ev.target.checked; });
+        listaPerguntas.appendChild(el('li', { classe: 'config-item pergunta-item', 'data-indice': String(i) }, [
+          el('div', { classe: 'config-item__topo' }, [
+            el('span', { classe: 'config-item__num tabular', texto: 'Pergunta extra ' + (i + 1) }),
+            botao('botao--perigo botao--pequeno', 'Remover', function () { f.perguntas.splice(i, 1); desenharPerguntas(); }, { 'aria-label': 'Remover pergunta ' + (i + 1) })
+          ]),
+          texto, erroQ, marca
+        ]));
+        conferir();
+      });
+      btnAddPergunta.disabled = f.perguntas.length >= MAX_PERGUNTAS;
+      notaPerguntas.textContent = f.perguntas.length >= MAX_PERGUNTAS ? 'Limite de ' + MAX_PERGUNTAS + ' perguntas extras.'
+        : 'Até ' + MAX_PERGUNTAS + ' perguntas abertas. Não pergunte dados sensíveis (sexo, gênero, estado civil, filhos, religião, gravidez, raça, saúde, antecedentes…).';
+    }
+    form.appendChild(secaoForm('O que perguntar ao candidato', 'Na identificação, antes do teste. Nome completo e WhatsApp são sempre pedidos (o WhatsApp liga as respostas da mesma pessoa).', [
+      fixos, camposConfig,
+      el('h4', { classe: 'conf-subtitulo', texto: 'Perguntas extras' }),
+      notaPerguntas, listaPerguntas, btnAddPergunta
+    ], 'form-secao--perguntas'));
+    desenharPerguntas();
 
     // 2. ClickUp
     var clickupCorpo = el('div', { classe: 'clickup-corpo', id: 'proc-clickup' });
@@ -2089,7 +2629,11 @@
         corte: numeroOuNulo($('proc-corte').value),
         faixaAvaliar: numeroOuNulo($('proc-faixa').value),
         statusFinalistas: $('proc-finalistas').value.split(',').map(function (x) { return x.trim(); }).filter(Boolean),
-        permitirAntecedentes: $('proc-antecedentes').checked
+        permitirAntecedentes: $('proc-antecedentes').checked,
+        formulario: {
+          campos: Object.assign({}, f.campos),
+          perguntas: f.perguntas.map(function (q) { return { id: q.id, texto: String(q.texto).replace(/\s+/g, ' ').trim(), obrigatoria: q.obrigatoria === true }; })
+        }
       };
       if (cfgBase.permitirSaude === true) config.permitirSaude = true;
       var dados = {
@@ -2101,12 +2645,13 @@
         contratante: $('proc-contratante').value.trim(),
         periodo: { inicio: $('proc-inicio').value, fim: $('proc-fim').value },
         clickupListId: lerLista(),
-        tipo: (p && p.tipo) || 'selecao',
+        tipo: escTipo.botao.value || 'selecao',
         mostrarResultado: $('proc-mostrar').checked,
         ativa: $('proc-ativa').checked,
         config: config
       };
       if (p) dados.id = p.id;
+      if (escEmpresa) dados.empresaId = escEmpresa.valor() || null;
       return dados;
     }
 
@@ -2117,6 +2662,7 @@
       var problema = !dados.nome ? 'Informe o nome do processo.' : validarConfig(dados.config);
       if (!problema && dados.periodo.inicio && dados.periodo.fim && dados.periodo.fim < dados.periodo.inicio) problema = 'O fim do período precisa ser depois do início.';
       if (problema) { erro.textContent = problema; return; }
+      dados.config.formulario = normalizarFormulario(dados.config.formulario);
       btnSalvar.disabled = true;
       api('processosSalvar', dados).then(function (resp) {
         var novo = resp.processo || {};
@@ -2129,6 +2675,7 @@
       }).then(function () { btnSalvar.disabled = false; });
     });
     box.appendChild(form);
+    atualizarTipo();
   }
 
   // Bloco da lista do ClickUp. Configurado: seletor em pílula com as listas. Senão: passo a passo + campo do ID.
@@ -2289,8 +2836,22 @@
         dlItem('Período', textoPeriodo(p.periodo)), dlItem('Consultor', p.consultor), dlItem('Recebe o relatório', p.contratante),
         dlItem('Lista do ClickUp', p.clickupListId, 'proc-lista-ligada'),
         dlItem('Respostas do teste DISC', String(n), 'proc-respostas'),
-        dlItem('Situação', p.ativa ? 'Ativo (link aceita respostas)' : 'Desativado', null, true)
+        dlItem('Situação', p.ativa ? 'Ativo (link aceita respostas)' : 'Desativado', null, true),
+        dlItem('Ao terminar o teste', p.mostrarResultado ? 'O participante vê o relatório DISC completo dele (sem vaga nem função)' : 'O participante não vê o resultado', 'proc-mostra-resultado', true)
       ])
+    ]);
+    var formBox = el('section', { classe: 'caixa proc-formulario', id: 'proc-formulario' }, [
+      el('h3', { classe: 'caixa__titulo', texto: 'O que o candidato responde' }),
+      el('ul', { classe: 'lista-simples proc-formulario__lista' }, resumoFormulario(cfg.formulario).filter(function (it) { return it.modo !== 'oculto'; }).map(function (it) {
+        return el('li', { 'data-modo': it.modo }, [
+          el('span', { classe: 'proc-etapas-resumo__nome', texto: (it.extra ? 'Pergunta: ' : '') + it.rotulo }),
+          el('span', { classe: 'selo' + (it.modo === 'opcional' ? '' : ' selo--noite'), texto: it.texto })
+        ]);
+      })),
+      (function () {
+        var fora = resumoFormulario(cfg.formulario).filter(function (it) { return it.modo === 'oculto'; }).map(function (it) { return it.rotulo; });
+        return fora.length ? el('p', { classe: 'texto-suave t-rotulo proc-formulario__fora', texto: 'Não perguntamos: ' + fora.join(', ') + '.' }) : null;
+      })()
     ]);
     var linkBox = el('section', { classe: 'caixa' }, [
       el('h3', { classe: 'caixa__titulo', texto: 'Link do teste DISC' }),
@@ -2324,7 +2885,7 @@
       el('p', { classe: 'texto-medio t-rotulo proc-corte', texto: 'Corte: ' + cfg.corte + ' pontos · faixa "avaliar" a partir de ' + cfg.faixaAvaliar + '.' })
     ]);
     box.appendChild(el('div', { classe: 'proc-grade' }, [
-      el('div', { classe: 'det-lado' }, [dados, linkBox]),
+      el('div', { classe: 'det-lado' }, [dados, linkBox, formBox]),
       el('div', { classe: 'det-lado' }, [configBox, blocoRelatorios(p)])
     ]));
   }
@@ -2488,6 +3049,915 @@
     });
     if (!grupos.length) area.appendChild(el('div', { classe: 'caixa vazio' }, el('p', { classe: 'vazio__texto', texto: 'Este relatório não tem textos para editar.' })));
     box.appendChild(area);
+  }
+
+  /* ---------- Seletor em pílula com busca (um ou vários; sem <select> nativo) ---------- */
+
+  // cfg: { id, rotulo, rotuloId?, opcoes: [{valor, rotulo, sub?}], multiplo?, valor? (um), valores? (vários),
+  //        vazio? (rótulo da opção "nenhum", só no modo de um), placeholder?, textoBotao? (vários) }
+  // -> { caixa, valor(), valores(), definir(v), aoMudar(fn) }
+  var buscas = [];
+  function criarSeletorBusca(cfg) {
+    var id = cfg.id;
+    var multiplo = !!cfg.multiplo;
+    var opcoes = (cfg.opcoes || []).slice();
+    if (!multiplo && cfg.vazio) opcoes.unshift({ valor: '', rotulo: cfg.vazio });
+    var sel = multiplo ? (cfg.valores || []).map(String) : [cfg.valor == null ? '' : String(cfg.valor)];
+    var ouvintes = [];
+    var aberto = false;
+    var porValor = {};
+    opcoes.forEach(function (o) { porValor[String(o.valor)] = o; });
+
+    var texto = el('span', { classe: 'escolha__texto', id: id + '-texto' });
+    var botao = el('button', {
+      type: 'button', id: id, classe: 'escolha__botao busca-sel__botao', 'aria-haspopup': 'listbox', 'aria-expanded': 'false', 'aria-controls': id + '-painel',
+      'aria-labelledby': cfg.rotuloId ? cfg.rotuloId + ' ' + id + '-texto' : null, 'aria-label': cfg.rotuloId ? null : cfg.rotulo
+    }, [texto, icone(multiplo ? 'M12 5v14M5 12h14' : ICONE_SETA, 'escolha__seta')]);
+    var busca = el('input', { id: id + '-busca', classe: 'entrada busca-sel__entrada', type: 'search', autocomplete: 'off',
+      placeholder: cfg.placeholder || 'Buscar pelo nome…', 'aria-label': 'Buscar em ' + cfg.rotulo, 'aria-controls': id + '-lista' });
+    var lista = el('ul', { role: 'listbox', id: id + '-lista', classe: 'busca-sel__lista', 'aria-label': cfg.rotulo, 'aria-multiselectable': multiplo ? 'true' : null });
+    var nada = el('p', { classe: 'busca-sel__nada', texto: 'Nada encontrado.', hidden: true });
+    var pronto = multiplo ? el('button', { type: 'button', id: id + '-pronto', classe: 'botao botao--claro botao--pequeno busca-sel__pronto', texto: 'Pronto', onclick: function () { fechar(true); } }) : null;
+    var painel = el('div', { id: id + '-painel', classe: 'busca-sel__painel vidro-janela', hidden: true }, [busca, lista, nada, pronto]);
+    var fichas = multiplo ? el('ul', { classe: 'busca-sel__fichas', id: id + '-fichas', 'aria-label': cfg.rotulo + ': escolhidos' }) : null;
+    var caixa = el('div', { classe: 'escolha busca-sel' + (multiplo ? ' busca-sel--multi' : '') + ' escolha--larga', id: id + '-caixa' }, [fichas, botao, painel]);
+
+    function avisarMudanca() {
+      botao.dispatchEvent(new Event('change', { bubbles: true }));
+      ouvintes.forEach(function (fn) { fn(); });
+    }
+    function desenharTopo() {
+      botao.value = multiplo ? sel.join(',') : sel[0];
+      if (multiplo) {
+        texto.textContent = cfg.textoBotao || 'Adicionar';
+        limpar(fichas);
+        sel.forEach(function (v) {
+          var o = porValor[v];
+          if (!o) return;
+          fichas.appendChild(el('li', { classe: 'ficha', 'data-valor': v }, [
+            el('span', { classe: 'ficha__texto', texto: o.rotulo }),
+            el('button', { type: 'button', classe: 'ficha__remover', 'aria-label': 'Remover ' + o.rotulo, 'data-valor': v, onclick: function () {
+              sel = sel.filter(function (x) { return x !== v; }); desenharTopo(); desenharLista(); avisarMudanca();
+            } }, icone('M18 6 6 18M6 6l12 12'))
+          ]));
+        });
+      } else {
+        var o2 = porValor[sel[0]];
+        texto.textContent = o2 ? o2.rotulo : (cfg.vazio || 'Escolher');
+      }
+    }
+    function desenharLista() {
+      limpar(lista);
+      var achadas = filtrarOpcoes(opcoes, busca.value);
+      achadas.forEach(function (o, i) {
+        var v = String(o.valor);
+        lista.appendChild(el('li', { role: 'option', id: id + '-op-' + i, 'data-valor': v, tabindex: '-1', classe: 'escolha__opcao busca-sel__opcao',
+          'aria-selected': sel.indexOf(v) !== -1 ? 'true' : 'false' }, [
+          el('span', { classe: 'busca-sel__rotulo' }, [el('span', { texto: o.rotulo }), o.sub ? el('span', { classe: 'busca-sel__sub', texto: o.sub }) : null]),
+          icone(ICONE_CHECK, 'escolha__check')
+        ]));
+      });
+      nada.hidden = achadas.length > 0;
+    }
+    function abrir() {
+      escolhas.forEach(function (e) { e.fechar(false); });
+      buscas.forEach(function (b) { if (b !== api3) b.fechar(false); });
+      aberto = true;
+      busca.value = '';
+      desenharLista();
+      painel.hidden = false;
+      botao.setAttribute('aria-expanded', 'true');
+      busca.focus();
+    }
+    function fechar(devolverFoco) {
+      if (!aberto) return;
+      aberto = false;
+      painel.hidden = true;
+      botao.setAttribute('aria-expanded', 'false');
+      if (devolverFoco) botao.focus();
+    }
+    function escolher(li) {
+      var v = li.getAttribute('data-valor');
+      if (multiplo) {
+        if (sel.indexOf(v) === -1) sel.push(v); else sel = sel.filter(function (x) { return x !== v; });
+        desenharTopo();
+        li.setAttribute('aria-selected', sel.indexOf(v) !== -1 ? 'true' : 'false');
+        avisarMudanca();
+        return;
+      }
+      var mudou = v !== sel[0];
+      sel = [v];
+      desenharTopo();
+      fechar(true);
+      if (mudou) avisarMudanca();
+    }
+    function itens() { return Array.prototype.slice.call(lista.querySelectorAll('[role="option"]')); }
+    botao.addEventListener('click', function () { if (aberto) fechar(false); else abrir(); });
+    botao.addEventListener('keydown', function (e) { if (e.key === 'ArrowDown') { e.preventDefault(); abrir(); } });
+    busca.addEventListener('input', desenharLista);
+    busca.addEventListener('keydown', function (e) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); var p = itens()[0]; if (p) p.focus(); }
+      else if (e.key === 'Enter') { e.preventDefault(); var u = itens(); if (u.length === 1) escolher(u[0]); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); fechar(true); }
+    });
+    lista.addEventListener('click', function (e) {
+      var li = e.target.closest ? e.target.closest('[role="option"]') : null;
+      if (li) escolher(li);
+    });
+    lista.addEventListener('keydown', function (e) {
+      var todos = itens(), i = todos.indexOf(document.activeElement);
+      if (e.key === 'ArrowDown') { e.preventDefault(); if (todos[i + 1]) todos[i + 1].focus(); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); if (i <= 0) busca.focus(); else todos[i - 1].focus(); }
+      else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (i !== -1) escolher(todos[i]); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); fechar(true); }
+      else if (e.key === 'Tab') fechar(false);
+    });
+    var api3 = {
+      caixa: caixa, botao: botao, fechar: fechar,
+      valor: function () { return sel[0] || ''; },
+      valores: function () { return sel.slice(); },
+      definir: function (v) { sel = multiplo ? (v || []).map(String) : [v == null ? '' : String(v)]; desenharTopo(); },
+      aoMudar: function (fn) { ouvintes.push(fn); }
+    };
+    buscas = buscas.filter(function (b) { return b.botao.id !== id && document.body.contains(b.caixa); });
+    buscas.push(api3);
+    desenharTopo();
+    return api3;
+  }
+  document.addEventListener('mousedown', function (e) {
+    buscas.forEach(function (x) { if (!x.caixa.contains(e.target)) x.fechar(false); });
+  });
+
+  /* ---------- Empresas: cadastro, colaboradores, ligações, organograma e relatórios ---------- */
+
+  function empresasOk() { return modoEmpresas(MODO_API, SUPABASE, SIMULADA) === 'ok'; }
+  function novoEstadoEmpresas() {
+    return { tela: 'lista', id: null, lista: null, erro: '', busca: '', equipes: {}, relatorios: {}, rel: null, indice: null };
+  }
+  function acharEmpresa(id) {
+    var l = estado.emp.lista || [];
+    for (var i = 0; i < l.length; i++) if (l[i].id === id) return l[i];
+    return null;
+  }
+  function nomeEmpresa(id) { var e = acharEmpresa(id); return e ? e.nome : ''; }
+  function consultorAtual() { return estado.usuario ? String(estado.usuario.nome || '') : ''; }
+
+  function carregarEmpresas() {
+    if (!empresasOk()) return Promise.resolve();
+    return api('listarEmpresas').then(function (resp) {
+      estado.emp.lista = resp.empresas || [];
+      estado.emp.erro = '';
+    }).catch(function (e) {
+      if (e && e.tratado) return; // sessão expirada: já voltou ao login
+      estado.emp.lista = estado.emp.lista || [];
+      estado.emp.erro = (e && e.message) || 'Não foi possível carregar as empresas.';
+    }).then(function () {
+      renderizarEmpresas();
+    });
+  }
+
+  // Equipe de uma empresa (cache por empresa; mudou algo -> esquecer e carregar de novo).
+  function carregarEquipe(id) {
+    return api('listarEquipe', id).then(function (resp) {
+      estado.emp.equipes[id] = { empresa: resp.empresa || acharEmpresa(id) || {}, colaboradores: resp.colaboradores || [], relacoes: resp.relacoes || [], historico: resp.historico || [] };
+      return estado.emp.equipes[id];
+    });
+  }
+  function esquecerEquipes() { estado.emp.equipes = {}; estado.emp.indice = null; }
+
+  function irParaEmpresas(tela, id) {
+    estado.emp.tela = tela || 'lista';
+    estado.emp.id = id || null;
+    renderizarEmpresas();
+    mostrarAba('empresas');
+    root.scrollTo(0, 0);
+    var h = $('vista-empresas').querySelector('h2');
+    if (h) { h.setAttribute('tabindex', '-1'); h.focus(); }
+  }
+
+  function renderizarEmpresas() {
+    var box = $('vista-empresas');
+    if (!box) return;
+    limpar(box);
+    if (papel() !== 'admin') return;
+    if (!empresasOk()) {
+      box.appendChild(cabecalhoVista('Cadastro', 'Empresas', null));
+      box.appendChild(el('div', { classe: 'caixa vazio', id: 'empresas-indisponivel' }, [
+        el('p', { classe: 'vazio__texto seminegrito', texto: 'Disponível com o servidor Supabase.' }),
+        el('p', { classe: 'vazio__texto t-rotulo', texto: 'Empresas, colaboradores, organograma e relatórios da equipe não existem na planilha do Google. Ligue o painel ao Supabase para usar esta aba.' })
+      ]));
+      return;
+    }
+    var t = estado.emp.tela;
+    if (t === 'relatorio' && estado.emp.rel) return renderizarRelatorioModelo(box, estado.emp.rel);
+    if (t === 'pagina' && estado.emp.id) return renderizarPaginaEmpresa(box, estado.emp.id);
+    estado.emp.tela = 'lista';
+    renderizarListaEmpresas(box);
+  }
+
+  function renderizarListaEmpresas(box) {
+    box.appendChild(cabecalhoVista('Cadastro', 'Empresas',
+      'Clientes atendidos, com os colaboradores, o organograma, a compatibilidade da equipe e os relatórios.',
+      [botao('botao--principal', 'Nova empresa', function () { janelaEmpresa(null); }, { id: 'btn-nova-empresa' })]));
+    if (estado.emp.erro) box.appendChild(el('p', { classe: 'aviso aviso--erro proc-aviso', id: 'empresas-erro', texto: estado.emp.erro }));
+    if (estado.emp.lista === null) {
+      box.appendChild(el('p', { classe: 'texto-suave t-corpo', texto: 'Carregando…' }));
+      carregarEmpresas();
+      return;
+    }
+    var entrada = el('input', { id: 'busca-empresas', classe: 'entrada', type: 'search', placeholder: 'Nome ou cidade da empresa…', autocomplete: 'off' });
+    entrada.value = estado.emp.busca;
+    box.appendChild(el('form', { classe: 'filtros', role: 'search', onsubmit: function (e) { e.preventDefault(); } }, [
+      el('label', { classe: 'filtros__busca' }, [
+        el('span', { classe: 'visualmente-oculto', texto: 'Buscar empresa' }),
+        (function () { var s = svg('svg', { viewBox: '0 0 24 24', 'aria-hidden': 'true', class: 'filtros__lupa' }); s.appendChild(svg('circle', { cx: 11, cy: 11, r: 7 })); s.appendChild(svg('path', { d: 'm20 20-3.5-3.5' })); return s; })(),
+        entrada
+      ])
+    ]));
+    var ul = el('ul', { classe: 'gestao-lista', id: 'lista-empresas' });
+    box.appendChild(ul);
+    function desenhar() {
+      limpar(ul);
+      var itens = filtrarEmpresas(estado.emp.lista, estado.emp.busca);
+      if (!estado.emp.lista.length || !itens.length) {
+        ul.appendChild(el('li', { classe: 'caixa vazio' }, el('p', { classe: 'vazio__texto', texto: estado.emp.lista.length ? 'Nenhuma empresa encontrada.' : 'Nenhuma empresa cadastrada ainda. Use "Nova empresa".' })));
+        return;
+      }
+      itens.forEach(function (e) {
+        var n = Number(e.colaboradores) || 0;
+        var abrir = function () { irParaEmpresas('pagina', e.id); };
+        ul.appendChild(el('li', { classe: 'caixa gestao-card emp-card' + (e.ativo === false ? ' gestao-linha--antigo' : ''), 'data-id': e.id, 'data-nome': e.nome }, [
+          el('div', { classe: 'gestao-card__topo' }, [
+            el('div', { classe: 'gestao-card__titulo-area' }, [
+              el('h3', { classe: 'gestao-card__titulo seminegrito' }, el('button', { type: 'button', classe: 'link-botao proc-card__nome', texto: e.nome, onclick: abrir })),
+              el('p', { classe: 'gestao-card__sub', texto: [e.cidade || '', ''].filter(Boolean).join(' · ') || 'Cidade não informada' })
+            ]),
+            el('span', { classe: 'protocolo', title: 'Colaboradores ativos' }, [
+              el('span', { classe: 'protocolo__rotulo', texto: 'Colaboradores' }),
+              el('span', { classe: 'protocolo__valor t-titulo negrito tabular emp-contador', texto: String(n) })
+            ])
+          ]),
+          e.ativo === false ? el('div', { classe: 'card-selos' }, el('span', { classe: 'selo emp-arquivada', texto: 'Arquivada' })) : null,
+          el('div', { classe: 'gestao-card__acoes' }, [
+            botao('botao--principal botao--pequeno', 'Abrir', abrir, { 'data-acao': 'abrir' }),
+            botao('botao--claro botao--pequeno', 'Editar', function () { janelaEmpresa(e); }, { 'data-acao': 'editar' }),
+            botao('botao--claro botao--pequeno', e.ativo === false ? 'Reativar' : 'Arquivar', function () { arquivarEmpresa(e); }, { 'data-acao': 'arquivar' }),
+            botao('botao--perigo botao--pequeno', 'Excluir', function () { excluirEmpresa(e); }, { 'data-acao': 'excluir' })
+          ])
+        ]));
+      });
+    }
+    entrada.addEventListener('input', function () { estado.emp.busca = entrada.value; desenhar(); });
+    desenhar();
+  }
+
+  function dadosEmpresa(e, extra) {
+    var d = { id: e.id, nome: e.nome, cidade: e.cidade || '', observacoes: e.observacoes || '', ativo: e.ativo !== false };
+    for (var k in extra || {}) d[k] = extra[k];
+    return d;
+  }
+
+  function janelaEmpresa(e) {
+    abrirJanela({
+      id: 'janela-empresa',
+      titulo: e ? 'Editar empresa' : 'Nova empresa',
+      corpo: [
+        campoCom('emp-nome', 'Nome da empresa', e && e.nome, { maxlength: 120 }),
+        campoCom('emp-cidade', 'Cidade', e && e.cidade, { maxlength: 120, placeholder: 'Ex.: Boa Vista / RR' }),
+        campoArea('emp-obs', 'Observações', e && e.observacoes, { maxlength: 2000 })
+      ],
+      botao: e ? 'Salvar alterações' : 'Criar empresa',
+      aoConfirmar: function () {
+        var nome = $('emp-nome').value.trim();
+        if (!nome) throw new Error('Informe o nome da empresa.');
+        var d = { nome: nome, cidade: $('emp-cidade').value.trim(), observacoes: $('emp-obs').value.trim(), ativo: e ? e.ativo !== false : true };
+        if (e) d.id = e.id;
+        return api('salvarEmpresa', d).then(function (resp) {
+          avisar(e ? 'Empresa salva.' : 'Empresa criada.', 'ok');
+          var nova = resp.empresa || {};
+          return carregarEmpresas().then(function () {
+            if (!e && nova.id) irParaEmpresas('pagina', nova.id);
+            else renderizarEmpresas();
+          });
+        });
+      }
+    });
+  }
+
+  function arquivarEmpresa(e) {
+    var arquivar = e.ativo !== false;
+    api('salvarEmpresa', dadosEmpresa(e, { ativo: !arquivar })).then(function () {
+      avisar(arquivar ? 'Empresa arquivada.' : 'Empresa reativada.', 'ok');
+      return carregarEmpresas().then(renderizarEmpresas);
+    }).catch(falhou);
+  }
+
+  function excluirEmpresa(e) {
+    confirmar({ titulo: 'Excluir a empresa?', texto: '"' + e.nome + '" sai do cadastro com o histórico de colaboradores, as ligações e os relatórios dela. Não dá para desfazer.', botao: 'Excluir empresa' }).then(function (ok) {
+      if (!ok) return;
+      api('excluirEmpresa', e.id).then(function () {
+        avisar('Empresa excluída.', 'ok');
+        estado.emp.tela = 'lista'; estado.emp.id = null;
+        esquecerEquipes();
+        return carregarEmpresas().then(renderizarEmpresas);
+      }).catch(falhou);
+    });
+  }
+
+  /* ----- Página da empresa ----- */
+
+  function processoEquipeDa(empresaId) {
+    var lista = estado.processos.filter(function (p) { return p.tipo === 'equipe' && String(p.empresaId || '') === String(empresaId); });
+    return lista.filter(function (p) { return p.ativa; })[0] || lista[0] || null;
+  }
+
+  function nomePorId(colabs) {
+    var m = {};
+    (colabs || []).forEach(function (c) { m[String(c.pessoaId)] = c.nome; });
+    return m;
+  }
+
+  function textoPeriodoVinculo(c) {
+    function br(d) { var x = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || '')); return x ? x[3] + '/' + x[2] + '/' + x[1] : ''; }
+    var a = br(c.inicio), b = br(c.fim);
+    return a && b ? a + ' a ' + b : (a ? 'desde ' + a : (b ? 'até ' + b : ''));
+  }
+
+  function renderizarPaginaEmpresa(box, id) {
+    var emp = acharEmpresa(id);
+    var eq = estado.emp.equipes[id];
+    if (!eq) {
+      box.appendChild(cabecalhoVista('Empresa', emp ? emp.nome : 'Empresa', null, [botao('botao--claro', '← Empresas', function () { irParaEmpresas('lista'); })]));
+      box.appendChild(el('p', { classe: 'texto-suave t-corpo', texto: 'Carregando…' }));
+      carregarEquipe(id).then(function () {
+        if (estado.emp.tela === 'pagina' && estado.emp.id === id) renderizarEmpresas();
+      }).catch(falhou);
+      return;
+    }
+    emp = emp || eq.empresa || { id: id, nome: '' };
+    var colabs = eq.colaboradores.filter(function (c) { return c.status !== 'desligado'; });
+    var nomes = nomePorId(colabs);
+    var proc = processoEquipeDa(id);
+    var linkTeste = proc ? linkDe(proc) : '';
+
+    box.appendChild(cabecalhoVista('Empresa' + (emp.cidade ? ' · ' + emp.cidade : ''), emp.nome, emp.observacoes || null, [
+      botao('botao--claro', '← Empresas', function () { irParaEmpresas('lista'); }, { id: 'btn-voltar-empresas' }),
+      botao('botao--claro', 'Editar', function () { janelaEmpresa(emp); }, { id: 'btn-editar-empresa' }),
+      botao('botao--principal', 'Adicionar colaborador', function () { janelaColaborador(emp, eq); }, { id: 'btn-add-colaborador' }),
+      botao('botao--laranja', 'Gerar relatório da equipe', function () { janelaRelatorioEquipe(emp, eq); }, { id: 'btn-relatorio-equipe', disabled: colabs.length ? null : true })
+    ]));
+    if (emp.ativo === false) box.appendChild(el('p', { classe: 'aviso proc-aviso', texto: 'Empresa arquivada: continua no cadastro, mas fica no fim da lista.' }));
+
+    // Link do teste da equipe
+    box.appendChild(el('section', { classe: 'caixa emp-bloco', id: 'emp-link' }, proc ? [
+      el('h3', { classe: 'caixa__titulo', texto: 'Link do teste da equipe' }),
+      el('p', { classe: 'form-secao__texto emp-link__texto', texto: textoEquipeEmpresa(emp.nome) }),
+      el('p', { classe: 'av-link', id: 'emp-link-teste', texto: linkTeste }),
+      el('div', { classe: 'gestao-card__acoes' }, [
+        botao('botao--claro botao--pequeno', 'Copiar link', function () { copiar(linkTeste, 'Link do teste copiado.'); }, { id: 'btn-copiar-link-equipe' }),
+        botao('botao--claro botao--pequeno', 'Copiar mensagem', function () { copiar(mensagemConvite(proc, linkTeste), 'Mensagem copiada. Cole no WhatsApp.'); }, { id: 'btn-copiar-msg-equipe' }),
+        botao('botao--claro botao--pequeno', 'Abrir o processo', function () { irParaProcessos('pagina', proc.id); })
+      ])
+    ] : [
+      el('h3', { classe: 'caixa__titulo', texto: 'Link do teste da equipe' }),
+      el('p', { classe: 'form-secao__texto emp-link__texto', texto: 'Ainda não há um processo de avaliação de equipe ligado a esta empresa. Crie um: ' + textoEquipeEmpresa(emp.nome) }),
+      el('div', { classe: 'gestao-card__acoes' }, botao('botao--contorno botao--pequeno', 'Criar link do teste da equipe', function () {
+        estado.proc = { tela: 'form', id: null, preset: { tipo: 'equipe', empresaId: id, empresa: emp.nome } };
+        renderizarProcessos(); mostrarAba('processos'); root.scrollTo(0, 0);
+      }, { id: 'btn-criar-link-equipe' }))
+    ]));
+
+    // Colaboradores ativos
+    var secColab = el('section', { classe: 'emp-colaboradores', id: 'emp-colaboradores' }, [
+      el('h3', { classe: 'emp-secao__titulo seminegrito', texto: 'Colaboradores ativos (' + colabs.length + ')' })
+    ]);
+    if (!colabs.length) {
+      secColab.appendChild(el('div', { classe: 'caixa vazio' }, el('p', { classe: 'vazio__texto', texto: 'Nenhum colaborador ainda. Adicione pelo nome e WhatsApp ou envie o link do teste da equipe.' })));
+    } else {
+      secColab.appendChild(el('ul', { classe: 'gestao-lista', id: 'lista-colaboradores' }, colabs.map(function (c) {
+        var lig = ligacoesDe(eq.relacoes, c.pessoaId);
+        var res = c.resultado && c.resultado.percentuais ? c.resultado : null;
+        var primario = res && res.codigo ? String(res.codigo).charAt(0) : '';
+        var partes = [];
+        partes.push('Líder: ' + (lig.lider && nomes[lig.lider] ? nomes[lig.lider] : '—'));
+        if (lig.liderados.length) partes.push('lidera ' + lig.liderados.length);
+        if (lig.diretos.length) partes.push(lig.diretos.length + ' direto' + (lig.diretos.length === 1 ? '' : 's'));
+        if (lig.indiretos.length) partes.push(lig.indiretos.length + ' indireto' + (lig.indiretos.length === 1 ? '' : 's'));
+        return el('li', { classe: 'caixa gestao-card colab-card', 'data-pessoa': c.pessoaId, 'data-vinculo': c.vinculoId, 'data-nome': c.nome }, [
+          el('div', { classe: 'card-topo' }, [
+            primario ? letraDisc(primario, 'card-letra') : el('span', { classe: 'letra-disc card-letra card-letra--vazia', 'aria-hidden': 'true', texto: '?' }),
+            el('div', { classe: 'colab-card__nome-area' }, [
+              el('p', { classe: 'colab-card__nome seminegrito', texto: c.nome }),
+              el('p', { classe: 'gestao-card__sub colab-card__cargo', texto: [c.cargo, c.area].filter(Boolean).join(' · ') || 'Cargo não informado' })
+            ]),
+            res ? el('span', { classe: 'badge disc-' + primario + ' colab-card__codigo', texto: res.codigo }) : el('span', { classe: 'selo colab-sem-teste', texto: 'Sem teste' })
+          ]),
+          res ? miniBarras(res.percentuais) : el('div', { classe: 'colab-card__sem' }, [
+            el('p', { classe: 'texto-suave t-rotulo', texto: 'Ainda não fez o teste DISC.' }),
+            proc ? botao('botao--contorno botao--pequeno', 'Copiar link do teste', function () { copiar(linkTeste, 'Link do teste copiado. Envie para ' + primeiroNome(c.nome) + '.'); }, { 'data-acao': 'copiar-link-teste' }) : null
+          ]),
+          el('p', { classe: 'colab-card__ligacoes t-rotulo texto-medio', texto: partes.join(' · ') }),
+          el('div', { classe: 'gestao-card__acoes' }, [
+            botao('botao--claro botao--pequeno', 'Ligações', function () { janelaLigacoes(emp, eq, c); }, { 'data-acao': 'ligacoes' }),
+            botao('botao--claro botao--pequeno', 'Editar', function () { janelaEditarColaborador(emp, c); }, { 'data-acao': 'editar' }),
+            botao('botao--claro botao--pequeno', 'Mover', function () { janelaMover(emp, c); }, { 'data-acao': 'mover' }),
+            botao('botao--claro botao--pequeno', 'Como liderar', function () { gerarLideranca(emp, eq, c); }, { 'data-acao': 'como-liderar', disabled: res ? null : true, title: res ? null : 'Precisa do teste DISC' }),
+            botao('botao--claro botao--pequeno', 'Relatório da pessoa', function () { gerarPessoa(c.pessoaId, c.nome, res, { aba: 'empresas', tela: 'pagina', id: id }, id); }, { 'data-acao': 'relatorio-pessoa', disabled: res ? null : true }),
+            botao('botao--perigo botao--pequeno', 'Desligar', function () { desligar(emp, c); }, { 'data-acao': 'desligar' })
+          ])
+        ]);
+      })));
+    }
+    box.appendChild(secColab);
+
+    // Organograma e compatibilidade
+    var CP = root.DISC_COMPATIBILIDADE;
+    var compat = null;
+    if (CP && typeof CP.montar === 'function' && colabs.length) {
+      try { compat = CP.montar(entradaCompatibilidade(emp, colabs, eq.relacoes)); } catch (e) { compat = null; }
+    }
+    box.appendChild(blocoOrganograma(compat, colabs, eq.relacoes));
+    box.appendChild(blocoCompatibilidade(compat, colabs));
+
+    // Relatórios da empresa e histórico
+    box.appendChild(el('div', { classe: 'proc-grade emp-rodape' }, [
+      blocoRelatoriosModelo({ empresaId: id }, 'e:' + id, { empresa: emp.nome }),
+      blocoHistorico2(eq)
+    ]));
+  }
+
+  function blocoHistorico2(eq) {
+    var hist = (eq.historico || []).concat(eq.colaboradores.filter(function (c) { return c.status === 'desligado'; }));
+    return el('section', { classe: 'caixa', id: 'emp-historico' }, [
+      el('h3', { classe: 'caixa__titulo', texto: 'Histórico (desligados e transferidos)' }),
+      hist.length ? el('ul', { classe: 'lista-simples' }, hist.map(function (c) {
+        return el('li', { classe: 'emp-hist', 'data-pessoa': c.pessoaId }, [
+          el('span', { classe: 'proc-etapas-resumo__nome', texto: c.nome + (c.cargo ? ' · ' + c.cargo : '') }),
+          el('span', { classe: 'texto-suave t-rotulo tabular', texto: textoPeriodoVinculo(c) || 'Desligado' })
+        ]);
+      })) : el('p', { classe: 'texto-suave t-rotulo', texto: 'Ninguém saiu desta empresa até agora.' })
+    ]);
+  }
+
+  // Organograma: o desenho do relatório (organogramaHtml) num quadro isolado; sem ele, uma árvore simples de cartões.
+  function blocoOrganograma(compat, colabs, relacoes) {
+    var sec = el('section', { classe: 'caixa caixa--ampla emp-bloco', id: 'emp-organograma' }, [el('h3', { classe: 'caixa__titulo', texto: 'Organograma' })]);
+    if (!colabs.length) { sec.appendChild(el('p', { classe: 'texto-suave t-rotulo', texto: 'Adicione colaboradores para montar o organograma.' })); return sec; }
+    var temLider = (relacoes || []).some(function (r) { return r.tipo === 'lidera'; });
+    if (!temLider) sec.appendChild(el('p', { classe: 'texto-suave t-rotulo emp-dica', texto: 'Ninguém tem líder definido ainda: use "Ligações" em cada colaborador para montar a hierarquia.' }));
+    var VIEW = root.DISC_RELATORIO_VIEW;
+    var org = compat && compat.organograma;
+    var html = '';
+    if (org && VIEW && typeof VIEW.organogramaHtml === 'function') {
+      try { html = String(VIEW.organogramaHtml(org) || ''); } catch (e) { html = ''; }
+    }
+    if (html) {
+      // organogramaHtml escapa todo texto (nomes já vêm curtos do DISC_COMPATIBILIDADE); estilos do bloco .org em admin.css.
+      var modelo = document.createElement('template');
+      modelo.innerHTML = html;
+      sec.appendChild(el('div', { classe: 'org-painel', id: 'emp-organograma-desenho' }, modelo.content));
+      return sec;
+    }
+    sec.appendChild(arvoreOrganograma(org, colabs));
+    return sec;
+  }
+
+  function arvoreOrganograma(org, colabs) {
+    var raizes = org && org.raizes ? org.raizes : colabs.map(function (c) {
+      return { id: String(c.pessoaId), nome: c.nome, cargo: c.cargo, codigo: c.resultado ? c.resultado.codigo : null, filhos: [] };
+    });
+    function no(n) {
+      var letra = n.codigo ? String(n.codigo).charAt(0) : '';
+      return el('li', { classe: 'orgf-no', 'data-pessoa': n.id }, [
+        el('div', { classe: 'orgf-cartao' }, [
+          letra ? letraDisc(letra, 'orgf-letra') : el('span', { classe: 'letra-disc orgf-letra card-letra--vazia', 'aria-hidden': 'true', texto: '?' }),
+          el('span', { classe: 'orgf-texto' }, [
+            el('span', { classe: 'orgf-nome seminegrito', texto: n.nome }),
+            el('span', { classe: 'orgf-cargo', texto: [n.cargo, n.codigo || 'sem teste'].filter(Boolean).join(' · ') })
+          ])
+        ]),
+        n.filhos && n.filhos.length ? el('ul', { classe: 'orgf-filhos' }, n.filhos.map(no)) : null
+      ]);
+    }
+    return el('ul', { classe: 'orgf-arvore', id: 'emp-organograma-arvore' }, raizes.map(no));
+  }
+
+  var NIVEIS_PAR = { fluido: 'Fluido', atencao: 'Atenção', tensao: 'Tensão', indefinido: 'Sem teste' };
+  var CLASSE_PAR = { fluido: 'selo--verde', atencao: '', tensao: 'selo--laranja', indefinido: '' };
+  var TIPOS_REL = { lidera: 'lidera', direto: 'trabalha diretamente com', indireto: 'trabalha indiretamente com' };
+
+  function blocoCompatibilidade(compat, colabs) {
+    var sec = el('section', { classe: 'caixa caixa--ampla emp-bloco', id: 'emp-compat' }, [el('h3', { classe: 'caixa__titulo', texto: 'Mapa de compatibilidade' })]);
+    if (!colabs.length) { sec.appendChild(el('p', { classe: 'texto-suave t-rotulo', texto: 'Sem colaboradores ainda.' })); return sec; }
+    if (!compat) { sec.appendChild(el('p', { classe: 'texto-suave t-rotulo', texto: 'Mapa indisponível (compatibilidade.js não carregado).' })); return sec; }
+    var eq = compat.equipe || {};
+    var niveis = eq.niveis || {};
+    sec.appendChild(el('div', { classe: 'compat-topo' }, [
+      el('div', { classe: 'caixa caixa--compacta caixa--destaque compat-harmonia' }, [
+        el('span', { classe: 'resumo__rotulo', texto: 'Harmonia da equipe' }),
+        el('span', { classe: 't-numero-grande valor-destaque', id: 'emp-harmonia', texto: eq.harmonia == null ? '—' : String(eq.harmonia) }),
+        el('span', { classe: 'resumo__nota', texto: eq.harmonia == null ? 'Defina as ligações entre quem já fez o teste' : 'de 0 a 100, média das ligações' })
+      ]),
+      el('div', { classe: 'compat-contagem' }, ['fluido', 'atencao', 'tensao'].map(function (k) {
+        return el('span', { classe: 'selo ' + CLASSE_PAR[k], 'data-nivel': k, texto: NIVEIS_PAR[k] + ': ' + (niveis[k] || 0) });
+      }).concat(el('p', { classe: 't-rotulo texto-medio compat-resumo', texto: eq.resumo || '' })))
+    ]));
+    var lacunas = (eq.falta || []).concat(eq.excesso || []);
+    if (lacunas.length) {
+      sec.appendChild(el('ul', { classe: 'compat-lacunas' }, lacunas.map(function (f) { return el('li', { texto: f.texto }); })));
+    }
+    var nomes = {};
+    colabs.forEach(function (c) { nomes[String(c.pessoaId)] = c.nome; });
+    var pares = (compat.pares || []).slice().sort(function (a, b) {
+      var ordem = { tensao: 0, atencao: 1, fluido: 2, indefinido: 3 };
+      return ordem[a.nivel] - ordem[b.nivel];
+    });
+    if (!pares.length) {
+      sec.appendChild(el('p', { classe: 'texto-suave t-rotulo emp-dica', texto: 'Nenhuma ligação definida. Em cada colaborador, use "Ligações" para dizer quem é o líder e com quem trabalha.' }));
+    } else {
+      sec.appendChild(el('ul', { classe: 'compat-pares', id: 'emp-pares' }, pares.map(function (p) {
+        var dicas = (p.dicas || []).slice(0, 3);
+        return el('li', { classe: 'compat-par', 'data-nivel': p.nivel, 'data-de': p.de, 'data-para': p.para }, [
+          el('div', { classe: 'compat-par__topo' }, [
+            el('span', { classe: 'compat-par__nomes' }, [
+              el('span', { classe: 'seminegrito', texto: nomes[p.de] || p.de }),
+              el('span', { classe: 'texto-suave', texto: ' ' + (TIPOS_REL[p.tipo] || p.tipo) + ' ' }),
+              el('span', { classe: 'seminegrito', texto: nomes[p.para] || p.para })
+            ]),
+            el('span', { classe: 'selo ' + (CLASSE_PAR[p.nivel] || ''), texto: NIVEIS_PAR[p.nivel] + (p.pontuacao != null ? ' · ' + p.pontuacao : '') })
+          ]),
+          p.riscos && p.riscos[0] ? el('p', { classe: 't-rotulo texto-medio', texto: p.riscos[0] }) : (p.sinergias && p.sinergias[0] ? el('p', { classe: 't-rotulo texto-medio', texto: p.sinergias[0] }) : null),
+          dicas.length ? el('ul', { classe: 'compat-dicas' }, dicas.map(function (d) { return el('li', { texto: d }); })) : null
+        ]);
+      })));
+    }
+    if (compat.avisos && compat.avisos.length) {
+      sec.appendChild(el('ul', { classe: 'compat-avisos' }, compat.avisos.map(function (a) { return el('li', { texto: a }); })));
+    }
+    return sec;
+  }
+
+  /* ----- Colaboradores: adicionar, editar, mover, desligar, ligações ----- */
+
+  function depoisDeMudarEquipe(empresaId, msg) {
+    avisar(msg, 'ok');
+    esquecerEquipes();
+    return Promise.all([carregarEquipe(empresaId), carregarEmpresas()]).then(function () { renderizarEmpresas(); });
+  }
+
+  function janelaColaborador(emp, eq) {
+    var ativos = {};
+    eq.colaboradores.forEach(function (c) { if (c.status !== 'desligado') ativos[String(c.pessoaId)] = true; });
+    var pessoas = pessoasDasRespostas(estado.registros).filter(function (p) { return !ativos[p.pessoaId]; });
+    var escPessoa = criarSeletorBusca({ id: 'colab-pessoa', rotulo: 'Pessoa que já respondeu', rotuloId: 'colab-pessoa-rotulo', vazio: 'Pessoa nova (preencher nome e WhatsApp)',
+      opcoes: pessoas.map(function (p) { return { valor: p.pessoaId, rotulo: p.nome, sub: [formatarTelefone(p.telefone), p.resultado ? p.resultado.codigo : 'sem teste'].filter(Boolean).join(' · '), busca: soDigitos(p.telefone) }; }) });
+    var novos = el('div', { classe: 'form-grade', id: 'colab-novos' }, [
+      campoTexto('colab-nome', 'Nome completo', { maxlength: 120 }),
+      campoTexto('colab-telefone', 'WhatsApp com DDD', { maxlength: 20, inputmode: 'tel', placeholder: '(11) 99999-8888' })
+    ]);
+    escPessoa.aoMudar(function () { novos.hidden = !!escPessoa.valor(); });
+    abrirJanela({
+      id: 'janela-colaborador',
+      titulo: 'Adicionar colaborador',
+      texto: 'Escolha alguém que já respondeu o teste ou cadastre pelo nome e WhatsApp (o teste pode vir depois).',
+      corpo: [
+        campoEscolha('Pessoa que já respondeu (opcional)', escPessoa, 'colab-pessoa-rotulo'),
+        novos,
+        el('div', { classe: 'form-grade' }, [
+          campoTexto('colab-cargo', 'Cargo', { maxlength: 120 }),
+          campoTexto('colab-area', 'Área', { maxlength: 120 })
+        ])
+      ],
+      botao: 'Adicionar',
+      aoConfirmar: function () {
+        var d = { empresaId: emp.id, cargo: $('colab-cargo').value.trim(), area: $('colab-area').value.trim() };
+        if (escPessoa.valor()) d.pessoaId = escPessoa.valor();
+        else {
+          d.nome = $('colab-nome').value.trim();
+          d.telefone = soDigitos($('colab-telefone').value);
+          if (!d.nome) throw new Error('Informe o nome do colaborador.');
+          if (d.telefone.length < 10) throw new Error('Informe o WhatsApp com DDD.');
+        }
+        return api('salvarColaborador', d).then(function () { return depoisDeMudarEquipe(emp.id, 'Colaborador adicionado.'); });
+      }
+    });
+  }
+
+  function janelaEditarColaborador(emp, c) {
+    abrirJanela({
+      id: 'janela-editar-colaborador',
+      titulo: 'Editar ' + c.nome,
+      corpo: [
+        campoCom('colab-cargo', 'Cargo', c.cargo, { maxlength: 120 }),
+        campoCom('colab-area', 'Área', c.area, { maxlength: 120 })
+      ],
+      aoConfirmar: function () {
+        return api('salvarColaborador', { empresaId: emp.id, pessoaId: c.pessoaId, cargo: $('colab-cargo').value.trim(), area: $('colab-area').value.trim() })
+          .then(function () { return depoisDeMudarEquipe(emp.id, 'Colaborador salvo.'); });
+      }
+    });
+  }
+
+  function janelaMover(emp, c) {
+    var outras = (estado.emp.lista || []).filter(function (e) { return e.id !== emp.id && e.ativo !== false; });
+    var escDestino = criarSeletorBusca({ id: 'mover-destino', rotulo: 'Empresa de destino', rotuloId: 'mover-destino-rotulo', vazio: 'Escolher a empresa',
+      opcoes: outras.map(function (e) { return { valor: e.id, rotulo: e.nome, sub: e.cidade || '' }; }) });
+    abrirJanela({
+      id: 'janela-mover',
+      titulo: 'Mover ' + c.nome,
+      texto: 'O vínculo atual com ' + emp.nome + ' vira histórico (desligado hoje) e as ligações dela aqui são apagadas. Na empresa nova ela entra como colaboradora ativa.',
+      corpo: [
+        campoEscolha('Empresa de destino', escDestino, 'mover-destino-rotulo'),
+        el('div', { classe: 'form-grade' }, [
+          campoCom('mover-cargo', 'Cargo na empresa nova', c.cargo, { maxlength: 120 }),
+          campoCom('mover-area', 'Área', c.area, { maxlength: 120 })
+        ])
+      ],
+      botao: 'Mover',
+      aoConfirmar: function () {
+        var destino = escDestino.valor();
+        if (!destino) throw new Error('Escolha a empresa de destino.');
+        return api('moverColaborador', { pessoaId: c.pessoaId, empresaId: destino, cargo: $('mover-cargo').value.trim(), area: $('mover-area').value.trim() })
+          .then(function () { return depoisDeMudarEquipe(emp.id, c.nome + ' agora está em ' + nomeEmpresa(destino) + '.'); });
+      }
+    });
+  }
+
+  function desligar(emp, c) {
+    confirmar({ titulo: 'Desligar ' + c.nome + '?', texto: 'O vínculo com ' + emp.nome + ' vai para o histórico e as ligações dela no organograma são apagadas. As respostas do teste continuam.', botao: 'Desligar' }).then(function (ok) {
+      if (!ok) return;
+      api('desligarColaborador', c.vinculoId).then(function () { return depoisDeMudarEquipe(emp.id, c.nome + ' foi desligado(a).'); }).catch(falhou);
+    });
+  }
+
+  function janelaLigacoes(emp, eq, c) {
+    var id = String(c.pessoaId);
+    var lig = ligacoesDe(eq.relacoes, id);
+    var outros = eq.colaboradores.filter(function (x) { return x.status !== 'desligado' && String(x.pessoaId) !== id; }).map(function (x) {
+      return { valor: String(x.pessoaId), rotulo: x.nome, sub: [x.cargo, x.resultado ? x.resultado.codigo : 'sem teste'].filter(Boolean).join(' · ') };
+    });
+    var escLider = criarSeletorBusca({ id: 'lig-lider', rotulo: 'Líder', rotuloId: 'lig-lider-rotulo', vazio: 'Sem líder', opcoes: outros, valor: lig.lider });
+    var escDiretos = criarSeletorBusca({ id: 'lig-diretos', rotulo: 'Trabalha diretamente com', rotuloId: 'lig-diretos-rotulo', multiplo: true, opcoes: outros, valores: lig.diretos, textoBotao: 'Adicionar pessoa' });
+    var escIndiretos = criarSeletorBusca({ id: 'lig-indiretos', rotulo: 'Trabalha indiretamente com', rotuloId: 'lig-indiretos-rotulo', multiplo: true, opcoes: outros, valores: lig.indiretos, textoBotao: 'Adicionar pessoa' });
+    abrirJanela({
+      id: 'janela-ligacoes',
+      titulo: 'Ligações de ' + c.nome,
+      texto: outros.length ? 'Quem lidera e com quem trabalha no dia a dia. Isso monta o organograma e o mapa de compatibilidade.' : 'Adicione outros colaboradores para criar ligações.',
+      corpo: [
+        campoEscolha('Líder (um)', escLider, 'lig-lider-rotulo'),
+        campoEscolha('Trabalha diretamente com', escDiretos, 'lig-diretos-rotulo'),
+        campoEscolha('Trabalha indiretamente com', escIndiretos, 'lig-indiretos-rotulo')
+      ],
+      botao: 'Salvar ligações',
+      aoConfirmar: function () {
+        var novo = aplicarLigacoes(eq.relacoes, id, { lider: escLider.valor(), diretos: escDiretos.valores(), indiretos: escIndiretos.valores() });
+        return api('salvarRelacoes', emp.id, novo).then(function () { return depoisDeMudarEquipe(emp.id, 'Ligações de ' + c.nome + ' salvas.'); });
+      }
+    });
+  }
+
+  /* ----- Relatórios dos modelos (equipe, como liderar, pessoa) ----- */
+
+  function modelos() {
+    var M = root.DISC_RELATORIO_MODELOS;
+    if (!M) throw new Error('Os modelos de relatório não foram carregados (relatorio-modelos.js).');
+    return M;
+  }
+
+  function abrirRelatorioModelo(rel) {
+    rel.id = null; rel.token = ''; rel.status = 'novo'; rel.url = '';
+    estado.emp.rel = rel;
+    irParaEmpresas('relatorio', null);
+  }
+
+  function janelaRelatorioEquipe(emp, eq) {
+    var colabs = eq.colaboradores.filter(function (c) { return c.status !== 'desligado'; });
+    var opColabs = colabs.map(function (c) { return { valor: String(c.pessoaId), rotulo: c.nome, sub: [c.cargo, c.resultado ? c.resultado.codigo : 'sem teste'].filter(Boolean).join(' · ') }; });
+    var ids = {};
+    colabs.forEach(function (c) { ids[String(c.pessoaId)] = true; });
+    var candidatos = estado.registros.filter(function (r) { return r.calc && !(r.pessoaId && ids[String(r.pessoaId)]); });
+    var escCand = criarSeletorBusca({ id: 'rel-cand', rotulo: 'Candidato', rotuloId: 'rel-cand-rotulo', vazio: 'Escolher uma resposta',
+      opcoes: candidatos.map(function (r) { return { valor: r.id, rotulo: r.nome || '(sem nome)', sub: [r.avaliacaoNome || r.vaga, r.calc.codigo, formatarData(r.fim || r.recebidoEm)].filter(Boolean).join(' · '), busca: r.protocolo }; }) });
+    var escLider = criarSeletorBusca({ id: 'rel-cand-lider', rotulo: 'Líder do candidato', rotuloId: 'rel-cand-lider-rotulo', vazio: 'Sem líder definido', opcoes: opColabs });
+    var escColegas = criarSeletorBusca({ id: 'rel-cand-colegas', rotulo: 'Colegas diretos do candidato', rotuloId: 'rel-cand-colegas-rotulo', multiplo: true, opcoes: opColabs, textoBotao: 'Adicionar colega' });
+    var marcar = campoMarcar('rel-incluir-candidato', 'Incluir o encaixe de um candidato nesta equipe', false);
+    var area = el('div', { classe: 'janela__corpo', id: 'rel-candidato-area', hidden: true }, [
+      campoEscolha('Candidato (resposta de um processo)', escCand, 'rel-cand-rotulo'),
+      campoTexto('rel-cand-cargo', 'Cargo pretendido', { maxlength: 120 }),
+      campoEscolha('Líder do candidato', escLider, 'rel-cand-lider-rotulo'),
+      campoEscolha('Colegas diretos do candidato', escColegas, 'rel-cand-colegas-rotulo')
+    ]);
+    marcar.querySelector('input').addEventListener('change', function (e) { area.hidden = !e.target.checked; });
+    abrirJanela({
+      id: 'janela-rel-equipe',
+      titulo: 'Relatório da equipe',
+      texto: 'Organograma com os perfis, compatibilidade, equilíbrio do time e como liderar cada colaborador. Gerado aqui no navegador: confira a prévia antes de publicar.',
+      corpo: [marcar, area],
+      botao: 'Gerar prévia',
+      aoConfirmar: function () {
+        var foco = null;
+        if ($('rel-incluir-candidato').checked) {
+          var r = acharRegistro(escCand.valor());
+          if (!r) throw new Error('Escolha o candidato.');
+          foco = { nome: r.nome, cargo: $('rel-cand-cargo').value.trim() || r.vaga || '', resultado: resultadoDoRegistro(r),
+            liderId: escLider.valor(), diretos: escColegas.valores() };
+          foco.relacoes = relacoesDoFoco(foco);
+        }
+        var dados = modelos().equipe({ empresa: { nome: emp.nome, cidade: emp.cidade || '' }, colaboradores: colabs, relacoes: eq.relacoes,
+          consultor: consultorAtual(), foco: foco || undefined });
+        abrirRelatorioModelo({ modelo: 'equipe', empresaId: emp.id, pessoaId: null, dados: dados, ctx: { empresa: emp.nome },
+          volta: { aba: 'empresas', tela: 'pagina', id: emp.id } });
+      }
+    });
+  }
+
+  function gerarLideranca(emp, eq, c) {
+    try {
+      var lig = ligacoesDe(eq.relacoes, c.pessoaId);
+      var l = lig.lider ? eq.colaboradores.filter(function (x) { return String(x.pessoaId) === lig.lider; })[0] : null;
+      var dados = modelos().lideranca({ pessoa: { nome: c.nome, cargo: c.cargo || '', resultado: c.resultado },
+        lider: l ? { nome: l.nome, resultado: l.resultado || null } : null, empresa: { nome: emp.nome } });
+      abrirRelatorioModelo({ modelo: 'lideranca', empresaId: emp.id, pessoaId: c.pessoaId, dados: dados, ctx: { empresa: emp.nome, pessoa: c.nome },
+        volta: { aba: 'empresas', tela: 'pagina', id: emp.id } });
+    } catch (e) { falhou(e); }
+  }
+
+  function gerarPessoa(pessoaId, nome, resultado, volta, empresaId) {
+    try {
+      var dados = modelos().pessoa({ pessoa: { nome: nome, resultado: resultado } });
+      abrirRelatorioModelo({ modelo: 'pessoa', empresaId: empresaId || null, pessoaId: pessoaId, dados: dados, ctx: { pessoa: nome }, volta: volta });
+    } catch (e) { falhou(e); }
+  }
+
+  function voltarDoRelatorio(rel) {
+    var v = rel.volta || {};
+    estado.emp.rel = null;
+    if (v.detalhe && acharRegistro(v.detalhe)) { estado.emp.tela = 'lista'; renderizarEmpresas(); mostrarAba('lista'); abrirDetalhe(v.detalhe); return; }
+    irParaEmpresas(v.tela || 'lista', v.id || null);
+  }
+
+  function salvarRelModelo(rel, publicar) {
+    var d = { modelo: rel.modelo, dados: rel.dados, publicar: !!publicar };
+    if (rel.empresaId) d.empresaId = rel.empresaId;
+    if (rel.pessoaId) d.pessoaId = rel.pessoaId;
+    if (rel.id) d.id = rel.id;
+    return api('salvarRelatorioModelo', d).then(function (resp) {
+      var r = resp.relatorio || {};
+      rel.id = r.id || rel.id;
+      rel.token = r.token || rel.token;
+      rel.status = r.status || (publicar ? 'publicado' : 'rascunho');
+      rel.url = rel.status === 'publicado' ? (r.url ? urlAbsoluta(r.url, root.location.href) : linkRelatorioModelo(root.location.href, rel.token)) : '';
+      estado.emp.relatorios = {};
+      return resp;
+    });
+  }
+
+  function renderizarRelatorioModelo(box, rel) {
+    var publicado = rel.status === 'publicado';
+    var titulo = (rel.dados && rel.dados.titulo) || MODELOS_REL[rel.modelo];
+    var acoes = [botao('botao--claro', '← Voltar', function () { voltarDoRelatorio(rel); }, { id: 'btn-voltar-relatorio' })];
+    var btnRasc = botao(publicado ? 'botao--claro' : 'botao--principal', publicado ? 'Voltar para rascunho' : 'Salvar rascunho', function () {
+      btnRasc.disabled = true;
+      salvarRelModelo(rel, false).then(function () {
+        avisar(publicado ? 'O relatório voltou a ser rascunho: o link não abre mais.' : 'Rascunho salvo.', 'ok');
+        renderizarEmpresas();
+      }).catch(function (e) { falhou(e); btnRasc.disabled = false; });
+    }, { id: 'btn-rel-rascunho' });
+    acoes.push(btnRasc);
+    if (!publicado) {
+      var btnPub = botao('botao--laranja', 'Publicar', function () {
+        btnPub.disabled = true;
+        salvarRelModelo(rel, true).then(function () {
+          avisar('Relatório publicado. Copie o link e envie.', 'ok');
+          renderizarEmpresas();
+        }).catch(function (e) { falhou(e); btnPub.disabled = false; });
+      }, { id: 'btn-rel-publicar' });
+      acoes.push(btnPub);
+    }
+    var sub = [MODELOS_REL[rel.modelo], rel.ctx && rel.ctx.empresa, publicado ? 'publicado' : (rel.status === 'rascunho' ? 'rascunho salvo' : 'ainda não salvo')].filter(Boolean).join(' · ');
+    box.appendChild(cabecalhoVista(sub, titulo, 'Prévia do documento como quem recebe vai ver. Salve como rascunho ou publique para gerar o link.', acoes));
+
+    if (publicado && rel.url) {
+      var ctx = { empresa: rel.ctx && rel.ctx.empresa, pessoa: rel.ctx && rel.ctx.pessoa, consultor: consultorAtual() };
+      var msg = mensagemRelatorioModelo(rel.modelo, ctx, rel.url);
+      box.appendChild(el('section', { classe: 'caixa caixa--destaque rel-publicado', id: 'rel-modelo-publicado' }, [
+        el('h3', { classe: 'caixa__titulo', texto: 'Link do relatório' }),
+        el('p', { classe: 'av-link', id: 'rel-modelo-link', texto: rel.url }),
+        el('p', { classe: 'rel-mensagem', id: 'rel-modelo-mensagem', texto: msg }),
+        el('div', { classe: 'gestao-card__acoes' }, [
+          botao('botao--principal botao--pequeno', 'Copiar link', function () { copiar(rel.url, 'Link do relatório copiado.'); }, { id: 'btn-rel-copiar-link' }),
+          botao('botao--claro botao--pequeno', 'Copiar mensagem para WhatsApp', function () { copiar(msg, 'Mensagem copiada. Cole no WhatsApp.'); }, { id: 'btn-rel-copiar-msg' }),
+          el('a', { classe: 'botao botao--claro botao--pequeno', href: rel.url, target: '_blank', rel: 'noopener', texto: 'Abrir relatório' })
+        ])
+      ]));
+    }
+
+    var frame = el('iframe', { classe: 'previa-doc', id: 'rel-modelo-previa', title: 'Prévia do relatório', sandbox: 'allow-same-origin', loading: 'eager' });
+    frame.addEventListener('load', function () {
+      try { var d = frame.contentDocument; if (d && d.documentElement) frame.style.height = Math.max(600, d.documentElement.scrollHeight) + 'px'; } catch (e) { /* altura padrão */ }
+    });
+    frame.srcdoc = documentoPrevia(rel.dados);
+    box.appendChild(el('div', { classe: 'caixa caixa--compacta previa-moldura' }, frame));
+
+    var filtro = rel.modelo === 'equipe' ? { empresaId: rel.empresaId } : { pessoaId: rel.pessoaId };
+    var chave = rel.modelo === 'equipe' ? 'e:' + rel.empresaId : 'p:' + rel.pessoaId;
+    box.appendChild(el('div', { classe: 'emp-rodape' }, blocoRelatoriosModelo(filtro, chave, rel.ctx || {})));
+  }
+
+  // Lista dos relatórios salvos (de uma empresa ou de uma pessoa), com link, mensagem e excluir.
+  function blocoRelatoriosModelo(filtro, chave, ctx) {
+    var idSec = 'rel-modelos-' + chave.replace(/[^A-Za-z0-9_-]/g, '_');
+    var sec = el('section', { classe: 'caixa emp-relatorios', id: idSec }, [el('h3', { classe: 'caixa__titulo', texto: filtro.empresaId ? 'Relatórios da empresa' : 'Relatórios salvos desta pessoa' })]);
+    var lista = estado.emp.relatorios[chave];
+    if (!lista) {
+      sec.appendChild(el('p', { classe: 'texto-suave t-rotulo', texto: 'Carregando…' }));
+      api('listarRelatoriosModelo', filtro).then(function (resp) {
+        estado.emp.relatorios[chave] = resp.relatorios || [];
+        var velho = $(idSec);
+        if (velho) velho.parentNode.replaceChild(blocoRelatoriosModelo(filtro, chave, ctx), velho);
+      }).catch(function (e) {
+        if (e && e.tratado) return;
+        var velho = $(idSec);
+        if (velho) { var p = velho.querySelector('p'); if (p) p.textContent = (e && e.message) || 'Não foi possível listar os relatórios.'; }
+      });
+      return sec;
+    }
+    if (!lista.length) { sec.appendChild(el('p', { classe: 'texto-suave t-rotulo', texto: 'Nenhum relatório salvo ainda.' })); return sec; }
+    sec.appendChild(el('ul', { classe: 'lista-simples' }, lista.map(function (r) {
+      var pub = r.status === 'publicado';
+      var url = pub ? (r.url ? urlAbsoluta(r.url, root.location.href) : linkRelatorioModelo(root.location.href, r.token)) : '';
+      return el('li', { classe: 'rel-linha', 'data-id': r.id, 'data-modelo': r.modelo, 'data-status': pub ? 'publicado' : 'rascunho' }, [
+        el('div', { classe: 'rel-linha__texto' }, [
+          el('span', { classe: 'selo ' + (pub ? 'selo--verde' : ''), texto: pub ? 'Publicado' : 'Rascunho' }),
+          el('span', { classe: 't-rotulo', texto: r.titulo || MODELOS_REL[r.modelo] || 'Relatório' }),
+          el('span', { classe: 'texto-suave t-rotulo tabular', texto: formatarData(r.atualizadoEm || r.criadoEm) })
+        ]),
+        el('div', { classe: 'gestao-card__acoes' }, [
+          pub ? botao('botao--claro botao--pequeno', 'Copiar link', function () { copiar(url, 'Link do relatório copiado.'); }, { 'data-acao': 'copiar-link' }) : null,
+          pub ? botao('botao--claro botao--pequeno', 'Copiar mensagem', function () {
+            copiar(mensagemRelatorioModelo(r.modelo, { empresa: ctx.empresa, pessoa: ctx.pessoa, consultor: consultorAtual() }, url), 'Mensagem copiada. Cole no WhatsApp.');
+          }, { 'data-acao': 'copiar-mensagem' }) : null,
+          pub ? el('a', { classe: 'botao botao--claro botao--pequeno', href: url, target: '_blank', rel: 'noopener', texto: 'Abrir' }) : null,
+          botao('botao--perigo botao--pequeno', 'Excluir', function () {
+            confirmar({ titulo: 'Excluir o relatório?', texto: 'O link deixa de abrir e o relatório sai da lista. Dá para gerar outro depois.', botao: 'Excluir relatório' }).then(function (ok) {
+              if (!ok) return;
+              api('excluirRelatorioModelo', r.id).then(function () {
+                avisar('Relatório excluído.', 'ok');
+                if (estado.emp.rel && estado.emp.rel.id === r.id) { estado.emp.rel.id = null; estado.emp.rel.token = ''; estado.emp.rel.status = 'novo'; estado.emp.rel.url = ''; }
+                estado.emp.relatorios = {};
+                renderizarEmpresas();
+              }).catch(falhou);
+            });
+          }, { 'data-acao': 'excluir' })
+        ])
+      ]);
+    })));
+    return sec;
+  }
+
+  // Vínculo ativo de uma pessoa (procura nas equipes das empresas; cache até a próxima mudança).
+  function acharVinculo(pessoaId) {
+    if (!empresasOk() || !pessoaId) return Promise.resolve(null);
+    if (!estado.emp.indice) {
+      estado.emp.indice = (estado.emp.lista ? Promise.resolve() : carregarEmpresas()).then(function () {
+        var idx = {};
+        return Promise.all((estado.emp.lista || []).map(function (e) {
+          var eq = estado.emp.equipes[e.id];
+          return (eq ? Promise.resolve(eq) : carregarEquipe(e.id)).then(function (q) {
+            q.colaboradores.forEach(function (c) { if (c.status !== 'desligado') idx[String(c.pessoaId)] = { empresa: e, equipe: q, colaborador: c }; });
+          }).catch(function () { /* empresa sem acesso: ignora */ });
+        })).then(function () { return idx; });
+      });
+    }
+    return estado.emp.indice.then(function (idx) { return idx[String(pessoaId)] || null; });
+  }
+
+  // Atalhos no detalhe de uma resposta: relatório da pessoa e, se ela tem vínculo ativo, como liderar.
+  function blocoRelatoriosDetalhe(r, ficha) {
+    if (!empresasOk() || !r.calc || !r.pessoaId || papel() !== 'admin') return null;
+    var nome = ficha.nome || r.nome || '';
+    var acoes = el('div', { classe: 'det-gestao__acoes', id: 'det-relatorios-acoes' }, [
+      botao('botao--claro', 'Relatório da pessoa', function () {
+        gerarPessoa(r.pessoaId, nome, resultadoDoRegistro(r), { detalhe: r.id }, null);
+      }, { id: 'btn-det-rel-pessoa' })
+    ]);
+    var nota = el('p', { classe: 'texto-suave t-rotulo', id: 'det-vinculo', texto: 'Procurando vínculo com empresa…' });
+    acharVinculo(r.pessoaId).then(function (v) {
+      if (!document.body.contains(acoes)) return;
+      if (!v) { nota.textContent = 'Sem vínculo ativo com empresa cadastrada.'; return; }
+      nota.textContent = 'Colaborador(a) de ' + v.empresa.nome + (v.colaborador.cargo ? ' · ' + v.colaborador.cargo : '') + '.';
+      acoes.appendChild(botao('botao--claro', 'Como liderar', function () {
+        var c = v.colaborador;
+        if (!c.resultado) c = Object.assign({}, c, { resultado: resultadoDoRegistro(r) });
+        gerarLideranca(v.empresa, v.equipe, c);
+        if (estado.emp.rel) estado.emp.rel.volta = { detalhe: r.id };
+      }, { id: 'btn-det-como-liderar' }));
+    });
+    return el('section', { classe: 'caixa nao-imprimir det-gestao surgir', id: 'det-relatorios-modelo' }, [
+      el('h3', { classe: 'caixa__titulo', texto: 'Relatórios desta pessoa' }),
+      nota,
+      acoes
+    ]);
   }
 
   /* ---------- Usuários (admin) ---------- */
@@ -2723,7 +4193,7 @@
       var p = v.p;
       if (acharRegistro(String(p.id))) { duplicados++; return; }
       var reg = {};
-      ['v', 'id', 'nome', 'telefone', 'idade', 'funcao', 'empresa', 'vaga', 'consentimento', 'inicio', 'fim', 'duracaoSeg', 'respostas', 'validacao', 'avaliacao'].forEach(function (k) {
+      ['v', 'id', 'nome', 'telefone', 'idade', 'funcao', 'empresa', 'email', 'cidade', 'extras', 'vaga', 'consentimento', 'inicio', 'fim', 'duracaoSeg', 'respostas', 'validacao', 'avaliacao'].forEach(function (k) {
         if (p[k] != null) reg[k] = typeof p[k] === 'object' ? JSON.stringify(p[k]) : p[k];
       });
       reg.id = String(reg.id);
@@ -2776,7 +4246,7 @@
   function renderizarTudo() {
     renderizarLista();
     renderizarComparativo();
-    if (MODO_API && papel() === 'admin') { renderizarProcessos(); renderizarUsuarios(); }
+    if (MODO_API && papel() === 'admin') { renderizarProcessos(); renderizarEmpresas(); renderizarUsuarios(); }
     if (estado.abertoId) renderizarDetalhe();
   }
 
@@ -2822,6 +4292,7 @@
     estado.proc = { tela: 'lista', id: null };
     estado.relatorios = {};
     estado.editor = null;
+    estado.emp = novoEstadoEmpresas();
     fecharMenuUsuario();
     clearTimeout(avisoTimer);
     $('aviso-geral').hidden = true;
@@ -2926,6 +4397,7 @@
   }
 
   function iniciar() {
+    estado.emp = novoEstadoEmpresas();
     if (CONFIG.EMPRESA) $('nome-empresa').textContent = '· ' + CONFIG.EMPRESA;
     $('modo-indicador').textContent = SIMULADA ? 'Prévia (dados de demonstração)'
       : (SUPABASE ? 'Conectado ao servidor' : (MODO_API ? 'Conectado à planilha' : 'Modo local (importar códigos)'));
@@ -2945,6 +4417,7 @@
         var aba = b.getAttribute('data-aba');
         // A aba Processos sempre volta para a lista (o rascunho aberto continua guardado na memória).
         if (aba === 'processos' && estado.proc.tela !== 'lista') { estado.proc = { tela: 'lista', id: null }; renderizarProcessos(); }
+        if (aba === 'empresas' && estado.emp.tela !== 'lista') { estado.emp.tela = 'lista'; estado.emp.id = null; renderizarEmpresas(); }
         mostrarAba(aba);
       });
     });

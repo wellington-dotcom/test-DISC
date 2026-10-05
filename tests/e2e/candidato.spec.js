@@ -91,13 +91,7 @@ test.describe('Candidato (celular, sem API)', () => {
     }
     await responderConfirmacao(page);
 
-    // Revisão
-    await expect(page.locator('h1')).toHaveText('Revise suas respostas');
-    await expect(page.locator('.resumo-dados')).toContainText('Maria Conceição Ávila');
-    await expect(page.locator('.resumo-dados')).toContainText('(11) 98765-4321');
-    await expect(page.locator('.revisao-item')).toHaveCount(25);
-    await expect(page.locator('.revisao-item.incompleto')).toHaveCount(0);
-
+    // Sem tela de revisão: "Enviar e finalizar" envia direto.
     await page.locator('[data-acao="enviar"]').click();
     await expect(page.locator('h1')).toHaveText('Obrigado, Maria!');
     // Sem servidor não há protocolo: plano B com o código de segurança longo.
@@ -115,6 +109,9 @@ test.describe('Candidato (celular, sem API)', () => {
     expect(payload.idade).toBe(30);
     expect(payload.funcao).toBe('');
     expect(payload.empresa).toBe('');
+    expect(payload.email).toBe('');
+    expect(payload.cidade).toBe('');
+    expect(payload.extras).toEqual([]);
     expect(payload.consentimento).toBe(true);
     expect(payload.respostas).toBe('1243'.repeat(25)); // D=1, I=2, S=4, C=3
     expect(payload.resultado.codigo).toBe('SC');
@@ -159,10 +156,6 @@ test.describe('Candidato (celular, com API simulada)', () => {
     });
 
     await fazerTesteCompleto(page, { nome: 'José Antônio Pereira', telefone: '2133334444', idade: '52', funcao: '  Auxiliar de caixa ', empresa: 'Mercado Bom Preço' }, ['D', 'I', 'S', 'C']);
-    // Revisão mostra idade, função e empresa no resumo de dados
-    await expect(page.locator('.resumo-dados')).toContainText('52 anos');
-    await expect(page.locator('.resumo-dados')).toContainText('Auxiliar de caixa');
-    await expect(page.locator('.resumo-dados')).toContainText('Mercado Bom Preço');
     await page.locator('[data-acao="enviar"]').click();
 
     // Primeira tentativa falha e mostra o erro; a segunda dá certo.
@@ -417,15 +410,6 @@ test.describe('Candidato: lista ordenável dos grupos', () => {
       await page.locator('[data-acao="proximo"]').click();
     }
     await responderConfirmacao(page);
-    // Revisão mostra 4 → 1 e "Alterar" volta ao grupo
-    await expect(page.locator('.revisao-item').first().locator('.revisao-ordem li')).toHaveCount(4);
-    await expect(page.locator('.revisao-item').first().locator('.mini-nota')).toHaveText(['4', '3', '2', '1']);
-    await page.locator('[data-acao="editar-grupo"][data-grupo="3"]').click();
-    await expect(page.locator('.progresso-topo')).toContainText('Grupo 4 de 25');
-    expect(await ordemNaTela(page)).toEqual(ordem);
-    await page.locator('[data-acao="proximo"]').click();
-    await expect(page.locator('h1')).toHaveText('Revise suas respostas');
-
     await page.locator('[data-acao="enviar"]').click();
     const codigo = await page.locator('textarea#codigo').inputValue();
     const payload = await page.evaluate((c) => window.DISC_CODEC.decode(c), codigo);
@@ -621,7 +605,7 @@ test.describe('Candidato: dicas (botão "i")', () => {
 });
 
 test.describe('Candidato: modo demonstração', () => {
-  test('GRUPOS_DEMONSTRACAO=3: responde 3 grupos, revisão mostra 3 e o payload vai com os 25', async ({ page }) => {
+  test('GRUPOS_DEMONSTRACAO=3: responde 3 grupos, confirma e o payload vai com os 25', async ({ page }) => {
     const erros = coletarErros(page);
     await configurar(page, { GRUPOS_DEMONSTRACAO: 3 });
     await page.goto('/index.html');
@@ -642,8 +626,6 @@ test.describe('Candidato: modo demonstração', () => {
     await expect(page.locator('.faixa-demo')).toHaveText(faixa);
     await responderConfirmacao(page);
     await expect(page.locator('.faixa-demo')).toHaveText(faixa);
-    await expect(page.locator('.revisao-item')).toHaveCount(3);
-    await expect(page.locator('.revisao-item.incompleto')).toHaveCount(0);
     await expect(page.locator('[data-acao="enviar"]')).toBeEnabled();
     const salvo = await page.evaluate(() => JSON.parse(localStorage.getItem('disc_progresso_v1')));
     expect(salvo.respondidos.every(Boolean)).toBe(true);
@@ -699,13 +681,13 @@ test.describe('Candidato: link de avaliação (API simulada)', () => {
     }
     // Retratos: escolhe sempre o de maior total (D > I > S > C); frases: tudo 4, menos a 2ª (2)
     await responderConfirmacao(page, { escolher: (letras) => letras.slice().sort((a, b) => ordem.indexOf(a) - ordem.indexOf(b))[0], nota: (it, k) => (k === 1 ? 2 : 4) });
-    await expect(page.locator('.resumo-dados')).toContainText('Recepção');
     await page.locator('[data-acao="enviar"]').click();
     await expect(page.locator('h1')).toHaveText('Obrigado, Rita!');
     await expect(page.locator('.agradecimento')).toContainText('O recrutador entrará em contato');
     await expect(page.locator('#protocolo')).toBeVisible();
     // SEL1 não mostra o resultado
-    await expect(page.locator('.resumo-perfil, .perfil')).toHaveCount(0);
+    await expect(page.locator('.relatorio-candidato')).toHaveCount(0);
+    expect((await page.evaluate(() => JSON.parse(sessionStorage.getItem('disc_concluido_v1')))).relatorio).toBeUndefined();
 
     const linha = await linhaSimulada(page, 'Rita Exemplo Seleção');
     expect(linha).not.toBeNull();
@@ -730,28 +712,37 @@ test.describe('Candidato: link de avaliação (API simulada)', () => {
     expect(erros).toEqual([]);
   });
 
-  test('#a-EQP1 (avaliação de equipe) esconde vaga e empresa e mostra o resumo do perfil no final', async ({ page }) => {
+  test('#a-EQP1 (avaliação de equipe) esconde vaga e empresa e mostra o relatório DISC completo no final', async ({ page }) => {
     const erros = coletarErros(page);
     await configurar(page, { API_URL: 'simulada' });
     await fazerTesteCompleto(page, { nome: 'Caio Exemplo Equipe', telefone: '11987654321', funcao: 'Vendedor' }, ['I', 'S', 'D', 'C'], {
       caminho: '/index.html#a-EQP1',
       confirmacao: {}
     });
-    await expect(page.locator('.resumo-dados')).toContainText('Seu cargo/função');
-    await expect(page.locator('.resumo-dados')).not.toContainText('Vaga pretendida');
     await page.locator('[data-acao="enviar"]').click();
     await expect(page.locator('h1')).toHaveText('Obrigado, Caio!');
     await expect(page.locator('.agradecimento')).toContainText('Obrigado por participar da avaliação da equipe.');
-    const resumo = page.locator('.resumo-perfil');
-    await expect(resumo).toBeVisible();
-    const retrato = await page.evaluate(() => window.DISC_VALIDACAO.retratos.I);
-    await expect(resumo.locator('.perfil-retrato')).toHaveText(retrato);
-    await expect(resumo.locator('.tags li').first()).toBeVisible();
-    // Nunca o guia de liderança nem a confiabilidade
-    await expect(resumo).not.toContainText(/lideran|confiabilidade/i);
-    await expect(page.locator('.rodape-nota')).toHaveText('Seus dados serão usados apenas nesta avaliação e excluídos ao final.');
+    // Relatório completo: os 4 fatores (I=40, S=30, D=20, C=10), estilo principal e secundário
+    const rel = page.locator('.relatorio-candidato');
+    await expect(rel).toBeVisible();
+    await expect(rel.locator('.rel-fator')).toHaveCount(4);
+    await expect(rel.locator('.rel-fator .rel-fator-nome')).toHaveText(['Dominância', 'Influência', 'Estabilidade', 'Conformidade']);
+    await expect(rel.locator('.rel-fator .rel-pct')).toHaveText(['20%', '40%', '30%', '10%']);
+    await expect(rel).toHaveAttribute('data-codigo', 'IS');
+    await expect(rel.locator('.rel-titulo')).toHaveText('Caio, seu estilo é Influente, com traços de Estável');
+    // Comunicação com os outros 3 perfis
+    await expect(rel.locator('.rel-com')).toHaveCount(3);
+    await expect(rel.locator('.rel-com[data-letra="I"]')).toHaveCount(0);
+    // Nunca o guia de liderança, a confiabilidade, nem vaga/função/aderência
+    await expect(rel).not.toContainText(/lideran|confiabilidade|aderência|vaga|Vendedor/i);
+    await expect(page.locator('.rodape-nota')).toHaveText('Seu resultado fica no cadastro da equipe da empresa e é compartilhado com ela. Você pode pedir a exclusão a qualquer momento.');
+    // Na aba fica só percentuais + código + primeiro nome (sem telefone)
+    const sessao = await page.evaluate(() => sessionStorage.getItem('disc_concluido_v1'));
+    expect(sessao).not.toContain('98765');
+    expect(JSON.parse(sessao).relatorio).toEqual({ percentuais: { D: 20, I: 40, S: 30, C: 10 }, codigo: 'IS' });
     await page.reload();
-    await expect(page.locator('.resumo-perfil .perfil-retrato')).toHaveText(retrato);
+    await expect(page.locator('.relatorio-candidato .rel-fator')).toHaveCount(4);
+    await expect(page.locator('.relatorio-candidato .rel-titulo')).toContainText('Caio');
     const linha = await linhaSimulada(page, 'Caio Exemplo Equipe');
     expect(linha.avaliacao).toBe('EQP1');
     expect(linha.empresa).toBe('');
@@ -761,7 +752,7 @@ test.describe('Candidato: link de avaliação (API simulada)', () => {
     await page.goto('about:blank');
     await page.goto('/index.html#a-SEL1');
     await expect(page.locator('.boasvindas-sobre')).toHaveText('Processo seletivo · Clínica Exemplo');
-    await expect(page.locator('.resumo-perfil')).toHaveCount(0);
+    await expect(page.locator('.relatorio-candidato')).toHaveCount(0);
     await page.goto('about:blank');
     await page.goto('/index.html#a-EQP1');
     await expect(page.locator('.boasvindas-sobre')).toHaveText('Avaliação de equipe · Clínica Exemplo');
@@ -777,7 +768,8 @@ test.describe('Candidato: link de avaliação (API simulada)', () => {
     await expect(page.locator('#empresa')).toHaveCount(0);
     await expect(page.locator('label[for="funcao"]')).toContainText('Seu cargo/função');
     await expect(page.locator('.subtitulo').first()).toHaveText('Precisamos destes dados para vincular o resultado à avaliação da equipe.');
-    await expect(page.locator('.consentimento')).toContainText('apenas nesta avaliação da Clínica Exemplo, conduzida pela Notus');
+    await expect(page.locator('.consentimento')).toContainText('na avaliação da equipe da Clínica Exemplo, conduzida pela Notus');
+    await expect(page.locator('.consentimento')).toContainText('compartilhado com a empresa');
   });
 
   test('código inexistente, desativado ou mal escrito mostra a tela de link inválido', async ({ page }) => {
@@ -824,6 +816,8 @@ test.describe('Candidato: etapa de confirmação', () => {
     await expect(page.locator('.tela-confirmacao')).not.toContainText(/DISC|Dominante|Influente|Estável|Cauteloso/);
     const proximo = page.locator('[data-acao="conf-proximo"]');
     await expect(proximo).toBeDisabled();
+    // 1ª tela: sem "Voltar" aos grupos (não há revisão)
+    await expect(page.locator('[data-acao="conf-anterior"]')).toHaveCount(0);
     // Cartões: posição relativa ao card da tela (a página pode rolar ao tocar); botões: barra fixa no celular.
     const caixas = () => page.locator('.retrato, [data-acao="conf-anterior"], [data-acao="conf-proximo"]').evaluateAll((els) => els.map((e) => {
       const r = e.getBoundingClientRect();
@@ -855,15 +849,17 @@ test.describe('Candidato: etapa de confirmação', () => {
     await expect(page.locator('.retrato[aria-pressed="true"]')).toHaveCount(3);
     await proximo.click();
 
-    // Tela 2: frases com escala
+    // Tela 2: frases com escala; "Enviar e finalizar" no lugar do avançar
     await expect(page.locator('.progresso-topo')).toContainText('Confirmação 2 de 2');
+    const enviar = page.locator('[data-acao="enviar"]');
     await expect(page.locator('.frase')).toHaveCount(4);
     await expect(page.locator('.frase').first().locator('.escala-opcao')).toHaveCount(5);
     await expect(page.locator('.escala-legenda').first()).toBeVisible();   // celular: legenda acima das pílulas 1..5
     await expect(page.locator('.escala-opcao').first()).toHaveText('1Discordo totalmente');
     await expect(page.locator('.escala-opcao').first()).toHaveAttribute('aria-label', '1: Discordo totalmente');
-    await expect(proximo).toBeDisabled();
-    const caixas2 = () => page.locator('.escala-opcao, [data-acao="conf-proximo"]').evaluateAll((els) => els.map((e) => {
+    await expect(enviar).toBeDisabled();
+    await expect(enviar).toHaveText('Enviar e finalizar');
+    const caixas2 = () => page.locator('.escala-opcao, [data-acao="enviar"]').evaluateAll((els) => els.map((e) => {
       const r = e.getBoundingClientRect();
       const base = e.closest('.barra-nav') ? { x: 0, y: 0 } : document.querySelector('.tela-confirmacao').getBoundingClientRect();
       return [Math.round(r.x - base.x), Math.round(r.y - base.y), Math.round(r.width), Math.round(r.height)];
@@ -871,7 +867,7 @@ test.describe('Candidato: etapa de confirmação', () => {
     const antes2 = await caixas2();
     for (let k = 0; k < 4; k++) {
       await page.locator('.escala-opcao[data-item="' + k + '"][data-nota="' + (k + 2) + '"]').click();
-      if (k < 3) await expect(proximo).toBeDisabled();
+      if (k < 3) await expect(enviar).toBeDisabled();
     }
     await page.waitForTimeout(250);
     const depois2 = await caixas2();
@@ -882,15 +878,10 @@ test.describe('Candidato: etapa de confirmação', () => {
     await expect(page.locator('.retrato[aria-pressed="true"]')).toHaveCount(3);
     await proximo.click();
     await expect(page.locator('.escala-opcao[aria-pressed="true"]')).toHaveCount(4);
-    await expect(proximo).toHaveText('Revisar respostas');
-    await proximo.click();
-    await expect(page.locator('h1')).toHaveText('Revise suas respostas');
-    // Voltar da revisão leva à confirmação
-    await page.locator('[data-acao="voltar-teste"]').click();
-    await expect(page.locator('.progresso-topo')).toContainText('Confirmação 2 de 2');
-    await proximo.click();
-
-    await page.locator('[data-acao="enviar"]').click();
+    await expect(enviar).toBeEnabled();
+    // Envia direto: nada de "Revise suas respostas"
+    await enviar.click();
+    await expect(page.locator('h1')).toHaveText('Obrigado, Maria!');
     const codigo = await page.locator('textarea#codigo').inputValue();
     const payload = await page.evaluate((c) => window.DISC_CODEC.decode(c), codigo);
     expect(payload.avaliacao).toBe('');
@@ -933,4 +924,173 @@ test('boas-vindas tem link discreto para a área do recrutador', async ({ page }
   const link = page.locator('.acesso-recrutador a');
   await expect(link).toHaveText('Área do recrutador');
   await expect(link).toHaveAttribute('href', 'admin.html');
+});
+
+test.describe('Candidato: formulário do processo, fim sem revisão e relatório completo', () => {
+  const FORMULARIO = {
+    campos: { idade: 'oculto', funcao: 'oculto', empresa: 'opcional', email: 'obrigatorio', cidade: 'opcional' },
+    perguntas: [
+      { id: 'p1', texto: 'Qual sua pretensão salarial?', obrigatoria: true },
+      { id: 'p2', texto: 'Como soube da vaga?', obrigatoria: false },
+      { id: 'p3', texto: 'Você tem filhos?', obrigatoria: true }   // dado sensível: nunca aparece
+    ]
+  };
+
+  async function linkComFormulario(page, formulario, mostrarResultado) {
+    await configurar(page, { API_URL: API_FALSA });
+    return simularApi(page, (corpo) => {
+      if (corpo.acao === 'avaliacaoPublica') {
+        return { ok: true, avaliacao: { codigo: 'FRM1', nome: 'Recepção', tipo: 'selecao', empresaNome: 'Clínica Teste', mostrarResultado: !!mostrarResultado, formulario } };
+      }
+      return { ok: true, id: corpo.payload && corpo.payload.id, protocolo: '58M' };
+    });
+  }
+
+  test('campos configurados: oculto some, obrigatório bloqueia, pergunta extra vai no payload; relatório com os 4 fatores', async ({ page }) => {
+    const erros = coletarErros(page);
+    const chamadas = await linkComFormulario(page, FORMULARIO, true);
+    await page.goto('/index.html?a=FRM1');
+    await page.locator('[data-acao="comecar"]').click();
+    await expect(page.locator('h1')).toHaveText('Sua identificação');
+    // Ocultos não aparecem; nome e WhatsApp sempre
+    await expect(page.locator('#idade')).toHaveCount(0);
+    await expect(page.locator('#funcao')).toHaveCount(0);
+    await expect(page.locator('#nome')).toBeVisible();
+    await expect(page.locator('#telefone')).toBeVisible();
+    await expect(page.locator('label[for="empresa"]')).toHaveText('Empresa atual ou última (opcional)');
+    await expect(page.locator('label[for="cidade"]')).toHaveText('Cidade onde mora (opcional)');
+    await expect(page.locator('label[for="email"]')).toContainText('E-mail');
+    await expect(page.locator('label[for="email"]')).not.toContainText('opcional');
+    await expect(page.locator('#email')).toHaveAttribute('type', 'email');
+    expect(await page.locator('#email').evaluate((el) => getComputedStyle(el).fontSize)).toBe('16px');
+    // Perguntas extras: textarea com contador; a sensível não aparece
+    await expect(page.locator('textarea[data-extra]')).toHaveCount(2);
+    await expect(page.locator('label[for="extra-p1"]')).toHaveText('Qual sua pretensão salarial? *');
+    await expect(page.locator('label[for="extra-p2"]')).toHaveText('Como soube da vaga? (opcional)');
+    await expect(page.locator('#form-identificacao')).not.toContainText('filhos');
+    await expect(page.locator('#extra-p1')).toHaveAttribute('maxlength', '500');
+    await expect(page.locator('.consentimento')).not.toContainText('a idade é usada');
+    await expect(page.locator('.consentimento')).toContainText('nome, telefone, e-mail, cidade, experiência e respostas do teste e das perguntas do processo');
+
+    // Obrigatórios vazios bloqueiam
+    await page.fill('#nome', 'Bruna Formulário Teste');
+    await page.locator('#telefone').pressSequentially('11987650000');
+    await page.check('#consentimento');
+    const enviarForm = page.locator('#form-identificacao button[type="submit"]');
+    await enviarForm.click();
+    await expect(page.locator('#erro-email')).toHaveText('Informe o e-mail.');
+    await expect(page.locator('#erro-extra-p1')).toHaveText('Responda esta pergunta.');
+    await expect(page.locator('#erro-extra-p2')).toHaveText('');
+    await expect(page.locator('h1')).toHaveText('Sua identificação');
+    await page.fill('#email', 'bruna@exemplo');
+    await enviarForm.click();
+    await expect(page.locator('#erro-email')).toHaveText('Confira o e-mail, ex.: nome@exemplo.com.');
+    await page.fill('#email', 'bruna@exemplo.com');
+    await page.fill('#extra-p1', 'R$ 3.000');
+    await expect(page.locator('#conta-extra-p1')).toHaveText('8/500');
+    await page.fill('#empresa', 'Padaria Central');
+    await enviarForm.click();
+
+    // Recarregar no meio guarda os valores do formulário
+    await expect(page.locator('.progresso-topo')).toContainText('Grupo 1 de 25');
+    const salvo = await page.evaluate(() => JSON.parse(localStorage.getItem('disc_progresso_v1')));
+    expect(salvo.email).toBe('bruna@exemplo.com');
+    expect(salvo.extras).toEqual({ p1: 'R$ 3.000', p2: '' });
+
+    const ordem = ['C', 'D', 'S', 'I'];
+    for (let i = 0; i < 25; i++) {
+      await expect(page.locator('.progresso-topo')).toContainText('Grupo ' + (i + 1) + ' de 25');
+      await responderGrupo(page, ordem);
+      await page.locator('[data-acao="proximo"]').click();
+    }
+    await responderConfirmacao(page);
+    await page.locator('[data-acao="enviar"]').click();
+    await expect(page.locator('h1')).toHaveText('Obrigado, Bruna!');
+    await expect(page.locator('#protocolo')).toHaveText('58M');
+
+    const envio = chamadas.find((c) => c.corpo.acao === 'enviar');
+    const p = envio.corpo.payload;
+    expect(p.avaliacao).toBe('FRM1');
+    expect(p.idade).toBeNull();
+    expect(p.funcao).toBe('');
+    expect(p.empresa).toBe('Padaria Central');
+    expect(p.email).toBe('bruna@exemplo.com');
+    expect(p.cidade).toBe('');
+    expect(p.extras).toEqual([{ id: 'p1', pergunta: 'Qual sua pretensão salarial?', resposta: 'R$ 3.000' }]);
+
+    // Relatório completo: C=40, D=30, S=20, I=10 → CD
+    const rel = page.locator('.relatorio-candidato');
+    await expect(rel.locator('.rel-fator')).toHaveCount(4);
+    await expect(rel.locator('.rel-fator .rel-fator-nome')).toHaveText(['Dominância', 'Influência', 'Estabilidade', 'Conformidade']);
+    await expect(rel.locator('.rel-fator .rel-pct')).toHaveText(['30%', '10%', '20%', '40%']);
+    await expect(rel.locator('.rel-fator .letra-disc')).toHaveText(['D', 'I', 'S', 'C']);
+    await expect(rel.locator('.rel-titulo')).toHaveText('Bruna, seu estilo é Cauteloso, com traços de Dominante');
+    await expect(rel.locator('.rel-secao')).toHaveCount(5);
+    await expect(rel.locator('.rel-secao-titulo')).toHaveText(['Seus pontos fortes e como usá-los mais', 'Pontos de atenção',
+      'Como você reage sob pressão', 'Como se comunicar melhor com cada perfil', 'Seu plano de desenvolvimento']);
+    await expect(rel.locator('.rel-com')).toHaveCount(3);
+    const prazos = await rel.locator('.rel-prazo').allTextContents();
+    expect(prazos.length).toBeGreaterThanOrEqual(3);
+    expect(prazos.length).toBeLessThanOrEqual(5);
+    expect(new Set(prazos)).toEqual(new Set(['30 dias', '60 dias', '90 dias']));
+    await expect(rel.locator('.rel-aviso')).toContainText('estilo de comportamento');
+    await expect(rel.locator('.rel-aviso')).toContainText('Não existe perfil certo ou errado');
+    await expect(rel).not.toContainText(/aderência|Clínica Teste|Recepção|Padaria/i);
+    await expect(rel.locator('[data-acao="imprimir"]')).toHaveText('Salvar em PDF');
+    // Celular: sem rolagem lateral
+    const larguras = await page.evaluate(() => [document.documentElement.scrollWidth, window.innerWidth]);
+    expect(larguras[0]).toBeLessThanOrEqual(larguras[1]);
+    // Impressão: só o relatório
+    await page.emulateMedia({ media: 'print' });
+    await expect(page.locator('.agradecimento')).toBeHidden();
+    await expect(rel).toBeVisible();
+    await expect(rel.locator('[data-acao="imprimir"]')).toBeHidden();
+    await page.emulateMedia({ media: 'screen' });
+    expect(erros).toEqual([]);
+  });
+
+  test('sem etapa de confirmação: o último grupo já mostra "Enviar e finalizar" e envia direto', async ({ page }) => {
+    const erros = coletarErros(page);
+    await page.route('**/js/validacao.js', (route) => route.fulfill({ status: 200, contentType: 'text/javascript', body: '' }));
+    await configurar(page, { GRUPOS_DEMONSTRACAO: 2 });
+    await page.goto('/index.html');
+    await page.locator('[data-acao="comecar"]').click();
+    await preencherIdentificacao(page, DADOS);
+    await page.locator('#form-identificacao button[type="submit"]').click();
+    await responderGrupo(page, ['D', 'I', 'S', 'C']);
+    await expect(page.locator('[data-acao="proximo"]')).toHaveText('Avançar');
+    await page.locator('[data-acao="proximo"]').click();
+    await responderGrupo(page, ['D', 'I', 'S', 'C']);
+    await expect(page.locator('[data-acao="proximo"]')).toHaveText('Enviar e finalizar');
+    // "Voltar" entre grupos continua
+    await page.locator('[data-acao="anterior"]').click();
+    await expect(page.locator('.progresso-topo')).toContainText('Grupo 1 de 2');
+    await page.locator('[data-acao="proximo"]').click();
+    await page.locator('[data-acao="proximo"]').click();
+    await expect(page.locator('h1')).toHaveText('Obrigado, Maria!');
+    await expect(page.locator('textarea#codigo')).toBeVisible();
+    expect(erros).toEqual([]);
+  });
+
+  test('progresso antigo parado na revisão cai na confirmação (tudo respondido) ou no grupo que falta', async ({ page }) => {
+    const erros = coletarErros(page);
+    await page.goto('/index.html');
+    async function salvarRevisao(faltando) {
+      await page.evaluate((f) => {
+        const agora = new Date().toISOString();
+        const ordens = []; const respondidos = []; const permutacoes = [];
+        for (let i = 0; i < 25; i++) { ordens.push(i === f ? null : ['D', 'I', 'S', 'C']); respondidos.push(i !== f); permutacoes.push(['D', 'I', 'S', 'C']); }
+        localStorage.setItem('disc_progresso_v1', JSON.stringify({ etapa: 'revisao', voltarParaRevisao: true, id: 'abc123-rev', nome: 'Fulano de Tal', telefone: '11999998888',
+          idade: '40', vaga: '', consentimento: true, ordens, respondidos, permutacoes, grupo: 24, inicio: agora, salvoEm: agora }));
+      }, faltando);
+      await page.reload();
+      await page.locator('[data-acao="continuar"]').click();
+    }
+    await salvarRevisao(-1);
+    await expect(page.locator('.progresso-topo')).toContainText('Confirmação 1 de 2');
+    await expect(page.locator('h1')).not.toHaveText('Revise suas respostas');
+    await salvarRevisao(6);
+    await expect(page.locator('.progresso-topo')).toContainText('Grupo 7 de 25');
+    expect(erros).toEqual([]);
+  });
 });

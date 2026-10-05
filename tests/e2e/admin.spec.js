@@ -47,7 +47,7 @@ test.describe('Admin sem API (importar código)', () => {
 
     // Mensagem completa do WhatsApp com dois códigos (um deles com nome malicioso para testar XSS)
     const c1 = await gerarCodigo(page, payload({ id: 'e2e-carla-01' }));
-    const c2 = await gerarCodigo(page, payload({ id: 'e2e-xss-0002', nome: '<img src=x onerror="window.__xss=1"> Silva', respostas: '1234'.repeat(25) }));
+    const c2 = await gerarCodigo(page, payload({ id: 'e2e-xss-0002', telefone: '5511977770002', nome: '<img src=x onerror="window.__xss=1"> Silva', respostas: '1234'.repeat(25) }));
     await page.fill('#campo-codigos', 'Olá! Concluí o teste DISC.\nNome: Carla\n\nCódigo de resultado:\n' + c1 + '\n\n' + c2);
     await page.click('#btn-importar');
     await expect(page.locator('#resultado-importacao')).toContainText('2 importados');
@@ -190,8 +190,8 @@ test.describe('Admin com API (servidor simulado por page.route)', () => {
     await configurar(page, { API_URL: API_FALSA, EMPRESA: 'Empresa Teste' });
     const itens = [
       Object.assign(payload({ id: 'api-item-001', nome: 'Rafael Moreira Lima', idade: 34, funcao: 'Supervisor de vendas', empresa: 'Loja Centro' }), { status: 'em_analise', observacoes: '', recebidoEm: '2026-10-02T10:00:00.000Z', protocolo: '47K', avaliacao: 'AB23', empresaId: 'emp1', empresaNome: 'Loja Modelo', avaliacaoNome: 'Vendedor 2026', avaliacaoTipo: 'selecao' }),
-      Object.assign(payload({ id: 'api-item-002', nome: 'Beatriz Santos', respostas: '2143'.repeat(25), resultado: { codigo: 'DI' } }), { status: 'reprovado', observacoes: 'Sem disponibilidade', recebidoEm: '2026-10-03T10:00:00.000Z', protocolo: '03W' }),
-      Object.assign(payload({ id: 'api-item-003', nome: 'Registro Corrompido', respostas: '1111' }), { status: 'em_analise', observacoes: '', recebidoEm: '2026-10-01T10:00:00.000Z' })
+      Object.assign(payload({ id: 'api-item-002', telefone: '5511977770003', nome: 'Beatriz Santos', respostas: '2143'.repeat(25), resultado: { codigo: 'DI' } }), { status: 'reprovado', observacoes: 'Sem disponibilidade', recebidoEm: '2026-10-03T10:00:00.000Z', protocolo: '03W' }),
+      Object.assign(payload({ id: 'api-item-003', telefone: '5511977770004', nome: 'Registro Corrompido', respostas: '1111' }), { status: 'em_analise', observacoes: '', recebidoEm: '2026-10-01T10:00:00.000Z' })
     ];
     const chamadas = await simularApi(page, (corpo) => {
       if (corpo.acao === 'login') {
@@ -231,8 +231,13 @@ test.describe('Admin com API (servidor simulado por page.route)', () => {
     expect(await page.evaluate(() => sessionStorage.getItem('disc_admin_token'))).toBe(TOKEN);
     expect(await page.evaluate(() => JSON.stringify(sessionStorage))).not.toContain('senha-certa-1');
     await expect(page.locator('#usuario-nome')).toHaveText('Ana Admin');
-    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'usuarios', 'comparativo', 'importar']);
+    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'empresas', 'usuarios', 'comparativo', 'importar']);
     await expect(page.locator('.aba[data-aba="processos"]')).toHaveText('Processos');
+    // Apps Script (legado): a aba Empresas só avisa que precisa do Supabase, sem chamar a API
+    await page.locator('.aba[data-aba="empresas"]').click();
+    await expect(page.locator('#empresas-indisponivel')).toContainText('Disponível com o servidor Supabase');
+    await expect(page.locator('#btn-nova-empresa')).toHaveCount(0);
+    await page.locator('.aba[data-aba="lista"]').click();
 
     // Card mostra avaliação e empresa; o perfil é recalculado das respostas (2143 -> SC), ignorando resultado.codigo
     await expect(page.locator('#lista-candidatos > li', { hasText: 'Rafael' }).locator('.card-origem')).toHaveText('Vendedor 2026 · Loja Modelo');
@@ -488,7 +493,8 @@ test.describe('Admin com API (servidor simulado por page.route)', () => {
         { id: 'digitacao', nome: 'Digitação', peso: 10, campo: 'Nota Digitação', descricao: '' }
       ],
       bonus: [{ id: 'perfil_presencial', nome: 'Perfil presencial', campo: 'Perfil presencial', regra: { tipo: 'mapa', pontos: { 4: 10, 5: 15 } } }],
-      corte: 70, faixaAvaliar: 55, statusFinalistas: ['finalista', 'aprovado'], permitirAntecedentes: false
+      corte: 70, faixaAvaliar: 55, statusFinalistas: ['finalista', 'aprovado'], permitirAntecedentes: false,
+      formulario: { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto' }, perguntas: [] }
     });
 
     // Página do processo: link do teste e geração do rascunho
@@ -551,7 +557,237 @@ test.describe('Admin com API (servidor simulado por page.route)', () => {
     // A pré-visualização roda num iframe sem scripts (sandbox): o aviso de bloqueio do Chromium não é erro do painel.
     expect(erros.filter((e) => !/Blocked script execution in 'about:srcdoc'/.test(e))).toEqual([]);
   });
+
+  test('processo: "O que perguntar ao candidato" salva config.formulario, recusa pergunta sensível e mostra o resumo', async ({ page }) => {
+    const erros = coletarErros(page);
+    const TOKEN = 'token-e2e-form';
+    const processos = [];
+    await configurar(page, { API_URL: API_FALSA });
+    const chamadas = await simularApi(page, (corpo) => {
+      if (corpo.acao === 'login') return { ok: true, token: TOKEN, usuario: { id: 'u1', nome: 'Ana Admin', email: corpo.email, papel: 'admin' } };
+      if (corpo.token !== TOKEN) return { ok: false, erro: 'Sessão expirada. Entre de novo.', sessaoExpirada: true };
+      switch (corpo.acao) {
+        case 'listar': return { ok: true, itens: [] };
+        case 'usuarios.listar': return { ok: true, usuarios: [] };
+        case 'clickup.status': return { ok: true, configurado: false };
+        case 'processos.listar': return { ok: true, processos };
+        case 'relatorios.listar': return { ok: true, relatorios: [] };
+        case 'processos.salvar': {
+          const p = Object.assign({ id: 'proc-f1', codigo: 'F0RM', respostas: 0 }, corpo.processo);
+          processos.splice(0, processos.length, p);
+          return { ok: true, processo: p };
+        }
+        default: return { ok: false, erro: 'Ação inesperada no teste: ' + corpo.acao };
+      }
+    });
+    await page.setViewportSize({ width: 375, height: 800 });
+    await page.goto('/admin.html');
+    await entrar(page, 'ana@empresa.com', 'senha-certa-1');
+    await page.locator('.aba[data-aba="processos"]').click();
+    await page.click('#btn-novo-processo');
+    await page.fill('#proc-nome', 'Recepção 2027');
+    await expect(page.locator('#proc-mostrar + span')).toContainText('relatório DISC completo');
+
+    // Nome e WhatsApp fixos; padrão: idade obrigatória, função/empresa opcionais, e-mail/cidade não perguntados
+    await expect(page.locator('#proc-campos-fixos')).toContainText('Nome completo');
+    await expect(page.locator('#proc-campos-fixos')).toContainText('WhatsApp');
+    await expect(page.locator('#proc-campos-fixos .selo')).toHaveText(['Sempre pedido', 'Sempre pedido']);
+    await expect(page.locator('#proc-campo-idade')).toHaveAttribute('value', 'obrigatorio');
+    await expect(page.locator('#proc-campo-email')).toHaveAttribute('value', 'oculto');
+    await expect(page.locator('#form-processo select')).toHaveCount(0);
+    await escolher(page, '#proc-campo-idade', 'oculto');
+    await escolher(page, '#proc-campo-email', 'obrigatorio');
+    await escolher(page, '#proc-campo-cidade', 'opcional');
+
+    // Perguntas extras: até 5; sensível é recusada (aviso na hora e no salvar)
+    for (let i = 0; i < 5; i++) await page.click('#btn-add-pergunta');
+    await expect(page.locator('#proc-perguntas > li')).toHaveCount(5);
+    await expect(page.locator('#btn-add-pergunta')).toBeDisabled();
+    for (let i = 4; i >= 2; i--) await page.locator('#proc-perguntas > li').nth(i).getByRole('button', { name: 'Remover pergunta ' + (i + 1) }).click();
+    await expect(page.locator('#btn-add-pergunta')).toBeEnabled();
+    await page.fill('#pergunta-texto-0', 'Qual sua pretensão salarial?');
+    await page.check('#pergunta-obrig-0');
+    await page.fill('#pergunta-texto-1', 'Você tem filhos?');
+    await expect(page.locator('#pergunta-erro-1')).toHaveText('A pergunta "Você tem filhos?" pede um dado sensível e não pode ser usada.');
+    await page.click('#btn-salvar-processo');
+    await expect(page.locator('#proc-erro')).toHaveText('A pergunta "Você tem filhos?" pede um dado sensível e não pode ser usada.');
+    expect(chamadas.filter((c) => c.corpo.acao === 'processos.salvar').length).toBe(0);
+    await page.fill('#pergunta-texto-1', 'Tem disponibilidade aos sábados?');
+    await expect(page.locator('#pergunta-erro-1')).toHaveText('');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    await page.click('#btn-salvar-processo');
+    await expect(page.locator('#aviso-geral')).toContainText('Processo criado');
+    const salvo = chamadas.find((c) => c.corpo.acao === 'processos.salvar').corpo.processo;
+    expect(salvo.config.formulario).toEqual({
+      campos: { idade: 'oculto', funcao: 'opcional', empresa: 'opcional', email: 'obrigatorio', cidade: 'opcional' },
+      perguntas: [
+        { id: 'p1', texto: 'Qual sua pretensão salarial?', obrigatoria: true },
+        { id: 'p2', texto: 'Tem disponibilidade aos sábados?', obrigatoria: false }
+      ]
+    });
+
+    // Página do processo: resumo do que é perguntado
+    const resumo = page.locator('#proc-formulario');
+    await expect(resumo).toContainText('Nome completo');
+    await expect(resumo.locator('li[data-modo="obrigatorio"]', { hasText: 'E-mail' })).toHaveCount(1);
+    await expect(resumo.locator('li', { hasText: 'Pergunta: Qual sua pretensão salarial?' })).toContainText('Obrigatória');
+    await expect(resumo.locator('li', { hasText: 'Pergunta: Tem disponibilidade aos sábados?' })).toContainText('Opcional');
+    await expect(resumo).toContainText('Não perguntamos: Idade.');
+    await expect(page.locator('#proc-mostra-resultado')).toHaveText('O participante não vê o resultado');
+
+    // Editar reabre com o que foi salvo
+    await page.click('#btn-editar-processo');
+    await expect(page.locator('#proc-campo-idade')).toHaveAttribute('value', 'oculto');
+    await expect(page.locator('#pergunta-texto-1')).toHaveValue('Tem disponibilidade aos sábados?');
+    await expect(page.locator('#pergunta-obrig-0')).toBeChecked();
+    expect(erros).toEqual([]);
+  });
+
+  test('pessoas: uma linha por pessoa com selo "N respostas", histórico, consistência, formulário, exclusão e CSV', async ({ page }) => {
+    const erros = coletarErros(page);
+    const TOKEN = 'token-e2e-pessoas';
+    const base = (id, extra) => Object.assign(payload({ id }), { status: 'em_analise', observacoes: '', email: '', cidade: '', extras: [], pessoaId: '', pessoa: null }, extra);
+    const carla = { id: 'pes-1', nome: 'Carla Nogueira Dias', telefone: '5511988887777', idade: 31, funcao: 'Supervisora', empresa: 'Loja Centro', email: 'carla@exemplo.com', cidade: 'Boa Vista', atualizadoEm: '2026-10-03T10:00:00.000Z' };
+    const itens = [
+      base('c-1', { fim: '2026-10-01T10:00:00.000Z', protocolo: '11A', avaliacao: 'AB23', pessoaId: 'pes-1', pessoa: carla, idade: null, email: 'carla@exemplo.com', cidade: 'Boa Vista',
+        extras: [{ id: 'p1', pergunta: 'Qual sua pretensão salarial?', resposta: 'R$ 3.000' }, { id: 'p2', pergunta: 'Tem disponibilidade aos sábados?', resposta: '' }] }),
+      base('c-2', { fim: '2026-10-03T10:00:00.000Z', protocolo: '22B', avaliacao: 'AB23', pessoaId: 'pes-1', pessoa: carla }),
+      base('b-1', { fim: '2026-10-02T10:00:00.000Z', protocolo: '33C', avaliacao: 'AB23', nome: 'Bruno Lima Souza', telefone: '5511955554444', idade: null }),
+      // Sem pessoaId (Apps Script antigo): agrupa pelo WhatsApp, mesmo com máscara diferente
+      base('d-1', { fim: '2026-09-20T10:00:00.000Z', protocolo: '44D', nome: 'Daniela Reis Prado', telefone: '(21) 97777-6666' }),
+      base('d-2', { fim: '2026-09-25T10:00:00.000Z', protocolo: '55E', nome: 'Daniela Reis Prado', telefone: '5521977776666', respostas: '1234'.repeat(25) })
+    ];
+    await configurar(page, { API_URL: API_FALSA });
+    const chamadas = await simularApi(page, (corpo) => {
+      if (corpo.acao === 'login') return { ok: true, token: TOKEN, usuario: { id: 'u1', nome: 'Ana Admin', email: corpo.email, papel: 'admin' } };
+      if (corpo.token !== TOKEN) return { ok: false, erro: 'Sessão expirada. Entre de novo.', sessaoExpirada: true };
+      switch (corpo.acao) {
+        case 'listar': return { ok: true, itens };
+        case 'usuarios.listar': return { ok: true, usuarios: [] };
+        case 'clickup.status': return { ok: true, configurado: false };
+        case 'processos.listar': return { ok: true, processos: [{ id: 'a1', codigo: 'AB23', empresa: 'Loja Modelo', nome: 'Vendedor 2026', tipo: 'selecao', ativa: true, respostas: 3, config: {} }] };
+        case 'excluir': {
+          const i = itens.findIndex((x) => x.id === corpo.id);
+          if (i === -1) return { ok: false, erro: 'Participante não encontrado.' };
+          itens.splice(i, 1);
+          return { ok: true, id: corpo.id };
+        }
+        default: return { ok: false, erro: 'Ação inesperada no teste: ' + corpo.acao };
+      }
+    });
+    await page.goto('/admin.html');
+    await entrar(page, 'ana@empresa.com', 'senha-certa-1');
+
+    // Lista: 3 pessoas, 5 respostas; selo só para quem tem mais de uma
+    const cards = page.locator('#lista-candidatos > li');
+    await expect(cards).toHaveCount(3);
+    await expect(page.locator('#contagem')).toHaveText('3 de 3 participantes (5 de 5 respostas)');
+    await expect(page.locator('#resumo-pessoas')).toContainText('Pessoas');
+    await expect(page.locator('#resumo-pessoas .resumo__valor')).toHaveText('3');
+    await expect(page.locator('#resumo-pessoas')).toContainText('5 respostas no total');
+    const cardCarla = cards.filter({ hasText: 'Carla Nogueira Dias' });
+    await expect(cardCarla.locator('.selo-respostas')).toHaveText('2 respostas');
+    await expect(cardCarla.locator('.protocolo__valor')).toHaveText('22B'); // a mais recente
+    await expect(cards.filter({ hasText: 'Daniela Reis Prado' }).locator('.selo-respostas')).toHaveText('2 respostas');
+    await expect(cards.filter({ hasText: 'Bruno Lima Souza' }).locator('.selo-respostas')).toHaveCount(0);
+    // Ordem: pela resposta mais recente de cada pessoa
+    await expect(cards.locator('.card-nome')).toHaveText(['Carla Nogueira Dias', 'Bruno Lima Souza', 'Daniela Reis Prado']);
+    // Filtro por processo: agrupa dentro do processo
+    await escolher(page, '#filtro-processo', 'AB23');
+    await expect(cards).toHaveCount(2);
+    await expect(cards.filter({ hasText: 'Carla' }).locator('.selo-respostas')).toHaveText('2 respostas');
+    await escolher(page, '#filtro-processo', '-');
+    await expect(cards).toHaveCount(1);
+    await expect(cards.locator('.selo-respostas')).toHaveText('2 respostas');
+    await escolher(page, '#filtro-processo', '');
+
+    // Detalhe da Carla: ficha da pessoa, formulário, histórico com troca e consistência
+    await cardCarla.getByRole('button', { name: /Ver detalhes/ }).click();
+    await expect(page.locator('#det-protocolo')).toHaveText('Código 22B');
+    await expect(page.locator('#det-idade')).toHaveText('31 anos');
+    await expect(page.locator('#det-funcao')).toHaveText('Supervisora');
+    await expect(page.locator('#det-formulario')).toContainText('carla@exemplo.com');
+    await expect(page.locator('#det-cidade')).toHaveText('Boa Vista');
+    const hist = page.locator('#det-historico-lista > li');
+    await expect(hist).toHaveCount(2);
+    await expect(hist.nth(0)).toHaveAttribute('aria-current', 'true');
+    await expect(hist.nth(0)).toContainText('Vendedor 2026');
+    await expect(hist.nth(1).locator('.mini-barras')).toBeVisible();
+    await expect(hist.nth(1).locator('.protocolo__valor')).toHaveText('11A');
+    await expect(page.locator('#det-consistencia')).toContainText('O perfil se manteve nas 2 respostas.');
+    await expect(page.locator('#det-consistencia')).toHaveAttribute('data-igual', 'sim');
+    await hist.nth(1).locator('[data-acao="ver-resposta"]').click();
+    await expect(page.locator('#det-protocolo')).toHaveText('Código 11A');
+    await expect(page.locator('#det-historico-lista > li').nth(1)).toHaveAttribute('aria-current', 'true');
+    const extras = page.locator('#det-formulario .det-extra');
+    await expect(extras).toHaveCount(2);
+    await expect(extras.nth(0)).toContainText('Qual sua pretensão salarial?');
+    await expect(extras.nth(0)).toContainText('R$ 3.000');
+    await expect(extras.nth(1)).toContainText('Sem resposta');
+    await expect(page.locator('#btn-excluir-participante')).toHaveText('Excluir só esta resposta');
+    await expect(page.locator('#btn-excluir-pessoa')).toHaveText('Excluir as 2 respostas da pessoa');
+    await page.setViewportSize({ width: 375, height: 800 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(375);
+    await page.setViewportSize({ width: 1280, height: 800 });
+    await page.keyboard.press('Escape');
+
+    // Bruno: sem idade (processo que não pergunta) e sem formulário extra
+    await cards.filter({ hasText: 'Bruno' }).getByRole('button', { name: /Ver detalhes/ }).click();
+    await expect(page.locator('#det-idade')).toHaveText('—');
+    await expect(page.locator('#det-historico')).toHaveCount(0);
+    await expect(page.locator('#det-formulario')).toHaveCount(0);
+    await expect(page.locator('#btn-excluir-pessoa')).toHaveCount(0);
+    await page.keyboard.press('Escape');
+
+    // Daniela: perfil mudou entre as respostas; excluir só uma resposta mantém a outra
+    await cards.filter({ hasText: 'Daniela' }).getByRole('button', { name: /Ver detalhes/ }).click();
+    await expect(page.locator('#det-consistencia')).toContainText('O perfil mudou entre as respostas: vale conversar sobre o momento de cada uma.');
+    await expect(page.locator('#det-consistencia')).toHaveAttribute('data-igual', 'nao');
+    await page.click('#btn-excluir-participante');
+    await expect(page.locator('#confirmar-desc')).toContainText('As outras 1 resposta de Daniela Reis Prado continuam.');
+    await page.click('#confirmar-ok');
+    await expect(page.locator('#aviso-geral')).toContainText('Resposta excluída');
+    await expect(page.locator('#det-protocolo')).toHaveText('Código 44D');
+    await expect(page.locator('#det-historico')).toHaveCount(0);
+    expect(chamadas.filter((c) => c.corpo.acao === 'excluir').map((c) => c.corpo.id)).toEqual(['d-2']);
+    await page.keyboard.press('Escape');
+
+    // CSV: uma linha por resposta, com e-mail, cidade e perguntas extras
+    const [download] = await Promise.all([page.waitForEvent('download'), page.click('#btn-csv')]);
+    const linhas = fs.readFileSync(await download.path(), 'utf8').slice(1).trim().split(/\r\n/);
+    expect(linhas.length).toBe(5);
+    expect(linhas[0]).toMatch(/;e-mail;cidade;perguntas extras$/);
+    expect(linhas.find((l) => l.indexOf(';11A;') !== -1)).toMatch(/;carla@exemplo\.com;Boa Vista;Qual sua pretensão salarial\?: R\$ 3\.000 \| Tem disponibilidade aos sábados\?: —$/);
+
+    // Excluir todas as respostas da pessoa (confirmação digitando EXCLUIR)
+    await cardCarla.getByRole('button', { name: /Ver detalhes/ }).click();
+    await page.click('#btn-excluir-pessoa');
+    await expect(page.locator('#confirmar-desc')).toContainText('as 2 respostas de Carla Nogueira Dias e a ficha dela');
+    await expect(page.locator('#confirmar-ok')).toBeDisabled();
+    await page.fill('#confirmar-texto', 'EXCLUIR');
+    await page.click('#confirmar-ok');
+    await expect(page.locator('#aviso-geral')).toContainText('Pessoa excluída com as 2 respostas');
+    await expect(page.locator('#vista-lista')).toBeVisible();
+    await expect(cards).toHaveCount(2);
+    await expect(page.locator('#vista-lista')).not.toContainText('Carla');
+    expect(chamadas.filter((c) => c.corpo.acao === 'excluir').map((c) => c.corpo.id).sort()).toEqual(['c-1', 'c-2', 'd-2']);
+    expect(erros).toEqual([]);
+  });
 });
+
+// Tamanho do seed da prévia gravado pela api-simulada: respostas e pessoas (mesmo WhatsApp/pessoaId = uma pessoa).
+async function seedDaPrevia(page) {
+  return page.evaluate(() => {
+    const linhas = JSON.parse(localStorage.getItem('disc_planilha_simulada') || '[]');
+    const chaves = new Set(linhas.map((r) => {
+      if (r.pessoaId) return 'p:' + r.pessoaId;
+      let d = String(r.telefone || '').replace(/\D/g, '');
+      if ((d.length === 10 || d.length === 11) && d.indexOf('55') !== 0) d = '55' + d;
+      return d ? 't:' + d : 'r:' + r.id;
+    }));
+    return { respostas: linhas.length, pessoas: chaves.size };
+  });
+}
 
 test.describe('Admin na prévia (API_URL "simulada")', () => {
   test('dados de exemplo, protocolo gerado e busca por código', async ({ page }) => {
@@ -570,25 +806,27 @@ test.describe('Admin na prévia (API_URL "simulada")', () => {
     await page.click('#btn-entrar');
     await expect(page.locator('#erro-login')).toHaveText('E-mail ou senha incorretos.');
     await entrar(page, 'admin@previa.com', 'previa123');
-    await expect(page.locator('#lista-candidatos > li')).toHaveCount(4);
+    // O seed da prévia muda entre versões: as contagens partem do que está gravado na página.
+    const seed = await seedDaPrevia(page);
+    await expect(page.locator('#lista-candidatos > li')).toHaveCount(seed.pessoas);
     await expect(page.locator('#usuario-nome')).toHaveText('Você (admin)');
 
     // Envio "do participante" pela API simulada: o servidor falso devolve o protocolo
-    const r1 = await page.evaluate((p) => window.DISC_API.enviar(p), payload({ id: 'previa-envio-01', nome: 'Paula Mendes Rocha', idade: 28 }));
+    const r1 = await page.evaluate((p) => window.DISC_API.enviar(p), payload({ id: 'previa-envio-01', telefone: '5521977770011', nome: 'Paula Mendes Rocha', idade: 28 }));
     expect(r1.protocolo).toMatch(/^[0-9]{2}[A-HJ-NP-Z]$/);
-    const r2 = await page.evaluate((p) => window.DISC_API.enviar(p), payload({ id: 'previa-envio-01', nome: 'Paula Mendes Rocha', idade: 28 }));
+    const r2 = await page.evaluate((p) => window.DISC_API.enviar(p), payload({ id: 'previa-envio-01', telefone: '5521977770011', nome: 'Paula Mendes Rocha', idade: 28 }));
     expect(r2).toEqual({ ok: true, duplicado: true, id: 'previa-envio-01', protocolo: r1.protocolo });
 
     // Código importado na aba "Importar códigos" também ganha protocolo; código sem idade é recusado pelo servidor
     await page.locator('#aba-importar').click();
     const antigoSemIdade = await gerarCodigo(page, payload({ id: 'previa-antigo-3', nome: 'Rui Antigo Melo' }));
-    await page.fill('#campo-codigos', await gerarCodigo(page, payload({ id: 'previa-import-2', nome: 'Otávio Prado Lins', idade: 61, respostas: '1234'.repeat(25) })) + '\n' + antigoSemIdade);
+    await page.fill('#campo-codigos', await gerarCodigo(page, payload({ id: 'previa-import-2', telefone: '5521977770012', nome: 'Otávio Prado Lins', idade: 61, respostas: '1234'.repeat(25) })) + '\n' + antigoSemIdade);
     await page.click('#btn-importar');
     await expect(page.locator('#resultado-importacao')).toContainText('1 importado');
     await expect(page.locator('#resultado-importacao')).toContainText('Idade não informada');
 
     await page.locator('.aba[data-aba="lista"]').click();
-    await expect(page.locator('#lista-candidatos > li')).toHaveCount(6);
+    await expect(page.locator('#lista-candidatos > li')).toHaveCount(seed.pessoas + 2);
     const paula = page.locator('#lista-candidatos > li', { hasText: 'Paula Mendes Rocha' });
     await expect(paula.locator('.protocolo__valor')).toHaveText(r1.protocolo);
 
@@ -604,8 +842,8 @@ test.describe('Admin na prévia (API_URL "simulada")', () => {
 
     // Recarregar mantém a sessão (sessionStorage) e os dados (localStorage 'disc_planilha_simulada')
     await page.reload();
-    await expect(page.locator('#lista-candidatos > li')).toHaveCount(6);
-    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('disc_planilha_simulada')).length)).toBe(6);
+    await expect(page.locator('#lista-candidatos > li')).toHaveCount(seed.pessoas + 2);
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('disc_planilha_simulada')).length)).toBe(seed.respostas + 2);
     expect(pedidosExternos).toEqual([]);
     expect(erros).toEqual([]);
   });
@@ -624,7 +862,7 @@ test.describe('Admin na prévia (API_URL "simulada")', () => {
     await expect(page.locator('#tela-painel')).toBeHidden();
 
     await entrar(page, 'admin@previa.com', 'previa123');
-    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'usuarios', 'comparativo', 'importar']);
+    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'empresas', 'usuarios', 'comparativo', 'importar']);
 
     // Processo novo
     await page.locator('.aba[data-aba="processos"]').click();
@@ -850,6 +1088,7 @@ const API_SUPABASE_FALSA = `
     listar: function () { return ok({ itens: [] }); },
     processosListar: function () { return ok({ processos: [] }); },
     listarUsuarios: function () { return ok({ usuarios: sb.usuarios.slice() }); },
+    listarEmpresas: function () { return ok({ empresas: [] }); },
     clickupStatus: function () { return ok({ configurado: false }); },
     convidarUsuario: function (token, dados) {
       anotar('convidarUsuario', arguments);
@@ -928,7 +1167,7 @@ test.describe('Admin com Supabase (DISC_API.MODO "supabase", API falsa)', () => 
     await entrar(page, 'dona@empresa.com', 'senha-boa-1');
     await expect(page.locator('#aviso-geral')).toContainText('você agora é o administrador do painel');
     await expect(page.locator('#usuario-nome')).toHaveText('Dona do Sistema');
-    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'usuarios', 'comparativo', 'importar']);
+    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'empresas', 'usuarios', 'comparativo', 'importar']);
     expect(await page.evaluate(() => sessionStorage.getItem('disc_admin_token'))).toBe('tk-dona');
 
     // Segundo login não repete o aviso
@@ -1027,5 +1266,373 @@ test.describe('Admin com Supabase (DISC_API.MODO "supabase", API falsa)', () => 
     await expect(lista.locator('[data-email="pendente@empresa.com"]')).toHaveCount(0);
     expect(await chamadasSb(page, 'excluirUsuario')).toEqual([['tk-dona', 'u2']]);
     expect(erros).toEqual([]);
+  });
+});
+
+/* ---------- Fase 2: empresas, colaboradores, ligações, organograma e relatórios dos modelos ---------- */
+
+// Acrescenta ao DISC_API falso do Supabase os métodos de empresas (memória da página, window.__sb).
+const API_EMPRESAS_FALSA = `
+(function () {
+  var sb = window.__sb;
+  sb.empresas = []; sb.vinculos = []; sb.relacoes = {}; sb.relatorios = []; sb.processos = [];
+  sb.pessoas = {
+    'p-bruno': { nome: 'Bruno Lima Costa', telefone: '5511977776666', resultado: { percentuais: { D: 15, I: 25, S: 40, C: 20 }, codigo: 'SI' } },
+    'p-diego': { nome: 'Diego Rocha', telefone: '5511955554444', resultado: { percentuais: { D: 40, I: 30, S: 20, C: 10 }, codigo: 'DI' } }
+  };
+  var seq = 0;
+  function id(p) { seq++; return p + seq; }
+  function ok(x) { return Promise.resolve(Object.assign({ ok: true }, x || {})); }
+  function anotar(nome, args) { sb.chamadas.push({ nome: nome, args: JSON.parse(JSON.stringify(Array.prototype.slice.call(args))) }); }
+  function ativos(eid) { return sb.vinculos.filter(function (v) { return v.empresaId === eid && v.status === 'ativo'; }); }
+  function colab(v) {
+    var p = sb.pessoas[v.pessoaId];
+    return { vinculoId: v.id, pessoaId: v.pessoaId, nome: p.nome, telefone: p.telefone, cargo: v.cargo, area: v.area, status: v.status,
+      inicio: v.inicio, fim: v.fim, resultado: p.resultado || null, respondidoEm: p.resultado ? '2026-10-01T12:00:00Z' : null };
+  }
+  function tirarRelacoes(eid, pid) { sb.relacoes[eid] = (sb.relacoes[eid] || []).filter(function (r) { return r.de !== pid && r.para !== pid; }); }
+  var resp = function (pid, nome, tel, respostas) {
+    return { id: 'r-' + pid, pessoaId: pid, nome: nome, telefone: tel, vaga: 'Vendedor', status: 'em_analise', respostas: respostas,
+      inicio: '2026-10-01T12:00:00.000Z', fim: '2026-10-01T12:09:30.000Z', duracaoSeg: 570, avaliacao: 'SEL1', recebidoEm: '2026-10-01T12:10:00.000Z' };
+  };
+  Object.assign(window.DISC_API, {
+    listar: function () { return ok({ itens: [resp('p-bruno', 'Bruno Lima Costa', '5511977776666', '1234'.repeat(25)), resp('p-diego', 'Diego Rocha', '5511955554444', '4321'.repeat(25))] }); },
+    processosListar: function () { return ok({ processos: sb.processos.slice() }); },
+    processosSalvar: function (t, p) {
+      anotar('processosSalvar', arguments);
+      var novo = Object.assign({ id: id('proc'), codigo: 'EQ' + seq, ativa: true, respostas: 0 }, p);
+      sb.processos.push(novo);
+      return ok({ processo: novo });
+    },
+    relatoriosListar: function () { return ok({ relatorios: [] }); },
+    clickupListas: function () { return ok({ listas: [] }); },
+    listarEmpresas: function () {
+      return ok({ empresas: sb.empresas.map(function (e) { return Object.assign({}, e, { colaboradores: ativos(e.id).length }); }) });
+    },
+    salvarEmpresa: function (t, e) {
+      anotar('salvarEmpresa', arguments);
+      var x = e.id ? sb.empresas.filter(function (y) { return y.id === e.id; })[0] : null;
+      if (!x) { x = { id: id('emp'), criadoEm: '2026-10-05T10:00:00Z' }; sb.empresas.push(x); }
+      Object.assign(x, { nome: e.nome, cidade: e.cidade || '', observacoes: e.observacoes || '', ativo: e.ativo !== false });
+      return ok({ empresa: x });
+    },
+    excluirEmpresa: function (t, eid) {
+      anotar('excluirEmpresa', arguments);
+      if (ativos(eid).length) return ok({ ok: false, erro: 'Desligue ou mova os colaboradores antes.' });
+      sb.empresas = sb.empresas.filter(function (e) { return e.id !== eid; });
+      return ok();
+    },
+    listarEquipe: function (t, eid) {
+      var e = sb.empresas.filter(function (y) { return y.id === eid; })[0];
+      return ok({ empresa: e, colaboradores: ativos(eid).map(colab), relacoes: (sb.relacoes[eid] || []).slice(),
+        historico: sb.vinculos.filter(function (v) { return v.empresaId === eid && v.status === 'desligado'; }).map(colab) });
+    },
+    salvarColaborador: function (t, d) {
+      anotar('salvarColaborador', arguments);
+      var pid = d.pessoaId;
+      if (!pid) { pid = id('p-'); sb.pessoas[pid] = { nome: d.nome, telefone: d.telefone, resultado: null }; }
+      var v = ativos(d.empresaId).filter(function (x) { return x.pessoaId === pid; })[0];
+      if (!v) { v = { id: id('v'), pessoaId: pid, empresaId: d.empresaId, status: 'ativo', inicio: '2026-10-05', fim: null }; sb.vinculos.push(v); }
+      v.cargo = d.cargo || ''; v.area = d.area || '';
+      return ok({ colaborador: colab(v) });
+    },
+    moverColaborador: function (t, d) {
+      anotar('moverColaborador', arguments);
+      sb.vinculos.forEach(function (v) { if (v.pessoaId === d.pessoaId && v.status === 'ativo') { v.status = 'desligado'; v.fim = '2026-10-05'; tirarRelacoes(v.empresaId, d.pessoaId); } });
+      sb.vinculos.push({ id: id('v'), pessoaId: d.pessoaId, empresaId: d.empresaId, status: 'ativo', cargo: d.cargo, area: d.area, inicio: '2026-10-05', fim: null });
+      return ok();
+    },
+    desligarColaborador: function (t, vid) {
+      anotar('desligarColaborador', arguments);
+      sb.vinculos.forEach(function (v) { if (v.id === vid) { v.status = 'desligado'; v.fim = '2026-10-05'; tirarRelacoes(v.empresaId, v.pessoaId); } });
+      return ok();
+    },
+    salvarRelacoes: function (t, eid, rels) { anotar('salvarRelacoes', arguments); sb.relacoes[eid] = rels.slice(); return ok(); },
+    salvarRelatorioModelo: function (t, d) {
+      anotar('salvarRelatorioModelo', arguments);
+      var r = d.id ? sb.relatorios.filter(function (x) { return x.id === d.id; })[0] : null;
+      if (!r) { r = { id: id('rel'), token: 'tok-modelo-' + seq, criadoEm: '2026-10-05T10:00:00Z' }; sb.relatorios.push(r); }
+      Object.assign(r, { modelo: d.modelo, empresaId: d.empresaId || null, pessoaId: d.pessoaId || null, titulo: d.dados.titulo, status: d.publicar ? 'publicado' : 'rascunho', atualizadoEm: '2026-10-05T11:00:00Z' });
+      return ok({ relatorio: { id: r.id, token: r.token, status: r.status, modelo: r.modelo } });
+    },
+    listarRelatoriosModelo: function (t, f) {
+      return ok({ relatorios: sb.relatorios.filter(function (r) { return f.empresaId ? r.empresaId === f.empresaId : r.pessoaId === f.pessoaId; }) });
+    },
+    excluirRelatorioModelo: function (t, rid) { anotar('excluirRelatorioModelo', arguments); sb.relatorios = sb.relatorios.filter(function (r) { return r.id !== rid; }); return ok(); }
+  });
+})();
+`;
+
+async function simularEmpresas(page) {
+  await simularSupabase(page);
+  await page.route('**/js/api-supabase.js', (route) => route.fulfill({ status: 200, contentType: 'text/javascript; charset=utf-8', body: API_SUPABASE_FALSA + API_EMPRESAS_FALSA }));
+}
+
+// Escolhe no seletor em pílula com busca: abre, digita e toca na opção.
+async function escolherBusca(page, id, texto) {
+  await page.click('#' + id);
+  await page.fill('#' + id + '-busca', texto);
+  await page.locator('#' + id + '-lista [role="option"]', { hasText: texto }).first().click();
+  // Vários: a lista continua aberta para escolher mais; "Pronto" fecha.
+  const pronto = page.locator('#' + id + '-pronto');
+  if (await pronto.count() && await pronto.isVisible()) await pronto.click();
+}
+
+async function semRolagemLateral(page) {
+  return page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
+}
+
+test.describe('Empresas (Supabase, API falsa)', () => {
+  test('cria empresa, adiciona colaboradores, liga líder e colegas, vê organograma e compatibilidade, gera e publica o relatório da equipe e move colaborador', async ({ page }) => {
+    const erros = coletarErros(page);
+    await simularEmpresas(page);
+    await page.goto('/admin.html');
+    await entrar(page, 'dona@empresa.com', 'senha-boa-1');
+    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'empresas', 'usuarios', 'comparativo', 'importar']);
+
+    // Cadastro: duas empresas
+    await page.locator('.aba[data-aba="empresas"]').click();
+    await expect(page.locator('#lista-empresas')).toContainText('Nenhuma empresa cadastrada');
+    await page.click('#btn-nova-empresa');
+    await page.click('#janela-ok');
+    await expect(page.locator('#janela-erro')).toHaveText('Informe o nome da empresa.');
+    await page.fill('#emp-nome', 'Filial Norte');
+    await page.click('#janela-ok');
+    await expect(page.locator('#vista-empresas h2')).toHaveText('Filial Norte');
+    await page.click('#btn-voltar-empresas');
+    await page.click('#btn-nova-empresa');
+    await page.fill('#emp-nome', 'Loja Modelo');
+    await page.fill('#emp-cidade', 'Boa Vista / RR');
+    await page.click('#janela-ok');
+    await expect(page.locator('#vista-empresas h2')).toHaveText('Loja Modelo');
+    await expect(page.locator('#btn-relatorio-equipe')).toBeDisabled();
+
+    // Colaboradores: nova pessoa (nome + WhatsApp), pessoa que já respondeu (busca) e outra nova
+    await page.click('#btn-add-colaborador');
+    await page.fill('#colab-nome', 'Ana Souza');
+    await page.fill('#colab-telefone', '11 9');
+    await page.click('#janela-ok');
+    await expect(page.locator('#janela-erro')).toHaveText('Informe o WhatsApp com DDD.');
+    await page.fill('#colab-telefone', '(11) 98888-1111');
+    await page.fill('#colab-cargo', 'Gerente');
+    await page.click('#janela-ok');
+    await expect(page.locator('#lista-colaboradores > li')).toHaveCount(1);
+    await page.click('#btn-add-colaborador');
+    await escolherBusca(page, 'colab-pessoa', 'Bruno');
+    await expect(page.locator('#colab-novos')).toBeHidden();
+    await page.fill('#colab-cargo', 'Vendedor');
+    await page.fill('#colab-area', 'Comercial');
+    await page.click('#janela-ok');
+    await page.click('#btn-add-colaborador');
+    await page.fill('#colab-nome', 'Carla Dias');
+    await page.fill('#colab-telefone', '11977770000');
+    await page.fill('#colab-cargo', 'Caixa');
+    await page.click('#janela-ok');
+    const colabs = page.locator('#lista-colaboradores > li');
+    await expect(colabs).toHaveCount(3);
+    const add = await chamadasSb(page, 'salvarColaborador');
+    expect(add[0][1]).toEqual({ empresaId: 'emp2', cargo: 'Gerente', area: '', nome: 'Ana Souza', telefone: '11988881111' });
+    expect(add[1][1]).toEqual({ empresaId: 'emp2', cargo: 'Vendedor', area: 'Comercial', pessoaId: 'p-bruno' });
+    const bruno = page.locator('#lista-colaboradores > li[data-nome="Bruno Lima Costa"]');
+    await expect(bruno.locator('.colab-card__codigo')).toHaveText('SI');
+    await expect(bruno.locator('.mini-barras')).toBeVisible();
+    await expect(page.locator('#lista-colaboradores > li[data-nome="Ana Souza"] .colab-sem-teste')).toHaveText('Sem teste');
+
+    // Ligações do Bruno: líder Ana, trabalha diretamente com Carla
+    await bruno.locator('[data-acao="ligacoes"]').click();
+    await escolherBusca(page, 'lig-lider', 'Ana');
+    await expect(page.locator('#lig-lider')).toContainText('Ana Souza');
+    await escolherBusca(page, 'lig-diretos', 'Carla');
+    await expect(page.locator('#lig-diretos-fichas .ficha')).toHaveText(['Carla Dias']);
+    await page.click('#janela-ok');
+    await expect(page.locator('#aviso-geral')).toHaveText('Ligações de Bruno Lima Costa salvas.');
+    const rels = await chamadasSb(page, 'salvarRelacoes');
+    expect(rels[0][1]).toBe('emp2');
+    const idAna = await page.locator('#lista-colaboradores > li[data-nome="Ana Souza"]').getAttribute('data-pessoa');
+    const idCarla = await page.locator('#lista-colaboradores > li[data-nome="Carla Dias"]').getAttribute('data-pessoa');
+    expect(rels[0][2]).toEqual([{ de: idAna, para: 'p-bruno', tipo: 'lidera' }, { de: 'p-bruno', para: idCarla, tipo: 'direto' }]);
+    await expect(bruno.locator('.colab-card__ligacoes')).toContainText('Líder: Ana Souza');
+
+    // Organograma (desenho do relatório num quadro) e mapa de compatibilidade
+    const org = page.locator('#emp-organograma');
+    await expect(org).toBeVisible();
+    await expect(org.locator('.org .org__filhos .org-cartao')).toContainText(['Bruno L.']);
+    await expect(org.locator('.org')).toContainText('Ana S.');
+    await expect(org.locator('.org-cartao', { hasText: 'Bruno L.' }).locator('.org-cartao__letra')).toHaveClass(/disc-fundo-S/);
+    await expect(page.locator('#emp-compat')).toContainText('Harmonia da equipe');
+    await expect(page.locator('#emp-pares > li')).toHaveCount(2);
+
+    // Relatório da equipe com o encaixe de um candidato (Diego, de um processo)
+    await page.click('#btn-relatorio-equipe');
+    await page.check('#rel-incluir-candidato');
+    await escolherBusca(page, 'rel-cand', 'Diego');
+    await page.fill('#rel-cand-cargo', 'Vendedor');
+    await escolherBusca(page, 'rel-cand-lider', 'Ana');
+    await escolherBusca(page, 'rel-cand-colegas', 'Bruno');
+    await page.click('#janela-ok');
+    await expect(page.locator('#rel-modelo-previa')).toBeVisible();
+    await expect(page.frameLocator('#rel-modelo-previa').locator('body')).toContainText('Loja Modelo');
+    await page.click('#btn-rel-rascunho');
+    await expect(page.locator('#aviso-geral')).toHaveText('Rascunho salvo.');
+    await page.click('#btn-rel-publicar');
+    await expect(page.locator('#rel-modelo-link')).toContainText('/relatorio.html#r-tok-modelo-');
+    await expect(page.locator('#rel-modelo-mensagem')).toContainText('relatório da equipe da Loja Modelo');
+    const salvos = await chamadasSb(page, 'salvarRelatorioModelo');
+    expect(salvos).toHaveLength(2);
+    expect(salvos[0][1].id).toBeUndefined();
+    expect(salvos[1][1].id).toBeTruthy();
+    expect(salvos[1][1]).toMatchObject({ modelo: 'equipe', empresaId: 'emp2', publicar: true });
+    expect(salvos[1][1].dados.modelo).toBe('equipe');
+    expect(salvos[1][1].dados.foco).toBeTruthy();
+    expect(JSON.stringify(salvos[1][1].dados)).not.toContain('5511977776666');
+    const listaRel = page.locator('[id^="rel-modelos-e_"] li[data-status="publicado"]');
+    await expect(listaRel).toHaveCount(1);
+    await page.click('#btn-voltar-relatorio');
+    await expect(page.locator('#vista-empresas h2')).toHaveText('Loja Modelo');
+    await expect(page.locator('#emp-relatorios, [id^="rel-modelos-e_"]').locator('li')).toHaveCount(1);
+
+    // Como liderar o Bruno (líder = Ana, da ligação)
+    await bruno.locator('[data-acao="como-liderar"]').click();
+    await expect(page.locator('#rel-modelo-previa')).toBeVisible();
+    await page.click('#btn-rel-publicar');
+    const lidSalvo = (await chamadasSb(page, 'salvarRelatorioModelo')).pop()[1];
+    expect(lidSalvo).toMatchObject({ modelo: 'lideranca', empresaId: 'emp2', pessoaId: 'p-bruno', publicar: true });
+    expect(lidSalvo.dados.lider).toBeTruthy();
+    await page.click('#btn-voltar-relatorio');
+
+    // Mover a Carla para a Filial Norte: some da lista e vai para o histórico
+    await page.locator('#lista-colaboradores > li[data-nome="Carla Dias"] [data-acao="mover"]').click();
+    await page.click('#janela-ok');
+    await expect(page.locator('#janela-erro')).toHaveText('Escolha a empresa de destino.');
+    await escolherBusca(page, 'mover-destino', 'Filial');
+    await page.click('#janela-ok');
+    await expect(page.locator('#aviso-geral')).toHaveText('Carla Dias agora está em Filial Norte.');
+    await expect(colabs).toHaveCount(2);
+    await expect(page.locator('#emp-historico')).toContainText('Carla Dias');
+    expect((await chamadasSb(page, 'moverColaborador'))[0][1]).toMatchObject({ empresaId: 'emp1', cargo: 'Caixa' });
+    await page.click('#btn-voltar-empresas');
+    await expect(page.locator('#lista-empresas li[data-nome="Filial Norte"] .emp-contador')).toHaveText('1');
+    await expect(page.locator('#lista-empresas li[data-nome="Loja Modelo"] .emp-contador')).toHaveText('2');
+    await page.fill('#busca-empresas', 'loja');
+    await expect(page.locator('#lista-empresas > li')).toHaveCount(1);
+    await page.fill('#busca-empresas', '');
+
+    // Excluir empresa com colaborador ativo é recusado; arquivar vai para o fim
+    await page.locator('#lista-empresas li[data-nome="Filial Norte"] [data-acao="excluir"]').click();
+    await page.click('#confirmar-ok');
+    await expect(page.locator('#aviso-geral')).toHaveText('Desligue ou mova os colaboradores antes.');
+    await page.locator('#lista-empresas li[data-nome="Filial Norte"] [data-acao="arquivar"]').click();
+    await expect(page.locator('#lista-empresas li[data-nome="Filial Norte"] .emp-arquivada')).toHaveText('Arquivada');
+    await expect(page.locator('#lista-empresas > li').last()).toHaveAttribute('data-nome', 'Filial Norte');
+
+    // Detalhe do candidato que é colaborador: atalhos "Relatório da pessoa" e "Como liderar"
+    await page.locator('.aba[data-aba="lista"]').click();
+    await page.locator('#lista-candidatos > li', { hasText: 'Bruno Lima Costa' }).getByRole('button', { name: /Ver detalhes/ }).click();
+    await expect(page.locator('#det-vinculo')).toContainText('Colaborador(a) de Loja Modelo');
+    await expect(page.locator('#btn-det-como-liderar')).toBeVisible();
+    await page.click('#btn-det-rel-pessoa');
+    await expect(page.locator('#rel-modelo-previa')).toBeVisible();
+    await page.click('#btn-voltar-relatorio');
+    await expect(page.locator('#vista-detalhe h2')).toHaveText('Bruno Lima Costa');
+    await page.keyboard.press('Escape');
+    await page.locator('#lista-candidatos > li', { hasText: 'Diego Rocha' }).getByRole('button', { name: /Ver detalhes/ }).click();
+    await expect(page.locator('#det-vinculo')).toHaveText('Sem vínculo ativo com empresa cadastrada.');
+    await expect(page.locator('#btn-det-como-liderar')).toHaveCount(0);
+
+    expect(erros.filter((e) => !/Blocked script execution in 'about:srcdoc'/.test(e))).toEqual([]);
+  });
+
+  test('processo de equipe escolhe a empresa cadastrada (lista com busca) e vira o link do teste da equipe', async ({ page }) => {
+    const erros = coletarErros(page);
+    await simularEmpresas(page);
+    await page.goto('/admin.html');
+    await entrar(page, 'dona@empresa.com', 'senha-boa-1');
+    await page.locator('.aba[data-aba="empresas"]').click();
+    await page.click('#btn-nova-empresa');
+    await page.fill('#emp-nome', 'Loja Modelo');
+    await page.click('#janela-ok');
+    await expect(page.locator('#btn-criar-link-equipe')).toBeVisible();
+    await page.click('#btn-criar-link-equipe');
+    await expect(page.locator('#form-processo')).toBeVisible();
+    await expect(page.locator('#proc-tipo')).toHaveAttribute('value', 'equipe');
+    await expect(page.locator('#proc-empresa-id')).toContainText('Loja Modelo');
+    await expect(page.locator('#proc-empresa')).toHaveValue('Loja Modelo');
+    await expect(page.locator('#proc-equipe-texto')).toContainText('compartilhado com a empresa');
+    expect(await page.locator('#vista-processos select').count()).toBe(0);
+    await page.fill('#proc-nome', 'Equipe 2026');
+    await page.click('#btn-salvar-processo');
+    await expect(page.locator('#aviso-geral')).toContainText('Processo criado');
+    const salvo = (await chamadasSb(page, 'processosSalvar'))[0][1];
+    expect(salvo).toMatchObject({ tipo: 'equipe', empresaId: 'emp1', empresa: 'Loja Modelo' });
+
+    // Seleção comum: trocar o tipo some com o texto da equipe
+    await page.locator('.aba[data-aba="processos"]').click();
+    await page.click('#btn-novo-processo');
+    await expect(page.locator('#proc-equipe-texto')).toBeHidden();
+    await escolher(page, '#proc-tipo', 'equipe');
+    await expect(page.locator('#proc-equipe-texto')).toContainText('Escolha a empresa cadastrada');
+    await escolherBusca(page, 'proc-empresa-id', 'Loja');
+    await expect(page.locator('#proc-equipe-texto')).toContainText('cadastro da empresa Loja Modelo');
+
+    // Página da empresa mostra o link do teste da equipe
+    await page.locator('.aba[data-aba="empresas"]').click();
+    await page.locator('#lista-empresas li[data-nome="Loja Modelo"] [data-acao="abrir"]').click();
+    await expect(page.locator('#emp-link-teste')).toContainText('index.html?a=EQ');
+    expect(erros).toEqual([]);
+  });
+
+  test('celular (375px): empresa, colaboradores e janela de ligações sem rolagem lateral', async ({ page }) => {
+    const erros = coletarErros(page);
+    await page.setViewportSize({ width: 375, height: 800 });
+    await simularEmpresas(page);
+    await page.goto('/admin.html');
+    await entrar(page, 'dona@empresa.com', 'senha-boa-1');
+    await page.locator('.aba[data-aba="empresas"]').click();
+    await page.click('#btn-nova-empresa');
+    await page.fill('#emp-nome', 'Empresa com um nome bem comprido para testar a quebra de linha no celular');
+    await page.click('#janela-ok');
+    for (const nome of ['Ana Souza', 'Maria Eduarda Albuquerque Figueiredo']) {
+      await page.click('#btn-add-colaborador');
+      await page.fill('#colab-nome', nome);
+      await page.fill('#colab-telefone', '11988881' + String(nome.length).padStart(3, '0'));
+      await page.fill('#colab-cargo', 'Coordenadora de atendimento ao cliente');
+      await page.click('#janela-ok');
+    }
+    await expect(page.locator('#lista-colaboradores > li')).toHaveCount(2);
+    expect(await semRolagemLateral(page)).toBe(true);
+    await page.locator('#lista-colaboradores > li').first().locator('[data-acao="ligacoes"]').click();
+    await page.click('#lig-diretos');
+    await expect(page.locator('#lig-diretos-painel')).toBeVisible();
+    expect(await semRolagemLateral(page)).toBe(true);
+    const fonte = await page.locator('#lig-diretos-busca').evaluate((n) => getComputedStyle(n).fontSize);
+    expect(fonte).toBe('16px');
+    await page.locator('#lig-diretos-lista [role="option"]').first().click();
+    await page.click('#lig-diretos-pronto');
+    await page.click('#janela-ok');
+    await expect(page.locator('#emp-pares > li')).toHaveCount(1);
+    expect(await semRolagemLateral(page)).toBe(true);
+    expect(erros.filter((e) => !/Blocked script execution in 'about:srcdoc'/.test(e))).toEqual([]);
+  });
+
+  test('prévia (API simulada): empresa de exemplo com colaboradores, organograma, mapa e relatório da equipe publicado', async ({ page }) => {
+    const erros = coletarErros(page);
+    await configurar(page, { API_URL: 'simulada' });
+    await page.goto('/admin.html');
+    await entrar(page, 'admin@previa.com', 'previa123');
+    await page.locator('.aba[data-aba="empresas"]').click();
+    const card = page.locator('#lista-empresas > li').first();
+    await expect(card).toBeVisible();
+    await card.locator('[data-acao="abrir"]').click();
+    await expect(page.locator('#lista-colaboradores > li').first()).toBeVisible();
+    const n = await page.locator('#lista-colaboradores > li').count();
+    await expect(page.locator('#vista-empresas .emp-secao__titulo')).toHaveText('Colaboradores ativos (' + n + ')');
+    await expect(page.locator('#emp-organograma .org, #emp-organograma .orgf-arvore')).toHaveCount(1);
+    await expect(page.locator('#emp-compat')).toContainText('Harmonia da equipe');
+    await page.click('#btn-relatorio-equipe');
+    await page.click('#janela-ok');
+    await expect(page.locator('#rel-modelo-previa')).toBeVisible();
+    await page.click('#btn-rel-publicar');
+    await expect(page.locator('#rel-modelo-link')).toContainText('relatorio.html');
+    expect(erros.filter((e) => !/Blocked script execution in 'about:srcdoc'/.test(e))).toEqual([]);
   });
 });

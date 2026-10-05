@@ -102,6 +102,8 @@ async function lerRelatorio(ctx, token) {
   if (!relTokenValido(token)) return null;
   const l = await ctx.db.relatorioLer(token);
   if (!l || !l.dados || typeof l.dados !== 'object') return null;
+  // Relatórios dos modelos novos (equipe/liderança/pessoa) são do painel, não do processo/ClickUp.
+  if (!l.processo_id || (l.modelo && l.modelo !== 'processo')) return null;
   return l;
 }
 
@@ -157,7 +159,7 @@ async function acaoRelatorioDespublicar(ctx, token) {
 
 async function acaoRelatoriosListar(ctx, processoId) {
   const linhas = await ctx.db.relatoriosListar(limparTexto(processoId, 60));
-  const relatorios = (linhas || []).map((l) => ({
+  const relatorios = (linhas || []).filter((l) => l.processo_id).map((l) => ({
     token: l.token, processoId: l.processo_id ? String(l.processo_id) : '',
     status: l.status === 'publicado' ? 'publicado' : 'rascunho',
     criadoEm: l.criado_em || '', publicadoEm: l.publicado_em || '', atualizadoEm: l.atualizado_em || ''

@@ -170,3 +170,18 @@ test('listas do ClickUp, sem token, erro HTTP em pt-BR sem o token e 429 com nov
   await cu2.post('/x', {});
   assert.equal(d2.pausas.length, 1);
 });
+
+test('processoDados: a mesma pessoa com várias respostas no processo usa a mais recente', async () => {
+  const { respostasMaisRecentesPorPessoa } = await import('../../supabase/funcoes-compartilhadas/clickup.js');
+  const it = (id, telefone, recebidoEm, pessoaId) => ({ id, telefone, recebidoEm, pessoaId: pessoaId || '' });
+  const r = respostasMaisRecentesPorPessoa([
+    it('ana-1', '5511988881111', '2026-10-01T10:00:00Z', 'pa'),
+    it('beto', '5521977772222', '2026-10-02T10:00:00Z', 'pb'),
+    it('ana-antiga-sem-pessoa', '(11) 98888-1111', '2026-09-01T10:00:00Z'),
+    it('ana-2', '11988881111', '2026-10-03T10:00:00Z', 'pa'),
+    it('sem-tel-1', '', '2026-10-01T10:00:00Z', 'pc'),
+    it('sem-tel-2', '', '2026-10-04T10:00:00Z', 'pc'),
+    it('sem-nada', '', '2026-10-04T10:00:00Z')
+  ]);
+  assert.deepEqual(r.map((x) => x.id), ['beto', 'ana-2', 'sem-tel-2', 'sem-nada']);
+});

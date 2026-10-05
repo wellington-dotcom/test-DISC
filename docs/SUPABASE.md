@@ -68,9 +68,13 @@ São **dois valores públicos**: podem ficar no site sem problema, porque o banc
 5. Se aparecer o aviso **"Potential issue detected — Query has destructive operations"**, é normal: o arquivo recria gatilhos e regras (não apaga dados). Clique em **Run this query**.
 6. Embaixo, em **Results**, deve aparecer **"Success. No rows returned"**.
 
-Para conferir: menu **Table Editor** → devem existir as tabelas `admins`, `processos`, `respostas`, `relatorios` e `configuracoes`, todas sem o selo vermelho **"RLS disabled"** / **"Unrestricted"**.
+7. Repita os passos 1 a 6 com o arquivo [`supabase/migrations/20261006120000_pessoas_formulario.sql`](../supabase/migrations/20261006120000_pessoas_formulario.sql) (formulário por processo e fichas de pessoas) e depois com [`supabase/migrations/20261007120000_empresas_equipes.sql`](../supabase/migrations/20261007120000_empresas_equipes.sql) (empresas, colaboradores, organograma e relatórios de equipe/liderança/pessoa). Sempre **nessa ordem**: `…_disc.sql`, `…_pessoas_formulario.sql`, `…_empresas_equipes.sql`.
 
-> **Pode rodar de novo?** Sim. Sempre que o arquivo `20261005120000_disc.sql` mudar no repositório, repita este passo: ele só cria o que falta e atualiza as funções, **sem apagar** respostas nem processos.
+Para conferir: menu **Table Editor** → devem existir as tabelas `admins`, `processos`, `pessoas`, `respostas`, `relatorios`, `configuracoes`, `empresas`, `vinculos` e `relacoes`, todas sem o selo vermelho **"RLS disabled"** / **"Unrestricted"**.
+
+> **Pode rodar de novo?** Sim. Cada arquivo só cria o que falta e atualiza as funções, **sem apagar** respostas nem processos. Se rodar um arquivo mais antigo de novo, rode os mais novos logo depois, na ordem (os antigos voltam algumas funções para a versão anterior).
+
+> **Migrações novas são automáticas.** Com a integração do GitHub do Supabase ligada, cada arquivo novo em `supabase/migrations/` é aplicado sozinho no push para a branch de produção (foi assim com `20261006120000_pessoas_formulario.sql`: ela cria `pessoas`, liga as respostas que já existem à pessoa do mesmo WhatsApp e não apaga nada). Se a integração estiver desligada ou falhar, rode à mão: abra o arquivo, **Copy raw file**, cole no **SQL Editor** e **Run** (como nos passos acima).
 
 ## 4. Fechar o cadastro livre
 
@@ -325,12 +329,13 @@ curl -sS -X DELETE "https://api.clickup.com/api/v2/webhook/ID_DO_WEBHOOK" -H "Au
 - **Pelo painel:** detalhe do candidato → **Excluir**, ou **Excluir todos** (digitando EXCLUIR), por processo.
 - **Pelo Supabase:** **Table Editor** → `respostas` → marque as linhas → **Delete**. Ou no SQL Editor:
   `delete from public.respostas where recebido_em < now() - interval '6 months';`
+- A ficha da pessoa (`public.pessoas`) sai sozinha junto com a última resposta dela (por qualquer um dos caminhos acima) — **menos** se ela for colaboradora ativa de uma empresa (continua no time, sem resultado). Para tirá-la também: desligue no painel e apague no SQL Editor `delete from public.pessoas where id = '…';` (vínculos, relações e relatórios dela saem junto).
 - Apague também CSVs, PDFs e mensagens com códigos que tiver salvo, como antes.
 - No plano grátis não há cópia de segurança para baixar: exporte o CSV pelo painel de vez em quando, se quiser guardar.
 
 ## Referência técnica (para quem for mexer no código)
 
-- Banco: `supabase/migrations/20261005120000_disc.sql` (idempotente; RLS em todas as tabelas; anon só chama `avaliacao_publica`, `enviar_resposta`, `relatorio_publico`; authenticated só com `public.e_admin()`; `garantir_primeiro_admin()`). Dados de exemplo para projeto de teste: `supabase/seed_previa.sql` (não rode no projeto real).
+- Banco: `supabase/migrations/20261005120000_disc.sql` + `supabase/migrations/20261006120000_pessoas_formulario.sql` + `supabase/migrations/20261007120000_empresas_equipes.sql` (em ordem; `pessoas` + formulário por processo; empresas/vínculos/relações + relatórios por modelo, com `salvar_colaborador`, `mover_colaborador` e `salvar_relacoes` só para admin; idempotentes; RLS em todas as tabelas; anon só chama `avaliacao_publica`, `enviar_resposta`, `relatorio_publico`; authenticated só com `public.e_admin()`; `garantir_primeiro_admin()`). Dados de exemplo para projeto de teste: `supabase/seed_previa.sql` (não rode no projeto real).
 - Funções: fonte em `supabase/functions/<nome>/index.ts` + `supabase/funcoes-compartilhadas/*.js`; `npm run montar:funcoes` gera `dist/funcoes/<nome>/index.ts` (um arquivo por função, para colar no painel). `npm test` confere se os gerados estão atualizados.
 - Site: `js/config.js` (`BACKEND`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`), `js/api-supabase.js`, `assets/vendor/supabase.js`.
 - Despertador: `.github/workflows/manter-ativo.yml`. Migração: `scripts/migrar-planilha.mjs` (testes em `tests/migrar-planilha.test.js`).

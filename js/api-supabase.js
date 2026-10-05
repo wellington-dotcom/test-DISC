@@ -29,7 +29,21 @@
  *   sessaoAtual()                    -> {ok, token, usuario} da sessão guardada (ou rejeita com sessaoExpirada)
  *   convidarUsuario(token, {email, nome}) · removerUsuario(token, id)
  *   primeiroAcesso e redefinirSenha  -> recusam com mensagem explicando o jeito do Supabase.
- *   Empresas não existem mais (a empresa é texto no processo): listarEmpresas devolve lista vazia.
+ *
+ * Empresas, colaboradores e organograma (tabelas empresas/vinculos/relacoes, só admin pela RLS; as operações
+ * que precisam ser atômicas vão pelas funções do banco salvar_colaborador, mover_colaborador e salvar_relacoes):
+ *   listarEmpresas(token) -> {empresas:[{id, nome, cidade, observacoes, ativo, criadoEm, atualizadoEm, colaboradores}]}
+ *   salvarEmpresa(token, {id?, nome, cidade, observacoes, ativo}) -> {empresa} · excluirEmpresa(token, id) -> {id}
+ *     (recusa com colaborador ativo: "Desligue ou mova os colaboradores antes.")
+ *   listarEquipe(token, empresaId) -> {empresa, colaboradores:[{vinculoId, pessoaId, nome, telefone, cargo, area,
+ *     status, inicio, fim, resultado:{percentuais, codigo}|null, respondidoEm}], relacoes:[{de, para, tipo}], historico:[…]}
+ *   salvarColaborador(token, {empresaId, pessoaId? | nome + telefone, cargo, area}) -> {colaborador}
+ *   moverColaborador(token, {pessoaId, empresaId, cargo, area}) -> {colaborador} · desligarColaborador(token, vinculoId) -> {id}
+ *   salvarRelacoes(token, empresaId, [{de, para, tipo}]) -> {relacoes} (substitui o conjunto)
+ * Relatórios por modelo (equipe/lideranca/pessoa; snapshot "dados" montado no navegador, até 300 KB):
+ *   salvarRelatorioModelo(token, {id?, modelo, empresaId?, pessoaId?, dados, publicar?}) -> {relatorio:{id, token,
+ *     status, modelo, url?}} · listarRelatoriosModelo(token, {empresaId?, pessoaId?}) -> {relatorios:[…]}
+ *   excluirRelatorioModelo(token, id) -> {id}. relatorioPublico devolve também o "modelo".
  *
  * No Node (testes): require('./js/api-supabase.js').criar({ supabase: libFalsa, url, chave, local?, timeoutMs? }).
  */
@@ -52,7 +66,9 @@
   var MSG_PRIMEIRO_ACESSO = 'Com o Supabase não há chave de primeiro acesso: crie o seu usuário no painel do Supabase ' +
     '(Authentication > Users > Add user) e entre com esse e-mail e senha. O primeiro login vira administrador.';
   var MSG_REDEFINIR = 'Com o Supabase cada pessoa cria a própria senha nova pelo "Esqueci minha senha", na tela de entrada.';
-  var MSG_SEM_EMPRESAS = 'As empresas não existem mais nesta versão: a empresa agora é um texto no processo.';
+  var MODELOS_RELATORIO = ['equipe', 'lideranca', 'pessoa'];
+  var TIPOS_RELACAO = ['lidera', 'direto', 'indireto'];
+  var MAX_DADOS_RELATORIO = 300000;     // ~300 KB de JSON (o banco recusa acima de ~350 mil caracteres)
   var SENHA_MIN = 8;
   var SENHA_MAX = 100;
   var STATUS_VALIDOS = ['em_analise', 'aprovado', 'reprovado'];
@@ -134,7 +150,54 @@
     return /^[A-Za-z0-9_-]{1,40}$/.test(s) ? s : prefixo + (i + 1);
   }
 
-  /** Mesma validação do Code.gs (validarConfigProcesso): {ok, config} ou {ok:false, erro}. */
+  // ---------------------------------------------------------------------------
+  // Formulário do processo (config.formulario): o que perguntar na identificação do candidato.
+  // Mesma regra de disc_interno.normalizar_formulario (banco) e de js/api-simulada.js.
+  // ---------------------------------------------------------------------------
+  var MODOS_CAMPO = ['obrigatorio', 'opcional', 'oculto'];
+  var CAMPOS_FORMULARIO = ['idade', 'funcao', 'empresa', 'email', 'cidade'];
+  var FORMULARIO_PADRAO = { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto' };
+  var MAX_PERGUNTAS = 5;
+
+  /** {campos:{idade,funcao,empresa,email,cidade: 'obrigatorio'|'opcional'|'oculto'}, perguntas:[{id,texto,obrigatoria}]} */
+  function normalizarFormulario(f) {
+    f = f && typeof f === 'object' && !Array.isArray(f) ? f : {};
+    var origem = f.campos && typeof f.campos === 'object' && !Array.isArray(f.campos) ? f.campos : {};
+    var campos = {};
+    CAMPOS_FORMULARIO.forEach(function (k) {
+      campos[k] = typeof origem[k] === 'string' && MODOS_CAMPO.indexOf(origem[k]) >= 0 ? origem[k] : FORMULARIO_PADRAO[k];
+    });
+    var perguntas = [];
+    var usados = {};
+    (Array.isArray(f.perguntas) ? f.perguntas : []).forEach(function (p) {
+      if (perguntas.length >= MAX_PERGUNTAS) return;
+      if (!p || typeof p !== 'object' || Array.isArray(p)) return;
+      var texto = limparTexto(p.texto, 200);
+      if (texto.length < 3) return;
+      var id = typeof p.id === 'string' ? p.id : '';
+      if (!/^[a-z0-9_]{1,20}$/.test(id) || usados[id]) {
+        var n = 1;
+        while (usados['p' + n]) n++;
+        id = 'p' + n;
+      }
+      usados[id] = true;
+      perguntas.push({ id: id, texto: texto, obrigatoria: p.obrigatoria === true });
+    });
+    return { campos: campos, perguntas: perguntas };
+  }
+  /** Mensagem de recusa se alguma pergunta extra pede dado sensível (sem exceções); senão ''. */
+  function perguntaSensivel(f) {
+    var lista = f && typeof f === 'object' && Array.isArray(f.perguntas) ? f.perguntas : [];
+    for (var i = 0; i < lista.length; i++) {
+      var p = lista[i];
+      if (!p || typeof p !== 'object' || Array.isArray(p)) continue;
+      var texto = limparTexto(p.texto, 200);
+      if (texto && classificarCampo(texto, {}) !== '') return 'A pergunta "' + texto + '" pede um dado sensível e não pode ser usada.';
+    }
+    return '';
+  }
+
+  /** Mesma validação do Code.gs (validarConfigProcesso) + formulário: {ok, config} ou {ok:false, erro}. */
   function validarConfigProcesso(c) {
     if (c === undefined || c === null) c = {};
     if (typeof c !== 'object' || Array.isArray(c)) return { ok: false, erro: 'Configuração do processo inválida.' };
@@ -183,6 +246,8 @@
       return { id: idUnico(b.id, 'bonus', i), nome: limparTexto(b.nome, 80) || ('Bônus ' + (i + 1)), campo: campo(b.campo), regra: r };
     });
     if (problema) return { ok: false, erro: problema };
+    var sensivel = perguntaSensivel(c.formulario);
+    if (sensivel) return { ok: false, erro: sensivel };
     var corte = numeroOu(c.corte, 70, 0, 200);
     var faixa = numeroOu(c.faixaAvaliar, 55, 0, 200);
     if (faixa > corte) return { ok: false, erro: 'A faixa "avaliar" precisa ser menor ou igual à nota de corte.' };
@@ -198,7 +263,8 @@
         statusFinalistas: (Array.isArray(c.statusFinalistas) ? c.statusFinalistas : []).slice(0, 30)
           .map(function (x) { return limparTexto(x, 80); }).filter(Boolean),
         permitirAntecedentes: permitirAntecedentes,
-        permitirSaude: c.permitirSaude === true
+        permitirSaude: c.permitirSaude === true,
+        formulario: normalizarFormulario(c.formulario)
       }
     };
   }
@@ -338,7 +404,7 @@
   function processoPublico(l) {
     var cfg = validarConfigProcesso(l.config && typeof l.config === 'object' ? l.config : {});
     return {
-      id: String(l.id), codigo: l.codigo || '', empresaId: '', empresaNome: l.empresa || '',
+      id: String(l.id), codigo: l.codigo || '', empresaId: l.empresa_id ? String(l.empresa_id) : '', empresaNome: l.empresa || '',
       nome: l.nome || '', tipo: TIPOS.indexOf(l.tipo) >= 0 ? l.tipo : 'selecao',
       mostrarResultado: l.mostrar_resultado === true, ativa: l.ativo === true,
       criadaEm: iso(l.criado_em), respostas: contagemRespostas(l),
@@ -351,7 +417,7 @@
   }
   function avaliacaoPublica(l) {
     var p = processoPublico(l);
-    return { id: p.id, codigo: p.codigo, empresaId: '', empresaNome: p.empresaNome, nome: p.nome, tipo: p.tipo,
+    return { id: p.id, codigo: p.codigo, empresaId: p.empresaId, empresaNome: p.empresaNome, nome: p.nome, tipo: p.tipo,
       mostrarResultado: p.mostrarResultado, ativa: p.ativa, criadaEm: p.criadaEm, respostas: p.respostas };
   }
 
@@ -368,7 +434,26 @@
     return { percentuais: p, codigo: linha.perfil || '' };
   }
 
-  /** Linha de public.respostas (com processos embutido) no item de "listar" do Code.gs. */
+  /** Ficha embutida (pessoas(...)) -> {id, nome, telefone, idade, funcao, empresa, email, cidade, atualizadoEm} ou null. */
+  function pessoaDaLinha(p) {
+    if (Array.isArray(p)) p = p[0];
+    if (!p || typeof p !== 'object' || !p.id) return null;
+    var idade = p.idade === null || p.idade === undefined || p.idade === '' ? null : Number(p.idade);
+    return {
+      id: String(p.id), nome: p.nome || '', telefone: String(p.telefone || '').replace(/\D/g, ''),
+      idade: isFinite(idade) ? idade : null, funcao: p.funcao || '', empresa: p.empresa || '',
+      email: p.email || '', cidade: p.cidade || '', atualizadoEm: iso(p.atualizado_em)
+    };
+  }
+  /** Respostas das perguntas extras gravadas: [{id, pergunta, resposta}] (o que não tiver esse formato sai). */
+  function extrasDaLinha(x) {
+    if (!Array.isArray(x)) return [];
+    return x.filter(function (e) { return e && typeof e === 'object' && !Array.isArray(e); }).map(function (e) {
+      return { id: String(e.id || ''), pergunta: String(e.pergunta || ''), resposta: String(e.resposta || '') };
+    });
+  }
+
+  /** Linha de public.respostas (com processos e pessoas embutidos) no item de "listar" do Code.gs + pessoa. */
   function itemDaLinha(l, scoring) {
     var base = l.payload && typeof l.payload === 'object' ? l.payload : {};
     var proc = l.processos && typeof l.processos === 'object' && !Array.isArray(l.processos) ? l.processos : null;
@@ -401,8 +486,54 @@
       processoId: l.processo_id ? String(l.processo_id) : '',
       empresaNome: proc ? (proc.empresa || '') : '',
       avaliacaoNome: proc ? (proc.nome || '') : '',
-      avaliacaoTipo: proc && TIPOS.indexOf(proc.tipo) >= 0 ? proc.tipo : 'selecao'
+      avaliacaoTipo: proc && TIPOS.indexOf(proc.tipo) >= 0 ? proc.tipo : 'selecao',
+      pessoaId: l.pessoa_id ? String(l.pessoa_id) : '',
+      pessoa: pessoaDaLinha(l.pessoas),
+      email: l.email || '',
+      cidade: l.cidade || '',
+      extras: extrasDaLinha(l.extras)
     };
+  }
+
+  /** Linha de public.empresas no formato do painel (colaboradores = vínculos ativos). */
+  function empresaDaLinha(l, colaboradores) {
+    return {
+      id: String(l.id), nome: l.nome || '', cidade: l.cidade || '', observacoes: l.observacoes || '',
+      ativo: l.ativo !== false, criadoEm: iso(l.criado_em), atualizadoEm: iso(l.atualizado_em),
+      colaboradores: numero(colaboradores)
+    };
+  }
+  function dataCurta(v) { return v ? String(v).slice(0, 10) : ''; }
+
+  /** Vínculo (com pessoas(…, respostas(…)) embutido) -> colaborador do painel, com o resultado mais recente. */
+  function colaboradorDaLinha(v, scoring) {
+    var p = Array.isArray(v.pessoas) ? v.pessoas[0] : v.pessoas;
+    p = p && typeof p === 'object' ? p : {};
+    var resps = (Array.isArray(p.respostas) ? p.respostas : []).filter(function (r) { return r && typeof r === 'object'; })
+      .slice().sort(function (a, b) { return String(b.recebido_em || '').localeCompare(String(a.recebido_em || '')); });
+    var ultima = resps[0] || null;
+    var resultado = ultima ? calcularDisc(String(ultima.respostas || '').replace(/\D/g, ''), ultima, scoring) : null;
+    return {
+      vinculoId: String(v.id), pessoaId: String(v.pessoa_id || p.id || ''), nome: p.nome || '',
+      telefone: String(p.telefone || '').replace(/\D/g, ''), cargo: v.cargo || '', area: v.area || '',
+      status: v.status === 'desligado' ? 'desligado' : 'ativo', inicio: dataCurta(v.inicio), fim: dataCurta(v.fim),
+      resultado: resultado, respondidoEm: resultado && ultima ? iso(ultima.recebido_em) : ''
+    };
+  }
+  function colaboradorDaRpc(c) {
+    c = c && typeof c === 'object' ? c : {};
+    return {
+      vinculoId: String(c.vinculoId || ''), pessoaId: String(c.pessoaId || ''), empresaId: String(c.empresaId || ''),
+      nome: c.nome || '', telefone: String(c.telefone || '').replace(/\D/g, ''), cargo: c.cargo || '', area: c.area || '',
+      status: c.status === 'desligado' ? 'desligado' : 'ativo', inicio: dataCurta(c.inicio), fim: dataCurta(c.fim)
+    };
+  }
+  function porNome(a, b) { return String(a.nome).localeCompare(String(b.nome), 'pt-BR'); }
+
+  /** Endereço do site (pasta da página atual), terminando em "/". '' fora do navegador. */
+  function baseDoSite(local) {
+    var painel = enderecoDoPainel(local);
+    return painel ? painel.replace(/admin\.html$/, '') : '';
   }
 
   // ---------------------------------------------------------------------------
@@ -604,6 +735,12 @@
         if (lista && !/^[A-Za-z0-9_-]{1,40}$/.test(lista)) return Promise.reject(recusa('ID da lista do ClickUp inválido.'));
         linha.clickup_list_id = lista || null;
       }
+      if (veio('empresaId')) {
+        // Empresa cadastrada (opcional). Ligando, o banco preenche o texto "empresa" se ele vier vazio.
+        var empresaId = limparTexto(dados.empresaId, 40);
+        if (empresaId && !RE_UUID.test(empresaId)) return Promise.reject(recusa('Escolha uma empresa válida.'));
+        linha.empresa_id = empresaId || null;
+      }
       if (veio('config')) {
         var cfg = validarConfigProcesso(dados.config);
         if (!cfg.ok) return Promise.reject(recusa(cfg.erro));
@@ -645,6 +782,122 @@
       }).then(function (linhas) { return Array.isArray(linhas) ? linhas : []; });
     }
 
+    // ---- empresas, colaboradores e organograma ----
+    function idValido(v) { var s = limparTexto(v, 40); return RE_UUID.test(s) ? s : ''; }
+
+    function contarAtivos(empresaId) {
+      return consulta(function (c) {
+        var q = c.from('vinculos').select('empresa_id').eq('status', 'ativo');
+        return empresaId ? q.eq('empresa_id', empresaId) : q;
+      }).then(function (linhas) {
+        var n = {};
+        (Array.isArray(linhas) ? linhas : []).forEach(function (l) { n[l.empresa_id] = (n[l.empresa_id] || 0) + 1; });
+        return n;
+      });
+    }
+
+    function salvarEmpresa(dados) {
+      if (!dados || typeof dados !== 'object') throw recusa('Dados da empresa ausentes.');
+      function veio(k) { return Object.prototype.hasOwnProperty.call(dados, k) && dados[k] !== undefined; }
+      var id = limparTexto(dados.id, 40);
+      var nome = limparTexto(dados.nome, 120);
+      if (letrasContadas(nome) < 1) throw recusa('Informe o nome da empresa.');
+      if (id && !RE_UUID.test(id)) throw recusa('Empresa não encontrada.');
+      var linha = { nome: nome };
+      if (veio('cidade') || !id) linha.cidade = limparTexto(dados.cidade, 120);
+      if (veio('observacoes') || !id) linha.observacoes = limparTextoLongo(dados.observacoes, 2000);
+      if (veio('ativo') || !id) linha.ativo = dados.ativo !== false;
+      return consulta(function (c) { return c.from('empresas').select('id, nome'); }).then(function (todas) {
+        var igual = (Array.isArray(todas) ? todas : []).some(function (e) {
+          return String(e.id) !== id && String(e.nome || '').toLowerCase() === nome.toLowerCase();
+        });
+        if (igual) throw recusa('Já existe uma empresa com esse nome.');
+        return consulta(function (c) {
+          return id ? c.from('empresas').update(linha).eq('id', id).select('*') : c.from('empresas').insert(linha).select('*');
+        });
+      }).then(function (linhas) {
+        var l = Array.isArray(linhas) ? linhas[0] : linhas;
+        if (!l) throw recusa('Empresa não encontrada.');
+        return contarAtivos(String(l.id)).then(function (n) { return { ok: true, empresa: empresaDaLinha(l, n[l.id]) }; });
+      });
+    }
+
+    function listarEquipe(empresaIdBruto) {
+      var empresaId = idValido(empresaIdBruto);
+      if (!empresaId) throw recusa('Empresa não encontrada.');
+      return Promise.all([
+        consulta(function (c) { return c.from('empresas').select('*').eq('id', empresaId).maybeSingle(); }),
+        consulta(function (c) {
+          return c.from('vinculos').select('*, pessoas(id, nome, telefone, respostas(respostas, d, i, s, c, perfil, recebido_em))')
+            .eq('empresa_id', empresaId).order('inicio', { ascending: true });
+        }),
+        consulta(function (c) { return c.from('relacoes').select('de_pessoa, para_pessoa, tipo').eq('empresa_id', empresaId); })
+      ]).then(function (r) {
+        var emp = r[0];
+        if (!emp) throw recusa('Empresa não encontrada.');
+        var sc = scoring();
+        var todos = (Array.isArray(r[1]) ? r[1] : []).map(function (v) { return colaboradorDaLinha(v, sc); });
+        var ativos = todos.filter(function (c) { return c.status === 'ativo'; }).sort(porNome);
+        var historico = todos.filter(function (c) { return c.status !== 'ativo'; })
+          .sort(function (a, b) { return String(b.fim).localeCompare(String(a.fim)); });
+        var ids = {};
+        ativos.forEach(function (c) { ids[c.pessoaId] = true; });
+        var relacoes = (Array.isArray(r[2]) ? r[2] : []).map(function (x) {
+          return { de: String(x.de_pessoa), para: String(x.para_pessoa), tipo: x.tipo };
+        }).filter(function (x) { return ids[x.de] && ids[x.para] && TIPOS_RELACAO.indexOf(x.tipo) >= 0; });
+        return { ok: true, empresa: empresaDaLinha(emp, ativos.length), colaboradores: ativos, relacoes: relacoes, historico: historico };
+      });
+    }
+
+    // ---- relatórios por modelo (tabela relatorios, direto com RLS) ----
+    function urlRelatorio(token) { return baseDoSite(local) + 'relatorio.html?r=' + token; }
+    var COLUNAS_REL_MODELO = 'id, token, modelo, status, empresa_id, pessoa_id, criado_em, atualizado_em, publicado_em, titulo:dados->>titulo';
+    function relatorioModeloDaLinha(l) {
+      var r = {
+        id: String(l.id), token: String(l.token), modelo: l.modelo, status: l.status === 'publicado' ? 'publicado' : 'rascunho',
+        titulo: l.titulo || '', empresaId: l.empresa_id ? String(l.empresa_id) : '', pessoaId: l.pessoa_id ? String(l.pessoa_id) : '',
+        criadoEm: iso(l.criado_em), atualizadoEm: iso(l.atualizado_em), publicadoEm: iso(l.publicado_em)
+      };
+      if (r.status === 'publicado') r.url = urlRelatorio(r.token);
+      return r;
+    }
+
+    function salvarRelatorioModelo(dados) {
+      if (!dados || typeof dados !== 'object') throw recusa('Dados do relatório ausentes.');
+      var modelo = limparTexto(dados.modelo, 20);
+      if (MODELOS_RELATORIO.indexOf(modelo) === -1) throw recusa('Modelo de relatório inválido. Use: equipe, lideranca ou pessoa.');
+      var id = limparTexto(dados.id, 40);
+      if (id && !RE_UUID.test(id)) throw recusa('Relatório não encontrado.');
+      var empresaId = limparTexto(dados.empresaId, 40);
+      var pessoaId = limparTexto(dados.pessoaId, 40);
+      if (empresaId && !RE_UUID.test(empresaId)) throw recusa('Empresa não encontrada.');
+      if (pessoaId && !RE_UUID.test(pessoaId)) throw recusa('Pessoa não encontrada.');
+      if (modelo === 'equipe' && !empresaId) throw recusa('Escolha a empresa do relatório.');
+      if (modelo !== 'equipe' && !pessoaId) throw recusa('Escolha a pessoa do relatório.');
+      var snap = dados.dados;
+      if (!snap || typeof snap !== 'object' || Array.isArray(snap)) throw recusa('Relatório vazio: gere o relatório antes de salvar.');
+      if (snap.modelo !== undefined && snap.modelo !== modelo) throw recusa('Os dados não são de um relatório "' + modelo + '".');
+      var json;
+      try { json = JSON.stringify(snap); } catch (e) { throw recusa('Dados do relatório inválidos.'); }
+      if (json.length > MAX_DADOS_RELATORIO) throw recusa('Relatório grande demais (máximo 300 KB).');
+      snap = JSON.parse(json);
+      snap.modelo = modelo;
+      var linha = { modelo: modelo, empresa_id: empresaId || null, pessoa_id: pessoaId || null, dados: snap };
+      if (dados.publicar === true) linha.status = 'publicado';
+      else if (dados.publicar === false || !id) linha.status = 'rascunho';
+      return consulta(function (c) {
+        return id ? c.from('relatorios').update(linha).eq('id', id).neq('modelo', 'processo').select(COLUNAS_REL_MODELO)
+          : c.from('relatorios').insert(linha).select(COLUNAS_REL_MODELO);
+      }).then(function (linhas) {
+        var l = Array.isArray(linhas) ? linhas[0] : linhas;
+        if (!l) throw recusa('Relatório não encontrado.');
+        var r = relatorioModeloDaLinha(l);
+        var saida = { id: r.id, token: r.token, status: r.status, modelo: r.modelo };
+        if (r.url) saida.url = r.url;
+        return { ok: true, relatorio: saida };
+      });
+    }
+
     var linkAtual = { tipo: linkInicial.tipo, erro: linkInicial.erro };
 
     var api = {
@@ -671,13 +924,14 @@
         exigir(codigo, MSG_LINK_INVALIDO);
         return rpcOk('avaliacao_publica', { p_codigo: String(codigo) }).then(function (r) {
           var a = r.avaliacao && typeof r.avaliacao === 'object' ? r.avaliacao : r;
-          return { ok: true, avaliacao: { codigo: a.codigo, nome: a.nome, tipo: a.tipo, empresaNome: a.empresaNome || '', mostrarResultado: a.mostrarResultado === true } };
+          return { ok: true, avaliacao: { codigo: a.codigo, nome: a.nome, tipo: a.tipo, empresaNome: a.empresaNome || '', mostrarResultado: a.mostrarResultado === true,
+            formulario: normalizarFormulario(a.formulario) } };
         });
       }),
       relatorioPublico: seguro(function (relatorioToken) {
         exigir(relatorioToken, MSG_REL_NAO_ENCONTRADO);
         return rpcOk('relatorio_publico', { p_token: String(relatorioToken) }).then(function (r) {
-          return { ok: true, relatorio: r.relatorio, publicadoEm: r.publicadoEm || '' };
+          return { ok: true, modelo: MODELOS_RELATORIO.indexOf(r.modelo) >= 0 ? r.modelo : 'processo', relatorio: r.relatorio, publicadoEm: r.publicadoEm || '' };
         });
       }),
       login: seguro(function (email, senha) {
@@ -763,7 +1017,8 @@
       }),
       listar: seguro(function (token) {
         return exigirSessao(token).then(function () {
-          return listarTodas('respostas', '*, processos(nome, tipo, empresa, codigo)', 'recebido_em');
+          return listarTodas('respostas', '*, processos(nome, tipo, empresa, codigo), ' +
+            'pessoas(id, nome, telefone, idade, funcao, empresa, email, cidade, atualizado_em)', 'recebido_em');
         }).then(function (linhas) {
           var sc = scoring();
           return { ok: true, itens: linhas.map(function (l) { return itemDaLinha(l, sc); }) };
@@ -818,10 +1073,122 @@
         });
       }),
 
-      // --- empresas (não existem mais: a empresa é texto no processo) ---
-      listarEmpresas: seguro(function (token) { return exigirSessao(token).then(function () { return { ok: true, empresas: [] }; }); }),
-      salvarEmpresa: seguro(function (token) { return exigirSessao(token).then(function () { throw recusa(MSG_SEM_EMPRESAS); }); }),
-      excluirEmpresa: seguro(function (token) { return exigirSessao(token).then(function () { throw recusa(MSG_SEM_EMPRESAS); }); }),
+      // --- empresas, colaboradores e organograma ---
+      listarEmpresas: seguro(function (token) {
+        return exigirSessao(token).then(function () {
+          return Promise.all([
+            consulta(function (c) { return c.from('empresas').select('*').order('nome', { ascending: true }); }),
+            contarAtivos('')
+          ]);
+        }).then(function (r) {
+          var n = r[1];
+          var empresas = (Array.isArray(r[0]) ? r[0] : []).map(function (l) { return empresaDaLinha(l, n[l.id]); }).sort(porNome);
+          return { ok: true, empresas: empresas };
+        });
+      }),
+      salvarEmpresa: seguro(function (token, empresa) {
+        return exigirSessao(token).then(function () { return salvarEmpresa(empresa || {}); });
+      }),
+      excluirEmpresa: seguro(function (token, idBruto) {
+        exigirToken(token);
+        exigir(idBruto, 'Empresa não informada.');
+        var id = idValido(idBruto);
+        return exigirSessao(token).then(function () {
+          if (!id) throw recusa('Empresa não encontrada.');
+          return consulta(function (c) { return c.from('empresas').delete().eq('id', id).select('id'); });
+        }).then(function (linhas) {
+          if (!Array.isArray(linhas) || !linhas.length) throw recusa('Empresa não encontrada.');
+          return { ok: true, id: id };
+        });
+      }),
+      listarEquipe: seguro(function (token, empresaId) {
+        exigirToken(token);
+        exigir(empresaId, 'Empresa não informada.');
+        return exigirSessao(token).then(function () { return listarEquipe(empresaId); });
+      }),
+      salvarColaborador: seguro(function (token, dados) {
+        exigirToken(token);
+        dados = dados && typeof dados === 'object' ? dados : {};
+        exigir(dados.empresaId, 'Empresa não informada.');
+        var p = { empresaId: limparTexto(dados.empresaId, 40), cargo: limparTexto(dados.cargo, 120), area: limparTexto(dados.area, 120) };
+        if (dados.pessoaId) p.pessoaId = limparTexto(dados.pessoaId, 40);
+        else { p.nome = limparTexto(dados.nome, 120); p.telefone = limparTexto(dados.telefone, 40); }
+        return exigirSessao(token).then(function () { return rpcOk('salvar_colaborador', { p_dados: p }); })
+          .then(function (r) { return { ok: true, colaborador: colaboradorDaRpc(r.colaborador) }; });
+      }),
+      moverColaborador: seguro(function (token, dados) {
+        exigirToken(token);
+        dados = dados && typeof dados === 'object' ? dados : {};
+        exigir(dados.pessoaId, 'Colaborador não informado.');
+        exigir(dados.empresaId, 'Escolha a empresa de destino.');
+        var p = { pessoaId: limparTexto(dados.pessoaId, 40), empresaId: limparTexto(dados.empresaId, 40),
+          cargo: limparTexto(dados.cargo, 120), area: limparTexto(dados.area, 120) };
+        return exigirSessao(token).then(function () { return rpcOk('mover_colaborador', { p_dados: p }); })
+          .then(function (r) { return { ok: true, colaborador: colaboradorDaRpc(r.colaborador) }; });
+      }),
+      desligarColaborador: seguro(function (token, vinculoId) {
+        exigirToken(token);
+        exigir(vinculoId, 'Colaborador não informado.');
+        var id = idValido(vinculoId);
+        return exigirSessao(token).then(function () {
+          if (!id) throw recusa('Colaborador não encontrado.');
+          // O banco carimba o fim (hoje) e apaga as relações da pessoa nessa empresa.
+          return consulta(function (c) { return c.from('vinculos').update({ status: 'desligado' }).eq('id', id).eq('status', 'ativo').select('id'); });
+        }).then(function (linhas) {
+          if (!Array.isArray(linhas) || !linhas.length) throw recusa('Colaborador não encontrado ou já desligado.');
+          return { ok: true, id: id };
+        });
+      }),
+      salvarRelacoes: seguro(function (token, empresaId, relacoes) {
+        exigirToken(token);
+        exigir(empresaId, 'Empresa não informada.');
+        if (!Array.isArray(relacoes)) throw recusa('Relações inválidas.');
+        var lista = relacoes.map(function (r) {
+          r = r && typeof r === 'object' ? r : {};
+          return { de: limparTexto(r.de, 40), para: limparTexto(r.para, 40), tipo: limparTexto(r.tipo, 20) };
+        });
+        return exigirSessao(token).then(function () {
+          return rpcOk('salvar_relacoes', { p_empresa: limparTexto(empresaId, 40), p_relacoes: lista });
+        }).then(function (r) {
+          var saida = (Array.isArray(r.relacoes) ? r.relacoes : []).map(function (x) { return { de: String(x.de), para: String(x.para), tipo: x.tipo }; });
+          return { ok: true, relacoes: saida };
+        });
+      }),
+
+      // --- relatórios por modelo (equipe, liderança, pessoa) ---
+      salvarRelatorioModelo: seguro(function (token, dados) {
+        return exigirSessao(token).then(function () { return salvarRelatorioModelo(dados); });
+      }),
+      listarRelatoriosModelo: seguro(function (token, filtro) {
+        filtro = filtro && typeof filtro === 'object' ? filtro : {};
+        var empresaId = limparTexto(filtro.empresaId, 40);
+        var pessoaId = limparTexto(filtro.pessoaId, 40);
+        return exigirSessao(token).then(function () {
+          if ((empresaId && !RE_UUID.test(empresaId)) || (pessoaId && !RE_UUID.test(pessoaId))) return [];
+          return consulta(function (c) {
+            var q = c.from('relatorios').select(COLUNAS_REL_MODELO).neq('modelo', 'processo');
+            if (empresaId) q = q.eq('empresa_id', empresaId);
+            if (pessoaId) q = q.eq('pessoa_id', pessoaId);
+            return q.order('criado_em', { ascending: false });
+          });
+        }).then(function (linhas) {
+          var lista = (Array.isArray(linhas) ? linhas : []).map(relatorioModeloDaLinha)
+            .sort(function (a, b) { return String(b.criadoEm).localeCompare(String(a.criadoEm)); });
+          return { ok: true, relatorios: lista };
+        });
+      }),
+      excluirRelatorioModelo: seguro(function (token, idBruto) {
+        exigirToken(token);
+        exigir(idBruto, 'Relatório não informado.');
+        var id = idValido(idBruto);
+        return exigirSessao(token).then(function () {
+          if (!id) throw recusa('Relatório não encontrado.');
+          return consulta(function (c) { return c.from('relatorios').delete().eq('id', id).neq('modelo', 'processo').select('id'); });
+        }).then(function (linhas) {
+          if (!Array.isArray(linhas) || !linhas.length) throw recusa('Relatório não encontrado.');
+          return { ok: true, id: id };
+        });
+      }),
 
       // --- avaliações (nome antigo dos processos) ---
       listarAvaliacoes: seguro(function (token) {
@@ -955,7 +1322,9 @@
     'excluirUsuario', 'redefinirSenha',
     'processosListar', 'processosSalvar', 'processosExcluir', 'processoDados', 'clickupStatus', 'clickupListas',
     'relatorioRascunho', 'relatorioSalvar', 'relatorioPublicar', 'relatorioDespublicar', 'relatoriosListar',
-    'relatorioMelhorarTextos', 'relatorioPublico'];
+    'relatorioMelhorarTextos', 'relatorioPublico',
+    'listarEquipe', 'salvarColaborador', 'moverColaborador', 'desligarColaborador', 'salvarRelacoes',
+    'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo'];
 
   var DISC_API_SUPABASE = {
     METODOS: METODOS,
@@ -967,6 +1336,8 @@
     lerLinkDeAcesso: lerLinkDeAcesso,
     enderecoDoPainel: enderecoDoPainel,
     validarConfigProcesso: validarConfigProcesso,
+    normalizarFormulario: normalizarFormulario,
+    FORMULARIO_PADRAO: FORMULARIO_PADRAO,
     processoPublico: processoPublico,
     itemDaLinha: itemDaLinha
   };

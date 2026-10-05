@@ -124,6 +124,7 @@
       <nav class="abas nao-imprimir" aria-label="Seções do painel">
         <button type="button" class="aba" data-aba="lista" aria-current="page">Participantes</button>
         <button type="button" class="aba" data-aba="processos" hidden>Processos</button>
+        <button type="button" class="aba" data-aba="empresas" hidden>Empresas</button>
         <button type="button" class="aba" data-aba="usuarios" hidden>Usuários</button>
         <button type="button" class="aba" data-aba="comparativo">Comparativo</button>
         <button type="button" class="aba" data-aba="importar" id="aba-importar" hidden>Importar códigos</button>
@@ -166,6 +167,8 @@
 
       <!-- Processos (lista, formulário, página do processo e editor do relatório) e usuários (só admin) -->
       <div id="vista-processos" class="vista nao-imprimir" hidden></div>
+      <!-- Empresas (colaboradores, ligações, organograma, compatibilidade e relatórios; só com o Supabase ou a prévia) -->
+      <div id="vista-empresas" class="vista nao-imprimir" hidden></div>
       <div id="vista-usuarios" class="vista nao-imprimir" hidden></div>
 
       <!-- Comparativo -->
@@ -205,6 +208,10 @@
   <script src="js/lideranca.js"></script>
   <script src="js/validacao.js"></script>
   <script src="js/confiabilidade.js"></script>
+  <script src="js/compatibilidade.js"></script>
+  <script src="js/relatorio-lideranca.js"></script>
+  <script src="js/relatorio-pessoa.js"></script>
+  <script src="js/relatorio-modelos.js"></script>
   <script src="js/relatorio-view.js"></script>
   <script src="js/admin.js"></script>
 </body>

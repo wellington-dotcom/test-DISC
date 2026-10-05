@@ -35,6 +35,9 @@
  *              relatorioMelhorarTextos(token, relatorioToken, ids?)
  *              (o 1º argumento é sempre o token da SESSÃO; o do relatório vai no corpo como "relatorioToken")
  *   Pública:   relatorioPublico(relatorioToken) -> {relatorio} (só relatório publicado)
+ *   Só Supabase (aqui rejeitam com "Disponível só com o servidor Supabase."): listarEquipe, salvarColaborador,
+ *              moverColaborador, desligarColaborador, salvarRelacoes, salvarRelatorioModelo, listarRelatoriosModelo,
+ *              excluirRelatorioModelo (contrato em js/api-supabase.js e docs/SPEC.md).
  *   Utilitários: protocoloValido, normalizarProtocolo, normalizarCodigoAvaliacao, codigoAvaliacaoDaUrl.
  */
 (function (root) {
@@ -145,6 +148,15 @@
     return function () {
       try { return fn.apply(null, arguments); } catch (e) { return Promise.reject(e); }
     };
+  }
+
+  // Recursos novos (empresas com colaboradores, organograma, relatórios por modelo) não existem no Apps Script.
+  var MSG_SO_SUPABASE = 'Disponível só com o servidor Supabase.';
+  function soSupabase() {
+    var e = new Error(MSG_SO_SUPABASE);
+    e.sessaoExpirada = false;
+    e.resposta = { ok: false, erro: MSG_SO_SUPABASE };
+    return Promise.reject(e);
   }
 
   // Ação com sessão: { acao, token, ...dados }.
@@ -279,6 +291,16 @@
       return comSessao('relatorio.melhorarTextos', token, dados, TIMEOUT_LONGO_MS);
     }),
 
+    // --- empresas/colaboradores/organograma e relatórios por modelo: só no servidor Supabase ---
+    listarEquipe: soSupabase,
+    salvarColaborador: soSupabase,
+    moverColaborador: soSupabase,
+    desligarColaborador: soSupabase,
+    salvarRelacoes: soSupabase,
+    salvarRelatorioModelo: soSupabase,
+    listarRelatoriosModelo: soSupabase,
+    excluirRelatorioModelo: soSupabase,
+
     // --- pública: página do relatório para o contratante ---
     relatorioPublico: seguro(function (relatorioToken) {
       exigir(relatorioToken, 'Relatório não encontrado ou fora do ar.');
@@ -293,7 +315,9 @@
     'excluirUsuario', 'redefinirSenha',
     'processosListar', 'processosSalvar', 'processosExcluir', 'processoDados', 'clickupStatus', 'clickupListas',
     'relatorioRascunho', 'relatorioSalvar', 'relatorioPublicar', 'relatorioDespublicar', 'relatoriosListar',
-    'relatorioMelhorarTextos', 'relatorioPublico'];
+    'relatorioMelhorarTextos', 'relatorioPublico',
+    'listarEquipe', 'salvarColaborador', 'moverColaborador', 'desligarColaborador', 'salvarRelacoes',
+    'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo'];
 
   if (typeof module !== 'undefined' && module.exports) module.exports = DISC_API;
   else root.DISC_API = DISC_API;

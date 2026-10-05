@@ -126,6 +126,131 @@
     return String(v == null ? '' : v).replace(/\s+/g, ' ').trim().slice(0, LIMITE_TEXTO_CURTO).trim();
   }
 
+  /* ---------- Formulário de identificação do processo (processo.config.formulario) ---------- */
+  // campos: idade/funcao/empresa/email/cidade -> 'obrigatorio' | 'opcional' | 'oculto'; perguntas extras: até 5.
+  // Nome e WhatsApp são sempre obrigatórios (fora daqui). Ausente/inválido = comportamento de antes.
+  var CAMPOS_FORMULARIO = ['idade', 'funcao', 'empresa', 'email', 'cidade'];
+  var MODOS_CAMPO = ['obrigatorio', 'opcional', 'oculto'];
+  var CAMPOS_PADRAO = { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto' };
+  var ROTULOS_CAMPOS = { idade: 'Idade', funcao: 'Função atual ou última', empresa: 'Empresa atual ou última', email: 'E-mail', cidade: 'Cidade onde mora' };
+  var MAX_PERGUNTAS = 5;
+  var LIMITE_EMAIL = 120;
+  var LIMITE_RESPOSTA = 500;
+  var RE_ID_PERGUNTA = /^[a-z0-9_]{1,20}$/;
+  // Mesmos termos do servidor (TERMOS_SENSIVEIS): pergunta que pede dado sensível nunca é mostrada.
+  var TERMOS_SENSIVEIS = ['sexo', 'genero', 'estado civil', 'filho', 'religi', 'gravid', 'etnia', 'raca',
+    'cor da pele', 'orientacao', 'deficien', 'doenca', 'saude', 'antecedente', 'processo em seu nome', 'criminal'];
+
+  function semAcento(s) {
+    var t = String(s == null ? '' : s).toLowerCase();
+    try { t = t.normalize('NFD').replace(/[̀-ͯ]/g, ''); } catch (e) { /* navegador antigo */ }
+    return t.replace(/\s+/g, ' ');
+  }
+  function textoSensivel(texto) {
+    var t = semAcento(texto);
+    return TERMOS_SENSIVEIS.some(function (termo) { return t.indexOf(termo) !== -1; });
+  }
+
+  function normalizarFormulario(f) {
+    var fonte = f && typeof f === 'object' ? f : {};
+    var camposFonte = fonte.campos && typeof fonte.campos === 'object' ? fonte.campos : {};
+    var campos = {};
+    CAMPOS_FORMULARIO.forEach(function (c) {
+      campos[c] = MODOS_CAMPO.indexOf(camposFonte[c]) !== -1 ? camposFonte[c] : CAMPOS_PADRAO[c];
+    });
+    var perguntas = [];
+    var usados = {};
+    (Array.isArray(fonte.perguntas) ? fonte.perguntas : []).forEach(function (p) {
+      if (perguntas.length >= MAX_PERGUNTAS || !p || typeof p !== 'object') return;
+      var texto = String(p.texto == null ? '' : p.texto).replace(/\s+/g, ' ').trim();
+      if (texto.length < 3 || texto.length > 200 || textoSensivel(texto)) return;
+      perguntas.push({ id: String(p.id == null ? '' : p.id), texto: texto, obrigatoria: p.obrigatoria === true });
+    });
+    // id inválido ou repetido: gera p1..p5 (o primeiro livre)
+    perguntas.forEach(function (p) {
+      if (RE_ID_PERGUNTA.test(p.id) && !usados[p.id]) { usados[p.id] = true; return; }
+      p.id = '';
+    });
+    perguntas.forEach(function (p) {
+      if (p.id) return;
+      for (var k = 1; k <= 99; k++) if (!usados['p' + k]) { p.id = 'p' + k; usados[p.id] = true; return; }
+    });
+    return { campos: campos, perguntas: perguntas };
+  }
+
+  // Formulário que vale na tela: na avaliação de equipe a "empresa atual" só aparece se for obrigatória.
+  function formularioEfetivo(f, tipo) {
+    var n = normalizarFormulario(f);
+    if (tipo === 'equipe' && n.campos.empresa === 'opcional') n.campos.empresa = 'oculto';
+    return n;
+  }
+
+  function limparEmail(v) {
+    return String(v == null ? '' : v).replace(/\s+/g, '').slice(0, LIMITE_EMAIL);
+  }
+  function emailValido(v) {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(v || ''));
+  }
+  function limparResposta(v) {
+    return String(v == null ? '' : v).replace(/\r\n?/g, '\n').trim().slice(0, LIMITE_RESPOSTA).trim();
+  }
+
+  var MSG_OBRIGATORIO = {
+    funcao: 'Informe a função atual ou última.',
+    empresa: 'Informe a empresa atual ou última.',
+    email: 'Informe o e-mail.',
+    cidade: 'Informe a cidade onde mora.'
+  };
+
+  // Valida os campos configuráveis e as perguntas extras (nome, telefone e consentimento ficam fora).
+  // dados: { idade, funcao, empresa, email, cidade, extras: {id: resposta} }. Retorna { campo: mensagem } (vazio = ok);
+  // erros das perguntas usam a chave 'extra-<id>'.
+  function validarCamposFormulario(dados, formulario) {
+    var f = normalizarFormulario(formulario);
+    var d = dados || {};
+    var erros = {};
+    var modo = f.campos;
+    if (modo.idade !== 'oculto') {
+      var idade = String(d.idade == null ? '' : d.idade).trim();
+      if (modo.idade === 'obrigatorio' || idade) {
+        var e = validarIdade(idade);
+        if (e) erros.idade = e;
+      }
+    }
+    ['funcao', 'empresa', 'cidade'].forEach(function (c) {
+      if (modo[c] === 'obrigatorio' && !limparTextoCurto(d[c])) erros[c] = MSG_OBRIGATORIO[c];
+    });
+    if (modo.email !== 'oculto') {
+      var email = limparEmail(d.email);
+      if (!email) { if (modo.email === 'obrigatorio') erros.email = MSG_OBRIGATORIO.email; }
+      else if (!emailValido(email)) erros.email = 'Confira o e-mail, ex.: nome@exemplo.com.';
+    }
+    var extras = d.extras && typeof d.extras === 'object' ? d.extras : {};
+    f.perguntas.forEach(function (p) {
+      if (p.obrigatoria && !limparResposta(extras[p.id])) erros['extra-' + p.id] = 'Responda esta pergunta.';
+    });
+    return erros;
+  }
+
+  // Campos do payload que vêm do formulário: oculto ou vazio vira ''/null; extras só com resposta.
+  function camposDoPayload(dados, formulario) {
+    var f = normalizarFormulario(formulario);
+    var d = dados || {};
+    var modo = f.campos;
+    var extras = d.extras && typeof d.extras === 'object' ? d.extras : {};
+    var email = modo.email === 'oculto' ? '' : limparEmail(d.email);
+    return {
+      idade: modo.idade === 'oculto' ? null : idadeParaSalvar(d.idade),
+      funcao: modo.funcao === 'oculto' ? '' : limparTextoCurto(d.funcao),
+      empresa: modo.empresa === 'oculto' ? '' : limparTextoCurto(d.empresa),
+      email: emailValido(email) ? email : '',
+      cidade: modo.cidade === 'oculto' ? '' : limparTextoCurto(d.cidade),
+      extras: f.perguntas.map(function (p) {
+        return { id: p.id, pergunta: p.texto, resposta: limparResposta(extras[p.id]) };
+      }).filter(function (x) { return !!x.resposta; })
+    };
+  }
+
   // Máscara progressiva: (11) 9999-8888 ou (11) 99999-8888.
   function formatarTelefone(tel) {
     var d = limparTelefone(tel).slice(0, 11);
@@ -215,8 +340,10 @@
     return out;
   }
 
-  function montarPayload(dados, ordens, agora) {
+  // formulario: o do processo (padrão quando ausente) — decide idade/função/empresa/e-mail/cidade/extras.
+  function montarPayload(dados, ordens, agora, formulario) {
     var respostas = ordens.map(ordemParaGrupo);
+    var campos = camposDoPayload(dados, formulario);
     var scoring = modScoring();
     var res = scoring.calcular(respostas);
     var fim = agora || new Date();
@@ -226,9 +353,12 @@
       id: dados.id,
       nome: normalizarNome(dados.nome),
       telefone: telefoneParaSalvar(dados.telefone),
-      idade: idadeParaSalvar(dados.idade),
-      funcao: limparTextoCurto(dados.funcao),
-      empresa: limparTextoCurto(dados.empresa),
+      idade: campos.idade,
+      funcao: campos.funcao,
+      empresa: campos.empresa,
+      email: campos.email,
+      cidade: campos.cidade,
+      extras: campos.extras,
       vaga: String(dados.vaga || '').trim(),
       consentimento: !!dados.consentimento,
       inicio: inicio.toISOString(),
@@ -314,9 +444,14 @@
       finalidade: equipe
         ? 'Precisamos destes dados para vincular o resultado à avaliação da equipe.'
         : 'Precisamos destes dados para vincular o resultado à sua candidatura.',
-      escopo: av ? 'apenas nesta avaliação' + daEmpresa + ', conduzida pela Notus' : 'apenas neste processo seletivo' + daEmpresa,
-      fimDados: av ? 'excluídos ao final da avaliação' : 'excluídos ao final do processo',
-      usoDados: av
+      // Equipe: o resultado fica no cadastro da empresa e é compartilhado com ela (orientar a liderança).
+      escopo: equipe
+        ? 'na avaliação da equipe' + daEmpresa + ', conduzida pela Notus, e sei que o meu resultado será compartilhado com a empresa para orientar a liderança'
+        : (av ? 'apenas nesta avaliação' + daEmpresa + ', conduzida pela Notus' : 'apenas neste processo seletivo' + daEmpresa),
+      fimDados: equipe ? 'excluídos quando eu deixar a empresa ou pedir a exclusão' : (av ? 'excluídos ao final da avaliação' : 'excluídos ao final do processo'),
+      usoDados: equipe
+        ? 'Seu resultado fica no cadastro da equipe da empresa e é compartilhado com ela. Você pode pedir a exclusão a qualquer momento.'
+        : av
         ? 'Seus dados serão usados apenas nesta avaliação e excluídos ao final.'
         : 'Seus dados serão usados apenas neste processo seletivo e excluídos ao final.',
       enviado: equipe
@@ -425,6 +560,27 @@
     return !!(e && e.etapa === 'teste' && e.grupo === 0 && !e.demoVista);
   }
 
+  // Ao continuar um progresso salvo: para onde ir. Etapas que não existem mais (ex.: 'revisao', do fluxo antigo)
+  // caem num destino válido: o primeiro grupo incompleto ou, com tudo respondido, a confirmação (onde está o envio).
+  // n: grupos que a pessoa responde; temValidacao: se a etapa de confirmação existe. Retorna { etapa, grupo, confTela }.
+  function etapaRetomada(e, n, temValidacao) {
+    var est = e && typeof e === 'object' ? e : {};
+    var total = Math.max(1, Math.min(TOTAL, Math.floor(Number(n) || TOTAL)));
+    var grupo = Math.max(0, Math.min(total - 1, Math.floor(Number(est.grupo) || 0)));
+    var confTela = est.confTela === 2 ? 2 : 1;
+    var etapa = est.etapa;
+    if (etapa === 'identificacao') return { etapa: 'identificacao', grupo: grupo, confTela: confTela };
+    if (['teste', 'confirmacao', 'revisao', 'enviando'].indexOf(etapa) === -1) return { etapa: 'identificacao', grupo: grupo, confTela: confTela };
+    if (etapa === 'teste') return est.permutacoes ? { etapa: 'teste', grupo: grupo, confTela: confTela } : { etapa: 'identificacao', grupo: grupo, confTela: confTela };
+    for (var i = 0; i < total; i++) {
+      var ok = !!(Array.isArray(est.respondidos) && est.respondidos[i] && ordemValida(Array.isArray(est.ordens) ? est.ordens[i] : null));
+      if (!ok) return { etapa: 'teste', grupo: i, confTela: confTela };
+    }
+    if (!temValidacao) return { etapa: 'teste', grupo: total - 1, confTela: confTela };
+    if (etapa !== 'confirmacao') confTela = telaValidacaoCompleta(est.validacao, 1) ? 2 : 1;
+    return { etapa: 'confirmacao', grupo: grupo, confTela: confTela };
+  }
+
   var PURAS = {
     deveMostrarDemo: deveMostrarDemo,
     validarNome: validarNome,
@@ -437,6 +593,15 @@
     limparIdade: limparIdade,
     idadeParaSalvar: idadeParaSalvar,
     limparTextoCurto: limparTextoCurto,
+    normalizarFormulario: normalizarFormulario,
+    formularioEfetivo: formularioEfetivo,
+    validarCamposFormulario: validarCamposFormulario,
+    camposDoPayload: camposDoPayload,
+    emailValido: emailValido,
+    limparEmail: limparEmail,
+    limparResposta: limparResposta,
+    etapaRetomada: etapaRetomada,
+    ROTULOS_CAMPOS: ROTULOS_CAMPOS,
     gerarId: gerarId,
     embaralhar: embaralhar,
     gerarPermutacoes: gerarPermutacoes,
@@ -502,6 +667,9 @@
       idade: '',
       funcao: '',
       empresa: '',
+      email: '',
+      cidade: '',
+      extras: {},              // respostas das perguntas extras do processo: { id: texto }
       vaga: '',
       consentimento: false,
       inicio: '',
@@ -509,7 +677,7 @@
       ordens: [],
       respondidos: [],
       grupo: 0,
-      voltarParaRevisao: false,
+      reenviar: false,         // voltou à identificação no envio (dado faltando): o botão vira "Salvar e enviar"
       preenchidosAoAcaso: [],  // modo demonstração: grupos completados automaticamente
       avaliacaoCodigo: AVAL ? AVAL.codigo : '',
       gruposSeg: [],           // segundos em cada grupo (acumula se voltar)
@@ -529,10 +697,25 @@
     if (e.confTela !== 2) e.confTela = 1;
     e.demoVista = e.demoVista === true;
     e.demonstracao = DEMO;
+    delete e.voltarParaRevisao;   // fluxo antigo (tela de revisão)
+    e.reenviar = e.reenviar === true;
+    if (!e.extras || typeof e.extras !== 'object' || Array.isArray(e.extras)) e.extras = {};
+    if (typeof e.email !== 'string') e.email = '';
+    if (typeof e.cidade !== 'string') e.cidade = '';
     return e;
   }
 
   function T() { return textosAvaliacao(AVAL, CONFIG.EMPRESA); }
+
+  // Formulário de identificação que vale agora (o do link ou o padrão).
+  function FORM() { return formularioEfetivo(AVAL && AVAL.formulario, AVAL ? AVAL.tipo : 'selecao'); }
+
+  // Mensagem de aviso mostrada uma vez na próxima tela (ex.: grupo incompleto no envio).
+  var avisoTela = '';
+  var avisoAtual = '';
+  function avisoHtml() {
+    return avisoAtual ? '<div class="aviso aviso--erro alerta" role="alert">' + escapar(avisoAtual) + '</div>' : '';
+  }
 
   /* ---- Tempo por grupo: do desenho do grupo até sair dele (acumula se voltar) ---- */
   function iniciarCronometro() {
@@ -646,19 +829,22 @@
     estado.preenchidosAoAcaso = marcados;
   }
 
-  // Depois do último grupo: monta (ou remonta, se o resultado mudou) a etapa de confirmação e decide o destino.
+  // Depois do último grupo: 'confirmacao' (etapa de confirmação a fazer) ou 'enviar' (sem confirmação ou já feita).
+  // Não há tela de revisão: terminou, envia.
   function destinoAposGrupos() {
-    if (!modValidacao()) return 'revisao';
+    if (!modValidacao()) return 'enviar';
     var res = resultadoDasOrdens(estado.ordens);
     if (!res) return 'confirmacao';   // ainda falta grupo (ou o modo demonstração ainda vai completar)
     if (precisaMontarValidacao(estado.validacao, res)) return 'confirmacao';
-    return validacaoCompleta(estado.validacao) ? 'revisao' : 'confirmacao';
+    return validacaoCompleta(estado.validacao) ? 'enviar' : 'confirmacao';
   }
 
+  // Monta (ou remonta, se o resultado mudou) a etapa de confirmação e vai para ela; sem a etapa, envia.
   function irDepoisDosGrupos() {
     completarDemonstracao();
-    if (destinoAposGrupos() === 'revisao') { irPara('revisao'); return; }
+    if (!modValidacao()) { concluir(); return; }
     var res = resultadoDasOrdens(estado.ordens);
+    if (!res) { irParaGrupoIncompleto('Encontramos um problema nas respostas. Confira este grupo e continue.'); return; }
     if (precisaMontarValidacao(estado.validacao, res)) {
       estado.validacao = novaValidacao(res);
       estado.confTela = 1;
@@ -666,6 +852,14 @@
       estado.confTela = telaValidacaoCompleta(estado.validacao, 1) ? 2 : 1;
     }
     irPara('confirmacao');
+  }
+
+  // Volta ao primeiro grupo incompleto (ou ao 1º grupo) com uma mensagem.
+  function irParaGrupoIncompleto(msg) {
+    var inc = primeiroIncompleto();
+    estado.grupo = inc === -1 ? 0 : inc;
+    avisoTela = msg || '';
+    irPara('teste');
   }
 
   function faixaDemonstracao() {
@@ -678,6 +872,8 @@
   function render(focar) {
     var html;
     pararCronometro();
+    avisoAtual = avisoTela;
+    avisoTela = '';
     arraste = null;
     fecharDica(false);
     if (telaLink) html = telaDoLink();
@@ -685,7 +881,6 @@
       case 'identificacao': html = telaIdentificacao(); break;
       case 'teste': html = telaGrupo(); break;
       case 'confirmacao': html = telaConfirmacao(); break;
-      case 'revisao': html = telaRevisao(); break;
       case 'enviando': html = telaEnvio(); break;
       case 'concluido': html = telaConclusao(); break;
       default: html = telaBoasVindas();
@@ -755,8 +950,66 @@
       '</section>';
   }
 
+  // Marca do rótulo: * (obrigatório) ou "(opcional)".
+  function marcaCampo(obrigatorio) {
+    return obrigatorio
+      ? ' <span class="obrigatorio" aria-hidden="true">*</span>'
+      : ' <span class="texto-suave">(opcional)</span>';
+  }
+
+  // Um campo configurável do formulário (idade, função, empresa, e-mail, cidade). '' se oculto.
+  function campoFormularioHtml(c, modo, t) {
+    if (modo === 'oculto') return '';
+    var obrig = modo === 'obrigatorio';
+    var rotulo = c === 'funcao' ? t.rotuloFuncao : ROTULOS_CAMPOS[c];
+    var ajuda = { idade: 'Em anos, só números.', funcao: t.ajudaFuncao, cidade: 'Ex.: Campinas (SP)' }[c] || '';
+    var desc = (ajuda ? 'dica-' + c + ' ' : '') + 'erro-' + c;
+    var atributos;
+    if (c === 'idade') {
+      atributos = 'type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" maxlength="3" value="' + escapar(limparIdade(estado.idade)) + '"';
+    } else if (c === 'email') {
+      atributos = 'type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" maxlength="' + LIMITE_EMAIL + '" value="' + escapar(estado.email) + '"';
+    } else {
+      var auto = { funcao: 'organization-title', empresa: 'organization', cidade: 'address-level2' }[c];
+      atributos = 'type="text" autocomplete="' + auto + '" maxlength="' + LIMITE_TEXTO_CURTO + '" value="' + escapar(estado[c]) + '"';
+    }
+    return '' +
+      '<div class="campo">' +
+        '<label class="campo__rotulo" for="' + c + '">' + escapar(rotulo) + marcaCampo(obrig) + '</label>' +
+        '<input class="entrada" id="' + c + '" name="' + c + '" ' + atributos + (obrig ? ' required' : '') + ' aria-describedby="' + desc + '">' +
+        (ajuda ? '<p class="campo__ajuda" id="dica-' + c + '">' + escapar(ajuda) + '</p>' : '') +
+        '<p class="campo__erro erro" id="erro-' + c + '" role="alert"></p>' +
+      '</div>';
+  }
+
+  // Pergunta extra do processo: texto livre até 500 caracteres, com contador discreto.
+  function perguntaExtraHtml(p) {
+    var id = 'extra-' + p.id;
+    var valor = String((estado.extras && estado.extras[p.id]) || '').slice(0, LIMITE_RESPOSTA);
+    return '' +
+      '<div class="campo campo--extra">' +
+        '<label class="campo__rotulo" for="' + id + '">' + escapar(p.texto) + marcaCampo(p.obrigatoria) + '</label>' +
+        '<textarea class="entrada entrada--texto" id="' + id + '" name="' + id + '" data-extra="' + p.id + '" rows="3" maxlength="' + LIMITE_RESPOSTA + '"' +
+          (p.obrigatoria ? ' required' : '') + ' aria-describedby="conta-' + id + ' erro-' + id + '">' + escapar(valor) + '</textarea>' +
+        '<p class="campo__contador" id="conta-' + id + '" data-contador>' + valor.length + '/' + LIMITE_RESPOSTA + '</p>' +
+        '<p class="campo__erro erro" id="erro-' + id + '" role="alert"></p>' +
+      '</div>';
+  }
+
+  // Lista dos dados pedidos, para o texto do consentimento.
+  function dadosConsentimento(f) {
+    var itens = ['nome', 'telefone'];
+    if (f.campos.idade !== 'oculto') itens.push('idade');
+    if (f.campos.email !== 'oculto') itens.push('e-mail');
+    if (f.campos.cidade !== 'oculto') itens.push('cidade');
+    if (f.campos.funcao !== 'oculto' || f.campos.empresa !== 'oculto') itens.push('experiência');
+    itens.push(f.perguntas.length ? 'respostas do teste e das perguntas do processo' : 'respostas');
+    return itens.slice(0, -1).join(', ') + ' e ' + itens[itens.length - 1];
+  }
+
   function telaIdentificacao() {
     var t = T();
+    var f = FORM();
     var campoVaga = t.mostrarVaga
       ? '<div class="campo">' +
           '<label class="campo__rotulo" for="vaga">Vaga pretendida neste processo <span class="texto-suave">(opcional)</span></label>' +
@@ -764,23 +1017,29 @@
           '<p class="campo__ajuda" id="dica-vaga">A vaga a que você está se candidatando.</p>' +
         '</div>'
       : '';
-    var campoFuncao = '' +
+    var campoTelefone = '' +
       '<div class="campo">' +
-        '<label class="campo__rotulo" for="funcao">' + escapar(t.rotuloFuncao) + ' <span class="texto-suave">(opcional)</span></label>' +
-        '<input class="entrada" id="funcao" name="funcao" type="text" autocomplete="organization-title" maxlength="80" aria-describedby="dica-funcao" value="' + escapar(estado.funcao) + '">' +
-        '<p class="campo__ajuda" id="dica-funcao">' + escapar(t.ajudaFuncao) + '</p>' +
+        '<label class="campo__rotulo" for="telefone">Telefone (WhatsApp) com DDD <span class="obrigatorio" aria-hidden="true">*</span></label>' +
+        '<input class="entrada" id="telefone" name="telefone" type="tel" inputmode="numeric" autocomplete="tel-national" required maxlength="25" ' +
+          'placeholder="(11) 99999-8888" aria-describedby="dica-telefone erro-telefone" value="' + escapar(formatarTelefone(estado.telefone)) + '">' +
+        '<p class="campo__ajuda" id="dica-telefone">Somente números, com DDD.</p>' +
+        '<p class="campo__erro erro" id="erro-telefone" role="alert"></p>' +
       '</div>';
-    var campoEmpresa = t.mostrarEmpresaAtual
-      ? '<div class="campo">' +
-          '<label class="campo__rotulo" for="empresa">Empresa atual ou última <span class="texto-suave">(opcional)</span></label>' +
-          '<input class="entrada" id="empresa" name="empresa" type="text" autocomplete="organization" maxlength="80" value="' + escapar(estado.empresa) + '">' +
-        '</div>'
-      : '';
+    var campoIdade = campoFormularioHtml('idade', f.campos.idade, t);
+    // Os demais campos visíveis vão em duplas (lado a lado no computador, empilhados no celular).
+    var outros = ['funcao', 'empresa', 'email', 'cidade'].map(function (c) { return campoFormularioHtml(c, f.campos[c], t); }).filter(Boolean);
+    var duplas = '';
+    for (var k = 0; k < outros.length; k += 2) {
+      duplas += outros[k + 1] ? '<div class="campos-dupla">' + outros[k] + outros[k + 1] + '</div>' : outros[k];
+    }
+    var extras = f.perguntas.map(perguntaExtraHtml).join('');
+    var idadeNota = f.campos.idade !== 'oculto' ? '; a idade é usada só para fins cadastrais' : '';
     return '' +
       '<section class="caixa surgir" aria-labelledby="titulo">' +
         '<p class="sobretitulo etapa">Etapa 1 de 3</p>' +
         '<h1 id="titulo" class="titulo-pagina">Sua identificação</h1>' +
         '<p class="subtitulo">' + escapar(t.finalidade) + '</p>' +
+        avisoHtml() +
         '<form id="form-identificacao" class="formulario" novalidate>' +
           '<div class="campo">' +
             '<label class="campo__rotulo" for="nome">Nome completo <span class="obrigatorio" aria-hidden="true">*</span></label>' +
@@ -788,35 +1047,21 @@
               'aria-describedby="erro-nome" value="' + escapar(estado.nome) + '">' +
             '<p class="campo__erro erro" id="erro-nome" role="alert"></p>' +
           '</div>' +
-          '<div class="campos-dupla campos-dupla--telefone">' +
-            '<div class="campo">' +
-              '<label class="campo__rotulo" for="telefone">Telefone (WhatsApp) com DDD <span class="obrigatorio" aria-hidden="true">*</span></label>' +
-              '<input class="entrada" id="telefone" name="telefone" type="tel" inputmode="numeric" autocomplete="tel-national" required maxlength="25" ' +
-                'placeholder="(11) 99999-8888" aria-describedby="dica-telefone erro-telefone" value="' + escapar(formatarTelefone(estado.telefone)) + '">' +
-              '<p class="campo__ajuda" id="dica-telefone">Somente números, com DDD.</p>' +
-              '<p class="campo__erro erro" id="erro-telefone" role="alert"></p>' +
-            '</div>' +
-            '<div class="campo">' +
-              '<label class="campo__rotulo" for="idade">Idade <span class="obrigatorio" aria-hidden="true">*</span></label>' +
-              '<input class="entrada" id="idade" name="idade" type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" required maxlength="3" ' +
-                'aria-describedby="dica-idade erro-idade" value="' + escapar(limparIdade(estado.idade)) + '">' +
-              '<p class="campo__ajuda" id="dica-idade">Em anos, só números.</p>' +
-              '<p class="campo__erro erro" id="erro-idade" role="alert"></p>' +
-            '</div>' +
-          '</div>' +
+          (campoIdade ? '<div class="campos-dupla campos-dupla--telefone">' + campoTelefone + campoIdade + '</div>' : campoTelefone) +
           campoVaga +
-          (campoEmpresa ? '<div class="campos-dupla">' + campoFuncao + campoEmpresa + '</div>' : campoFuncao) +
+          duplas +
+          extras +
           '<div class="campo consentimento">' +
             '<label class="marcar" for="consentimento">' +
               '<input id="consentimento" name="consentimento" type="checkbox" required aria-describedby="erro-consentimento"' + (estado.consentimento ? ' checked' : '') + '>' +
-              '<span>Autorizo o uso dos meus dados (nome, telefone, idade, experiência e respostas) <strong>' + escapar(t.escopo) + '</strong>' +
-                '; a idade é usada só para fins cadastrais. Sei que eles serão <strong>' + escapar(t.fimDados) + '</strong>, conforme a LGPD.</span>' +
+              '<span>Autorizo o uso dos meus dados (' + escapar(dadosConsentimento(f)) + ') <strong>' + escapar(t.escopo) + '</strong>' +
+                idadeNota + '. Sei que eles serão <strong>' + escapar(t.fimDados) + '</strong>, conforme a LGPD.</span>' +
             '</label>' +
             '<p class="campo__erro erro" id="erro-consentimento" role="alert"></p>' +
           '</div>' +
           '<div class="acoes">' +
             '<button type="button" class="botao botao--claro botao--grande" data-acao="voltar-inicio">Voltar</button>' +
-            '<button type="submit" class="botao botao--principal botao--grande">' + (estado.voltarParaRevisao ? 'Salvar e voltar à revisão' : 'Iniciar teste') + '</button>' +
+            '<button type="submit" class="botao botao--principal botao--grande">' + (estado.reenviar ? 'Salvar e enviar' : 'Iniciar teste') + '</button>' +
           '</div>' +
         '</form>' +
       '</section>';
@@ -918,6 +1163,7 @@
       '<section class="caixa tela-grupo" aria-labelledby="titulo">' +
         faixaDemonstracao() +
         progressoHtml(i, completo) +
+        avisoHtml() +
         '<h1 id="titulo" class="titulo-grupo">' + escapar(perguntaDoGrupo(i, g)) +
           (temDicaPergunta(i) ? '\u00a0' + botaoInfo('Entender a pergunta', 'data-dica="pergunta"') : '') +
         '</h1>' +
@@ -951,13 +1197,9 @@
       '</section>';
   }
 
-  // "Revisar respostas" só quando o próximo passo é mesmo a revisão; antes da confirmação é "Avançar".
+  // Sem revisão: depois do último grupo vem a confirmação ("Avançar"); sem a etapa de confirmação, já envia.
   function rotuloProximo(ultimo) {
-    if (!estado.voltarParaRevisao && !ultimo) return 'Avançar';
-    for (var i = 0; i < N; i++) {
-      if (i !== estado.grupo && !grupoCompleto(i)) return i > estado.grupo ? 'Avançar' : 'Revisar respostas';
-    }
-    return destinoAposGrupos() === 'revisao' ? 'Revisar respostas' : 'Avançar';
+    return ultimo && !modValidacao() ? 'Enviar e finalizar' : 'Avançar';
   }
 
   /* -------------------- Confirmação (depois dos grupos) -------------------- */
@@ -971,7 +1213,7 @@
   }
 
   function dicaConfirmacao(tela, completo) {
-    if (completo) return 'Tudo certo. Toque em Avançar quando quiser.';
+    if (completo) return tela === 1 ? 'Tudo certo. Toque em Avançar quando quiser.' : 'Tudo certo. Toque em Enviar e finalizar.';
     return tela === 1 ? 'Escolha um jeito em cada rodada' : 'Marque uma opção em cada frase';
   }
 
@@ -979,7 +1221,14 @@
     var v = estado.validacao;
     if (!v || !v.montagem) {
       var res = resultadoDasOrdens(estado.ordens);
-      if (!res || !modValidacao()) { estado.etapa = 'revisao'; return telaRevisao(); }
+      if (!res || !modValidacao()) {
+        // Não dá para montar a etapa (grupo faltando): volta aos grupos, sem tela de revisão.
+        var inc = primeiroIncompleto();
+        estado.etapa = 'teste';
+        estado.grupo = inc === -1 ? N - 1 : inc;
+        if (inc !== -1) avisoAtual = 'Falta ordenar este grupo para concluir.';
+        return telaGrupo();
+      }
       v = estado.validacao = novaValidacao(res);
       estado.confTela = 1;
       salvar();
@@ -1032,10 +1281,14 @@
         corpo +
         '<div class="barra-nav">' +
           '<p class="barra-dica" id="dica-avancar">' + dicaConfirmacao(tela, completo) + '</p>' +
+          // Tela 1: sem "Voltar" aos grupos (não há revisão); o espaço fica reservado para o botão não mudar de lugar.
+          // Tela 2: "Enviar e finalizar" envia direto.
           '<div class="barra-botoes">' +
-            '<button type="button" class="botao botao--claro botao--grande" data-acao="conf-anterior">Voltar</button>' +
-            '<button type="button" class="botao botao--principal botao--grande" data-acao="conf-proximo" aria-describedby="dica-avancar"' + (completo ? '' : ' disabled') + '>' +
-              (tela === 1 ? 'Avançar' : 'Revisar respostas') +
+            (tela === 1
+              ? '<span class="barra-vazio" aria-hidden="true"></span>'
+              : '<button type="button" class="botao botao--claro botao--grande" data-acao="conf-anterior">Voltar</button>') +
+            '<button type="button" class="botao botao--principal botao--grande" data-acao="' + (tela === 1 ? 'conf-proximo' : 'enviar') + '" data-avancar aria-describedby="dica-avancar"' + (completo ? '' : ' disabled') + '>' +
+              (tela === 1 ? 'Avançar' : 'Enviar e finalizar') +
             '</button>' +
           '</div>' +
         '</div>' +
@@ -1058,58 +1311,11 @@
         b.setAttribute('aria-pressed', String(!!it && v.notas[it.id] === Number(b.getAttribute('data-nota'))));
       });
     }
-    var prox = app.querySelector('[data-acao="conf-proximo"]');
+    var prox = app.querySelector('[data-avancar]');
     if (prox) prox.disabled = !completo;
     var dica = app.querySelector('#dica-avancar');
     if (dica) dica.textContent = dicaConfirmacao(tela, completo);
     atualizarBarra(N + (tela - 1) + (completo ? 1 : 0));
-  }
-
-  function telaRevisao() {
-    var linhas = DATA.grupos.slice(0, N).map(function (g, i) {
-      var completo = grupoCompleto(i);
-      var ordem = estado.ordens[i];
-      var conteudo = completo
-        ? '<ol class="revisao-ordem">' + ordem.map(function (l, k) {
-            return '<li><span class="mini-nota' + (k === 0 ? ' mini-nota--topo' : '') + '" aria-hidden="true">' + (4 - k) + '</span> ' + escapar(palavraDoGrupo(i, g, l)) + '</li>';
-          }).join('') + '</ol>'
-        : '<p class="erro-inline">Grupo ainda não ordenado</p>';
-      return '' +
-        '<li class="revisao-item' + (completo ? '' : ' incompleto') + '">' +
-          '<div class="revisao-cab">' +
-            '<span class="revisao-num">' + (i + 1) + '.</span> ' +
-            '<span class="revisao-titulo">' + escapar(perguntaDoGrupo(i, g)) + '</span>' +
-            '<button type="button" class="botao botao--link botao--pequeno" data-acao="editar-grupo" data-grupo="' + i + '" aria-label="Alterar grupo ' + (i + 1) + '">Alterar</button>' +
-          '</div>' +
-          conteudo +
-        '</li>';
-    }).join('');
-    var faltando = N - gruposRespondidos();
-    return '' +
-      '<section class="caixa surgir" aria-labelledby="titulo">' +
-        faixaDemonstracao() +
-        '<p class="sobretitulo etapa">Etapa 3 de 3</p>' +
-        '<h1 id="titulo" class="titulo-pagina">Revise suas respostas</h1>' +
-        '<div class="resumo-dados">' +
-          '<dl>' +
-            '<div><dt>Nome</dt><dd>' + escapar(normalizarNome(estado.nome)) + '</dd></div>' +
-            '<div><dt>Telefone</dt><dd>' + escapar(formatarTelefone(estado.telefone)) + '</dd></div>' +
-            '<div><dt>Idade</dt><dd>' + escapar(limparIdade(estado.idade)) + ' anos</dd></div>' +
-            (estado.vaga && T().mostrarVaga ? '<div><dt>Vaga pretendida</dt><dd>' + escapar(estado.vaga) + '</dd></div>' : '') +
-            (estado.funcao ? '<div><dt>' + escapar(T().rotuloFuncao) + '</dt><dd>' + escapar(estado.funcao) + '</dd></div>' : '') +
-            (estado.empresa && T().mostrarEmpresaAtual ? '<div><dt>Empresa atual ou última</dt><dd>' + escapar(estado.empresa) + '</dd></div>' : '') +
-          '</dl>' +
-          '<button type="button" class="botao botao--link botao--pequeno" data-acao="editar-dados">Alterar dados</button>' +
-        '</div>' +
-        '<p class="subtitulo">Em cada grupo, a ordem vai do <strong>4 (mais me identifica)</strong> ao <strong>1 (menos me identifica)</strong>. Se quiser, altere algum grupo antes de enviar.</p>' +
-        '<ol class="revisao-lista">' + linhas + '</ol>' +
-        (envio.erro ? '<div class="aviso aviso--erro alerta" role="alert">' + escapar(envio.erro) + '</div>' : '') +
-        (faltando ? '<p class="campo__erro erro" role="alert">Faltam ' + faltando + ' grupo(s) para concluir.</p>' : '') +
-        '<div class="acoes">' +
-          '<button type="button" class="botao botao--claro botao--grande" data-acao="voltar-teste">Voltar</button>' +
-          '<button type="button" class="botao botao--principal botao--grande" data-acao="enviar"' + (faltando ? ' disabled' : '') + '>Enviar respostas</button>' +
-        '</div>' +
-      '</section>';
   }
 
   function telaEnvio() {
@@ -1129,71 +1335,106 @@
         '<div class="acoes acoes-coluna">' +
           '<button type="button" class="botao botao--principal botao--grande" data-acao="retentar">Tentar novamente</button>' +
           '<button type="button" class="botao botao--claro botao--grande" data-acao="usar-codigo">Gerar código de segurança</button>' +
-          '<button type="button" class="botao botao--link" data-acao="voltar-revisao">Voltar à revisão</button>' +
         '</div>' +
       '</section>';
   }
 
-  function blocoPerfil(payload) {
+  // Dados do relatório da pessoa: só percentuais + código do perfil (é o que fica na sessionStorage).
+  function relatorioDoPayload(payload) {
+    var R = root.DISC_RELATORIO_PESSOA;
+    if (!R || !payload) return null;
     var res;
-    try { res = root.DISC_SCORING.calcular(root.DISC_SCORING.descompactar(payload.respostas)); } catch (e) { return ''; }
-    var p = DATA.perfis[res.primario];
-    var s = DATA.perfis[res.secundario];
-    var barras = LETRAS.map(function (l) {
-      var perfil = DATA.perfis[l];
-      var v = res.percentuais[l];
+    try { res = root.DISC_SCORING.calcular(root.DISC_SCORING.descompactar(payload.respostas)); } catch (e) { return null; }
+    return R.dadosDoResultado(res.percentuais, res.codigo);
+  }
+
+  // A pessoa vê o próprio resultado? Com link, vale a configuração da avaliação; sem link, a do CONFIG.
+  function mostraResultado() {
+    return AVAL ? AVAL.mostrarResultado === true : CONFIG.MOSTRAR_RESULTADO_AO_CANDIDATO === true;
+  }
+
+  function pctTexto(v) { return String(Math.round(Number(v) * 10) / 10).replace('.', ',') + '%'; }
+
+  function listaTags(itens) {
+    if (!itens || !itens.length) return '';
+    return '<ul class="tags">' + itens.map(function (t) { return '<li class="selo">' + escapar(t) + '</li>'; }).join('') + '</ul>';
+  }
+
+  // Itens { titulo, texto, prazo? } em cartões empilhados.
+  function listaItens(itens, comPrazo) {
+    if (!itens || !itens.length) return '';
+    return '<ul class="rel-itens' + (comPrazo ? ' rel-itens--plano' : '') + '">' + itens.map(function (it) {
+      return '<li class="rel-item">' +
+        (comPrazo ? '<span class="rel-prazo">' + escapar(it.prazo) + '</span>' : '') +
+        '<p class="rel-item-titulo">' + escapar(it.titulo) + '</p>' +
+        '<p class="rel-item-texto">' + escapar(it.texto) + '</p>' +
+      '</li>';
+    }).join('') + '</ul>';
+  }
+
+  function secaoRelatorio(sec) {
+    var corpo = '';
+    if (sec.id === 'fortes') corpo = listaTags(sec.caracteristicas) + '<h3 class="rel-h3">Como usar mais</h3>' + listaItens(sec.itens);
+    else if (sec.id === 'pressao') corpo = listaTags(sec.sinais) + '<h3 class="rel-h3">O que fazer nessas horas</h3>' + listaItens(sec.itens);
+    else if (sec.id === 'comunicacao') {
+      corpo = '<ul class="rel-itens">' + (sec.perfis || []).map(function (pf) {
+        return '<li class="rel-item rel-com" data-letra="' + escapar(pf.letra) + '">' +
+          '<p class="rel-item-titulo"><span class="letra-disc letra-disc--mini disc-' + escapar(pf.letra) + '" aria-hidden="true">' + escapar(pf.letra) + '</span>' +
+            'Com pessoas de perfil ' + escapar(pf.rotulo) + ' <span class="perfil-sub">' + escapar(pf.nome) + '</span></p>' +
+          '<p class="rel-item-texto">' + escapar(pf.texto) + '</p>' +
+        '</li>';
+      }).join('') + '</ul>';
+    } else corpo = listaItens(sec.itens, sec.id === 'plano');
+    var idT = 'rel-' + escapar(sec.id);
+    return '' +
+      '<section class="caixa rel-caixa rel-secao surgir" data-secao="' + escapar(sec.id) + '" aria-labelledby="' + idT + '">' +
+        '<h2 id="' + idT + '" class="caixa__titulo rel-secao-titulo">' + escapar(sec.titulo) + '</h2>' +
+        (sec.intro ? '<p class="rel-nota">' + escapar(sec.intro) + '</p>' : '') +
+        corpo +
+      '</section>';
+  }
+
+  // Relatório "modelo pessoa" (dados de js/relatorio-pessoa.js) em cartões empilhados.
+  function relatorioPessoaHtml(d) {
+    if (!d) return '';
+    var barras = d.fatores.map(function (f) {
+      var largura = Math.max(4, Math.min(100, (Number(f.pct) / 40) * 100));
       return '' +
-        '<li class="barra-linha">' +
-          '<span class="letra-disc disc-' + l + ' barra-letra">' + l + '</span>' +
-          '<span class="barra-nome">' + escapar(perfil.nome) + '</span>' +
-          '<span class="barra-trilho trilho" aria-hidden="true"><span class="barra-valor disc-' + l + '" style="width:' + Math.max(4, Math.min(100, (v / 40) * 100)) + '%"></span></span>' +
-          '<span class="barra-pct">' + String(v).replace('.', ',') + '%</span>' +
+        '<li class="barra-linha rel-fator" data-letra="' + escapar(f.letra) + '">' +
+          '<span class="letra-disc disc-' + escapar(f.letra) + ' barra-letra" aria-hidden="true">' + escapar(f.letra) + '</span>' +
+          '<span class="barra-nome"><span class="rel-fator-nome">' + escapar(f.nome) + '</span>' +
+            '<span class="visualmente-oculto"> (' + escapar(f.letra) + ')</span>' +
+            '<span class="rel-fator-desc">' + escapar(f.descricao) + '</span></span>' +
+          '<span class="barra-trilho trilho" aria-hidden="true"><span class="barra-valor disc-' + escapar(f.letra) + '" style="width:' + largura + '%"></span></span>' +
+          '<span class="barra-pct rel-pct">' + pctTexto(f.pct) + '</span>' +
         '</li>';
     }).join('');
-    var pontos = (p.positivos || []).slice(0, 6).map(function (t) { return '<li class="selo">' + escapar(t) + '</li>'; }).join('');
+    var titulo = (d.nome ? escapar(d.nome) + ', seu' : 'Seu') + ' estilo é ' + escapar(d.primario.rotulo) + ', com traços de ' + escapar(d.secundario.rotulo);
     return '' +
-      '<section class="caixa perfil surgir" aria-labelledby="titulo-perfil">' +
-        '<h2 id="titulo-perfil" class="caixa__titulo">Seu perfil predominante</h2>' +
-        '<p class="perfil-titulo"><span class="letra-disc disc-' + res.primario + '">' + res.primario + '</span> ' +
-          '<span>' + escapar(p.rotulo) + ' <span class="perfil-sub">(' + escapar(p.nome) + '), com traços de ' + escapar(s.rotulo) + '</span></span></p>' +
-        '<ul class="barras">' + barras + '</ul>' +
-        (pontos ? '<h3 class="perfil-h3">Pontos fortes</h3><ul class="tags">' + pontos + '</ul>' : '') +
-      '</section>';
+      '<div class="relatorio-candidato relatorio-pessoa" data-codigo="' + escapar(d.codigo) + '">' +
+        '<section class="caixa rel-caixa surgir" aria-labelledby="titulo-relatorio">' +
+          '<p class="sobretitulo">Seu relatório DISC</p>' +
+          '<h2 id="titulo-relatorio" class="rel-titulo">' + titulo + '</h2>' +
+          '<p class="rel-intro rel-frase">' + escapar(d.frase) + '</p>' +
+          '<h3 class="rel-h3">Seus 4 fatores</h3>' +
+          '<p class="rel-nota">Quanto maior a barra, mais esse jeito aparece no seu dia a dia. Os quatro somam 100%.</p>' +
+          '<ul class="barras rel-barras">' + barras + '</ul>' +
+          '<div class="acoes rel-acoes">' +
+            '<button type="button" class="botao botao--claro" data-acao="imprimir">Salvar em PDF</button>' +
+          '</div>' +
+        '</section>' +
+        d.secoes.map(secaoRelatorio).join('') +
+        '<p class="rel-aviso">' + escapar(d.aviso) + '</p>' +
+      '</div>';
   }
 
-  // Primário e secundário a partir das respostas (para o resumo ao participante).
-  function resumoDoPayload(payload) {
-    try {
-      var r = root.DISC_SCORING.calcular(root.DISC_SCORING.descompactar(payload.respostas));
-      return { primario: r.primario, secundario: r.secundario };
-    } catch (e) { return null; }
-  }
-
-  // Resumo para o participante (link com "mostrar resultado"): retrato do perfil e pontos fortes.
-  // Nunca mostra o Guia para a Liderança nem a confiabilidade.
-  function blocoResumo(resumo) {
-    if (!resumo || !DATA.perfis[resumo.primario]) return '';
-    var p = DATA.perfis[resumo.primario];
-    var s = DATA.perfis[resumo.secundario];
-    var retrato = textoRetrato(resumo.primario);
-    var pontos = (p.positivos || []).slice(0, 6).map(function (t) { return '<li class="selo">' + escapar(t) + '</li>'; }).join('');
-    return '' +
-      '<section class="caixa perfil resumo-perfil surgir" aria-labelledby="titulo-perfil">' +
-        '<h2 id="titulo-perfil" class="caixa__titulo">Seu perfil predominante</h2>' +
-        '<p class="perfil-titulo"><span class="letra-disc disc-' + resumo.primario + '">' + resumo.primario + '</span> ' +
-          '<span>' + escapar(p.rotulo) + (s ? ' <span class="perfil-sub">com traços de ' + escapar(s.rotulo) + '</span>' : '') + '</span></p>' +
-        (retrato ? '<p class="perfil-retrato">' + escapar(retrato) + '</p>' : '') +
-        (pontos ? '<h3 class="perfil-h3">Pontos fortes</h3><ul class="tags">' + pontos + '</ul>' : '') +
-      '</section>';
-  }
-
-  // Bloco de resultado da conclusão: com link, vale a configuração da avaliação; sem link, a do CONFIG.
-  function blocoResultado(payload, dados) {
-    if (AVAL) {
-      if (!AVAL.mostrarResultado) return '';
-      return blocoResumo((dados && dados.resumo) || (payload ? resumoDoPayload(payload) : null));
-    }
-    return CONFIG.MOSTRAR_RESULTADO_AO_CANDIDATO && payload ? blocoPerfil(payload) : '';
+  // Relatório DISC da pessoa na conclusão (desenvolvimento pessoal). Nunca o Guia para a Liderança, a confiabilidade,
+  // vaga, função, aderência ou empresa.
+  function blocoResultado(payload, dados, primeiroNome) {
+    var R = root.DISC_RELATORIO_PESSOA;
+    if (!R || !mostraResultado()) return '';
+    var rel = (dados && dados.relatorio) || relatorioDoPayload(payload);
+    return rel ? relatorioPessoaHtml(R.montar(rel, primeiroNome, DATA)) : '';
   }
 
   function numeroWhatsApp() {
@@ -1231,7 +1472,7 @@
     var primeiroNome = payload ? normalizarNome(payload.nome).split(' ')[0] : String(dados.primeiroNome || '');
     var titulo = primeiroNome ? 'Obrigado, ' + escapar(primeiroNome) + '!' : 'Obrigado!';
     var t = T();
-    var resultado = blocoResultado(payload, dados);
+    var resultado = blocoResultado(payload, dados, primeiroNome);
     var rodape = '' +
       '<div class="rodape">' +
         '<p class="rodape-nota">' + escapar(t.usoDados) + '</p>' +
@@ -1340,7 +1581,8 @@
         nome: String(av.nome || ''),
         tipo: av.tipo === 'equipe' ? 'equipe' : 'selecao',
         empresaNome: String(av.empresaNome || ''),
-        mostrarResultado: av.mostrarResultado === true
+        mostrarResultado: av.mostrarResultado === true,
+        formulario: normalizarFormulario(av.formulario)   // ausente = padrão (comportamento de antes)
       };
       telaLink = '';
       if (estado.etapa === 'boasvindas') estado.avaliacaoCodigo = AVAL.codigo;
@@ -1377,19 +1619,33 @@
         }
       });
       var idade = form.querySelector('#idade');
-      idade.addEventListener('input', function () {
-        var limpo = limparIdade(idade.value);
-        if (limpo !== idade.value) idade.value = limpo;
-      });
+      if (idade) {
+        idade.addEventListener('input', function () {
+          var limpo = limparIdade(idade.value);
+          if (limpo !== idade.value) idade.value = limpo;
+        });
+      }
       form.addEventListener('submit', function (ev) {
         ev.preventDefault();
         enviarIdentificacao(form);
       });
-      ['nome', 'telefone', 'idade', 'funcao', 'empresa', 'vaga'].forEach(function (campo) {
+      ['nome', 'telefone', 'idade', 'funcao', 'empresa', 'email', 'cidade', 'vaga'].forEach(function (campo) {
         var el = form.querySelector('#' + campo);
-        if (!el) return;   // na avaliação de equipe, vaga e empresa não aparecem
+        if (!el) return;   // campo oculto pelo formulário do processo (ou vaga/empresa na avaliação de equipe)
         el.addEventListener('change', function () {
           estado[campo] = campo === 'telefone' ? limparTelefone(this.value) : campo === 'idade' ? limparIdade(this.value) : this.value;
+          salvar();
+        });
+      });
+      // Perguntas extras: contador discreto e progresso salvo.
+      Array.prototype.forEach.call(form.querySelectorAll('textarea[data-extra]'), function (ta) {
+        var id = ta.getAttribute('data-extra');
+        var conta = form.querySelector('#conta-extra-' + id);
+        ta.addEventListener('input', function () {
+          if (conta) conta.textContent = ta.value.length + '/' + LIMITE_RESPOSTA;
+        });
+        ta.addEventListener('change', function () {
+          estado.extras[id] = ta.value.slice(0, LIMITE_RESPOSTA);
           salvar();
         });
       });
@@ -1418,39 +1674,73 @@
     return el ? el.value : '';
   }
 
+  // Respostas das perguntas extras que estão na tela: { id: texto }.
+  function extrasDoForm(form) {
+    var out = {};
+    for (var k in estado.extras) if (Object.prototype.hasOwnProperty.call(estado.extras, k)) out[k] = estado.extras[k];
+    Array.prototype.forEach.call(form.querySelectorAll('textarea[data-extra]'), function (ta) {
+      out[ta.getAttribute('data-extra')] = ta.value.slice(0, LIMITE_RESPOSTA);
+    });
+    return out;
+  }
+
   function enviarIdentificacao(form) {
+    var f = FORM();
     var nome = form.querySelector('#nome').value;
     var tel = form.querySelector('#telefone').value;
-    var idade = form.querySelector('#idade').value;
     var vaga = valorCampo(form, 'vaga');
     var cons = form.querySelector('#consentimento').checked;
+    var dados = {
+      idade: valorCampo(form, 'idade'),
+      funcao: valorCampo(form, 'funcao'),
+      empresa: valorCampo(form, 'empresa'),
+      email: valorCampo(form, 'email'),
+      cidade: valorCampo(form, 'cidade'),
+      extras: extrasDoForm(form)
+    };
+    var errosForm = validarCamposFormulario(dados, f);
     var okNome = mostrarErro(form, 'nome', validarNome(nome));
     var okTel = mostrarErro(form, 'telefone', validarTelefone(tel));
-    var okIdade = mostrarErro(form, 'idade', validarIdade(idade));
+    var okForm = true;
+    CAMPOS_FORMULARIO.forEach(function (c) { if (!mostrarErro(form, c, errosForm[c] || '')) okForm = false; });
+    f.perguntas.forEach(function (p) { if (!mostrarErro(form, 'extra-' + p.id, errosForm['extra-' + p.id] || '')) okForm = false; });
     var okCons = mostrarErro(form, 'consentimento', cons ? '' : 'Para continuar, marque a autorização de uso dos dados.');
-    if (!okNome || !okTel || !okIdade || !okCons) {
+    if (!okNome || !okTel || !okForm || !okCons) {
       var primeiro = form.querySelector('[aria-invalid="true"]');
       if (primeiro) primeiro.focus();
       return;
     }
     estado.nome = normalizarNome(nome);
     estado.telefone = limparTelefone(tel);
-    estado.idade = limparIdade(idade);
-    estado.funcao = limparTextoCurto(valorCampo(form, 'funcao'));
-    estado.empresa = limparTextoCurto(valorCampo(form, 'empresa'));
+    if (form.querySelector('#idade')) estado.idade = limparIdade(dados.idade);
+    if (form.querySelector('#funcao')) estado.funcao = limparTextoCurto(dados.funcao);
+    if (form.querySelector('#empresa')) estado.empresa = limparTextoCurto(dados.empresa);
+    if (form.querySelector('#email')) estado.email = limparEmail(dados.email);
+    if (form.querySelector('#cidade')) estado.cidade = limparTextoCurto(dados.cidade);
+    estado.extras = dados.extras;
     estado.vaga = String(vaga || '').trim();
     estado.consentimento = true;
     if (!estado.id) estado.id = gerarId();
     if (!estado.permutacoes) estado.permutacoes = gerarPermutacoes();
     if (!estado.inicio) estado.inicio = new Date().toISOString();
-    if (estado.voltarParaRevisao) {
-      estado.voltarParaRevisao = false;
-      irPara('revisao');
+    // Voltou aqui no envio (dado faltando): "Salvar e enviar" reenvia.
+    if (estado.reenviar) {
+      estado.reenviar = false;
+      concluir();
       return;
     }
     var p = primeiroIncompleto();
-    estado.grupo = p === -1 ? 0 : p;
-    irPara(p === -1 ? 'revisao' : 'teste');
+    if (p === -1) { irDepoisDosGrupos(); return; }
+    estado.grupo = p;
+    irPara('teste');
+  }
+
+  // A identificação salva ainda vale para o formulário atual? (ex.: progresso de antes do campo idade)
+  function identificacaoValida() {
+    if (validarNome(estado.nome) || validarTelefone(estado.telefone) || !estado.consentimento) return false;
+    var erros = validarCamposFormulario(estado, FORM());
+    for (var k in erros) if (Object.prototype.hasOwnProperty.call(erros, k)) return false;
+    return true;
   }
 
   function aoClicar(ev) {
@@ -1473,15 +1763,14 @@
       case 'continuar':
         var salvo = lerStorage(CHAVE_PROGRESSO);
         estado = garantirCampos(progressoValido(salvo) ? migrarProgresso(salvo) : estadoInicial());
-        if (estado.etapa === 'boasvindas' || estado.etapa === 'concluido') estado.etapa = 'identificacao';
-        if (estado.etapa === 'confirmacao' && primeiroIncompleto() !== -1) estado.etapa = 'teste';
-        if (estado.etapa === 'enviando') estado.etapa = 'revisao';
-        if (estado.etapa === 'teste' && !estado.permutacoes) estado.etapa = 'identificacao';
-        // Progresso de antes do campo idade: pede a idade antes de seguir.
-        if ((estado.etapa === 'teste' || estado.etapa === 'revisao') && validarIdade(estado.idade)) {
-          estado.voltarParaRevisao = estado.etapa === 'revisao';
-          estado.etapa = 'identificacao';
-        }
+        // Etapas antigas (ex.: 'revisao') caem num destino válido.
+        var dest = etapaRetomada(estado, N, !!modValidacao());
+        estado.etapa = dest.etapa;
+        estado.grupo = dest.grupo;
+        estado.confTela = dest.confTela;
+        estado.reenviar = false;
+        // Identificação incompleta para este formulário (ex.: progresso de antes do campo idade): pede antes de seguir.
+        if (estado.etapa !== 'identificacao' && !identificacaoValida()) estado.etapa = 'identificacao';
         render(true);
         break;
       case 'recomecar':
@@ -1491,7 +1780,7 @@
         break;
       case 'voltar-inicio':
         guardarCamposForm();
-        estado.voltarParaRevisao = false;
+        estado.reenviar = false;
         irPara('boasvindas');
         break;
       case 'ver-demo':
@@ -1504,38 +1793,19 @@
         anunciar('Ordem registrada. Você já pode avançar.');
         break;
       case 'anterior':
-        if (estado.voltarParaRevisao) { estado.voltarParaRevisao = false; irPara('revisao'); }
-        else if (estado.grupo === 0) irPara('identificacao');
+        if (estado.grupo === 0) irPara('identificacao');
         else { estado.grupo--; irPara('teste'); }
         break;
       case 'proximo':
         if (!grupoCompleto(estado.grupo)) return;
-        if (estado.voltarParaRevisao || estado.grupo === N - 1) {
-          estado.voltarParaRevisao = false;
+        if (estado.grupo >= N - 1) {
           var falta = primeiroIncompleto();
-          if (falta !== -1 && falta > estado.grupo) { estado.grupo = falta; irPara('teste'); }
-          else if (falta === -1) irDepoisDosGrupos();
-          else irPara('revisao');
+          if (falta !== -1) irParaGrupoIncompleto('Falta ordenar este grupo para concluir.');
+          else irDepoisDosGrupos();
         } else {
           estado.grupo++;
           irPara('teste');
         }
-        break;
-      case 'editar-grupo':
-        estado.grupo = Math.min(N - 1, Number(alvo.getAttribute('data-grupo')) || 0);
-        estado.voltarParaRevisao = true;
-        irPara('teste');
-        break;
-      case 'editar-dados':
-        estado.voltarParaRevisao = true;
-        irPara('identificacao');
-        break;
-      case 'voltar-teste':
-        envio = { carregando: false, erro: '' };
-        var inc = primeiroIncompleto();
-        if (inc === -1 && estado.validacao && modValidacao()) { estado.confTela = 2; irPara('confirmacao'); break; }
-        estado.grupo = inc === -1 ? N - 1 : inc;
-        irPara('teste');
         break;
       case 'escolher-retrato':
         if (!estado.validacao) return;
@@ -1551,29 +1821,36 @@
         atualizarConfirmacao();
         break;
       case 'conf-anterior':
+        // Só a 2ª tela volta (para a 1ª); da confirmação não se volta aos grupos.
         if (estado.confTela === 2) { estado.confTela = 1; irPara('confirmacao'); }
-        else { estado.grupo = N - 1; irPara('teste'); }
         break;
       case 'conf-proximo':
-        if (!telaValidacaoCompleta(estado.validacao, estado.confTela === 2 ? 2 : 1)) return;
-        if (estado.confTela !== 2) { estado.confTela = 2; irPara('confirmacao'); }
-        else irPara('revisao');
+        if (!telaValidacaoCompleta(estado.validacao, 1)) return;
+        estado.confTela = 2;
+        irPara('confirmacao');
+        break;
+      case 'imprimir':
+        try { root.print(); } catch (e) { /* sem impressão */ }
         break;
       case 'link-retentar':
         carregarAvaliacao();
         break;
       case 'enviar':
+        if (estado.etapa === 'confirmacao' && !validacaoCompleta(estado.validacao)) return;
+        concluir();
+        break;
       case 'retentar':
         concluir();
         break;
       case 'usar-codigo':
         completarDemonstracao();
         estado.avaliacaoCodigo = AVAL ? AVAL.codigo : '';
-        finalizar(montarPayload(estado, estado.ordens), false);
-        break;
-      case 'voltar-revisao':
-        envio = { carregando: false, erro: '' };
-        irPara('revisao');
+        try {
+          finalizar(montarPayload(estado, estado.ordens, null, FORM()), false);
+        } catch (e) {
+          envio = { carregando: false, erro: '' };
+          irParaGrupoIncompleto('Encontramos um problema nas respostas. Confira este grupo e continue.');
+        }
         break;
       case 'copiar':
         copiarCodigo();
@@ -1603,10 +1880,12 @@
     if (!form) return;
     estado.nome = form.querySelector('#nome').value;
     estado.telefone = limparTelefone(form.querySelector('#telefone').value);
-    estado.idade = limparIdade(form.querySelector('#idade').value);
-    estado.funcao = valorCampo(form, 'funcao');
-    estado.empresa = valorCampo(form, 'empresa');
-    estado.vaga = valorCampo(form, 'vaga');
+    // Campo que não está na tela (oculto neste processo) mantém o valor salvo.
+    ['funcao', 'empresa', 'email', 'cidade', 'vaga'].forEach(function (c) {
+      if (form.querySelector('#' + c)) estado[c] = valorCampo(form, c);
+    });
+    if (form.querySelector('#idade')) estado.idade = limparIdade(valorCampo(form, 'idade'));
+    estado.extras = extrasDoForm(form);
     estado.consentimento = form.querySelector('#consentimento').checked;
   }
 
@@ -1972,10 +2251,11 @@
       : { enviado: false, payload: payload };
     // De qual link veio: ao abrir outro link (ou o link geral) nesta aba, a conclusão antiga não aparece.
     if (AVAL) sessao.avaliacao = AVAL.codigo;
-    // Avaliação que mostra o resultado: guarda só o perfil (letras), para o resumo continuar ao recarregar.
-    if (enviado && AVAL && AVAL.mostrarResultado) {
-      var resumo = resumoDoPayload(payload);
-      if (resumo) { sessao.resumo = resumo; concluido.resumo = resumo; }
+    // Avaliação que mostra o resultado: guarda só percentuais + código do perfil (sem telefone nem respostas),
+    // para o relatório continuar ao recarregar.
+    if (enviado && mostraResultado()) {
+      var rel = relatorioDoPayload(payload);
+      if (rel) { sessao.relatorio = rel; concluido.relatorio = rel; }
     }
     gravarSessao(CHAVE_CONCLUIDO, sessao);
     apagarStorage(CHAVE_CONCLUIDO);
@@ -1988,17 +2268,23 @@
 
   function concluir() {
     if (envio.carregando) return;
-    if (primeiroIncompleto() !== -1) { irPara('revisao'); return; }
-    if (validarIdade(estado.idade)) { estado.voltarParaRevisao = true; irPara('identificacao'); return; }
+    envio = { carregando: false, erro: '' };
+    if (primeiroIncompleto() !== -1) { irParaGrupoIncompleto('Falta ordenar este grupo para concluir.'); return; }
+    // Dado da identificação faltando (ex.: idade obrigatória): volta à identificação; "Salvar e enviar" reenvia.
+    if (!identificacaoValida()) {
+      estado.reenviar = true;
+      avisoTela = 'Falta completar seus dados. Confira e toque em Salvar e enviar.';
+      irPara('identificacao');
+      return;
+    }
     completarDemonstracao();
     if (destinoAposGrupos() === 'confirmacao') { irDepoisDosGrupos(); return; }
     estado.avaliacaoCodigo = AVAL ? AVAL.codigo : '';
     var payload;
     try {
-      payload = montarPayload(estado, estado.ordens);
+      payload = montarPayload(estado, estado.ordens, null, FORM());
     } catch (e) {
-      envio = { carregando: false, erro: 'Encontramos um problema nas respostas. Revise os grupos e tente novamente.' };
-      irPara('revisao');
+      irParaGrupoIncompleto('Encontramos um problema nas respostas. Confira este grupo e continue.');
       return;
     }
     var api = root.DISC_API;

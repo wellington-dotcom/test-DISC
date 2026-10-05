@@ -347,8 +347,30 @@ export function itemDaResposta(l) {
   if (typeof validacao === 'string') { try { validacao = JSON.parse(validacao); } catch (err) { validacao = null; } }
   return {
     id: String(l.id), telefone: l.telefone || '', respostas: l.respostas || '', validacao,
-    protocolo: normalizarProtocolo(l.protocolo), resultado
+    protocolo: normalizarProtocolo(l.protocolo), resultado,
+    pessoaId: l.pessoa_id ? String(l.pessoa_id) : '', recebidoEm: l.recebido_em ? String(l.recebido_em) : ''
   };
+}
+
+/**
+ * Mesma pessoa com várias respostas no processo: fica só a MAIS RECENTE (por recebido_em). A pessoa é o
+ * mesmo WhatsApp (como public.pessoas; vale também para linha antiga ainda sem pessoa_id) ou, sem telefone
+ * utilizável, o pessoa_id. Mantém a ordem original das que ficam.
+ */
+export function respostasMaisRecentesPorPessoa(itens) {
+  const tempo = (it) => { const t = Date.parse(it.recebidoEm); return isNaN(t) ? -Infinity : t; };
+  const chave = (it) => {
+    const t = cuChaveTelefone(it.telefone);
+    if (t) return 't:' + t.ddd + t.fim;
+    return it.pessoaId ? 'p:' + it.pessoaId : 'id:' + it.id;
+  };
+  const escolhida = {};
+  itens.forEach((it, i) => {
+    const k = chave(it);
+    if (escolhida[k] === undefined || tempo(it) >= tempo(itens[escolhida[k]])) escolhida[k] = i;
+  });
+  const ficam = new Set(Object.values(escolhida));
+  return itens.filter((_, i) => ficam.has(i));
 }
 
 function cuDiscDaResposta(item, motorConfiabilidade) {
@@ -414,7 +436,7 @@ export async function cuMontarDadosProcesso(cu, proc, linhasRespostas, motorConf
   const camposBonus = {};
   config.bonus.forEach((b) => { camposBonus[b.id] = campoConfigurado(b.campo, 'Bônus "' + b.nome + '"'); });
 
-  const respostas = (linhasRespostas || []).map(itemDaResposta).filter((it) => it.resultado);
+  const respostas = respostasMaisRecentesPorPessoa((linhasRespostas || []).map(itemDaResposta).filter((it) => it.resultado));
   const usadas = {};
   const finalistasStatus = config.statusFinalistas.map(normalizarNomeCampo);
 

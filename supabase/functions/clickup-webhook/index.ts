@@ -563,8 +563,30 @@ function itemDaResposta(l) {
   if (typeof validacao === 'string') { try { validacao = JSON.parse(validacao); } catch (err) { validacao = null; } }
   return {
     id: String(l.id), telefone: l.telefone || '', respostas: l.respostas || '', validacao,
-    protocolo: normalizarProtocolo(l.protocolo), resultado
+    protocolo: normalizarProtocolo(l.protocolo), resultado,
+    pessoaId: l.pessoa_id ? String(l.pessoa_id) : '', recebidoEm: l.recebido_em ? String(l.recebido_em) : ''
   };
+}
+
+/**
+ * Mesma pessoa com várias respostas no processo: fica só a MAIS RECENTE (por recebido_em). A pessoa é o
+ * mesmo WhatsApp (como public.pessoas; vale também para linha antiga ainda sem pessoa_id) ou, sem telefone
+ * utilizável, o pessoa_id. Mantém a ordem original das que ficam.
+ */
+function respostasMaisRecentesPorPessoa(itens) {
+  const tempo = (it) => { const t = Date.parse(it.recebidoEm); return isNaN(t) ? -Infinity : t; };
+  const chave = (it) => {
+    const t = cuChaveTelefone(it.telefone);
+    if (t) return 't:' + t.ddd + t.fim;
+    return it.pessoaId ? 'p:' + it.pessoaId : 'id:' + it.id;
+  };
+  const escolhida = {};
+  itens.forEach((it, i) => {
+    const k = chave(it);
+    if (escolhida[k] === undefined || tempo(it) >= tempo(itens[escolhida[k]])) escolhida[k] = i;
+  });
+  const ficam = new Set(Object.values(escolhida));
+  return itens.filter((_, i) => ficam.has(i));
 }
 
 function cuDiscDaResposta(item, motorConfiabilidade) {
@@ -630,7 +652,7 @@ async function cuMontarDadosProcesso(cu, proc, linhasRespostas, motorConfiabilid
   const camposBonus = {};
   config.bonus.forEach((b) => { camposBonus[b.id] = campoConfigurado(b.campo, 'Bônus "' + b.nome + '"'); });
 
-  const respostas = (linhasRespostas || []).map(itemDaResposta).filter((it) => it.resultado);
+  const respostas = respostasMaisRecentesPorPessoa((linhasRespostas || []).map(itemDaResposta).filter((it) => it.resultado));
   const usadas = {};
   const finalistasStatus = config.statusFinalistas.map(normalizarNomeCampo);
 
@@ -1011,6 +1033,8 @@ async function lerRelatorio(ctx, token) {
   if (!relTokenValido(token)) return null;
   const l = await ctx.db.relatorioLer(token);
   if (!l || !l.dados || typeof l.dados !== 'object') return null;
+  // Relatórios dos modelos novos (equipe/liderança/pessoa) são do painel, não do processo/ClickUp.
+  if (!l.processo_id || (l.modelo && l.modelo !== 'processo')) return null;
   return l;
 }
 
@@ -1066,7 +1090,7 @@ async function acaoRelatorioDespublicar(ctx, token) {
 
 async function acaoRelatoriosListar(ctx, processoId) {
   const linhas = await ctx.db.relatoriosListar(limparTexto(processoId, 60));
-  const relatorios = (linhas || []).map((l) => ({
+  const relatorios = (linhas || []).filter((l) => l.processo_id).map((l) => ({
     token: l.token, processoId: l.processo_id ? String(l.processo_id) : '',
     status: l.status === 'publicado' ? 'publicado' : 'rascunho',
     criadoEm: l.criado_em || '', publicadoEm: l.publicado_em || '', atualizadoEm: l.atualizado_em || ''
@@ -1509,7 +1533,7 @@ function criarDb(sb) {
     },
     /** Respostas do DISC do processo (pelo processo_id; histórico importado só com o código também vale). */
     async respostasDoProcesso(proc) {
-      let q = sb.from('respostas').select('id, telefone, respostas, validacao, protocolo, recebido_em');
+      let q = sb.from('respostas').select('id, pessoa_id, telefone, respostas, validacao, protocolo, recebido_em');
       q = /^[A-Z0-9]{4}$/.test(proc.codigo || '')
         ? q.or('processo_id.eq.' + proc.id + ',avaliacao.eq.' + proc.codigo)
         : q.eq('processo_id', proc.id);

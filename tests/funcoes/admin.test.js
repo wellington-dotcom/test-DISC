@@ -254,3 +254,16 @@ test('relBaseSite: baseUrl https do painel, SITE_URL com ou sem barra, nada vál
   assert.equal(relBaseSite('http://inseguro.com/', 'https://site.com/pasta'), 'https://site.com/pasta/');
   assert.equal(relBaseSite('javascript:alert(1)', ''), '');
 });
+
+test('relatórios dos modelos novos (equipe/liderança/pessoa, sem processo) ficam fora das ações do relatório de processo', async () => {
+  const { chamar, db } = preparar({ env: { ANTHROPIC_API_KEY: 'chave-falsa' } });
+  const tokenEquipe = 'e'.repeat(64);
+  await db.relatorioInserir({ token: tokenEquipe, processo_id: null, modelo: 'equipe', empresa_id: 'x', status: 'rascunho',
+    dados: { modelo: 'equipe', titulo: 'Equipe', textos: {} }, criado_em: '2026-10-05T00:00:00Z' });
+  for (const acao of ['relatorio.publicar', 'relatorio.despublicar', 'relatorio.melhorarTextos']) {
+    assert.equal((await chamar({ acao, relatorioToken: tokenEquipe })).json.erro, 'Relatório não encontrado.', acao);
+  }
+  assert.equal((await chamar({ acao: 'relatorio.salvar', relatorioToken: tokenEquipe, relatorio: { textos: { a: 'b' } } })).json.erro, 'Relatório não encontrado.');
+  const lista = (await chamar({ acao: 'relatorios.listar' })).json;
+  assert.ok(lista.relatorios.every((r) => r.token !== tokenEquipe));
+});

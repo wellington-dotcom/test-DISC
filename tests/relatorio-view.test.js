@@ -143,3 +143,119 @@ test('render escreve no elemento e marca aria-busy', () => {
   assert.match(el.innerHTML, /Relatório não encontrado ou fora do ar\./);
   assert.equal(el.attrs['data-estado'], 'erro');
 });
+
+/* ------------------------------------------------------------------ modelos da fase 2 (equipe, liderança, pessoa) */
+const MODELOS = require('../js/relatorio-modelos.js');
+const GERADO = '2026-10-05T12:00:00.000Z';
+const RES = {
+  DI: { percentuais: { D: 45, I: 25, S: 15, C: 15 }, codigo: 'DI' },
+  SC: { percentuais: { D: 15, I: 20, S: 45, C: 20 }, codigo: 'SC' },
+  CS: { percentuais: { D: 10, I: 15, S: 25, C: 50 }, codigo: 'CS' },
+  IS: { percentuais: { D: 20, I: 40, S: 25, C: 15 }, codigo: 'IS' }
+};
+function dadosEquipe(foco) {
+  return MODELOS.equipe({
+    empresa: { nome: 'Cartório Exemplo', cidade: 'Boa Vista' }, consultor: 'Wellington V.',
+    colaboradores: [
+      { pessoaId: 'a', nome: 'Ana Paula Souza', telefone: '5595991112222', cargo: 'Diretora', status: 'ativo', resultado: RES.DI },
+      { pessoaId: 'b', nome: 'Bruno Lima', cargo: 'Gerente', status: 'ativo', resultado: RES.SC },
+      { pessoaId: 'c', nome: 'Carla Dias', cargo: 'Analista', status: 'ativo', resultado: RES.CS },
+      { pessoaId: 'd', nome: 'Davi Reis', cargo: 'Vendedor', status: 'ativo', resultado: null }
+    ],
+    relacoes: [{ de: 'a', para: 'b', tipo: 'lidera' }, { de: 'a', para: 'd', tipo: 'lidera' }, { de: 'b', para: 'c', tipo: 'lidera' }, { de: 'c', para: 'd', tipo: 'direto' }],
+    foco: foco ? { nome: 'Gabriel Rocha', cargo: 'Analista', resultado: RES.IS, relacoes: [{ de: 'b', para: 'foco', tipo: 'lidera' }] } : undefined
+  }, { geradoEm: GERADO });
+}
+
+test('modelo equipe: capa, sumário, organograma, equilíbrio, relações, guia por líder, como liderar, encaixe e limites', () => {
+  const d = dadosEquipe(true);
+  const html = V.montarHtml(d);
+  assert.match(html, /data-modelo="equipe"/);
+  for (const id of ['capa', 'indice', 'sumario', 'organograma', 'equilibrio', 'relacoes', 'lideres', 'pessoas', 'foco', 'encerramento', 'rodape']) {
+    assert.match(html, new RegExp('data-secao="' + id + '"'), 'seção ' + id);
+  }
+  assert.ok(html.includes('Cartório Exemplo') && html.includes('Wellington V.') && html.includes('05 out 2026'));
+  for (const t of d.sumario.destaques.concat(d.sumario.alertas)) assert.ok(html.includes(V.esc(t)), t);
+  for (const p of d.pares) assert.ok(html.includes('par-doc--' + p.nivel));
+  assert.ok(html.includes('Ana P.') && html.includes('Davi R.'));
+  assert.ok(!html.includes('data-secao="ranking"'), 'não desenha o processo seletivo');
+  // processo atual continua igual sem modelo
+  assert.match(V.montarHtml(relatorio()), /data-secao="ranking"/);
+  // sem foco: sem a seção de encaixe
+  assert.ok(!V.montarHtml(dadosEquipe(false)).includes('data-secao="foco"'));
+});
+
+test('organogramaHtml: árvore de cartões com letra e cor DISC, sem teste com traço, foco marcado', () => {
+  const d = dadosEquipe(true);
+  const html = V.organogramaHtml(d.organograma);
+  assert.match(html, /^<div class="org"/);
+  assert.equal((html.match(/class="org-cartao /g) || []).length, 4);
+  assert.match(html, /org-cartao--D[^]*disc-fundo-D">D</);
+  assert.match(html, /org-cartao--S/);
+  assert.match(html, /org-cartao--sem[^]*>–</);
+  assert.match(html, /org__filhos org__filhos--linha/, 'topo com 2 liderados: linha horizontal');
+  assert.match(html, /Sem teste/);
+  const comFoco = V.organogramaHtml(d.foco.organograma);
+  assert.match(comFoco, /org-cartao--foco/);
+  assert.match(comFoco, /candidato/);
+  // também aceita o organograma cru do DISC_COMPATIBILIDADE, com focoId
+  const C = require('../js/compatibilidade.js');
+  const org = C.montar({ pessoas: [{ id: 'x', nome: 'Xis Um', percentuais: RES.CS.percentuais }, { id: 'y', nome: 'Ípsilon Dois', percentuais: null }], relacoes: [] }).organograma;
+  const solto = V.organogramaHtml(org, { focoId: 'y' });
+  assert.match(solto, /org__grade/);
+  assert.match(solto, /org-cartao--sem org-cartao--foco/);
+  assert.match(V.organogramaHtml(null), /Nenhum colaborador/);
+  // nada de bolhas: sem border-radius 50% no HTML e nenhum SVG de círculo
+  assert.ok(!/<circle/.test(html));
+});
+
+test('modelo liderança: documento curto para o líder', () => {
+  const d = MODELOS.lideranca({ pessoa: { nome: 'Bruno Lima', cargo: 'Gerente', resultado: RES.SC }, lider: { nome: 'Ana Souza', resultado: RES.DI }, empresa: { nome: 'Cartório' } }, { geradoEm: GERADO });
+  const html = V.montarHtml(d);
+  assert.match(html, /data-modelo="lideranca"/);
+  for (const id of ['capa', 'resumo', 'liderar', 'encerramento', 'rodape']) assert.match(html, new RegExp('data-secao="' + id + '"'));
+  assert.match(html, /Como liderar <em>Bruno L\.<\/em>/);
+  for (const s of d.secoes) assert.ok(html.includes(V.esc(s.titulo)), s.titulo);
+  assert.ok(html.includes('Você e Bruno L.'));
+  assert.ok(html.includes(V.esc(d.aviso)));
+});
+
+test('modelo pessoa: documento de desenvolvimento, acolhedor', () => {
+  const d = MODELOS.pessoa({ pessoa: { nome: 'Carla Dias', resultado: RES.CS } }, { geradoEm: GERADO });
+  const html = V.montarHtml(d);
+  assert.match(html, /data-modelo="pessoa"/);
+  for (const id of ['capa', 'perfil', 'fortes', 'atencao', 'pressao', 'comunicacao', 'plano', 'encerramento', 'rodape']) assert.match(html, new RegExp('data-secao="' + id + '"'), id);
+  assert.match(html, /Olá, Carla\./);
+  assert.ok(html.includes(V.esc(d.frase)));
+  for (const s of d.secoes) assert.ok(html.includes(V.esc(s.titulo)));
+  assert.ok(!/empresa|vaga|aderência/i.test(html.replace(/Notus <em>Agência<\/em>/g, '')), 'sem linguagem de seleção');
+});
+
+test('modelos novos: escape (XSS), modelo desconhecido e campos sensíveis ignorados', () => {
+  const ataque = '<img src=x onerror="alert(1)">';
+  const d = dadosEquipe(true);
+  d.empresa.nome = ataque;
+  d.organograma.raizes[0].nome = ataque;
+  d.organograma.raizes[0].codigo = '"><b data-x>';
+  d.pares[0].riscos[0] = ataque;
+  d.pares[0].nivel = '"><i data-y>';
+  d.sumario.destaques[0] = ataque;
+  d.colaboradores[0].secoes[0].itens[0] = ataque;
+  d.colaboradores[0].telefone = '5595991112222';
+  d.colaboradores[0].email = 'ana@exemplo.com';
+  d.foco.nome = ataque;
+  const html = V.montarHtml(d);
+  assert.ok(!html.includes('<img src=x'));
+  assert.ok(!html.includes('data-x>') && !html.includes('data-y>'));
+  assert.ok(!html.includes('5595991112222') && !html.includes('ana@exemplo.com'));
+  const p = MODELOS.pessoa({ pessoa: { nome: 'Carla Dias', resultado: RES.CS } }, { geradoEm: GERADO });
+  p.frase = ataque; p.pessoa.primeiroNome = ataque; p.secoes[0].itens[0].titulo = ataque;
+  assert.ok(!V.montarHtml(p).includes('<img src=x'));
+  const l = MODELOS.lideranca({ pessoa: { nome: 'Bruno Lima', resultado: RES.SC }, lider: null, empresa: { nome: ataque } }, { geradoEm: GERADO });
+  l.pessoa.nome = ataque; l.secoes[0].itens[0] = ataque;
+  assert.ok(!V.montarHtml(l).includes('<img src=x'));
+  assert.match(V.montarHtml({ modelo: 'outro' }), /Relatório não encontrado/);
+  assert.match(V.montarHtml({ modelo: 'constructor' }), /Relatório não encontrado/);
+  // snapshot mínimo de cada modelo não quebra
+  for (const m of ['equipe', 'lideranca', 'pessoa']) assert.match(V.montarHtml({ modelo: m }), /data-secao="capa"/);
+});

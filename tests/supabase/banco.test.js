@@ -1,5 +1,5 @@
 'use strict';
-// Testes do banco do Supabase (supabase/migrations/20261005120000_disc.sql) num Postgres 17 EMBUTIDO
+// Testes do banco do Supabase (supabase/migrations/*.sql, aplicadas em sequência) num Postgres 17 EMBUTIDO
 // (npm: embedded-postgres — binários baixados pelo registry do npm; nada acessa *.supabase.co).
 //
 // Para ficar parecido com o Supabase, antes da migração o teste cria:
@@ -22,6 +22,14 @@ const { payloadValido, respostasAleatorias, prng } = require('../helpers/fixture
 
 const RAIZ = path.join(__dirname, '..', '..');
 const MIGRACAO = fs.readFileSync(path.join(RAIZ, 'supabase', 'migrations', '20261005120000_disc.sql'), 'utf8');
+const MIGRACAO_PESSOAS = fs.readFileSync(path.join(RAIZ, 'supabase', 'migrations', '20261006120000_pessoas_formulario.sql'), 'utf8');
+// A 3ª migração (empresas/equipes) tem testes próprios em tests/supabase/empresas.test.js; aqui ela é
+// aplicada logo depois da 2ª para os testes de segurança e do seed valerem sobre o banco completo.
+const MIGRACAO_EQUIPES = fs.readFileSync(path.join(RAIZ, 'supabase', 'migrations', '20261007120000_empresas_equipes.sql'), 'utf8');
+const TABELAS = ['admins', 'configuracoes', 'empresas', 'pessoas', 'processos', 'relacoes', 'relatorios', 'respostas', 'vinculos'];
+// Campos que a migração nova acrescenta ao payload (o Code.gs, legado, não tem): com o formulário padrão
+// eles vêm vazios e o resto do payload continua igual ao do Code.gs.
+const NOVOS_NO_PAYLOAD = { email: '', cidade: '', extras: [] };
 const CAMINHO_SEED = path.join(RAIZ, 'supabase', 'seed_previa.sql');
 
 const PREPARO_SUPABASE = `
@@ -160,31 +168,106 @@ async function limparRespostas() {
 // Instalação
 // ---------------------------------------------------------------------------
 
-test('migração roda e pode rodar de novo sem erro (idempotente)', async () => {
+test('migração antiga roda e pode rodar de novo sem erro (idempotente)', async () => {
   exigirBanco();
   await db.query(MIGRACAO);
   await db.query(MIGRACAO);
-  const t = await db.query(`select tablename, rowsecurity from pg_tables where schemaname = 'public' order by 1`);
+  const t = await db.query(`select tablename from pg_tables where schemaname = 'public' order by 1`);
   assert.deepEqual(t.rows.map((r) => r.tablename), ['admins', 'configuracoes', 'processos', 'relatorios', 'respostas']);
-  assert.ok(t.rows.every((r) => r.rowsecurity), 'RLS ligado em todas as tabelas');
 });
 
-test('seed da prévia (opcional) roda duas vezes e cria SEL1/EQP1', async () => {
+test('migração nova sobre dados antigos: idempotente, cria pessoas agrupando pelo WhatsApp (backfill)', async () => {
+  exigirBanco();
+  // Dados "de produção" gravados pela versão antiga: o mesmo WhatsApp em formatos diferentes, telefone vazio etc.
+  await db.query(`insert into public.processos (codigo, nome) values ('LEG1', 'Legado')`);
+  await db.query(`
+    insert into public.respostas (id, processo_id, avaliacao, nome, telefone, idade, funcao, empresa, respostas, recebido_em)
+    select x.id, (select id from public.processos where codigo = 'LEG1'), 'LEG1', x.nome, x.tel, x.idade, x.funcao, x.empresa,
+           repeat('1234', 25), x.quando::timestamptz
+    from (values
+      ('legado-01', 'Maria Antiga Souza', '(11) 98888-7777', 25, 'Caixa', 'Mercado A', '2026-09-01T10:00:00Z'),
+      ('legado-02', 'Maria Souza', '11988887777', null, '', 'Mercado B', '2026-09-10T10:00:00Z'),
+      ('legado-03', 'Maria S. Souza', '5511988887777', 26, 'Gerente', '', '2026-09-05T10:00:00Z'),
+      ('legado-04', 'Pedro Outro Lima', '5521977776666', 40, 'Motorista', '', '2026-09-02T10:00:00Z'),
+      ('legado-05', 'Sem Telefone Algum', '', 33, '', '', '2026-09-03T10:00:00Z'),
+      ('legado-06', 'Telefone Ruim Aqui', '123', 33, '', '', '2026-09-04T10:00:00Z')
+    ) as x(id, nome, tel, idade, funcao, empresa, quando)`);
+
+  await db.query(MIGRACAO_PESSOAS);
+  await db.query(MIGRACAO_PESSOAS);
+  await db.query(MIGRACAO_PESSOAS);
+  await db.query(MIGRACAO_EQUIPES);
+  await db.query(MIGRACAO_EQUIPES);
+  const t = await db.query(`select tablename, rowsecurity from pg_tables where schemaname = 'public' order by 1`);
+  assert.deepEqual(t.rows.map((r) => r.tablename), TABELAS);
+  assert.ok(t.rows.every((r) => r.rowsecurity), 'RLS ligado em todas as tabelas');
+
+  const pessoas = (await db.query(`select * from public.pessoas order by telefone`)).rows;
+  assert.equal(pessoas.length, 2, 'uma ficha por WhatsApp (rodar de novo não duplica)');
+  const maria = pessoas.find((p) => p.telefone === '5511988887777');
+  assert.equal(maria.nome, 'Maria Souza', 'nome da resposta mais recente');
+  assert.equal(maria.idade, 26, 'idade mais recente informada');
+  assert.equal(maria.funcao, 'Gerente');
+  assert.equal(maria.empresa, 'Mercado B');
+  assert.equal(maria.criado_em.toISOString(), '2026-09-01T10:00:00.000Z');
+  assert.equal(maria.atualizado_em.toISOString(), '2026-09-10T10:00:00.000Z');
+  const ligadas = (await db.query(`select id, pessoa_id, email, cidade, extras from public.respostas where id like 'legado-%' order by id`)).rows;
+  assert.deepEqual(ligadas.slice(0, 3).map((r) => r.pessoa_id), [maria.id, maria.id, maria.id]);
+  assert.equal(ligadas[3].pessoa_id, pessoas.find((p) => p.telefone === '5521977776666').id);
+  assert.equal(ligadas[4].pessoa_id, null, 'telefone vazio fica sem pessoa');
+  assert.equal(ligadas[5].pessoa_id, null, 'telefone inválido fica sem pessoa');
+  assert.deepEqual(ligadas[0], { id: 'legado-01', pessoa_id: maria.id, email: '', cidade: '', extras: [] });
+
+  // Excluir respostas: a pessoa só some quando fica sem nenhuma.
+  await db.query(`delete from public.respostas where id in ('legado-01', 'legado-04')`);
+  assert.deepEqual((await db.query(`select telefone from public.pessoas`)).rows, [{ telefone: '5511988887777' }]);
+  await db.query(`delete from public.respostas where id like 'legado-%'`);
+  assert.equal((await db.query(`select count(*)::int n from public.pessoas`)).rows[0].n, 0);
+  await db.query(`delete from public.processos where codigo = 'LEG1'`);
+});
+
+test('seed da prévia (opcional) roda duas vezes e cria SEL1/EQP1/ATD1, a mesma pessoa em 2 respostas e a equipe da Clínica Exemplo', async () => {
   exigirBanco();
   if (!fs.existsSync(CAMINHO_SEED)) return;
   const seed = fs.readFileSync(CAMINHO_SEED, 'utf8');
   await db.query(seed);
   await db.query(seed);
-  const r = await db.query(`select codigo, tipo, mostrar_resultado from public.processos where codigo in ('SEL1', 'EQP1') order by codigo`);
+  const r = await db.query(`select codigo, tipo, mostrar_resultado from public.processos where codigo in ('SEL1', 'EQP1', 'ATD1') order by codigo`);
   assert.deepEqual(r.rows, [
+    { codigo: 'ATD1', tipo: 'selecao', mostrar_resultado: true },
     { codigo: 'EQP1', tipo: 'equipe', mostrar_resultado: true },
     { codigo: 'SEL1', tipo: 'selecao', mostrar_resultado: false }
   ]);
-  const n = await db.query(`select count(*)::int n from public.respostas where id like 'previa-%'`);
-  assert.ok(n.rows[0].n >= 1);
-  // Sai do caminho dos outros testes (que esperam banco limpo).
+  const n = await db.query(`select count(*)::int n, count(distinct pessoa_id)::int p from public.respostas where id like 'previa-%'`);
+  assert.deepEqual(n.rows[0], { n: 9, p: 8 });
+  const ana = (await db.query(`select p.* from public.pessoas p join public.respostas r on r.pessoa_id = p.id where r.id = 'previa-exemplo-05'`)).rows[0];
+  assert.equal(ana.email, 'ana.exemplo@exemplo.com');
+  assert.equal((await db.query(`select pessoa_id from public.respostas where id = 'previa-exemplo-01'`)).rows[0].pessoa_id, ana.id);
+  const atd = await rpc('anon', null, 'avaliacao_publica', ['ATD1']);
+  assert.equal(atd.formulario.campos.email, 'obrigatorio');
+  assert.equal(atd.formulario.perguntas.length, 1);
+  // Equipe: 7 ativos (1 sem teste), 1 desligado, organograma de 3 níveis; SEL1 e EQP1 ligados à empresa.
+  const EMP = '5eed0000-0000-4000-8000-000000000001';
+  const vin = (await db.query(`select v.status, p.nome, v.fim is not null as tem_fim,
+      exists (select 1 from public.respostas r where r.pessoa_id = p.id) as testou
+    from public.vinculos v join public.pessoas p on p.id = v.pessoa_id where v.empresa_id = $1 order by p.nome`, [EMP])).rows;
+  assert.equal(vin.filter((v) => v.status === 'ativo').length, 7);
+  assert.deepEqual(vin.filter((v) => v.status === 'desligado').map((v) => [v.nome, v.tem_fim]), [['Bruno Teste Fictício', true]]);
+  assert.deepEqual(vin.filter((v) => !v.testou).map((v) => v.nome), ['Tiago Modelo Sem Teste']);
+  const lidera = (await db.query(`select a.nome de, b.nome para from public.relacoes r join public.pessoas a on a.id = r.de_pessoa
+    join public.pessoas b on b.id = r.para_pessoa where r.empresa_id = $1 and r.tipo = 'lidera' order by 1, 2`, [EMP])).rows;
+  assert.equal(lidera.length, 6);
+  assert.equal(lidera.filter((x) => x.de === 'Marta Exemplo Diretora').length, 2, 'diretora lidera os 2 líderes de área');
+  assert.equal((await db.query(`select count(*)::int n from public.relacoes where empresa_id = $1`, [EMP])).rows[0].n, 9);
+  const ligados = (await db.query(`select codigo, empresa from public.processos where empresa_id = $1 order by codigo`, [EMP])).rows;
+  assert.deepEqual(ligados, [{ codigo: 'EQP1', empresa: 'Clínica Exemplo' }, { codigo: 'SEL1', empresa: 'Clínica Exemplo' }]);
+  // Sai do caminho dos outros testes (que esperam banco limpo) — mesma limpeza do cabeçalho do seed.
+  await db.query(`delete from public.vinculos where empresa_id = $1`, [EMP]);
+  await db.query(`delete from public.empresas where id = $1`, [EMP]);
   await db.query(`delete from public.respostas where id like 'previa-%'`);
-  await db.query(`delete from public.processos where codigo in ('SEL1', 'EQP1')`);
+  await db.query(`delete from public.processos where codigo in ('SEL1', 'EQP1', 'ATD1')`);
+  await db.query(`delete from public.pessoas where telefone like '55119000000%'`);
+  assert.equal((await db.query(`select count(*)::int n from public.pessoas`)).rows[0].n, 0);
 });
 
 // ---------------------------------------------------------------------------
@@ -193,7 +276,7 @@ test('seed da prévia (opcional) roda duas vezes e cria SEL1/EQP1', async () => 
 
 test('anon não lê nem grava nenhuma tabela', async () => {
   exigirBanco();
-  for (const t of ['admins', 'processos', 'respostas', 'relatorios', 'configuracoes']) {
+  for (const t of TABELAS) {
     await rejeita(anon(`select * from public.${t}`), /permission denied/);
     await rejeita(anon(`delete from public.${t}`), /permission denied/);
   }
@@ -221,7 +304,8 @@ test('anon só executa as 3 funções públicas', async () => {
     select p.proname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'public' and has_function_privilege('authenticated', p.oid, 'execute') order by 1`);
   assert.deepEqual(g.rows.map((x) => x.proname),
-    ['avaliacao_publica', 'e_admin', 'enviar_resposta', 'garantir_primeiro_admin', 'relatorio_publico']);
+    ['avaliacao_publica', 'e_admin', 'enviar_resposta', 'garantir_primeiro_admin', 'mover_colaborador', 'relatorio_publico',
+      'salvar_colaborador', 'salvar_relacoes']);
   assert.equal((await db.query(`select has_schema_privilege('anon', 'disc_interno', 'usage') v`)).rows[0].v, false);
   assert.equal((await db.query(`select has_schema_privilege('authenticated', 'disc_interno', 'usage') v`)).rows[0].v, false);
 });
@@ -266,7 +350,8 @@ test('authenticated que não é admin não vê nem grava nada', async () => {
   const env = await rpc('anon', null, 'enviar_resposta', [JSON.stringify(payload())]);
   assert.equal(env.ok, true, env.erro);
 
-  for (const t of ['admins', 'processos', 'respostas', 'relatorios', 'configuracoes']) {
+  // (empresas/vinculos/relacoes: RLS conferido com dados em tests/supabase/empresas.test.js)
+  for (const t of TABELAS.filter((x) => !['empresas', 'vinculos', 'relacoes'].includes(x))) {
     const r = await logado(U.outro, `select * from public.${t}`);
     assert.equal(r.rowCount, 0, `não-admin não vê ${t}`);
     const tudo = await db.query(`select count(*)::int n from public.${t}`);
@@ -290,7 +375,7 @@ test('admin vê e administra tudo (processos, respostas, relatórios, admins, co
   const env = await rpc('anon', null, 'enviar_resposta', [JSON.stringify(payload({ avaliacao: 'rls1' }))]);
   assert.equal(env.ok, true, env.erro);
 
-  for (const t of ['admins', 'processos', 'respostas', 'configuracoes']) {
+  for (const t of ['admins', 'processos', 'respostas', 'configuracoes', 'pessoas']) {
     const r = await logado(U.dono, `select * from public.${t}`);
     assert.ok(r.rowCount > 0, `admin vê ${t}`);
   }
@@ -382,7 +467,8 @@ test('avaliacao_publica: só processos ativos; código normalizado; erro igual a
   await db.query(`update public.processos set ativo = false where codigo = 'OFF1'`);
   const r = await rpc('anon', null, 'avaliacao_publica', [' pub1 ']);
   assert.equal(r.ok, true);
-  const esperado = { codigo: 'PUB1', nome: 'Seleção Recepção', tipo: 'selecao', empresaNome: 'Clínica Exemplo', mostrarResultado: true };
+  const esperado = { codigo: 'PUB1', nome: 'Seleção Recepção', tipo: 'selecao', empresaNome: 'Clínica Exemplo', mostrarResultado: true,
+    formulario: { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto' }, perguntas: [] } };
   assert.deepEqual(r.avaliacao, esperado);
   for (const k of Object.keys(esperado)) assert.deepEqual(r[k], esperado[k]);
   assert.equal(JSON.stringify(r).includes('901'), false, 'não expõe a lista do ClickUp');
@@ -431,7 +517,7 @@ test('enviar_resposta grava, recalcula D/I/S/C e perfil e devolve protocolo', as
   assert.equal(linha.clickup_sync, null);
   // payload e validação iguais aos do Code.gs (mesma limpeza)
   const v = gas.g.validarPayload(JSON.parse(JSON.stringify(p)));
-  const esperado = JSON.parse(JSON.stringify(v.payload));
+  const esperado = Object.assign(JSON.parse(JSON.stringify(v.payload)), NOVOS_NO_PAYLOAD);
   assert.deepEqual(linha.payload, esperado);
   assert.deepEqual(linha.validacao, esperado.validacao);
 });
@@ -531,7 +617,7 @@ test('enviar_resposta valida tudo como o Code.gs (mesmas mensagens e mesma limpe
     const rotulo = `caso ${i}: ${JSON.stringify(c).slice(0, 120)}`;
     assert.equal(obtido.ok, esperado.ok, rotulo + ' -> ' + JSON.stringify(obtido.erro || esperado.erro));
     if (!esperado.ok) assert.equal(obtido.erro, esperado.erro, rotulo);
-    else assert.deepEqual(obtido.payload, esperado.payload, rotulo);
+    else assert.deepEqual(obtido.payload, Object.assign({}, esperado.payload, NOVOS_NO_PAYLOAD), rotulo);
   }
   // E pela RPC de verdade, com a mesma mensagem.
   const r = await rpc('anon', null, 'enviar_resposta', [JSON.stringify(payload({ telefone: '123' }))]);
@@ -637,7 +723,8 @@ test('relatorio_publico: só relatório publicado, sem o id da lista do ClickUp'
   assert.equal(pub.ok, true);
   assert.deepEqual(pub.relatorio, { processo: { nome: 'Seleção Recepção' }, candidatos: [{ nome: 'Ana S.' }] });
   assert.match(pub.publicadoEm, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
-  assert.deepEqual(Object.keys(pub).sort(), ['ok', 'publicadoEm', 'relatorio']);
+  assert.deepEqual(Object.keys(pub).sort(), ['modelo', 'ok', 'publicadoEm', 'relatorio']);
+  assert.equal(pub.modelo, 'processo');
 
   await logado(U.dono, `update public.relatorios set status = 'rascunho' where token = $1`, [token]);
   assert.deepEqual(await rpc('anon', null, 'relatorio_publico', [token]), naoAchou, 'despublicado some');
@@ -673,7 +760,7 @@ test('segurança: toda função security definer tem search_path fixo; nada de p
       and not exists (select 1 from unnest(coalesce(p.proconfig, '{}')) c where c like 'search_path=%')`);
   assert.deepEqual(semPath.rows, [], 'security definer sem search_path');
   const privs = ['select', 'insert', 'update', 'delete', 'truncate', 'references', 'trigger'];
-  for (const t of ['admins', 'processos', 'respostas', 'relatorios', 'configuracoes']) {
+  for (const t of TABELAS) {
     for (const pr of privs) {
       const r = await db.query(`select has_table_privilege('anon', 'public.${t}', $1) v`, [pr]);
       assert.equal(r.rows[0].v, false, `anon tem ${pr} em ${t}`);
@@ -730,8 +817,8 @@ test('segurança: enviar_resposta trata texto malicioso como dado e ignora campo
   assert.match(l.protocolo, /^[0-9]{2}[A-HJ-NP-Z]$/);
   const proc = (await db.query(`select id from public.processos where codigo = 'ADV2'`)).rows[0].id;
   assert.equal(l.processo_id, proc);
-  assert.deepEqual(Object.keys(l.payload).sort(), ['avaliacao', 'consentimento', 'duracaoSeg', 'empresa', 'fim', 'funcao',
-    'id', 'idade', 'inicio', 'nome', 'respostas', 'resultado', 'telefone', 'v', 'vaga', 'validacao']);
+  assert.deepEqual(Object.keys(l.payload).sort(), ['avaliacao', 'cidade', 'consentimento', 'duracaoSeg', 'email', 'empresa',
+    'extras', 'fim', 'funcao', 'id', 'idade', 'inicio', 'nome', 'respostas', 'resultado', 'telefone', 'v', 'vaga', 'validacao']);
   // tabela continua lá
   assert.equal((await db.query(`select to_regclass('public.respostas') is not null v`)).rows[0].v, true);
 
@@ -758,4 +845,193 @@ test('segurança: relatorio_publico nunca devolve rascunho, nem por token pareci
     assert.deepEqual(await rpc('anon', null, 'relatorio_publico', [tentativa]), naoAchou, tentativa);
   }
   await db.query(`delete from public.relatorios`);
+});
+
+// ---------------------------------------------------------------------------
+// Formulário do processo e pessoas (migração 20261006120000_pessoas_formulario.sql)
+// ---------------------------------------------------------------------------
+
+const FORM_PADRAO = { campos: { idade: 'obrigatorio', funcao: 'opcional', empresa: 'opcional', email: 'oculto', cidade: 'oculto' }, perguntas: [] };
+
+test('processos: formulário normalizado ao gravar e pergunta sensível recusada', async () => {
+  exigirBanco();
+  const cfg = (formulario) => JSON.stringify({ formulario });
+  for (const texto of ['Você tem filhos?', 'Qual seu estado civil?', 'Qual sua religião?', 'Tem algum problema de saúde?',
+    'Possui antecedentes criminais?', 'Qual seu gênero?']) {
+    await rejeita(logado(U.dono, `insert into public.processos (nome, config) values ('X', $1)`,
+      [cfg({ perguntas: [{ id: 'p1', texto: 'Qual sua pretensão salarial?' }, { id: 'p2', texto }] })]),
+    new RegExp('A pergunta "' + texto.replace(/[?]/g, '\\?') + '" pede um dado sensível e não pode ser usada\\.'));
+  }
+  // Nem com permitirSaude/permitirAntecedentes a pergunta ao candidato passa.
+  await rejeita(logado(U.dono, `insert into public.processos (nome, config) values ('X', $1)`,
+    [JSON.stringify({ permitirSaude: true, formulario: { perguntas: [{ texto: 'Como está sua saúde?' }] } })]), /dado sensível/);
+
+  const r = await logado(U.dono, `insert into public.processos (nome, codigo, config) values ('Formulário', 'FRM1', $1) returning config`, [cfg({
+    campos: { idade: 'oculto', email: 'obrigatorio', cidade: 'opcional', funcao: 'talvez' },
+    perguntas: [
+      { id: 'p1', texto: '  Qual sua   pretensão salarial?  ', obrigatoria: true },
+      { id: 'p1', texto: 'Tem disponibilidade aos sábados?', obrigatoria: 'sim' },
+      { id: 'Inválido!', texto: 'Como soube da vaga?' },
+      { texto: 'ok' }, 'texto solto', null,
+      { id: 'carro', texto: 'Tem carro próprio?', obrigatoria: false },
+      { texto: 'Pergunta seis aqui?' }, { texto: 'Pergunta sete aqui?' }
+    ]
+  })]);
+  assert.deepEqual(r.rows[0].config.formulario, {
+    campos: { idade: 'oculto', funcao: 'opcional', empresa: 'opcional', email: 'obrigatorio', cidade: 'opcional' },
+    perguntas: [
+      { id: 'p1', texto: 'Qual sua pretensão salarial?', obrigatoria: true },
+      { id: 'p2', texto: 'Tem disponibilidade aos sábados?', obrigatoria: false },
+      { id: 'p3', texto: 'Como soube da vaga?', obrigatoria: false },
+      { id: 'carro', texto: 'Tem carro próprio?', obrigatoria: false },
+      { id: 'p4', texto: 'Pergunta seis aqui?', obrigatoria: false }
+    ]
+  });
+  // Formulário inválido vira o padrão; processo sem formulário não ganha a chave (dados antigos intocados).
+  const ruim = await logado(U.dono, `insert into public.processos (nome, config) values ('Ruim', $1) returning id, config`, [cfg('x')]);
+  assert.deepEqual(ruim.rows[0].config.formulario, FORM_PADRAO);
+  const sem = await logado(U.dono, `insert into public.processos (nome, config) values ('Sem', '{"corte":70}') returning id, config`);
+  assert.deepEqual(sem.rows[0].config, { corte: 70 });
+  await db.query(`delete from public.processos where id in ($1, $2)`, [ruim.rows[0].id, sem.rows[0].id]);
+  // avaliacao_publica devolve o formulário normalizado
+  const pub = await rpc('anon', null, 'avaliacao_publica', ['frm1']);
+  assert.deepEqual(pub.avaliacao.formulario, r.rows[0].config.formulario);
+  assert.deepEqual(pub.formulario, r.rows[0].config.formulario);
+});
+
+test('enviar_resposta: segue o formulário do processo (obrigatórios, ocultos, e-mail e perguntas extras)', async () => {
+  exigirBanco();
+  await limparRespostas();
+  const env = async (extra) => rpc('anon', null, 'enviar_resposta', [JSON.stringify(payload(Object.assign({ avaliacao: 'FRM1' }, extra)))]);
+  const extrasOk = [{ id: 'p1', pergunta: 'texto antigo', resposta: '  R$ 3.000  ' }];
+  assert.deepEqual(await env({ extras: extrasOk }), { ok: false, erro: 'Informe o e-mail.' });
+  assert.deepEqual(await env({ email: 'nao-e-email', extras: extrasOk }), { ok: false, erro: 'E-mail inválido.' });
+  assert.deepEqual(await env({ email: 'a@b.co' }), { ok: false, erro: 'Responda a pergunta "Qual sua pretensão salarial?".' });
+  assert.deepEqual(await env({ email: 'a@b.co', extras: [{ id: 'p1', resposta: '   ' }] }),
+    { ok: false, erro: 'Responda a pergunta "Qual sua pretensão salarial?".' });
+  assert.deepEqual(await env({ email: 'a@b.co', extras: 'lixo' }), { ok: false, erro: 'Responda a pergunta "Qual sua pretensão salarial?".' });
+
+  const p = payload({
+    avaliacao: 'FRM1', idade: 'abc', email: ' Pessoa@Exemplo.COM ', cidade: '  Boa   Vista ',
+    extras: extrasOk.concat([{ id: 'inventada', pergunta: 'X?', resposta: 'ignorar' }, { id: 'carro', resposta: 'Sim' }, { id: 'p2', resposta: '' }])
+  });
+  const r = await rpc('anon', null, 'enviar_resposta', [JSON.stringify(p)]);
+  assert.equal(r.ok, true, r.erro);
+  const l = (await db.query(`select * from public.respostas where id = $1`, [p.id])).rows[0];
+  assert.equal(l.idade, null, 'idade oculta não é gravada (nem validada)');
+  assert.equal(l.email, 'pessoa@exemplo.com');
+  assert.equal(l.cidade, 'Boa Vista');
+  assert.deepEqual(l.extras, [
+    { id: 'p1', pergunta: 'Qual sua pretensão salarial?', resposta: 'R$ 3.000' },
+    { id: 'carro', pergunta: 'Tem carro próprio?', resposta: 'Sim' }
+  ]);
+  assert.deepEqual(l.payload.extras, l.extras);
+  assert.equal(l.payload.idade, null);
+
+  // Idade opcional: pode faltar, mas se vier precisa ser válida. Função obrigatória.
+  await db.query(`insert into public.processos (nome, codigo, config) values ('Opcional', 'OPC1', $1)`,
+    [JSON.stringify({ formulario: { campos: { idade: 'opcional', funcao: 'obrigatorio', empresa: 'obrigatorio', cidade: 'obrigatorio' } } })]);
+  const opc = (extra) => rpc('anon', null, 'enviar_resposta', [JSON.stringify(payload(Object.assign({ avaliacao: 'OPC1', cidade: 'Campinas' }, extra)))]);
+  assert.deepEqual(await opc({ idade: 120 }), { ok: false, erro: 'Idade inválida: precisa ser entre 14 e 99 anos.' });
+  assert.deepEqual(await opc({ funcao: '  ' }), { ok: false, erro: 'Informe a função atual ou última.' });
+  assert.deepEqual(await opc({ empresa: '' }), { ok: false, erro: 'Informe a empresa atual ou última.' });
+  assert.deepEqual(await opc({ cidade: '' }), { ok: false, erro: 'Informe a cidade onde mora.' });
+  const semIdade = await opc({ idade: null, email: 'ignorado@x.com' });
+  assert.equal(semIdade.ok, true, semIdade.erro);
+  const ls = (await db.query(`select idade, email, cidade from public.respostas where id = $1`, [semIdade.id])).rows[0];
+  assert.deepEqual(ls, { idade: null, email: '', cidade: 'Campinas' }, 'e-mail oculto não é gravado');
+  // Link geral (sem processo): padrão de sempre (idade obrigatória).
+  assert.match((await rpc('anon', null, 'enviar_resposta', [JSON.stringify(payload({ idade: null }))])).erro, /Idade não informada/);
+  await limparRespostas();
+  await db.query(`delete from public.processos where codigo = 'OPC1'`);
+});
+
+test('pessoas: envio liga à pessoa pelo WhatsApp, atualiza a ficha sem apagar campos e some com a última resposta', async () => {
+  exigirBanco();
+  await limparRespostas();
+  assert.equal((await db.query(`select count(*)::int n from public.pessoas`)).rows[0].n, 0);
+  const r1 = await rpc('anon', null, 'enviar_resposta', [JSON.stringify(payload({ telefone: '(11) 97777-6666', idade: 30, funcao: 'Caixa', empresa: 'Mercado' }))]);
+  assert.equal(r1.ok, true, r1.erro);
+  let pes = (await db.query(`select * from public.pessoas`)).rows;
+  assert.equal(pes.length, 1);
+  assert.deepEqual([pes[0].telefone, pes[0].nome, pes[0].idade, pes[0].funcao, pes[0].empresa, pes[0].email, pes[0].cidade],
+    ['5511977776666', 'João da Silva', 30, 'Caixa', 'Mercado', '', '']);
+  const criado = pes[0].criado_em;
+
+  // Mesma pessoa (outro formato do número), outro processo com e-mail/cidade; função vazia não apaga a ficha.
+  const r2 = await rpc('anon', null, 'enviar_resposta', [JSON.stringify(payload({
+    avaliacao: 'FRM1', telefone: '11977776666', nome: 'João Pedro da Silva', funcao: '', empresa: '',
+    email: 'joao@exemplo.com', cidade: 'Campinas', extras: [{ id: 'p1', resposta: 'A combinar' }]
+  }))]);
+  assert.equal(r2.ok, true, r2.erro);
+  // Outra pessoa
+  const r3 = await rpc('anon', null, 'enviar_resposta', [JSON.stringify(payload({ telefone: '21 96666-5555', nome: 'Maria Lima Souza' }))]);
+  assert.equal(r3.ok, true, r3.erro);
+  pes = (await db.query(`select * from public.pessoas order by telefone`)).rows;
+  assert.equal(pes.length, 2);
+  const joao = pes.find((p) => p.telefone === '5511977776666');
+  assert.deepEqual([joao.nome, joao.idade, joao.funcao, joao.empresa, joao.email, joao.cidade],
+    ['João Pedro da Silva', 30, 'Caixa', 'Mercado', 'joao@exemplo.com', 'Campinas'], 'ficha atualizada sem apagar com vazio');
+  assert.equal(joao.criado_em.toISOString(), criado.toISOString());
+  assert.ok(joao.atualizado_em >= criado);
+  const ligacoes = (await db.query(`select id, pessoa_id from public.respostas order by recebido_em, id`)).rows;
+  assert.equal(ligacoes.filter((x) => x.pessoa_id === joao.id).length, 2);
+  // Reenvio (mesmo id) não mexe na ficha nem cria resposta
+  const dup = await rpc('anon', null, 'enviar_resposta', [JSON.stringify(payload({ id: r1.id, telefone: '11977776666', nome: 'Nome Diferente Aqui', funcao: 'Outra' }))]);
+  assert.equal(dup.duplicado, true);
+  assert.equal((await db.query(`select nome from public.pessoas where id = $1`, [joao.id])).rows[0].nome, 'João Pedro da Silva');
+
+  // Admin lê pessoas pelo PostgREST (embutido); anon e não-admin não.
+  const viaAdmin = await logado(U.dono, `select r.id, p.nome from public.respostas r join public.pessoas p on p.id = r.pessoa_id`);
+  assert.equal(viaAdmin.rowCount, 3);
+  assert.equal((await logado(U.outro, `select * from public.pessoas`)).rowCount, 0);
+  await rejeita(anon(`select * from public.pessoas`), /permission denied/);
+  await rejeita(logado(U.dono, `update public.pessoas set nome = 'X Y'`), /permission denied/);
+  await rejeita(logado(U.dono, `insert into public.pessoas (telefone) values ('5511900000000')`), /permission denied/);
+  await rejeita(logado(U.dono, `update public.respostas set pessoa_id = null`), /permission denied/);
+
+  // Exclusão: a ficha fica enquanto houver resposta; sai junto com a última (admin pelo painel).
+  await logado(U.dono, `delete from public.respostas where id = $1`, [r1.id]);
+  assert.equal((await db.query(`select count(*)::int n from public.pessoas where id = $1`, [joao.id])).rows[0].n, 1);
+  await logado(U.dono, `delete from public.respostas where id = $1`, [r2.id]);
+  assert.equal((await db.query(`select count(*)::int n from public.pessoas where id = $1`, [joao.id])).rows[0].n, 0);
+  // Excluir todos: nenhuma ficha sobra.
+  await logado(U.dono, `delete from public.respostas where id <> ''`);
+  assert.equal((await db.query(`select count(*)::int n from public.pessoas`)).rows[0].n, 0);
+});
+
+test('pessoas: resposta gravada sem pessoa (importação/versão antiga) é ligada pelo gatilho sem sobrescrever a ficha', async () => {
+  exigirBanco();
+  await limparRespostas();
+  const r = await rpc('anon', null, 'enviar_resposta', [JSON.stringify(payload({ telefone: '11955554444', funcao: '', empresa: 'Atual' }))]);
+  assert.equal(r.ok, true, r.erro);
+  await db.query(`insert into public.respostas (id, nome, telefone, idade, funcao, empresa, respostas, recebido_em)
+    values ('import-0001', 'Nome Antigo Importado', '(11) 95555-4444', 22, 'Estagiário', 'Antiga', repeat('1234', 25), now() - interval '1 year'),
+           ('import-0002', 'Outra Pessoa Importada', '5511944443333', null, '', '', repeat('1234', 25), now() - interval '1 year'),
+           ('import-0003', 'Sem Telefone Importado', '', null, '', '', repeat('1234', 25), now() - interval '1 year')`);
+  const l = (await db.query(`select id, pessoa_id from public.respostas order by id`)).rows;
+  const p1 = (await db.query(`select * from public.pessoas where telefone = '5511955554444'`)).rows[0];
+  assert.equal(l.find((x) => x.id === 'import-0001').pessoa_id, p1.id);
+  assert.equal(l.find((x) => x.id === r.id).pessoa_id, p1.id);
+  assert.equal(l.find((x) => x.id === 'import-0003').pessoa_id, null);
+  assert.deepEqual([p1.nome, p1.idade, p1.funcao, p1.empresa], ['João da Silva', 30, 'Estagiário', 'Atual'], 'importação só preenche o que estava vazio');
+  assert.equal((await db.query(`select count(*)::int n from public.pessoas`)).rows[0].n, 2);
+  await limparRespostas();
+  assert.equal((await db.query(`select count(*)::int n from public.pessoas`)).rows[0].n, 0);
+  await db.query(`delete from public.processos where codigo = 'FRM1'`);
+});
+
+test('rodar a migração antiga de novo depois da nova não perde a ligação com a pessoa (e a nova volta a valer)', async () => {
+  exigirBanco();
+  await limparRespostas();
+  await db.query(MIGRACAO);
+  const r = await rpc('anon', null, 'enviar_resposta', [JSON.stringify(payload({ telefone: '11933332222' }))]);
+  assert.equal(r.ok, true, r.erro);
+  const l = (await db.query(`select r.pessoa_id, p.telefone from public.respostas r join public.pessoas p on p.id = r.pessoa_id where r.id = $1`, [r.id])).rows[0];
+  assert.equal(l.telefone, '5511933332222');
+  await db.query(MIGRACAO_PESSOAS);
+  await db.query(MIGRACAO_EQUIPES);
+  assert.ok((await rpc('anon', null, 'avaliacao_publica', ['PUB1'])).formulario);
+  await limparRespostas();
+  assert.equal((await db.query(`select count(*)::int n from public.pessoas`)).rows[0].n, 0);
 });

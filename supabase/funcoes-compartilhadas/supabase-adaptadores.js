@@ -41,7 +41,7 @@ export function criarDb(sb) {
     },
     /** Respostas do DISC do processo (pelo processo_id; histórico importado só com o código também vale). */
     async respostasDoProcesso(proc) {
-      let q = sb.from('respostas').select('id, telefone, respostas, validacao, protocolo, recebido_em');
+      let q = sb.from('respostas').select('id, pessoa_id, telefone, respostas, validacao, protocolo, recebido_em');
       q = /^[A-Z0-9]{4}$/.test(proc.codigo || '')
         ? q.or('processo_id.eq.' + proc.id + ',avaliacao.eq.' + proc.codigo)
         : q.eq('processo_id', proc.id);

@@ -26,7 +26,7 @@ Contrato compartilhado entre todos os módulos. Se algo aqui conflitar com o có
 | `js/config.js` | `CONFIG = { API_URL: '', WHATSAPP_RECRUTADOR: '', EMPRESA: '', MOSTRAR_RESULTADO_AO_CANDIDATO: false, GRUPOS_DEMONSTRACAO: 0 }`. `API_URL: 'simulada'` liga a API simulada (prévia). |
 | `js/codec.js` | `DISC_CODEC = { encode(payload) -> string, decode(string) -> payload }` (base64url de JSON UTF-8, prefixo `DISC1.`) |
 | `js/api.js` | `DISC_API`: públicas `enviar(payload)`, `avaliacaoPublica(codigo)`, `login(email, senha)`, `primeiroAcesso(chave, nome, email, senha)`; com sessão (token sempre o 1º argumento) `eu`, `sair`, `trocarSenha`, `listar`, `atualizar(token, id, campos)`, `excluir`, `excluirTodos(token, avaliacao?)`, `listarEmpresas`, `salvarEmpresa`, `excluirEmpresa`, `listarAvaliacoes`, `salvarAvaliacao`, `excluirAvaliacao`, `listarUsuarios`, `salvarUsuario(token, usuario, senhaTemporaria?)`, `excluirUsuario`, `redefinirSenha(token, id, senhaTemporaria)`; utilitários `protocoloValido`, `normalizarProtocolo`, `normalizarCodigoAvaliacao`, `codigoAvaliacaoDaUrl(search, hash)`. Erros têm `sessaoExpirada` e `resposta`. |
-| `js/api-simulada.js` | Só age com `CONFIG.API_URL === 'simulada'`: troca `DISC_API` por um backend falso em `localStorage` que imita o `Code.gs` ação por ação, com as mesmas mensagens (teste de paridade em `tests/api-simulada.test.js`). Semente da prévia: `admin@previa.com` / `gestor@previa.com` (senha `previa123`), empresa "Clínica Exemplo", avaliações `SEL1` (seleção) e `EQP1` (equipe, mostra resultado), 4 respostas de exemplo. Chave de primeiro acesso: `previa`. |
+| `js/api-simulada.js` | Só age com `CONFIG.API_URL === 'simulada'`: troca `DISC_API` por um backend falso em `localStorage` que imita o `Code.gs` ação por ação, com as mesmas mensagens (teste de paridade em `tests/api-simulada.test.js`). Semente da prévia: `admin@previa.com` / `gestor@previa.com` (senha `previa123`), empresa "Clínica Exemplo", avaliações `SEL1` (seleção), `EQP1` (equipe, mostra resultado) e `ATD1` (mostra resultado; formulário com e-mail obrigatório, cidade opcional e 1 pergunta extra), processo `CRT1` (mostra resultado), 5 respostas de exemplo (a mesma pessoa respondeu `SEL1` e `ATD1`). Chave de primeiro acesso: `previa`. |
 | `js/validacao.js` | `DISC_VALIDACAO = { retratos, afirmacoes, ESCALA, montarEtapa(resultado, rnd?) }` — etapa de confirmação do participante (texto neutro, sem termos DISC). |
 | `js/confiabilidade.js` | `DISC_CONFIABILIDADE = { avaliar(respostas, validacao) -> {nivel, pontos, motivos, detalhes}, NIVEIS }` — usado só no painel. |
 | `js/dicas.js` | **Pronto.** `DISC_DICAS = { dicaPergunta(grupo), dicaPalavra(grupo, letra) -> {palavra, sentido, exemplo} }` (botão "i") |
@@ -57,6 +57,9 @@ Ordem de scripts nas páginas: `config.js`, `disc-data.js`, `scoring.js`, `codec
   "idade": 30,
   "funcao": "Recepcionista",
   "empresa": "Clínica Exemplo",
+  "email": "",
+  "cidade": "",
+  "extras": [{ "id": "p1", "pergunta": "Qual sua pretensão salarial?", "resposta": "R$ 3.000" }],
   "vaga": "opcional",
   "consentimento": true,
   "inicio": "ISO-8601",
@@ -80,12 +83,63 @@ Ordem de scripts nas páginas: `config.js`, `disc-data.js`, `scoring.js`, `codec
 - `avaliacao`: código do link (`?a=SEL1` ou `#a-SEL1`); `''`/ausente = processo seletivo geral. O servidor recusa código inexistente ou desativado ("Este link de avaliação não está mais ativo.") e grava o `empresaId` da avaliação na linha.
 - `validacao`: respostas da etapa de confirmação (ver abaixo). Opcional (payloads antigos não têm); o servidor só confere o formato (tipos, tamanhos, até 4.000 caracteres em JSON), guarda dentro de `payloadJson` e devolve no `listar`. Formato errado → "Dados da etapa de validação inválidos.".
 
-- `idade`: número inteiro de 14 a 99 (obrigatório no envio ao servidor).
-- `funcao` / `empresa`: função e empresa **atual ou última** (texto, até 80 caracteres; `''` quando não informadas). Não confundir com `vaga`, que é a vaga **pretendida** neste processo.
+- `idade`: número inteiro de 14 a 99, ou `null`. Obrigatória só quando o formulário do processo diz `obrigatorio` (o padrão, e sempre no link geral); se vier, precisa estar na faixa. Campo `oculto` é ignorado (grava `null`).
+- `funcao` / `empresa`: função e empresa **atual ou última** (texto, até 80 caracteres; `''` quando não informadas ou ocultas). Não confundir com `vaga`, que é a vaga **pretendida** neste processo.
+- `email` (até 120, formato `a@b.c`, gravado em minúsculas) e `cidade` (cidade onde mora, até 80): `''` quando ocultos/vazios.
+- `extras`: respostas às perguntas extras do processo, `[{id, pergunta, resposta}]` (resposta até 500). O servidor só aceita ids que existem no formulário do processo (os outros são ignorados), grava a `pergunta` com o texto do processo e não guarda resposta vazia.
+- Obrigatórios do formulário vazios são recusados com mensagem clara: "Informe o e-mail.", "E-mail inválido.", "Informe a cidade onde mora.", "Informe a função atual ou última.", "Informe a empresa atual ou última.", `Responda a pergunta "<texto>".`. Ordem das verificações: id, nome, telefone, idade, função, empresa, e-mail, cidade, extras, consentimento, respostas, código do link, validação.
 - Continua `v: 1`. Payloads antigos (sem `idade`, `funcao`, `empresa`) seguem válidos para leitura no painel e na planilha: aparecem como `—`. Na importação por código longo eles são aceitos (`validarImportado`); com servidor, porém, o `enviar` exige a idade e recusa o código antigo com mensagem clara.
 
 O admin e o backend **recalculam** o resultado a partir de `respostas` (nunca confiam no campo `resultado`).
 O payload **não** leva protocolo: ele é gerado pelo servidor e volta só na resposta de `enviar`.
+
+### Formulário do processo (`processo.config.formulario`)
+
+O recrutador define, por processo (link), o que perguntar na identificação. Nome completo e WhatsApp são sempre obrigatórios (não configuráveis).
+
+```json
+{
+  "campos": { "idade": "obrigatorio", "funcao": "opcional", "empresa": "opcional", "email": "oculto", "cidade": "oculto" },
+  "perguntas": [ { "id": "p1", "texto": "Qual sua pretensão salarial?", "obrigatoria": false } ]
+}
+```
+
+- Modos de campo: `obrigatorio` | `opcional` | `oculto`. Ausente ou inválido = o padrão acima (o comportamento de antes). Rótulos ao candidato: idade "Idade", funcao "Função atual ou última", empresa "Empresa atual ou última", email "E-mail", cidade "Cidade onde mora".
+- `perguntas`: até 5; texto 3–200 caracteres (espaços normalizados; menor que 3 é descartado); `id` `^[a-z0-9_]{1,20}$` (faltando, inválido ou repetido vira o primeiro `p1`…`pN` livre); `obrigatoria` só `true` vale.
+- Normalização igual em todos os lados: `normalizarFormulario(f)` em `js/api-supabase.js` e `js/api-simulada.js` e `disc_interno.normalizar_formulario` no banco (o gatilho de `processos` grava o formulário já normalizado).
+- Pergunta com termo sensível (mesma lista de `classificarCampo`: sexo, gênero, estado civil, filhos, religião, gravidez, etnia/raça, cor da pele, orientação, deficiência, doença, saúde, antecedentes, criminal…) é **recusada**, sem exceção (nem `permitirSaude`/`permitirAntecedentes`): `A pergunta "<texto>" pede um dado sensível e não pode ser usada.`
+- `avaliacaoPublica(codigo)` devolve também `formulario` (normalizado). Sem link (fluxo geral) vale o padrão.
+
+### Pessoas (mesma pessoa = mesmo WhatsApp normalizado)
+
+- Tabela `public.pessoas` (`id`, `telefone` único, `nome`, `idade`, `funcao`, `empresa`, `email`, `cidade`, `criado_em`, `atualizado_em`); `respostas.pessoa_id` aponta para ela.
+- Ao enviar: acha a pessoa pelo telefone ou cria; **atualiza a ficha** com o nome do envio e com os campos **não vazios** do envio (vazio não apaga o que havia). Reenvio do mesmo `id` não mexe na ficha.
+- Excluir resposta (uma ou todas): a pessoa que fica sem nenhuma resposta é excluída junto (LGPD), **menos** quem é colaborador ativo de uma empresa (continua no time, sem resultado).
+- Resposta gravada sem pessoa (importação da planilha, dados de exemplo) é ligada pelo gatilho `respostas_ligar_pessoa`, que só preenche o que estiver vazio na ficha.
+- Item de `listar` ganha: `pessoaId` (`''` sem pessoa), `pessoa: {id, nome, telefone, idade, funcao, empresa, email, cidade, atualizadoEm} | null`, `email`, `cidade`, `extras`. O painel agrupa por `pessoaId || telefone` (o Apps Script, legado, não manda `pessoaId`).
+- Relatório/ClickUp do processo (`processo.dados`): se a mesma pessoa tem várias respostas no processo, vale a **mais recente**.
+
+### Empresas, colaboradores e organograma (só Supabase e prévia)
+
+- Tabelas (migração `20261007120000_empresas_equipes.sql`; RLS só admin, `anon` nada): `empresas` (`nome` 1–120, `cidade` ≤ 120, `observacoes` ≤ 2000, `ativo`), `vinculos` (pessoa × empresa: `cargo`, `area`, `status` `ativo`|`desligado`, `inicio`, `fim`; **no máximo 1 vínculo ativo por pessoa** — índice único parcial), `relacoes` (`empresa_id`, `de_pessoa`, `para_pessoa`, `tipo` `lidera`|`direto`|`indireto`; única por empresa+de+para; de ≠ para; as duas pessoas precisam ser colaboradoras ativas da empresa — gatilho).
+- Desligar = `status 'desligado'` (o banco põe `fim` = hoje e apaga as relações da pessoa nessa empresa). Mover = o vínculo ativo vira desligado + nasce o ativo no destino (`mover_colaborador`, atômico). Empresa com colaborador ativo não é excluída ("Desligue ou mova os colaboradores antes."); excluída, leva vínculos/relações/relatórios de equipe e deixa `processos.empresa_id` nulo (o texto `processos.empresa` fica).
+- `processos.empresa_id` (opcional): ligando, o banco preenche o texto `empresa` se ele vier vazio. Link de processo **tipo `equipe` ligado a uma empresa**: quem envia e ainda não tem vínculo ativo em nenhuma empresa vira colaborador ativo dela (`cargo` = função informada); ativo em outra empresa → nada muda.
+- Funções do painel (authenticated, só admin; respondem `{ok, ...}` ou `{ok:false, erro}`): `salvar_colaborador(p_dados)`, `mover_colaborador(p_dados)`, `salvar_relacoes(p_empresa, p_relacoes)` (substitui o conjunto; valida tudo antes; repetida = vale a última).
+- `DISC_API` (`js/api-supabase.js` e `js/api-simulada.js`; no Apps Script, `js/api.js` rejeita com "Disponível só com o servidor Supabase."):
+  - `listarEmpresas(token)` → `{empresas:[{id, nome, cidade, observacoes, ativo, criadoEm, atualizadoEm, colaboradores}]}` (a simulada também manda `criadaEm`, nome do Code.gs).
+  - `salvarEmpresa(token, {id?, nome, cidade, observacoes, ativo})` → `{empresa}` (nome repetido recusado) · `excluirEmpresa(token, id)` → `{id}`.
+  - `listarEquipe(token, empresaId)` → `{empresa, colaboradores:[{vinculoId, pessoaId, nome, telefone, cargo, area, status, inicio, fim, resultado:{percentuais, codigo}|null, respondidoEm}], relacoes:[{de, para, tipo}], historico:[mesmo formato, desligados]}` (resultado = resposta mais recente da pessoa; ativos por nome, histórico pelo fim mais recente; relações só entre ativos).
+  - `salvarColaborador(token, {empresaId, pessoaId? | nome + telefone, cargo, area})` → `{colaborador:{vinculoId, pessoaId, empresaId, nome, telefone, cargo, area, status, inicio, fim}}` (sem `pessoaId`: acha/cria a pessoa pelo WhatsApp normalizado; já ativo na mesma empresa: atualiza cargo/área; ativo em outra: recusa sugerindo "Mover").
+  - `moverColaborador(token, {pessoaId, empresaId, cargo, area})` → `{colaborador}` · `desligarColaborador(token, vinculoId)` → `{id}` · `salvarRelacoes(token, empresaId, [{de, para, tipo}])` → `{relacoes}`.
+  - Processos: `processosListar`/`processosSalvar` levam `empresaId` (`''` = sem empresa).
+
+### Relatórios por modelo (equipe, liderança, pessoa)
+
+- `relatorios` ganha `id` (uuid), `modelo` (`processo` padrão | `equipe` | `lideranca` | `pessoa`), `empresa_id`, `pessoa_id`; `processo_id` pode ser nulo. Checagem: `processo` exige `processo_id`; `equipe` exige `empresa_id`; `lideranca`/`pessoa` exigem `pessoa_id`. Modelos novos: `dados` é objeto e ≤ ~300 KB. `relatorio_publico` devolve também `modelo` (relatórios antigos = `processo`).
+- `dados` é o snapshot pronto montado no navegador (`js/relatorio-modelos.js`), sem telefone/idade/e-mail.
+- `salvarRelatorioModelo(token, {id?, modelo, empresaId?, pessoaId?, dados, publicar?})` → `{relatorio:{id, token, status, modelo, url?}}` (`publicar:true` publica, `false` volta a rascunho, ausente mantém; `url` = pasta do site + `relatorio.html?r=<token>`; os dados ganham `modelo`).
+- `listarRelatoriosModelo(token, {empresaId?, pessoaId?})` → `{relatorios:[{id, token, modelo, status, titulo, empresaId, pessoaId, criadoEm, atualizadoEm, publicadoEm, url?}]}` · `excluirRelatorioModelo(token, id)` → `{id}`. Nenhum dos três toca relatórios de processo; as ações do relatório de processo (`relatorio.*`, `relatoriosListar`) ignoram os modelos novos.
+- `relatorioPublico(token)` → `{ok, modelo, relatorio, publicadoEm}`.
 
 ### Protocolo (código curto do candidato)
 
@@ -165,14 +219,14 @@ Todas as requisições usam `Content-Type: text/plain;charset=utf-8` (evita pref
 
 Ações públicas:
 - `enviar {payload}` → `{ok, id, protocolo}`. Id já gravado → `{ok, duplicado:true, id, protocolo}` com o **mesmo** protocolo. Limite global de envios por janela e de linhas na planilha.
-- `avaliacaoPublica {codigo}` → `{ok, avaliacao:{codigo, nome, tipo, empresaNome, mostrarResultado}}` (só avaliações ativas).
+- `avaliacaoPublica {codigo}` → `{ok, avaliacao:{codigo, nome, tipo, empresaNome, mostrarResultado, formulario}}` (só avaliações ativas; `formulario` no Supabase e na prévia — o Apps Script legado não manda e o site usa o padrão).
 - `login {email, senha}` → `{ok, token, usuario:{id, nome, email, papel, empresaId, empresaNome}}`.
 - `primeiroAcesso {chave, nome, email, senha}` → igual ao login (+ `redefinida`).
 - `relatorioPublico {token}` → `{ok, relatorio, publicadoEm}` só se publicado; senão "Relatório não encontrado ou fora do ar.".
 
 Com sessão (`token` no corpo):
 - `eu`, `sair`, `trocarSenha {senhaAtual, novaSenha}` (a sessão atual continua; as outras caem).
-- `listar` → `{ok, itens:[payload + status, observacoes, recebidoEm, protocolo, avaliacao, empresaId, empresaNome, avaliacaoNome, avaliacaoTipo, validacao]}` (admin: tudo; gestor: só a empresa dele; respostas sem código só o admin vê).
+- `listar` → `{ok, itens:[payload + status, observacoes, recebidoEm, protocolo, avaliacao, empresaId, empresaNome, avaliacaoNome, avaliacaoTipo, validacao (+ pessoaId, pessoa, email, cidade, extras no Supabase e na prévia)]}` (admin: tudo; gestor: só a empresa dele; respostas sem código só o admin vê).
 - `atualizar {id, campos:{status?, observacoes?}}` (gestor só na própria empresa).
 - Só admin: `excluir {id}`, `excluirTodos {avaliacao?}`, `empresas.listar|salvar {empresa:{id?, nome}}|excluir {id}` (recusa com avaliações ou gestores), `avaliacoes.salvar {avaliacao:{id?, empresaId, nome, tipo, mostrarResultado, ativa}}`, `avaliacoes.excluir {id}` (recusa com respostas: sugere desativar), `usuarios.listar|salvar {usuario, senhaTemporaria?}|excluir {id}|redefinirSenha {id, senhaTemporaria}` (ninguém exclui/desativa/rebaixa a si mesmo; sempre sobra 1 admin ativo).
 - `avaliacoes.listar`: admin e gestor (filtrado), com a contagem de `respostas`.
@@ -210,8 +264,8 @@ pt-BR, mobile-first (375px), acessível (labels, foco visível, contraste AA). *
 O servidor está migrando do Apps Script + planilha para o **Supabase** (Postgres + Auth + Edge Functions). O site continua estático (GitHub Pages) e o ClickUp continua sendo a fonte dos candidatos. O Apps Script fica no repositório como legado até o corte. Passo a passo para o dono: `docs/SUPABASE.md`.
 
 - **Escolha do backend** (`js/config.js`): `BACKEND: 'appsscript'` (padrão enquanto o dono não configurar) | `'supabase'` | `'simulada'`; `SUPABASE_URL` e `SUPABASE_ANON_KEY` são públicos (nunca a `service_role`). Nas 3 páginas, `assets/vendor/supabase.js` (supabase-js UMD, versão fixa, sem CDN; ver `assets/vendor/LEIAME.txt`) e `js/api-supabase.js` carregam depois de `js/api.js`; o arquivo só substitui o `DISC_API` quando `BACKEND === 'supabase'`, com os mesmos métodos, argumentos e respostas `{ok, ...}` (erros com `sessaoExpirada`).
-- **Banco** (`supabase/migrations/20261005120000_disc.sql`, um arquivo idempotente; `supabase/seed_previa.sql` = exemplos para projeto de teste): tabelas `admins`, `processos` (código de 4 caracteres gerado por gatilho), `respostas` (id do payload, protocolo único, D/I/S/C e perfil recalculados, `status`, `validacao`, `payload`, `clickup_sync`), `relatorios` (token ≥ 32 caracteres; `rascunho`|`publicado`) e `configuracoes` (só valores não secretos). **RLS em todas**; `anon` não acessa tabela nenhuma; `authenticated` só com `public.e_admin()`. Auxiliares no schema `disc_interno` (fora da API).
-- **RPCs** (security definer, `search_path` fixo): `avaliacao_publica(p_codigo)` → `{codigo, nome, tipo, empresaNome, mostrarResultado}` (só processos ativos); `enviar_resposta(p_payload)` → `{ok, id, protocolo, duplicado?}` com as mesmas validações e mensagens do `Code.gs` (idempotente por `id`; no máx. 40 envios por 10 minutos e 2.000 linhas); `relatorio_publico(p_token)` → `{ok, relatorio, publicadoEm}` (só publicado); `garantir_primeiro_admin()` (tabela `admins` vazia → o usuário logado vira admin; depois só admin convida admin).
+- **Banco** (`supabase/migrations/`, aplicadas em ordem, cada uma idempotente: `20261005120000_disc.sql`, `20261006120000_pessoas_formulario.sql` e `20261007120000_empresas_equipes.sql`; `supabase/seed_previa.sql` = exemplos para projeto de teste): tabelas `admins`, `processos` (código de 4 caracteres gerado por gatilho; `config.formulario` normalizado e pergunta sensível recusada), `pessoas` (ficha por WhatsApp), `respostas` (id do payload, protocolo único, D/I/S/C e perfil recalculados, `status`, `validacao`, `payload`, `clickup_sync`, `pessoa_id`, `email`, `cidade`, `extras`), `relatorios` (token ≥ 32 caracteres; `rascunho`|`publicado`; `modelo`), `empresas`, `vinculos`, `relacoes` e `configuracoes` (só valores não secretos). **RLS em todas**; `anon` não acessa tabela nenhuma; `authenticated` só com `public.e_admin()`. Auxiliares no schema `disc_interno` (fora da API).
+- **RPCs** (security definer, `search_path` fixo): `avaliacao_publica(p_codigo)` → `{codigo, nome, tipo, empresaNome, mostrarResultado, formulario}` (só processos ativos); `enviar_resposta(p_payload)` → `{ok, id, protocolo, duplicado?}` com as mesmas validações e mensagens do `Code.gs` mais as do formulário do processo, ligando a resposta à pessoa e atualizando a ficha (idempotente por `id`; no máx. 40 envios por 10 minutos e 2.000 linhas); `relatorio_publico(p_token)` → `{ok, modelo, relatorio, publicadoEm}` (só publicado); para o painel (authenticated, só admin): `salvar_colaborador`, `mover_colaborador`, `salvar_relacoes`; `garantir_primeiro_admin()` (tabela `admins` vazia → o usuário logado vira admin; depois só admin convida admin).
 - **Edge Functions** (Deno; fonte em `supabase/functions/<nome>/index.ts` + `supabase/funcoes-compartilhadas/*.js`; `npm run montar:funcoes` gera `dist/funcoes/<nome>/index.ts`, um arquivo autocontido por função para colar no painel; `npm test` confere se estão atualizados):
   - `admin` (JWT de usuário admin): `clickup.status`, `clickup.listas`, `processo.dados`, `relatorio.rascunho`, `relatorio.salvar`, `relatorio.publicar` (comenta o link na tarefa "📌 Briefing…"), `relatorio.despublicar`, `relatorios.listar`, `relatorio.melhorarTextos`, `usuarios.listar|convidar|remover` (convite por `inviteUserByEmail` com retorno para `SITE_URL/admin.html`). Participantes e processos vão direto nas tabelas (PostgREST com RLS).
   - `disc-sync` (o site chama logo depois de `enviar_resposta`, com `{id}`; responde só `{ok}`): grava o DISC na tarefa do candidato achada pelo WhatsApp, ou cria "<nome> (DISC)" com a etiqueta "sem formulário"; idempotente (`respostas.clickup_sync`).
