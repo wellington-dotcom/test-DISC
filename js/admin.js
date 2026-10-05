@@ -4882,7 +4882,7 @@
     box.appendChild(el('ul', { classe: 'modelos-grade', id: 'lista-modelos' }, MODELOS_CATALOGO.map(function (m) {
       var ok = modeloDisponivel(m);
       return el('li', { classe: 'caixa modelo-card', id: 'modelo-' + m.chave, 'data-chave': m.chave }, [
-        el('p', { classe: 'sobretitulo', texto: m.modelo === 'processo' ? 'Seleção' : (m.modelo === 'equipe' ? 'Empresa' : 'Pessoa') }),
+        el('p', { classe: 'sobretitulo', texto: m.modelo === 'processo' ? 'Seleção' : (m.modelo === 'equipe' ? 'Empresa' : (m.modelo === 'lideranca' ? 'Empresa · líder' : 'Pessoa')) }),
         el('h3', { classe: 'modelo-card__titulo seminegrito', texto: m.titulo }),
         el('dl', { classe: 'modelo-card__dl' }, [
           el('div', null, [el('dt', { texto: 'Para quem é' }), el('dd', { texto: m.paraQuem })]),

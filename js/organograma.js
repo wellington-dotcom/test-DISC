@@ -30,7 +30,7 @@
 
   var CARTAO = { w: 224, h: 88 };
   var PADRAO = { largura: CARTAO.w, altura: CARTAO.h, espacoX: 24, espacoY: 60, espacoRaizes: 56, espacoPilha: 14, empilharAcima: 4 };
-  var ESCALA_MIN = 0.3, ESCALA_MAX = 1.6, PASSO = 0.1, MARGEM = 24, AJUSTE_MAX = 1.15;
+  var ESCALA_MIN = 0.3, ESCALA_MAX = 1.6, PASSO = 0.1, MARGEM = 24, AJUSTE_MAX = 1.15, AJUSTE_MIN = 0.9;
   var NOMES_DISC = { D: 'Dominância', I: 'Influência', S: 'Estabilidade', C: 'Conformidade' };
 
   /* ------------------------------------------------------------------ utilidades */
@@ -508,7 +508,8 @@
       if (!quadro) return;
       var W = quadro.clientWidth, H = quadro.clientHeight, L = st.lay.largura, A = st.lay.altura;
       if (st.ajustar && W > 0 && H > 0 && L > 0) {
-        st.escala = Math.max(ESCALA_MIN, Math.min(AJUSTE_MAX, (W - 2 * MARGEM) / L, (H - 2 * MARGEM) / A));
+        // Ajusta pela largura (nomes legíveis): não encolhe abaixo de AJUSTE_MIN; o que passar rola dentro do quadro.
+        st.escala = Math.max(AJUSTE_MIN, Math.min(AJUSTE_MAX, (W - 2 * MARGEM) / L));
       }
       var e = st.escala;
       var tw = Math.max(W, Math.ceil(L * e + 2 * MARGEM)), th = Math.max(H, Math.ceil(A * e + 2 * MARGEM));
