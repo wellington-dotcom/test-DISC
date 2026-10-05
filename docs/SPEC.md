@@ -1,0 +1,95 @@
+# Especificação técnica — Sistema de Teste DISC
+
+Contrato compartilhado entre todos os módulos. Se algo aqui conflitar com o código, **este arquivo vence**.
+
+## Objetivo
+
+1. Candidatos de processo seletivo fazem o teste DISC (25 grupos de 4 palavras) pelo celular ou computador.
+2. Cada candidato se identifica com **nome completo** e **telefone (WhatsApp)** — opcionalmente vaga/cargo.
+3. O recrutador (admin) vê os resultados, filtra, marca quem foi aprovado e gera um **Guia para a Liderança** de cada candidato aprovado (como liderar, motivar, dar feedback, delegar, sinais de estresse).
+4. Poucos candidatos; os dados são apagados depois (LGPD: consentimento + exclusão).
+
+## Arquitetura (sem build, sem servidor próprio)
+
+- Site estático (HTML + CSS + JS puro, sem frameworks, sem bundler), publicável no GitHub Pages.
+- Backend: **Google Apps Script** publicado como Web App, gravando numa **Google Sheet** do recrutador.
+- Plano B sem backend: ao concluir, o candidato vê um **código de resultado** (e botão "Enviar pelo WhatsApp" quando `CONFIG.WHATSAPP_RECRUTADOR` está preenchido). O admin cola o código no painel para importar.
+
+## Arquivos e responsáveis
+
+| Arquivo | Conteúdo |
+|---|---|
+| `js/disc-data.js` | **Pronto.** `DISC_DATA = { grupos: [25 × {titulo, D, I, S, C}], perfis: {D,I,S,C: {nome, rotulo, cor, positivos[], valorEquipe[], ambienteIdeal[], sobPressao[], limitantes[]}} }` |
+| `js/scoring.js` | **Pronto.** `DISC_SCORING = { LETRAS, TOTAL_GRUPOS, validarGrupo, validarRespostas, calcular, compactar, descompactar }` |
+| `js/config.js` | `CONFIG = { API_URL: '', WHATSAPP_RECRUTADOR: '', EMPRESA: '', MOSTRAR_RESULTADO_AO_CANDIDATO: false }` |
+| `js/codec.js` | `DISC_CODEC = { encode(payload) -> string, decode(string) -> payload }` (base64url de JSON UTF-8, prefixo `DISC1.`) |
+| `js/api.js` | `DISC_API = { enviar(payload), listar(chave), atualizar(chave, id, campos), excluir(chave, id), excluirTodos(chave) }` |
+| `index.html`, `js/app.js`, `assets/styles.css` | Fluxo do candidato |
+| `admin.html`, `js/admin.js`, `assets/admin.css` | Painel do recrutador |
+| `js/lideranca.js` | `DISC_LIDERANCA = { gerarGuia(resultado, nome) -> {titulo, resumo, secoes:[{titulo, itens:[]}]}, combinacoes: {...} }` |
+| `apps-script/Code.gs`, `docs/BACKEND.md` | Backend |
+| `tests/*.test.js`, `tests/e2e/*.spec.js`, `package.json` | Testes |
+| `README.md` | Guia de uso para o recrutador (pt-BR, leigo) |
+
+Todos os módulos JS usam o padrão UMD já usado em `scoring.js` (global no navegador, `module.exports` no Node) para serem testáveis com `node --test`.
+Ordem de scripts nas páginas: `config.js`, `disc-data.js`, `scoring.js`, `codec.js`, `api.js`, (`lideranca.js`), `app.js`/`admin.js`.
+
+## Payload de resultado (candidato → backend / código)
+
+```json
+{
+  "v": 1,
+  "id": "string única (timestamp base36 + aleatório)",
+  "nome": "Nome Completo",
+  "telefone": "5511999998888",
+  "vaga": "opcional",
+  "consentimento": true,
+  "inicio": "ISO-8601",
+  "fim": "ISO-8601",
+  "duracaoSeg": 512,
+  "respostas": "100 dígitos — DISC_SCORING.compactar()",
+  "resultado": { "percentuais": {"D":0,"I":0,"S":0,"C":0}, "codigo": "DI" }
+}
+```
+
+O admin e o backend **recalculam** o resultado a partir de `respostas` (nunca confiam no campo `resultado`).
+
+## Regras do teste (iguais à planilha)
+
+- Em cada grupo o candidato ordena as 4 palavras: 4 = mais me identifica … 1 = menos me identifica. Sem repetição.
+- UX: toque na palavra que mais combina (recebe 4), depois na próxima (3), na próxima (2); a última recebe 1 automaticamente. Botão "refazer grupo".
+- A ordem das 4 palavras dentro de cada grupo é **embaralhada** por candidato (na planilha o D é sempre o primeiro, o que deixa o teste manipulável). A pontuação continua mapeada pela letra.
+- Total por letra = soma (25..100); percentual = total / 2.5 (soma 100).
+- Perfil = letra com maior total (primário) + segunda maior (secundário).
+
+## Validações de identificação
+
+- Nome: pelo menos 2 palavras, mínimo 5 letras.
+- Telefone: só dígitos após limpeza; 10 ou 11 dígitos (DDD + número) — salvar com `55` na frente → 12 ou 13 dígitos. Exibir com máscara `(11) 99999-8888`.
+- Checkbox de consentimento LGPD obrigatório (texto: dados usados apenas neste processo seletivo e excluídos ao final).
+- Progresso salvo em `localStorage` (try/catch) para não perder se fechar a aba; limpo ao concluir.
+
+## API do Apps Script
+
+Todas as requisições usam `Content-Type: text/plain;charset=utf-8` (evita preflight CORS). Respostas JSON `{ ok: boolean, ... , erro?: string }`.
+
+- `POST API_URL` corpo `{"acao":"enviar","payload":{...}}` → grava linha. Pública (candidato). Rejeita payload inválido e id duplicado.
+- `POST API_URL` corpo `{"acao":"listar","chave":"..."}` → `{ok, itens:[payload + status + observacoes + recebidoEm]}`.
+- `POST API_URL` corpo `{"acao":"atualizar","chave":"...","id":"...","campos":{"status":"aprovado|reprovado|em_analise","observacoes":"..."}}`.
+- `POST API_URL` corpo `{"acao":"excluir","chave":"...","id":"..."}` e `{"acao":"excluirTodos","chave":"..."}`.
+- A chave admin fica nas Script Properties (`ADMIN_KEY`). Comparação em tempo constante não é necessária, mas nunca retornar a chave.
+
+Colunas da aba `Respostas`: `id, recebidoEm, nome, telefone, vaga, inicio, fim, duracaoSeg, respostas, D, I, S, C, perfil, status, observacoes, payloadJson`.
+
+## Painel admin
+
+- Login pela chave admin (guardada em `sessionStorage`). Se `API_URL` vazio, funciona só em modo "importar código" (salvo em `localStorage`).
+- Lista: nome, telefone (link `https://wa.me/55...`), vaga, data, perfil (badge colorido), barras D/I/S/C, status.
+- Filtros: busca por nome/telefone, perfil primário, status.
+- Detalhe do candidato: gráfico de barras DISC (SVG/CSS, sem libs), características do perfil (de `DISC_DATA.perfis`), e o **Guia para a Liderança** de `DISC_LIDERANCA.gerarGuia`. Botão imprimir/salvar PDF (CSS `@media print`) e "copiar guia" (texto).
+- Ações: marcar aprovado/reprovado/em análise, observações, excluir, excluir todos (com confirmação digitando EXCLUIR), exportar CSV.
+- Comparativo: tabela com distribuição dos perfis dos aprovados (útil para montar equipe).
+
+## Visual
+
+pt-BR, mobile-first, acessível (labels, foco visível, contraste AA, `prefers-color-scheme` dark), cores DISC: D `#d64545`, I `#e0a100`, S `#2f9e6e`, C `#3b6fd6`. Sem dependências externas (sem CDN) — funciona offline após carregar.
