@@ -420,7 +420,13 @@
     return (agora || Date.now()) - ref > VALIDADE_PROGRESSO_MS;
   }
 
+  // Demonstração do arraste (mão fantasma): só no primeiro grupo, até a pessoa tocar ou ver uma vez.
+  function deveMostrarDemo(e) {
+    return !!(e && e.etapa === 'teste' && e.grupo === 0 && !e.demoVista);
+  }
+
   var PURAS = {
+    deveMostrarDemo: deveMostrarDemo,
     validarNome: validarNome,
     normalizarNome: normalizarNome,
     validarTelefone: validarTelefone,
@@ -510,6 +516,7 @@
       aceitos: [],             // grupos confirmados em "Esta ordem está certa" sem mexer
       validacao: null,         // etapa de confirmação: { montagem, escolhas, notas }
       confTela: 1,
+      demoVista: false,        // a demonstração do arraste já foi vista (não reaparece sozinha)
       demonstracao: DEMO
     };
   }
@@ -520,6 +527,7 @@
     if (!Array.isArray(e.aceitos)) e.aceitos = [];
     if (e.validacao && (typeof e.validacao !== 'object' || !e.validacao.montagem)) e.validacao = null;
     if (e.confTela !== 2) e.confTela = 1;
+    e.demoVista = e.demoVista === true;
     e.demonstracao = DEMO;
     return e;
   }
@@ -687,6 +695,7 @@
     try { document.body.setAttribute('data-etapa', telaLink ? 'link' : (estado.etapa || 'boasvindas')); } catch (e) { /* ignora */ }
     ligarEventos();
     iniciarCronometro();
+    if (!telaLink && deveMostrarDemo(estado)) iniciarDemo();
     if (focar) {
       var titulo = app.querySelector('h1');
       if (titulo) {
@@ -741,6 +750,7 @@
                 '<button type="button" class="botao botao--sobre-noite botao--grande" data-acao="recomecar">Começar do zero</button>' +
               '</div>'
             : '<div class="acoes acoes-coluna"><button type="button" class="botao botao--laranja botao--grande" data-acao="comecar">Começar</button></div>') +
+          '<p class="acesso-recrutador"><a href="admin.html">Área do recrutador</a></p>' +
         '</div>' +
       '</section>';
   }
@@ -844,6 +854,12 @@
   var ICONE_ALCA = '<svg viewBox="0 0 12 20" width="12" height="20" aria-hidden="true" focusable="false">' +
     '<circle cx="3" cy="4" r="1.6"/><circle cx="9" cy="4" r="1.6"/><circle cx="3" cy="10" r="1.6"/>' +
     '<circle cx="9" cy="10" r="1.6"/><circle cx="3" cy="16" r="1.6"/><circle cx="9" cy="16" r="1.6"/></svg>';
+  // Seta da régua (aponta para o "MAIS").
+  var ICONE_SETA_CIMA = '<svg viewBox="0 0 16 12" width="16" height="12" aria-hidden="true" focusable="false"><path d="M8 1.5l6 8.5H2z"/></svg>';
+  // Mão (dedo) da demonstração: contorno azul-escuro, preenchimento branco (cores pelo CSS).
+  var ICONE_MAO = '<svg viewBox="0 0 34 40" width="34" height="40" aria-hidden="true" focusable="false">' +
+    '<path class="mao-corpo" d="M10 6a3 3 0 0 1 6 0V17a2.6 2.6 0 0 1 5.2 0V19a2.6 2.6 0 0 1 5.2 0V21a2.4 2.4 0 0 1 4.8 0V28c0 6-4 10-10 10h-3c-3.5 0-5.5-1.2-7.5-3.5L2.6 27.6a2.4 2.4 0 0 1 3.6-3.2L10 28Z"/>' +
+    '<path class="mao-dobra" d="M16 17v4M21.2 19v3M26.4 21v2.5"/></svg>';
   // Ícone "i" (círculo + i), no padrão do componente Info do BI.
   var ICONE_INFO = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" ' +
     'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' +
@@ -893,12 +909,9 @@
     var ordem = ordemDoGrupo(i);
     var completo = grupoCompleto(i);
     var ultimo = i === N - 1;
-    var posicoes = [4, 3, 2, 1].map(function (n) {
-      var texto = n === 4 ? 'Mais me identifica' : (n === 1 ? 'Menos me identifica' : '');
-      return '<li class="posicao' + (n === 4 ? ' posicao--topo' : '') + '">' +
-        '<span class="posicao-num">' + n + '</span>' +
-        (texto ? '<span class="posicao-texto">' + texto + '</span>' : '') +
-      '</li>';
+    // Régua à esquerda: números 4..1 pequenos, alinhados ao centro de cada cartão.
+    var posicoes = [4, 3, 2, 1].map(function (n, k) {
+      return '<li class="posicao' + (n === 4 ? ' posicao--topo' : '') + '" style="--pos:' + k + '">' + n + '</li>';
     }).join('');
     var cartoes = ordem.map(function (l, k) { return cartaoHtml(i, g, l, k); }).join('');
     return '' +
@@ -908,11 +921,22 @@
         '<h1 id="titulo" class="titulo-grupo">' + escapar(perguntaDoGrupo(i, g)) +
           (temDicaPergunta(i) ? '\u00a0' + botaoInfo('Entender a pergunta', 'data-dica="pergunta"') : '') +
         '</h1>' +
-        '<p class="instrucao" id="instrucao">No topo, a palavra que <strong>mais</strong> combina com você; embaixo, a que <strong>menos</strong> combina.</p>' +
+        // A régua (MAIS / MENOS me identifica) faz o papel da instrução na tela; o texto fica para o leitor de tela.
+        '<p class="visualmente-oculto" id="instrucao">No topo, a palavra que mais combina com você; embaixo, a que menos combina.</p>' +
         '<p class="visualmente-oculto" id="ajuda-teclado">Arraste a palavra ou use as setas para cima e para baixo do teclado para mudar a posição.</p>' +
         '<div class="ordenar">' +
-          '<ol class="posicoes" aria-hidden="true">' + posicoes + '</ol>' +
-          '<ol class="cartoes" aria-label="Palavras, da que mais à que menos combina com você" aria-describedby="instrucao">' + cartoes + '</ol>' +
+          '<div class="regua" aria-hidden="true">' +
+            '<span class="regua-seta">' + ICONE_SETA_CIMA + '</span>' +
+            '<ol class="posicoes">' + posicoes + '</ol>' +
+          '</div>' +
+          '<div class="regua-topo">' +
+            '<p class="regua-texto regua-texto--mais" aria-hidden="true"><span class="regua-forte">MAIS</span> me identifica</p>' +
+            '<button type="button" class="ver-demo" data-acao="ver-demo">Ver como funciona</button>' +
+          '</div>' +
+          '<div class="lista-ordenar">' +
+            '<ol class="cartoes" aria-label="Palavras, da que mais à que menos combina com você" aria-describedby="instrucao">' + cartoes + '</ol>' +
+          '</div>' +
+          '<p class="regua-texto regua-texto--menos" aria-hidden="true"><span class="regua-forte">MENOS</span> me identifica</p>' +
         '</div>' +
         '<div class="confirmar" id="confirmar">' + confirmarHtml(completo) + '</div>' +
         '<div class="barra-nav">' +
@@ -1470,6 +1494,9 @@
         estado.voltarParaRevisao = false;
         irPara('boasvindas');
         break;
+      case 'ver-demo':
+        iniciarDemo();
+        break;
       case 'confirmar-ordem':
         marcarRespondido(ordemNaTela(), true, true);
         var prox = app.querySelector('[data-acao="proximo"]');
@@ -1677,6 +1704,54 @@
     });
     root.addEventListener('resize', posicionarDica);
     root.addEventListener('scroll', posicionarDica, true);
+  }
+
+  /* ------------- Demonstração do arraste (mão fantasma) ------------- */
+  // Uma cópia do último cartão sobe até o topo e volta (2 ciclos), com a mão e o balão "Arraste para ordenar".
+  // É só desenho por cima da lista (pointer-events: none): não muda a ordem real e não conta como interação.
+  // Some no primeiro toque ou tecla; com prefers-reduced-motion fica só a dica parada.
+
+  function iniciarDemo() {
+    encerrarDemo(false);
+    var caixa = app.querySelector('.lista-ordenar');
+    var cartoes = cartoesNaTela();
+    if (!caixa || cartoes.length !== 4) return;
+    var ultimo = cartoes[3];
+    var texto = palavraDoGrupo(estado.grupo, DATA.grupos[estado.grupo], ultimo.getAttribute('data-letra'));
+    var el = document.createElement('div');
+    el.className = 'demo';
+    el.setAttribute('aria-hidden', 'true');
+    el.innerHTML = '' +
+      '<div class="demo-arrasto">' +
+        '<div class="demo-cartao"><span class="cartao-alca">' + ICONE_ALCA + '</span><span class="cartao-texto">' + escapar(texto) + '</span></div>' +
+        '<span class="demo-mao"><span class="demo-toque"></span>' + ICONE_MAO + '</span>' +
+      '</div>' +
+      '<p class="demo-balao vidro-janela">Arraste para ordenar</p>';
+    caixa.appendChild(el);
+    caixa.classList.add('lista-ordenar--demo');
+    var arrasto = el.querySelector('.demo-arrasto');
+    arrasto.addEventListener('animationend', function (ev) {
+      if (ev.target === arrasto) encerrarDemo(true);
+    });
+  }
+
+  // marcar: grava no progresso que a demonstração já foi vista.
+  function encerrarDemo(marcar) {
+    var el = app && app.querySelector('.demo');
+    if (!el) return;
+    var caixa = el.parentNode;
+    caixa.removeChild(el);
+    caixa.classList.remove('lista-ordenar--demo');
+    if (marcar && estado && !estado.demoVista) {
+      estado.demoVista = true;
+      salvar();
+    }
+  }
+
+  function ligarDemoGlobal() {
+    // Captura: o primeiro toque/tecla em qualquer lugar some com a demonstração antes de qualquer outra ação.
+    document.addEventListener('pointerdown', function () { encerrarDemo(true); }, true);
+    document.addEventListener('keydown', function () { encerrarDemo(true); }, true);
   }
 
   /* ------------------- Lista ordenável (grupos) -------------------- */
@@ -2015,6 +2090,7 @@
     }
     app.addEventListener('click', aoClicar);
     ligarDicasGlobais();
+    ligarDemoGlobal();
     // Tempo por grupo: pausa com a aba escondida e grava o que já passou.
     document.addEventListener('visibilitychange', function () {
       if (!estado) return;

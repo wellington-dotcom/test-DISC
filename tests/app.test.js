@@ -336,3 +336,12 @@ test('montarValidacao e montarPayload levam avaliacao e validacao', () => {
   assert.ok(['alta', 'media', 'baixa'].includes(r.nivel));
   assert.equal(A.montarPayload({ id: 'abc123-q', nome: 'Ana Lima', telefone: '11999998888', idade: 30 }, ordens).avaliacao, '');
 });
+
+test('deveMostrarDemo: só no primeiro grupo e até ser vista', () => {
+  assert.equal(A.deveMostrarDemo({ etapa: 'teste', grupo: 0, demoVista: false }), true);
+  assert.equal(A.deveMostrarDemo({ etapa: 'teste', grupo: 0 }), true, 'progresso antigo sem o campo');
+  assert.equal(A.deveMostrarDemo({ etapa: 'teste', grupo: 0, demoVista: true }), false);
+  assert.equal(A.deveMostrarDemo({ etapa: 'teste', grupo: 1, demoVista: false }), false);
+  assert.equal(A.deveMostrarDemo({ etapa: 'identificacao', grupo: 0 }), false);
+  assert.equal(A.deveMostrarDemo(null), false);
+});

@@ -15,8 +15,18 @@
  *   admin  admin@previa.com  / previa123   ·  gestor  gestor@previa.com / previa123 (Clínica Exemplo)
  *   avaliações SEL1 (Recepcionista 2026, seleção) e EQP1 (Equipe comercial, equipe, mostra resultado)
  *   4 respostas de exemplo (2 em cada avaliação). Chave de primeiro acesso da prévia: "previa".
+ *   Processo "Cartório Exemplo — Escrevente" (código CRT1) ligado à lista fictícia do ClickUp da fixture
+ *   (tests/fixtures/processo-exemplo.json, embutida em js/fixture-processo-exemplo.js) e um relatório
+ *   JÁ PUBLICADO com o token fixo "exemplo-cartorio" (relatorio.html#r-exemplo-cartorio).
+ *
+ * Processos, ClickUp e relatórios (rodada ClickUp): o ClickUp NUNCA é chamado. "processo.dados" devolve a
+ * fixture (com os dados do processo gravado), "relatorio.rascunho" roda o MESMO motor do servidor
+ * (js/relatorio-motor.js, DISC_RELATORIO) e "relatorio.melhorarTextos" só simula a IA (prefixo "[IA] ").
+ * No navegador, o motor e a fixture são carregados sob demanda (mesma pasta deste arquivo), então as
+ * páginas não precisam incluí-los.
  *
  * No Node (testes): require('./js/api-simulada.js').criar({ armazenamento, scoring, latenciaMs: 0, semente: false }).
+ * Opcional: { motor, fixture } para trocar o motor do relatório e os dados do processo de exemplo.
  */
 (function (root) {
   'use strict';
@@ -27,7 +37,9 @@
     empresas: 'disc_simulada_empresas',
     avaliacoes: 'disc_simulada_avaliacoes',
     sessoes: 'disc_simulada_sessoes',
-    semente: 'disc_simulada_semente'
+    relatorios: 'disc_simulada_relatorios',
+    semente: 'disc_simulada_semente',
+    sementeRelatorio: 'disc_simulada_semente_relatorio'
   };
   var CHAVE_ADMIN = 'previa';
   var LATENCIA_MS = 400;
@@ -35,11 +47,29 @@
     chave: CHAVE_ADMIN,
     admin: { email: 'admin@previa.com', senha: 'previa123' },
     gestor: { email: 'gestor@previa.com', senha: 'previa123' },
-    avaliacoes: ['SEL1', 'EQP1']
+    avaliacoes: ['SEL1', 'EQP1'],
+    processo: { id: 'ava_previa_cartorio', codigo: 'CRT1', nome: 'Cartório Exemplo — Escrevente' },
+    relatorioToken: 'exemplo-cartorio'
   };
 
   // Mesmos valores do Code.gs
   var LIMITE_CORPO = 20000;
+  var LIMITE_CORPO_RELATORIO = 450000;      // só "relatorio.salvar" (o relatório inteiro volta do painel)
+  var ACOES_CORPO_GRANDE = ['relatorio.salvar'];
+  var REL_MAX_TEXTO = 4000;
+  var REL_MAX_TEXTOS_IA = 80;
+  var PREFIXO_IA = '[IA] ';
+  var MSG_REL_NAO_ENCONTRADO = 'Relatório não encontrado ou fora do ar.';
+  var MSG_CU_SEM_LISTA = 'Este processo ainda não está ligado a uma lista do ClickUp.';
+  var AVISO_PREVIA = 'Prévia: candidatos fictícios de exemplo. Com o servidor de verdade eles vêm da lista do ClickUp.';
+  // Ações que, no navegador, precisam do motor do relatório e da fixture (carregados sob demanda).
+  var ACOES_COM_MOTOR = ['processo.dados', 'relatorio.rascunho', 'relatorio.salvar', 'relatorio.publicar',
+    'relatorio.melhorarTextos', 'relatorioPublico'];
+  var LISTAS_PREVIA = [
+    { id: '900000000001', nome: 'Escrevente de atendimento 2026', pasta: 'Recrutamento e Seleção' },
+    { id: '900000000002', nome: 'Recepcionista — Clínica Exemplo', pasta: 'Recrutamento e Seleção' },
+    { id: '900000000003', nome: 'Auxiliar administrativo — Loja Fictícia', pasta: 'Recrutamento e Seleção' }
+  ];
   var LIMITE_LINHAS = 500;
   var LIMITE_ENVIOS_JANELA = 40;
   var JANELA_ENVIOS_SEG = 600;
@@ -345,11 +375,163 @@
     return null;
   }
 
+  /* ---------- Config do processo (espelho do Code.gs: validarConfigProcesso / classificarCampo) ---------- */
+
+  var TERMOS_SENSIVEIS = ['sexo', 'genero', 'estado civil', 'filho', 'religi', 'gravid', 'etnia', 'raca',
+    'cor da pele', 'orientacao', 'deficien', 'doenca', 'saude', 'antecedente', 'processo em seu nome', 'criminal'];
+  var TERMOS_ANTECEDENTES = ['antecedente', 'processo em seu nome', 'criminal'];
+
+  function normalizarNomeCampo(nome) {
+    var s = String(nome === null || nome === undefined ? '' : nome).toLowerCase();
+    if (s.normalize) s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    return s.replace(/[^a-z0-9%]+/g, ' ').trim();
+  }
+
+  // '' (pode ler), 'sensivel' (nunca ler) ou 'antecedente' (só com permitirAntecedentes; nunca no relatório).
+  function classificarCampo(nome, config) {
+    var n = ' ' + normalizarNomeCampo(nome);
+    config = config || {};
+    for (var i = 0; i < TERMOS_SENSIVEIS.length; i++) {
+      var termo = TERMOS_SENSIVEIS[i];
+      if (n.indexOf(' ' + termo) === -1) continue;
+      if (termo === 'saude' && config.permitirSaude === true) continue;
+      if (TERMOS_ANTECEDENTES.indexOf(termo) >= 0) return config.permitirAntecedentes === true ? 'antecedente' : 'sensivel';
+      return 'sensivel';
+    }
+    return '';
+  }
+
+  function numeroOu(v, padrao, min, max) {
+    var n = typeof v === 'number' ? v : (typeof v === 'string' && v.trim() !== '' ? Number(v.replace(',', '.')) : NaN);
+    if (!isFinite(n)) return padrao;
+    return Math.max(min, Math.min(max, n));
+  }
+
+  function idSimples(v, prefixo, i) {
+    var s = limparTexto(v, 40);
+    return /^[A-Za-z0-9_-]{1,40}$/.test(s) ? s : prefixo + (i + 1);
+  }
+
+  function validarConfigProcesso(c) {
+    if (c === undefined || c === null) c = {};
+    if (typeof c !== 'object' || Array.isArray(c)) return erro('Configuração do processo inválida.');
+    var json;
+    try { json = JSON.stringify(c); } catch (e) { return erro('Configuração do processo inválida.'); }
+    if (json.length > 40000) return erro('Configuração do processo grande demais.');
+    var perfil = String(c.perfilIdeal || '').toUpperCase().replace(/[^DISC]/g, '');
+    if (perfil.length > 2 || (perfil.length === 2 && perfil[0] === perfil[1])) return erro('Perfil ideal inválido: use 1 ou 2 letras entre D, I, S e C.');
+    var permitirAntecedentes = c.permitirAntecedentes === true;
+    var base = { permitirAntecedentes: permitirAntecedentes, permitirSaude: c.permitirSaude === true };
+    var problema = null;
+    function campo(v) {
+      var nome = limparTexto(v, 120);
+      if (nome && classificarCampo(nome, base) === 'sensivel') problema = problema || ('O campo "' + nome + '" é um dado sensível e não pode ser usado.');
+      return nome;
+    }
+    var ids = {};
+    function idUnico(v, prefixo, i) {
+      var id = idSimples(v, prefixo, i);
+      while (ids[id]) id = id + '_';
+      ids[id] = true;
+      return id;
+    }
+    var etapas = (Array.isArray(c.etapas) ? c.etapas : []).slice(0, 20).map(function (e, i) {
+      e = e && typeof e === 'object' ? e : {};
+      return {
+        id: idUnico(e.id, 'etapa', i), nome: limparTexto(e.nome, 80) || ('Etapa ' + (i + 1)),
+        peso: numeroOu(e.peso, 0, 0, 1000), campo: campo(e.campo), descricao: limparTextoLongo(e.descricao, 1000)
+      };
+    });
+    var bonus = (Array.isArray(c.bonus) ? c.bonus : []).slice(0, 20).map(function (b, i) {
+      b = b && typeof b === 'object' ? b : {};
+      var regra = b.regra && typeof b.regra === 'object' ? b.regra : {};
+      var r;
+      if (regra.tipo === 'mapa') {
+        var pontos = {};
+        var origem = regra.pontos && typeof regra.pontos === 'object' ? regra.pontos : {};
+        Object.keys(origem).slice(0, 50).forEach(function (k) {
+          var chave = limparTexto(k, 120);
+          if (chave) pontos[chave] = numeroOu(origem[k], 0, -100, 100);
+        });
+        r = { tipo: 'mapa', pontos: pontos };
+      } else {
+        r = { tipo: 'checkbox', pontos: numeroOu(regra.pontos, 0, -100, 100) };
+      }
+      return { id: idUnico(b.id, 'bonus', i), nome: limparTexto(b.nome, 80) || ('Bônus ' + (i + 1)), campo: campo(b.campo), regra: r };
+    });
+    if (problema) return erro(problema);
+    var corte = numeroOu(c.corte, 70, 0, 200);
+    var faixa = numeroOu(c.faixaAvaliar, 55, 0, 200);
+    if (faixa > corte) return erro('A faixa "avaliar" precisa ser menor ou igual à nota de corte.');
+    return {
+      ok: true,
+      config: {
+        perfilIdeal: perfil,
+        explicacaoPerfil: limparTextoLongo(c.explicacaoPerfil, 2000),
+        etapas: etapas,
+        bonus: bonus,
+        corte: corte,
+        faixaAvaliar: faixa,
+        statusFinalistas: (Array.isArray(c.statusFinalistas) ? c.statusFinalistas : []).slice(0, 30)
+          .map(function (x) { return limparTexto(x, 80); }).filter(Boolean),
+        permitirAntecedentes: permitirAntecedentes,
+        permitirSaude: c.permitirSaude === true
+      }
+    };
+  }
+
+  /* ---------- Motor do relatório e fixture (Node: require; navegador: carregados sob demanda) ---------- */
+
+  // Pasta deste arquivo no site (para carregar js/relatorio-motor.js e js/fixture-processo-exemplo.js).
+  var PASTA_SCRIPTS = (function () {
+    try {
+      var atual = root && root.document && root.document.currentScript;
+      if (atual && atual.src) return String(atual.src).replace(/[^\/]*$/, '');
+    } catch (e) { /* sem DOM */ }
+    return 'js/';
+  })();
+
+  function globalDe(nome) {
+    if (root && root[nome]) return root[nome];
+    if (typeof globalThis !== 'undefined' && globalThis[nome]) return globalThis[nome];
+    return null;
+  }
+
+  function exigirModulo(nomeGlobal, arquivo) {
+    var m = globalDe(nomeGlobal);
+    if (m) return m;
+    if (typeof require === 'function') {
+      try { return require(arquivo); } catch (e) { /* segue para o erro */ }
+    }
+    throw new Error('não foi possível carregar ' + arquivo.replace('./', 'js/') + '.');
+  }
+
+  var carregando = {};
+  function carregarScript(arquivo, nomeGlobal) {
+    if (globalDe(nomeGlobal)) return Promise.resolve();
+    var doc = root && root.document;
+    if (!doc || typeof doc.createElement !== 'function') return Promise.resolve(); // Node: usa require
+    if (carregando[arquivo]) return carregando[arquivo];
+    carregando[arquivo] = new Promise(function (resolver) {
+      var el = doc.createElement('script');
+      el.src = PASTA_SCRIPTS + arquivo;
+      el.async = true;
+      // Falha vira erro claro na própria ação (exigirModulo); aqui só libera a fila.
+      el.onload = function () { resolver(); };
+      el.onerror = function () { delete carregando[arquivo]; resolver(); };
+      (doc.head || doc.documentElement).appendChild(el);
+    });
+    return carregando[arquivo];
+  }
+
   /* ---------- Planilha falsa ---------- */
 
   function criar(opcoes) {
     opcoes = opcoes || {};
-    var SC = obterScoring(opcoes);
+    // Scoring só quando precisa: a página do relatório (relatorio.html) não carrega o scoring.js.
+    var scoringCarregado = null;
+    function SCx() { return scoringCarregado || (scoringCarregado = obterScoring(opcoes)); }
+    function temScoring() { try { SCx(); return true; } catch (e) { return false; } }
     var latencia = typeof opcoes.latenciaMs === 'number' ? opcoes.latenciaMs : LATENCIA_MS;
     var agora = typeof opcoes.agora === 'function' ? opcoes.agora : function () { return Date.now(); };
     var aleatorio = opcoes.aleatorio;
@@ -387,6 +569,7 @@
     function recalcular(respostas) {
       if (typeof respostas !== 'string' || !/^[1-4]{100}$/.test(respostas)) return null;
       var lista;
+      var SC = SCx();
       try { lista = SC.descompactar(respostas); } catch (e) { return null; }
       if (!SC.validarRespostas(lista)) return null;
       var c = SC.calcular(lista);
@@ -457,6 +640,9 @@
     function usuarios() { garantirSemente(); return lerLista(CHAVES.usuarios); }
     function empresas() { garantirSemente(); return lerLista(CHAVES.empresas); }
     function avaliacoes() { garantirSemente(); return lerLista(CHAVES.avaliacoes); }
+    function relatoriosSalvos() { garantirSemente(); return lerLista(CHAVES.relatorios); }
+    function obterMotor() { return opcoes.motor || exigirModulo('DISC_RELATORIO', './relatorio-motor.js'); }
+    function obterFixture() { return opcoes.fixture || exigirModulo('DISC_FIXTURE_PROCESSO', './fixture-processo-exemplo.js'); }
     function mapaEmpresas() {
       var m = {};
       empresas().forEach(function (e) { m[e.id] = e.nome; });
@@ -574,7 +760,7 @@
       if (!av || !av.ativa) return erro(MSG_LINK_INVALIDO);
       return {
         ok: true,
-        avaliacao: { codigo: av.codigo, nome: av.nome, tipo: av.tipo, empresaNome: mapaEmpresas()[av.empresaId] || '', mostrarResultado: av.mostrarResultado === true }
+        avaliacao: { codigo: av.codigo, nome: av.nome, tipo: av.tipo, empresaNome: mapaEmpresas()[av.empresaId] || av.empresa || '', mostrarResultado: av.mostrarResultado === true }
       };
     }
 
@@ -791,7 +977,7 @@
 
     function avaliacaoPublica(a, emp, contagem) {
       return {
-        id: a.id, codigo: a.codigo, empresaId: a.empresaId, empresaNome: emp[a.empresaId] || '',
+        id: a.id, codigo: a.codigo, empresaId: a.empresaId, empresaNome: emp[a.empresaId] || a.empresa || '',
         nome: a.nome, tipo: a.tipo, mostrarResultado: a.mostrarResultado === true, ativa: a.ativa === true,
         criadaEm: a.criadaEm, respostas: contagem[a.codigo] || 0
       };
@@ -807,36 +993,301 @@
       };
     }
 
-    function acaoAvaliacoesSalvar(dados) {
-      if (!dados || typeof dados !== 'object') return erro('Dados da avaliação ausentes.');
+    function acaoAvaliacoesSalvar(dados) { return salvarProcesso(dados, true); }
+
+    /* ----- processos (interface nova: só admin, empresa como texto, campos do ClickUp e config) ----- */
+
+    function configDoProcesso(a) {
+      var bruto = {};
+      try { bruto = a && a.config ? (typeof a.config === 'string' ? JSON.parse(a.config) : a.config) : {}; } catch (e) { bruto = {}; }
+      var v = validarConfigProcesso(bruto);
+      return v.ok ? v.config : validarConfigProcesso({}).config;
+    }
+
+    function processoPublico(a, emp, contagem) {
+      var p = avaliacaoPublica(a, emp, contagem);
+      p.empresa = a.empresa || emp[a.empresaId] || '';
+      p.vaga = a.vaga || '';
+      p.cidade = a.cidade || '';
+      p.consultor = a.consultor || '';
+      p.contratante = a.contratante || '';
+      p.periodo = { inicio: a.periodoInicio || '', fim: a.periodoFim || '' };
+      p.clickupListId = a.clickupListId || '';
+      p.config = configDoProcesso(a);
+      return p;
+    }
+
+    function acaoProcessosListar() {
+      var emp = mapaEmpresas();
+      var contagem = respostasPorAvaliacao();
+      return { ok: true, processos: avaliacoes().map(function (a) { return processoPublico(a, emp, contagem); }) };
+    }
+
+    // Mesmo salvarProcesso_ do Code.gs. legado=true: avaliacoes.salvar (exige empresaId e tipo, como antes).
+    function salvarProcesso(dados, legado) {
+      var rotulo = legado ? 'avaliação' : 'processo';
+      if (!dados || typeof dados !== 'object') return erro('Dados da ' + rotulo + ' ausentes.');
+      function veio(k) { return Object.prototype.hasOwnProperty.call(dados, k) && dados[k] !== undefined; }
       var id = limparTexto(dados.id, 40);
       var nome = limparTexto(dados.nome, 80);
-      if (letrasContadas(nome) < 2) return erro('Informe o nome da avaliação.');
+      if (letrasContadas(nome) < 2) return erro('Informe o nome ' + (legado ? 'da avaliação.' : 'do processo.'));
       var tipo = limparTexto(dados.tipo, 20);
+      if (!legado && !tipo) tipo = 'selecao';
       if (TIPOS_AVALIACAO.indexOf(tipo) === -1) return erro('Tipo inválido. Use: selecao ou equipe.');
       var empresaId = limparTexto(dados.empresaId, 40);
+      var extras = {};
+      var textos = { empresa: 80, vaga: 120, cidade: 80, consultor: 80, contratante: 80 };
+      Object.keys(textos).forEach(function (k) { if (veio(k)) extras[k] = limparTexto(dados[k], textos[k]); });
+      if (veio('periodo')) {
+        var per = dados.periodo && typeof dados.periodo === 'object' ? dados.periodo : {};
+        var dataOk = function (d) { d = limparTexto(d, 10); return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : ''; };
+        extras.periodoInicio = dataOk(per.inicio);
+        extras.periodoFim = dataOk(per.fim);
+      }
+      if (veio('clickupListId')) {
+        var lista = limparTexto(dados.clickupListId, 40);
+        if (lista && !/^[A-Za-z0-9_-]{1,40}$/.test(lista)) return erro('ID da lista do ClickUp inválido.');
+        extras.clickupListId = lista;
+      }
+      if (veio('config')) {
+        var cfg = validarConfigProcesso(dados.config);
+        if (!cfg.ok) return cfg;
+        extras.config = JSON.stringify(cfg.config);
+      }
       var emp = mapaEmpresas();
-      if (!empresaId || !Object.prototype.hasOwnProperty.call(emp, empresaId)) return erro('Escolha uma empresa válida.');
-      var lista = avaliacoes();
+      if (legado || empresaId) {
+        if (!empresaId || !Object.prototype.hasOwnProperty.call(emp, empresaId)) return erro('Escolha uma empresa válida.');
+      }
+      var registros = avaliacoes();
       var contagem = respostasPorAvaliacao();
       var a;
       if (id) {
-        a = buscarPor(lista, 'id', id);
-        if (!a) return erro('Avaliação não encontrada.');
+        a = buscarPor(registros, 'id', id);
+        if (!a) return erro(legado ? 'Avaliação não encontrada.' : 'Processo não encontrado.');
+        if (!legado && !veio('empresaId')) empresaId = a.empresaId;
         if (a.empresaId !== empresaId && contagem[a.codigo]) return erro('Esta avaliação já tem respostas: não dá para trocar a empresa dela.');
         if (dados.ativa !== undefined) a.ativa = dados.ativa === true;
       } else {
         var usadosCod = {};
-        lista.forEach(function (r) { usadosCod[r.codigo] = true; });
+        registros.forEach(function (r) { usadosCod[r.codigo] = true; });
         a = { id: novoId('ava'), codigo: gerarCodigoAvaliacao(usadosCod), criadaEm: agoraIso(), ativa: dados.ativa !== false };
-        lista.push(a);
+        if (!extras.config) extras.config = JSON.stringify(validarConfigProcesso({}).config);
+        registros.push(a);
       }
       a.empresaId = empresaId;
       a.nome = nome;
       a.tipo = tipo;
-      a.mostrarResultado = dados.mostrarResultado === true;
-      gravarChave(CHAVES.avaliacoes, lista);
-      return { ok: true, avaliacao: avaliacaoPublica(a, emp, contagem) };
+      if (legado || veio('mostrarResultado') || !id) a.mostrarResultado = dados.mostrarResultado === true;
+      Object.keys(extras).forEach(function (k) { a[k] = extras[k]; });
+      gravarChave(CHAVES.avaliacoes, registros);
+      return legado ? { ok: true, avaliacao: avaliacaoPublica(a, emp, contagem) }
+        : { ok: true, processo: processoPublico(a, emp, contagem) };
+    }
+
+    /* ----- ClickUp (simulado: nunca chama o ClickUp) ----- */
+
+    function acaoClickupStatus() {
+      return { ok: true, configurado: true, conectado: true, usuario: 'Prévia', pastaConfigurada: true, iaConfigurada: true, avisos: [] };
+    }
+
+    function processoPronto(idBruto) {
+      var id = limparTexto(idBruto, 40);
+      var a = id && buscarPor(avaliacoes(), 'id', id);
+      if (!a) return erro('Processo não encontrado.');
+      if (!a.clickupListId) return erro(MSG_CU_SEM_LISTA);
+      return { ok: true, processo: a };
+    }
+
+    // Dados normalizados do processo: os do processo gravado + candidatos/status da fixture.
+    function dadosDoProcesso(a) {
+      var fx = copiar(obterFixture());
+      var config = configDoProcesso(a);
+      if (!config.etapas.length) {
+        var daFixture = validarConfigProcesso(fx.config || {});
+        if (daFixture.ok) config = daFixture.config;
+      }
+      var candidatos = (Array.isArray(fx.candidatos) ? fx.candidatos : []).map(function (c) {
+        delete c.antecedentes; // a prévia nunca mostra antecedentes
+        return c;
+      });
+      return {
+        processo: {
+          id: a.id, nome: a.nome, codigo: a.codigo, empresa: a.empresa || mapaEmpresas()[a.empresaId] || '',
+          vaga: a.vaga || '', cidade: a.cidade || '', consultor: a.consultor || '', contratante: a.contratante || '',
+          periodo: { inicio: a.periodoInicio || '', fim: a.periodoFim || '' }, clickupListId: a.clickupListId || ''
+        },
+        config: config,
+        status: Array.isArray(fx.status) ? fx.status : [],
+        candidatos: candidatos,
+        avisos: [AVISO_PREVIA].concat(Array.isArray(fx.avisos) ? fx.avisos : [])
+      };
+    }
+
+    function acaoProcessoDados(id) {
+      var p = processoPronto(id);
+      if (!p.ok) return p;
+      var d;
+      try { d = dadosDoProcesso(p.processo); } catch (e) { return erro('Não foi possível ler o ClickUp: ' + e.message); }
+      return { ok: true, processo: d.processo, config: d.config, status: d.status, candidatos: d.candidatos, avisos: d.avisos };
+    }
+
+    /* ----- relatórios (mesmas regras e mensagens do Relatorio.gs) ----- */
+
+    function relTokenValido(t) {
+      return typeof t === 'string' && (/^[0-9a-f]{40,128}$/.test(t) || t === PREVIA.relatorioToken);
+    }
+
+    // "Maria da Silva" -> "Maria S." (igual ao relNomeCurto_ do servidor).
+    function nomeCurto(nome) {
+      var partes = limparTexto(nome, 120).split(' ').filter(function (p) { return letras(p).length > 0; });
+      if (partes.length < 2) return partes[0] || '';
+      return partes[0] + ' ' + partes[partes.length - 1].charAt(0).toUpperCase() + '.';
+    }
+
+    // Roda o motor sem antecedentes; no fim troca qualquer nome completo por "Nome S." e tira o id da lista.
+    function montarRelatorio(dados) {
+      var M = obterMotor();
+      if (!M || typeof M.montar !== 'function') throw new Error('motor do relatório indisponível.');
+      var copia = copiar(dados);
+      (copia.candidatos || []).forEach(function (c) { delete c.antecedentes; });
+      var relatorio = M.montar(copia, { geradoEm: agoraIso() });
+      if (relatorio && relatorio.processo) delete relatorio.processo.clickupListId;
+      var json = JSON.stringify(relatorio);
+      (dados.candidatos || []).forEach(function (c) {
+        var completo = limparTexto(c.nome, 120);
+        var curto = nomeCurto(completo);
+        if (completo && curto && completo !== curto && completo.indexOf(' ') > 0) {
+          json = json.split(JSON.stringify(completo).slice(1, -1)).join(JSON.stringify(curto).slice(1, -1));
+        }
+      });
+      return JSON.parse(json);
+    }
+
+    // {lista, reg} do token, ou null. O relatório da semente é montado na primeira leitura.
+    function relLer(token) {
+      if (!relTokenValido(token)) return null;
+      var lista = relatoriosSalvos();
+      var reg = buscarPor(lista, 'token', token);
+      if (!reg) return null;
+      if (!reg.relatorio || typeof reg.relatorio !== 'object') {
+        var a = buscarPor(avaliacoes(), 'id', reg.processoId);
+        if (!a || !a.clickupListId) return null;
+        reg.relatorio = montarRelatorio(dadosDoProcesso(a));
+        gravarChave(CHAVES.relatorios, lista);
+      }
+      return { lista: lista, reg: reg };
+    }
+
+    function relGravar(lido) {
+      lido.reg.atualizadoEm = agoraIso();
+      gravarChave(CHAVES.relatorios, lido.lista);
+    }
+
+    function acaoRelatorioRascunho(processoId) {
+      var p = processoPronto(processoId);
+      if (!p.ok) return p;
+      var dados, relatorio;
+      try {
+        dados = dadosDoProcesso(p.processo);
+        relatorio = montarRelatorio(dados);
+      } catch (e) {
+        return erro('Não foi possível gerar o rascunho: ' + e.message);
+      }
+      var token = hexAleatorio(32);
+      var lista = relatoriosSalvos();
+      var t = agoraIso();
+      lista.push({ token: token, processoId: p.processo.id, status: 'rascunho', criadoEm: t, publicadoEm: '', atualizadoEm: t, relatorio: relatorio });
+      gravarChave(CHAVES.relatorios, lista);
+      return { ok: true, relatorio: relatorio, token: token, avisos: dados.avisos || [] };
+    }
+
+    function acaoRelatorioSalvar(corpo) {
+      var novos = (corpo.relatorio && typeof corpo.relatorio === 'object' && corpo.relatorio.textos) || corpo.textos;
+      if (!novos || typeof novos !== 'object' || Array.isArray(novos)) return erro('Nada para salvar.');
+      var lido = relLer(corpo.relatorioToken);
+      if (!lido) return erro('Relatório não encontrado.');
+      var textos = lido.reg.relatorio.textos || {};
+      var alterados = 0;
+      Object.keys(novos).forEach(function (id) {
+        if (!Object.prototype.hasOwnProperty.call(textos, id)) return;
+        var v = novos[id];
+        var texto = typeof v === 'string' ? v : (v && typeof v.texto === 'string' ? v.texto : null);
+        if (texto === null) return;
+        texto = limparTextoLongo(texto, REL_MAX_TEXTO);
+        if (texto === textos[id].texto) return;
+        textos[id] = { texto: texto, origem: 'editado' };
+        alterados++;
+      });
+      if (alterados) relGravar(lido);
+      return { ok: true, relatorio: lido.reg.relatorio, alterados: alterados };
+    }
+
+    // Endereço do site a partir do baseUrl do painel (tira "admin.html", "?…" e "#…"). '' se não der.
+    function baseSite(baseUrl) {
+      var b = typeof baseUrl === 'string' ? baseUrl.trim() : '';
+      b = b.split('#')[0].split('?')[0];
+      if (!/^https?:\/\/[^\s"'<>]+$/.test(b)) return '';
+      if (b.charAt(b.length - 1) !== '/') b = b.substring(0, b.lastIndexOf('/') + 1);
+      return b;
+    }
+
+    function acaoRelatorioPublicar(token, baseUrl) {
+      var lido = relLer(token);
+      if (!lido) return erro('Relatório não encontrado.');
+      lido.reg.status = 'publicado';
+      lido.reg.publicadoEm = lido.reg.publicadoEm || agoraIso();
+      relGravar(lido);
+      // Na prévia o link não é comentado no ClickUp (o ClickUp nunca é chamado).
+      return { ok: true, url: baseSite(baseUrl) + 'relatorio.html?r=' + token };
+    }
+
+    function acaoRelatorioDespublicar(token) {
+      if (!relTokenValido(token)) return erro('Relatório não encontrado.');
+      var lista = relatoriosSalvos();
+      var reg = buscarPor(lista, 'token', token);
+      if (!reg) return erro('Relatório não encontrado.');
+      reg.status = 'rascunho';
+      reg.publicadoEm = '';
+      relGravar({ lista: lista, reg: reg });
+      return { ok: true };
+    }
+
+    function acaoRelatoriosListar(processoId) {
+      var filtro = limparTexto(processoId, 40);
+      var lista = relatoriosSalvos().filter(function (r) { return !filtro || r.processoId === filtro; }).map(function (r) {
+        return { token: r.token, processoId: r.processoId, status: r.status === 'publicado' ? 'publicado' : 'rascunho',
+          criadoEm: r.criadoEm, publicadoEm: r.publicadoEm || '', atualizadoEm: r.atualizadoEm };
+      }).sort(function (a, b) { return String(b.criadoEm).localeCompare(String(a.criadoEm)); });
+      return { ok: true, relatorios: lista };
+    }
+
+    // IA simulada: só marca os textos escolhidos com "[IA] " e origem 'ia' (nenhuma chamada externa).
+    function acaoRelatorioMelhorarTextos(token, ids) {
+      var lido = relLer(token);
+      if (!lido) return erro('Relatório não encontrado.');
+      var textos = lido.reg.relatorio.textos || {};
+      var escolhidos = Array.isArray(ids) && ids.length
+        ? ids.filter(function (id) { return typeof id === 'string' && Object.prototype.hasOwnProperty.call(textos, id); })
+        : Object.keys(textos).filter(function (id) { return textos[id] && textos[id].origem === 'regra'; });
+      escolhidos = escolhidos.slice(0, REL_MAX_TEXTOS_IA);
+      if (!escolhidos.length) return erro('Nenhum texto para melhorar.');
+      escolhidos.forEach(function (id) {
+        var atual = String(textos[id].texto || '');
+        var novo = atual.indexOf(PREFIXO_IA) === 0 ? atual : PREFIXO_IA + atual;
+        textos[id] = { texto: limparTextoLongo(novo, REL_MAX_TEXTO), origem: 'ia' };
+      });
+      relGravar(lido);
+      return { ok: true, relatorio: lido.reg.relatorio, alterados: escolhidos.length };
+    }
+
+    // PÚBLICA: só relatório publicado.
+    function acaoRelatorioPublico(token) {
+      var lido = null;
+      try { lido = relLer(token); } catch (e) { lido = null; }
+      if (!lido || lido.reg.status !== 'publicado') return erro(MSG_REL_NAO_ENCONTRADO);
+      var relatorio = copiar(lido.reg.relatorio);
+      if (relatorio && relatorio.processo) delete relatorio.processo.clickupListId;
+      return { ok: true, relatorio: relatorio, publicadoEm: lido.reg.publicadoEm };
     }
 
     function acaoAvaliacoesExcluir(idBruto) {
@@ -943,6 +1394,18 @@
       'avaliacoes.listar': { fn: function (u) { return acaoAvaliacoesListar(u); } },
       'avaliacoes.salvar': { soAdmin: true, fn: function (u, c) { return acaoAvaliacoesSalvar(c.avaliacao); } },
       'avaliacoes.excluir': { soAdmin: true, fn: function (u, c) { return acaoAvaliacoesExcluir(c.id); } },
+      'processos.listar': { soAdmin: true, fn: function () { return acaoProcessosListar(); } },
+      'processos.salvar': { soAdmin: true, fn: function (u, c) { return salvarProcesso(c.processo, false); } },
+      'processos.excluir': { soAdmin: true, fn: function (u, c) { return acaoAvaliacoesExcluir(c.id); } },
+      'clickup.status': { soAdmin: true, fn: function () { return acaoClickupStatus(); } },
+      'clickup.listas': { soAdmin: true, fn: function () { return { ok: true, listas: copiar(LISTAS_PREVIA) }; } },
+      'processo.dados': { soAdmin: true, fn: function (u, c) { return acaoProcessoDados(c.id); } },
+      'relatorio.rascunho': { soAdmin: true, fn: function (u, c) { return acaoRelatorioRascunho(c.processoId); } },
+      'relatorio.salvar': { soAdmin: true, fn: function (u, c) { return acaoRelatorioSalvar(c); } },
+      'relatorio.publicar': { soAdmin: true, fn: function (u, c) { return acaoRelatorioPublicar(c.relatorioToken, c.baseUrl); } },
+      'relatorio.despublicar': { soAdmin: true, fn: function (u, c) { return acaoRelatorioDespublicar(c.relatorioToken); } },
+      'relatorios.listar': { soAdmin: true, fn: function (u, c) { return acaoRelatoriosListar(c.processoId); } },
+      'relatorio.melhorarTextos': { soAdmin: true, fn: function (u, c) { return acaoRelatorioMelhorarTextos(c.relatorioToken, c.ids); } },
       'usuarios.listar': {
         soAdmin: true,
         fn: function () {
@@ -960,10 +1423,12 @@
       if (!corpo || typeof corpo !== 'object' || Array.isArray(corpo)) return erro('Formato de requisição inválido.');
       var tamanho = 0;
       try { tamanho = JSON.stringify(corpo).length; } catch (e) { return erro('JSON inválido.'); }
-      if (tamanho > LIMITE_CORPO) return erro('Requisição grande demais.');
-      garantirSemente();
       var acao = corpo.acao;
+      if (tamanho > LIMITE_CORPO_RELATORIO) return erro('Requisição grande demais.');
+      if (tamanho > LIMITE_CORPO && ACOES_CORPO_GRANDE.indexOf(acao) === -1) return erro('Requisição grande demais.');
+      garantirSemente();
       if (acao === 'enviar') return acaoEnviar(corpo.payload);
+      if (acao === 'relatorioPublico') return acaoRelatorioPublico(corpo.token);
       if (acao === 'avaliacaoPublica') return acaoAvaliacaoPublica(corpo.codigo);
       if (acao === 'login') return acaoLogin(corpo.email, corpo.senha);
       if (acao === 'primeiroAcesso') return acaoPrimeiroAcesso(corpo);
@@ -980,9 +1445,46 @@
     var semeando = false;
     function garantirSemente() {
       if (!comSemente || semeando) return;
-      if (lerChave(CHAVES.semente, null)) return;
+      var base = !!lerChave(CHAVES.semente, null);
+      var rel = !!lerChave(CHAVES.sementeRelatorio, null);
+      if (base && rel) return;
       semeando = true;
-      try { semear(); } finally { semeando = false; }
+      try {
+        if (!base && temScoring()) semear(); // sem scoring.js (página do relatório) fica para a próxima página
+        if (!rel) semearProcessoExemplo(); // prévias antigas (só com a semente base) ganham o processo de exemplo
+      } finally { semeando = false; }
+    }
+
+    // Processo de exemplo ligado à fixture + relatório JÁ PUBLICADO (token fixo). O conteúdo do relatório
+    // é montado pelo motor na primeira leitura (o motor só é carregado quando alguém pede um relatório).
+    function semearProcessoExemplo() {
+      var t = agora();
+      var dia = 24 * 3600 * 1000;
+      var fx = null;
+      try { fx = obterFixture(); } catch (e) { fx = null; }
+      var fp = (fx && fx.processo) || {};
+      var lsAv = lerLista(CHAVES.avaliacoes);
+      if (!buscarPor(lsAv, 'id', PREVIA.processo.id) && !buscarPor(lsAv, 'codigo', PREVIA.processo.codigo)) {
+        var cfg = validarConfigProcesso((fx && fx.config) || {});
+        lsAv.push({
+          id: PREVIA.processo.id, codigo: PREVIA.processo.codigo, empresaId: '', nome: PREVIA.processo.nome, tipo: 'selecao',
+          mostrarResultado: false, ativa: true, criadaEm: new Date(t - 30 * dia).toISOString(),
+          empresa: 'Cartório Exemplo', vaga: fp.vaga || 'Escrevente de atendimento', cidade: fp.cidade || 'Boa Vista / RR',
+          consultor: fp.consultor || 'Consultor Exemplo', contratante: fp.contratante || 'Responsável Exemplo',
+          periodoInicio: (fp.periodo && fp.periodo.inicio) || '', periodoFim: (fp.periodo && fp.periodo.fim) || '',
+          clickupListId: fp.clickupListId || LISTAS_PREVIA[0].id,
+          config: JSON.stringify(cfg.ok ? cfg.config : validarConfigProcesso({}).config)
+        });
+        gravarChave(CHAVES.avaliacoes, lsAv);
+      }
+      var lsRel = lerLista(CHAVES.relatorios);
+      if (!buscarPor(lsRel, 'token', PREVIA.relatorioToken)) {
+        var quando = new Date(t - 3 * dia).toISOString();
+        lsRel.push({ token: PREVIA.relatorioToken, processoId: PREVIA.processo.id, status: 'publicado',
+          criadoEm: quando, publicadoEm: quando, atualizadoEm: quando, relatorio: null });
+        gravarChave(CHAVES.relatorios, lsRel);
+      }
+      gravarChave(CHAVES.sementeRelatorio, 1);
     }
 
     // 25 grupos: ordem principal, trocando para a alternativa a cada "cada" grupos (perfil com nuances).
@@ -994,12 +1496,12 @@
         ordem.forEach(function (l, idx) { g[l] = 4 - idx; });
         lista.push(g);
       }
-      return SC.compactar(lista);
+      return SCx().compactar(lista);
     }
 
     // Validação de exemplo coerente com o perfil (notas: força P, sombra P, força S, contraste U).
     function validacaoDe(respostas, opcoesV) {
-      var o = SC.calcular(SC.descompactar(respostas)).ordem;
+      var o = SCx().calcular(SCx().descompactar(respostas)).ordem;
       var acertos = opcoesV.acertos;
       var pares = [[o[0], o[3]], [o[1], o[2]], [o[0], o[2]]];
       var certas = [o[0], o[1], o[0]];
@@ -1080,11 +1582,25 @@
       });
       gravar(linhas);
       gravarChave(CHAVES.semente, 1);
+      semearProcessoExemplo();
     }
 
     // Como o DISC_API real: Promise que resolve com o JSON (ok === true) ou rejeita com Error em pt-BR
     // (com erro.sessaoExpirada e erro.resposta, iguais aos do js/api.js).
+    function prepararDependencias(acao) {
+      var semearExemplo = comSemente && !lerChave(CHAVES.sementeRelatorio, null); // a semente usa a fixture
+      if ((ACOES_COM_MOTOR.indexOf(acao) === -1 && !semearExemplo) || (opcoes.motor && opcoes.fixture)) return Promise.resolve();
+      return Promise.all([
+        (opcoes.motor || ACOES_COM_MOTOR.indexOf(acao) === -1) ? null : carregarScript('relatorio-motor.js', 'DISC_RELATORIO'),
+        opcoes.fixture ? null : carregarScript('fixture-processo-exemplo.js', 'DISC_FIXTURE_PROCESSO')
+      ]);
+    }
+
     function chamar(corpo) {
+      return prepararDependencias(corpo && corpo.acao).then(function () { return chamarJa(corpo); });
+    }
+
+    function chamarJa(corpo) {
       return new Promise(function (resolver, rejeitar) {
         setTimeout(function () {
           var resp;
@@ -1131,10 +1647,11 @@
       limpar: function () { gravar([]); },
       // Volta a prévia ao estado inicial (apaga tudo e recria a semente).
       reiniciar: function () {
-        [CHAVE_ARMAZENAMENTO, CHAVES.usuarios, CHAVES.empresas, CHAVES.avaliacoes, CHAVES.sessoes].forEach(function (k) {
+        [CHAVE_ARMAZENAMENTO, CHAVES.usuarios, CHAVES.empresas, CHAVES.avaliacoes, CHAVES.sessoes, CHAVES.relatorios].forEach(function (k) {
           gravarChave(k, k === CHAVES.sessoes ? {} : []);
         });
         gravarChave(CHAVES.semente, 0);
+        gravarChave(CHAVES.sementeRelatorio, 0);
         garantirSemente();
       },
       enviar: seguro(function (payload) {
@@ -1188,6 +1705,58 @@
       excluirUsuario: seguro(function (token, id) { return comSessao('usuarios.excluir', token, { id: id }); }),
       redefinirSenha: seguro(function (token, id, senhaTemporaria) {
         return comSessao('usuarios.redefinirSenha', token, { id: id, senhaTemporaria: senhaTemporaria });
+      }),
+      // Mesmas assinaturas do js/api.js (1º argumento = token da sessão; o do relatório vai como relatorioToken).
+      processosListar: seguro(function (token) { return comSessao('processos.listar', token); }),
+      processosSalvar: seguro(function (token, processo) { return comSessao('processos.salvar', token, { processo: processo || {} }); }),
+      processosExcluir: seguro(function (token, id) {
+        exigirToken(token);
+        exigir(id, 'Processo não informado.');
+        return comSessao('processos.excluir', token, { id: id });
+      }),
+      processoDados: seguro(function (token, id) {
+        exigirToken(token);
+        exigir(id, 'Processo não informado.');
+        return comSessao('processo.dados', token, { id: id });
+      }),
+      clickupStatus: seguro(function (token) { return comSessao('clickup.status', token); }),
+      clickupListas: seguro(function (token) { return comSessao('clickup.listas', token); }),
+      relatorioRascunho: seguro(function (token, processoId) {
+        exigirToken(token);
+        exigir(processoId, 'Processo não informado.');
+        return comSessao('relatorio.rascunho', token, { processoId: processoId });
+      }),
+      relatorioSalvar: seguro(function (token, relatorioToken, relatorio) {
+        exigirToken(token);
+        exigir(relatorioToken, 'Relatório não informado.');
+        var textos = relatorio && typeof relatorio === 'object' && relatorio.textos && typeof relatorio.textos === 'object' ? relatorio.textos : {};
+        return comSessao('relatorio.salvar', token, { relatorioToken: relatorioToken, relatorio: { textos: textos } });
+      }),
+      relatorioPublicar: seguro(function (token, relatorioToken, baseUrl) {
+        exigirToken(token);
+        exigir(relatorioToken, 'Relatório não informado.');
+        var dados = { relatorioToken: relatorioToken };
+        if (baseUrl) dados.baseUrl = String(baseUrl);
+        return comSessao('relatorio.publicar', token, dados);
+      }),
+      relatorioDespublicar: seguro(function (token, relatorioToken) {
+        exigirToken(token);
+        exigir(relatorioToken, 'Relatório não informado.');
+        return comSessao('relatorio.despublicar', token, { relatorioToken: relatorioToken });
+      }),
+      relatoriosListar: seguro(function (token, processoId) {
+        return comSessao('relatorios.listar', token, processoId ? { processoId: processoId } : null);
+      }),
+      relatorioMelhorarTextos: seguro(function (token, relatorioToken, ids) {
+        exigirToken(token);
+        exigir(relatorioToken, 'Relatório não informado.');
+        var dados = { relatorioToken: relatorioToken };
+        if (Array.isArray(ids) && ids.length) dados.ids = ids.slice();
+        return comSessao('relatorio.melhorarTextos', token, dados);
+      }),
+      relatorioPublico: seguro(function (relatorioToken) {
+        exigir(relatorioToken, MSG_REL_NAO_ENCONTRADO);
+        return chamar({ acao: 'relatorioPublico', token: relatorioToken });
       })
     };
   }
@@ -1195,7 +1764,10 @@
   var METODOS = ['enviar', 'avaliacaoPublica', 'login', 'primeiroAcesso', 'eu', 'sair', 'trocarSenha',
     'listar', 'atualizar', 'excluir', 'excluirTodos', 'listarEmpresas', 'salvarEmpresa', 'excluirEmpresa',
     'listarAvaliacoes', 'salvarAvaliacao', 'excluirAvaliacao', 'listarUsuarios', 'salvarUsuario',
-    'excluirUsuario', 'redefinirSenha'];
+    'excluirUsuario', 'redefinirSenha',
+    'processosListar', 'processosSalvar', 'processosExcluir', 'processoDados', 'clickupStatus', 'clickupListas',
+    'relatorioRascunho', 'relatorioSalvar', 'relatorioPublicar', 'relatorioDespublicar', 'relatoriosListar',
+    'relatorioMelhorarTextos', 'relatorioPublico'];
 
   // Liga no lugar do DISC_API real quando CONFIG.API_URL === 'simulada' (o objeto continua o mesmo).
   function instalar(alvo, cfg, opcoes) {
@@ -1226,6 +1798,10 @@
     normalizarCodigoAvaliacao: normalizarCodigoAvaliacao,
     gerarCodigoAvaliacao: gerarCodigoAvaliacao,
     validarValidacao: validarValidacao,
+    validarConfigProcesso: validarConfigProcesso,
+    classificarCampo: classificarCampo,
+    normalizarNomeCampo: normalizarNomeCampo,
+    LISTAS_PREVIA: LISTAS_PREVIA,
     sha256Hex: sha256Hex,
     hashSenha: hashSenha
   };

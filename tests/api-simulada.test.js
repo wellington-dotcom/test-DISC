@@ -255,7 +255,8 @@ test('semente da prévia: admin e gestor, Clínica Exemplo, SEL1/EQP1 e 4 respos
   const avs = (await api.listarAvaliacoes(adm.token)).avaliacoes;
   assert.deepEqual(avs.map((a) => [a.codigo, a.nome, a.tipo, a.mostrarResultado, a.ativa, a.empresaNome, a.respostas]), [
     ['SEL1', 'Recepcionista 2026', 'selecao', false, true, 'Clínica Exemplo', 2],
-    ['EQP1', 'Equipe comercial', 'equipe', true, true, 'Clínica Exemplo', 2]
+    ['EQP1', 'Equipe comercial', 'equipe', true, true, 'Clínica Exemplo', 2],
+    ['CRT1', 'Cartório Exemplo — Escrevente', 'selecao', false, true, 'Cartório Exemplo', 0]
   ]);
   const { itens } = await api.listar(adm.token);
   assert.equal(itens.length, 4);
@@ -432,4 +433,306 @@ test('mesmo comportamento do Code.gs no roteiro de logins, empresas, avaliaçõe
     });
     assert.deepEqual(normalizar(res[1], lados[1].vars), normalizar(res[0], lados[0].vars), '#' + n + ' ' + corpo.acao);
   });
+});
+
+/* ---------- Rodada ClickUp: processos, relatórios e página pública (prévia) ---------- */
+
+const FIXTURE = require('./fixtures/processo-exemplo.json');
+
+async function previa() {
+  const armazenamento = localStorageFalso();
+  const api = SIM.criar({ armazenamento, scoring: S, latenciaMs: 0 });
+  const T = (await api.login('admin@previa.com', 'previa123')).token;
+  return { api, armazenamento, T };
+}
+
+test('js/fixture-processo-exemplo.js é a cópia em dia de tests/fixtures/processo-exemplo.json (npm run montar:fixture)', async () => {
+  const { montarConteudo } = await import('../scripts/montar-fixture.mjs');
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const atual = fs.readFileSync(path.join(__dirname, '..', 'js', 'fixture-processo-exemplo.js'), 'utf8');
+  assert.equal(atual, montarConteudo(fs.readFileSync(path.join(__dirname, 'fixtures', 'processo-exemplo.json'), 'utf8')),
+    'rode: npm run montar:fixture');
+  assert.deepEqual(require('../js/fixture-processo-exemplo.js'), FIXTURE);
+});
+
+test('prévia: processo de exemplo ligado ao ClickUp, status/listas simulados e processo.dados com a fixture', async () => {
+  const { api, T } = await previa();
+  const st = await api.clickupStatus(T);
+  assert.equal(st.configurado, true);
+  assert.equal(st.usuario, 'Prévia');
+  const { listas } = await api.clickupListas(T);
+  assert.equal(listas.length, 3);
+  listas.forEach((l) => { assert.ok(l.id && l.nome && l.pasta); });
+
+  const { processos } = await api.processosListar(T);
+  const cart = processos.find((p) => p.codigo === 'CRT1');
+  assert.ok(cart, 'processo de exemplo da prévia');
+  assert.equal(cart.nome, 'Cartório Exemplo — Escrevente');
+  assert.equal(cart.empresa, 'Cartório Exemplo');
+  assert.equal(cart.clickupListId, FIXTURE.processo.clickupListId);
+  assert.equal(cart.config.perfilIdeal, FIXTURE.config.perfilIdeal);
+  assert.deepEqual(cart.config.etapas.map((e) => e.id), FIXTURE.config.etapas.map((e) => e.id));
+  assert.deepEqual(cart.periodo, FIXTURE.processo.periodo);
+  // SEL1/EQP1 também aparecem como processos (sem lista do ClickUp)
+  assert.equal(processos.find((p) => p.codigo === 'SEL1').clickupListId, '');
+
+  const d = await api.processoDados(T, cart.id);
+  assert.equal(d.processo.id, cart.id);
+  assert.equal(d.processo.codigo, 'CRT1');
+  assert.equal(d.candidatos.length, FIXTURE.candidatos.length);
+  assert.deepEqual(d.status, FIXTURE.status);
+  assert.ok(d.avisos.some((a) => /Prévia/.test(a)));
+  const sel = processos.find((p) => p.codigo === 'SEL1');
+  await assert.rejects(api.processoDados(T, sel.id), { message: 'Este processo ainda não está ligado a uma lista do ClickUp.' });
+  await assert.rejects(api.processoDados(T, 'ava_nada'), { message: 'Processo não encontrado.' });
+  await assert.rejects(api.processoDados('', cart.id), (e) => e.sessaoExpirada === true);
+});
+
+test('prévia: relatório da semente já publicado abre pelo token "exemplo-cartorio", sem contato nem sobrenome', async () => {
+  const { api, T } = await previa();
+  const r = await api.relatorioPublico('exemplo-cartorio');
+  const rel = r.relatorio;
+  assert.equal(rel.versao, 1);
+  assert.equal(rel.processo.codigo, 'CRT1');
+  assert.equal(rel.processo.clickupListId, undefined);
+  assert.ok(rel.ranking.linhas.length > 0);
+  assert.ok(rel.sumario.recomendacao && rel.sumario.recomendacao.nome);
+  const json = JSON.stringify(rel);
+  for (const c of FIXTURE.candidatos) {
+    if (c.nome.trim().includes(' ')) assert.ok(!json.includes(c.nome), 'nome completo vazou: ' + c.nome);
+  }
+  assert.ok(!/@|whatsapp|telefone/i.test(json), 'sem e-mail/telefone');
+  // aparece na lista de relatórios do processo
+  const cart = (await api.processosListar(T)).processos.find((p) => p.codigo === 'CRT1');
+  const { relatorios } = await api.relatoriosListar(T, cart.id);
+  assert.deepEqual(relatorios.map((x) => [x.token, x.status]), [['exemplo-cartorio', 'publicado']]);
+  await assert.rejects(api.relatorioPublico('nao-existe-token'), { message: 'Relatório não encontrado ou fora do ar.' });
+  await assert.rejects(api.relatorioPublico(''), { message: 'Relatório não encontrado ou fora do ar.' });
+});
+
+test('prévia: rascunho -> editar -> IA simulada -> publicar -> página pública -> despublicar', async () => {
+  const { api, T } = await previa();
+  const cart = (await api.processosListar(T)).processos.find((p) => p.codigo === 'CRT1');
+  const ras = await api.relatorioRascunho(T, cart.id);
+  assert.match(ras.token, /^[0-9a-f]{64}$/);
+  assert.equal(ras.relatorio.processo.clickupListId, undefined);
+  const ids = Object.keys(ras.relatorio.textos);
+  assert.ok(ids.length > 3);
+  ids.forEach((id) => assert.equal(ras.relatorio.textos[id].origem, 'regra'));
+  // rascunho não abre na página pública
+  await assert.rejects(api.relatorioPublico(ras.token), { message: 'Relatório não encontrado ou fora do ar.' });
+
+  // edição: só os textos contam; id desconhecido é ignorado
+  const rel = JSON.parse(JSON.stringify(ras.relatorio));
+  rel.textos[ids[0]].texto = '  Texto revisado pelo consultor.  ';
+  rel.textos.inventado = { texto: 'x', origem: 'regra' };
+  const sal = await api.relatorioSalvar(T, ras.token, rel);
+  assert.equal(sal.alterados, 1);
+  assert.deepEqual(sal.relatorio.textos[ids[0]], { texto: 'Texto revisado pelo consultor.', origem: 'editado' });
+  assert.equal(sal.relatorio.textos.inventado, undefined);
+  // abrir de novo = salvar sem mudanças
+  assert.equal((await api.relatorioSalvar(T, ras.token, { textos: {} })).alterados, 0);
+  await assert.rejects(api.relatorioSalvar(T, 'f'.repeat(64), { textos: {} }), { message: 'Relatório não encontrado.' });
+
+  // IA simulada: prefixo leve e origem 'ia'; sem ids = todos os de origem 'regra'
+  const ia1 = await api.relatorioMelhorarTextos(T, ras.token, [ids[1]]);
+  assert.equal(ia1.alterados, 1);
+  assert.equal(ia1.relatorio.textos[ids[1]].origem, 'ia');
+  assert.ok(ia1.relatorio.textos[ids[1]].texto.startsWith('[IA] '));
+  const ia2 = await api.relatorioMelhorarTextos(T, ras.token);
+  assert.equal(ia2.alterados, ids.length - 2);
+  assert.equal(ia2.relatorio.textos[ids[0]].origem, 'editado', 'texto editado não é reescrito');
+  assert.ok(!ia2.relatorio.textos[ids[1]].texto.startsWith('[IA] [IA] '));
+  await assert.rejects(api.relatorioMelhorarTextos(T, ras.token), { message: 'Nenhum texto para melhorar.' });
+
+  const pub = await api.relatorioPublicar(T, ras.token, 'https://notus.exemplo/disc/admin.html?x=1#processos');
+  assert.equal(pub.url, 'https://notus.exemplo/disc/relatorio.html?r=' + ras.token);
+  const aberto = await api.relatorioPublico(ras.token);
+  assert.equal(aberto.relatorio.textos[ids[0]].texto, 'Texto revisado pelo consultor.');
+  // sem endereço do site: link relativo (o painel completa)
+  assert.equal((await api.relatorioPublicar(T, ras.token)).url, 'relatorio.html?r=' + ras.token);
+  const lista = (await api.relatoriosListar(T, cart.id)).relatorios;
+  assert.deepEqual(lista.map((x) => x.status).sort(), ['publicado', 'publicado']);
+  assert.ok(lista.every((x) => !('relatorio' in x)), 'a lista não carrega o relatório inteiro');
+
+  await api.relatorioDespublicar(T, ras.token);
+  await assert.rejects(api.relatorioPublico(ras.token), { message: 'Relatório não encontrado ou fora do ar.' });
+  await assert.rejects(api.relatorioDespublicar(T, 'f'.repeat(64)), { message: 'Relatório não encontrado.' });
+
+  // processo sem lista do ClickUp não gera rascunho
+  const sel = (await api.processosListar(T)).processos.find((p) => p.codigo === 'SEL1');
+  await assert.rejects(api.relatorioRascunho(T, sel.id), { message: 'Este processo ainda não está ligado a uma lista do ClickUp.' });
+});
+
+test('prévia: processos.salvar com config completa, campo sensível recusado e excluir', async () => {
+  const { api, T } = await previa();
+  const config = {
+    perfilIdeal: 'is', explicacaoPerfil: 'Atendimento acolhedor.',
+    etapas: [{ id: 'entrevista', nome: 'Entrevista', peso: '10', campo: 'Nota – Entrevista', descricao: '' }],
+    bonus: [{ id: 'grad', nome: 'Graduação', campo: 'Graduação na área', regra: { tipo: 'checkbox', pontos: 5 } }],
+    corte: 70, faixaAvaliar: 55, statusFinalistas: ['finalista'], permitirAntecedentes: false
+  };
+  const novo = (await api.processosSalvar(T, {
+    nome: 'Atendente 2027', empresa: 'Padaria Exemplo', vaga: 'Atendente', cidade: 'Boa Vista / RR', consultor: 'Consultor Exemplo',
+    contratante: 'Dona Exemplo', periodo: { inicio: '2026-10-01', fim: 'ontem' }, clickupListId: '900000000002', config
+  })).processo;
+  assert.match(novo.codigo, /^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{4}$/);
+  assert.equal(novo.empresa, 'Padaria Exemplo');
+  assert.equal(novo.empresaNome, 'Padaria Exemplo');
+  assert.deepEqual(novo.periodo, { inicio: '2026-10-01', fim: '' });
+  assert.equal(novo.config.perfilIdeal, 'IS');
+  assert.equal(novo.config.etapas[0].peso, 10);
+  // o link do teste continua valendo com a empresa em texto
+  assert.equal((await api.avaliacaoPublica(novo.codigo)).avaliacao.empresaNome, 'Padaria Exemplo');
+
+  await assert.rejects(api.processosSalvar(T, { id: novo.id, nome: 'Atendente 2027', config: Object.assign({}, config, {
+    etapas: [{ id: 'x', nome: 'X', peso: 1, campo: 'Estado civil' }] }) }), { message: 'O campo "Estado civil" é um dado sensível e não pode ser usado.' });
+  await assert.rejects(api.processosSalvar(T, { nome: 'Outro', config: { perfilIdeal: 'DD' } }), { message: 'Perfil ideal inválido: use 1 ou 2 letras entre D, I, S e C.' });
+  await assert.rejects(api.processosSalvar(T, { nome: 'Outro', clickupListId: 'lista com espaço' }), { message: 'ID da lista do ClickUp inválido.' });
+  // editar sem mandar a config mantém a config
+  const ed = (await api.processosSalvar(T, { id: novo.id, nome: 'Atendente 2027 B', ativa: false })).processo;
+  assert.equal(ed.nome, 'Atendente 2027 B');
+  assert.equal(ed.ativa, false);
+  assert.equal(ed.config.etapas.length, 1);
+  assert.equal(ed.clickupListId, '900000000002');
+  assert.equal((await api.processosExcluir(T, novo.id)).ok, true);
+  assert.ok(!(await api.processosListar(T)).processos.some((p) => p.id === novo.id));
+
+  assert.equal(SIM.classificarCampo('Nº de filhos'), 'sensivel');
+  assert.equal(SIM.classificarCampo('Gênero'), 'sensivel');
+  assert.equal(SIM.classificarCampo('Antecedentes criminais'), 'sensivel');
+  assert.equal(SIM.classificarCampo('Antecedentes criminais', { permitirAntecedentes: true }), 'antecedente');
+  assert.equal(SIM.classificarCampo('Graça'), '');
+  assert.equal(SIM.classificarCampo('Pretensão salarial'), '');
+});
+
+test('prévia antiga (só a semente base) ganha o processo de exemplo e o relatório publicado sem duplicar respostas', async () => {
+  const armazenamento = localStorageFalso();
+  const api = SIM.criar({ armazenamento, scoring: S, latenciaMs: 0 });
+  const T = (await api.login('admin@previa.com', 'previa123')).token;
+  // simula a versão anterior: sem processo/relatórios e sem a marca nova
+  const avs = JSON.parse(armazenamento.dados.disc_simulada_avaliacoes).filter((a) => a.codigo !== 'CRT1');
+  armazenamento.dados.disc_simulada_avaliacoes = JSON.stringify(avs);
+  delete armazenamento.dados.disc_simulada_relatorios;
+  delete armazenamento.dados.disc_simulada_semente_relatorio;
+  const api2 = SIM.criar({ armazenamento, scoring: S, latenciaMs: 0 });
+  assert.equal((await api2.listar(T)).itens.length, 4);
+  assert.ok((await api2.processosListar(T)).processos.some((p) => p.codigo === 'CRT1'));
+  assert.equal((await api2.relatorioPublico('exemplo-cartorio')).ok, true);
+  // reiniciar recria tudo
+  api2.reiniciar();
+  const T2 = (await api2.login('admin@previa.com', 'previa123')).token;
+  assert.equal((await api2.relatoriosListar(T2)).relatorios.length, 1);
+});
+
+test('mesmo comportamento do Code.gs em processos.* (sem ClickUp) e nas recusas de relatório', () => {
+  const gas = carregarGas({ props: { ADMIN_KEY: 'previa' } });
+  const sim = SIM.criar({ armazenamento: localStorageFalso(), scoring: S, latenciaMs: 0, semente: false });
+  const cfg = { perfilIdeal: 'cd', etapas: [{ id: 'rev', nome: 'Revisão', peso: 30, campo: 'Nota Revisão' }, { nome: '', peso: 'x' }],
+    bonus: [{ nome: 'Presencial', campo: 'Perfil presencial', regra: { tipo: 'mapa', pontos: { 3: 0, 4: '10', 5: 15 } } }], corte: 70, faixaAvaliar: 80 };
+  const lados = [{ chamar: (c) => gas.post(c), vars: {} }, { chamar: (c) => sim.processar(c), vars: {} }];
+  const trocar = (v, vars) => {
+    if (typeof v === 'string' && v.startsWith('$')) return vars[v.slice(1)];
+    if (Array.isArray(v)) return v.map((x) => trocar(x, vars));
+    if (v && typeof v === 'object') return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, trocar(x, vars)]));
+    return v;
+  };
+  const normalizar = (r, vars) => {
+    let txt = JSON.stringify(r, (k, v) => (['criadaEm', 'criadoEm', 'token', 'codigo', 'id'].includes(k) ? undefined : v));
+    Object.entries(vars).forEach(([n, val]) => { if (typeof val === 'string' && val.length >= 4) txt = txt.split(val).join('$' + n); });
+    return JSON.parse(txt);
+  };
+  const roteiro = [
+    [{ acao: 'primeiroAcesso', chave: 'previa', nome: 'Dona Admin', email: 'dona@x.com', senha: '12345678' }, (r) => ({ T: r.token })],
+    [{ acao: 'processos.salvar', token: '$T', processo: { nome: 'X' } }],
+    [{ acao: 'processos.salvar', token: '$T', processo: { nome: 'Escrevente', config: cfg } }],
+    [{ acao: 'processos.salvar', token: '$T', processo: { nome: 'Escrevente', config: Object.assign({}, cfg, { faixaAvaliar: 50 }) } }, (r) => ({ p: r.processo.id })],
+    [{ acao: 'processos.salvar', token: '$T', processo: { nome: 'Escrevente', config: { etapas: [{ campo: 'Religião' }] } } }],
+    [{ acao: 'processos.salvar', token: '$T', processo: { nome: 'Escrevente', config: { etapas: [{ campo: 'Antecedentes' }], permitirAntecedentes: true } } }],
+    [{ acao: 'processos.salvar', token: '$T', processo: { id: '$p', nome: 'Escrevente 2026', empresa: ' Cartório  Alfa ', vaga: 'Escrevente', cidade: 'Boa Vista', consultor: 'Ana', contratante: 'Beto', periodo: { inicio: '2026-01-02', fim: '2026-13' }, clickupListId: '900' } }],
+    [{ acao: 'processos.salvar', token: '$T', processo: { id: 'ava_x', nome: 'Nada Aqui' } }],
+    [{ acao: 'processos.salvar', token: '$T', processo: { nome: 'Com empresa', empresaId: 'emp_nada' } }],
+    [{ acao: 'processos.listar', token: '$T' }],
+    [{ acao: 'avaliacoes.listar', token: '$T' }],
+    [{ acao: 'processo.dados', token: '$T', id: 'ava_nada' }],
+    [{ acao: 'relatorio.rascunho', token: '$T', processoId: 'ava_nada' }],
+    [{ acao: 'relatorio.salvar', token: '$T', relatorioToken: 'f'.repeat(64), textos: {} }],
+    [{ acao: 'relatorio.salvar', token: '$T', relatorioToken: 'f'.repeat(64) }],
+    [{ acao: 'relatorio.publicar', token: '$T', relatorioToken: 'f'.repeat(64) }],
+    [{ acao: 'relatorio.despublicar', token: '$T', relatorioToken: 'nada' }],
+    [{ acao: 'relatorios.listar', token: '$T' }],
+    [{ acao: 'relatorioPublico', token: 'f'.repeat(64) }],
+    [{ acao: 'relatorioPublico', token: '<script>' }],
+    [{ acao: 'processos.excluir', token: '$T', id: '$p' }],
+    [{ acao: 'processos.excluir', token: '$T', id: '$p' }],
+    [{ acao: 'processos.listar', token: 'x' }]
+  ];
+  roteiro.forEach(([corpo, guardar], n) => {
+    const res = lados.map((lado) => {
+      const r = lado.chamar(trocar(corpo, lado.vars));
+      if (guardar && r.ok) Object.assign(lado.vars, guardar(r));
+      return r;
+    });
+    assert.deepEqual(normalizar(res[1], lados[1].vars), normalizar(res[0], lados[0].vars), '#' + n + ' ' + corpo.acao);
+  });
+});
+
+test('corpo grande só é aceito em relatorio.salvar (mesmo limite do Code.gs)', () => {
+  const sim = SIM.criar({ armazenamento: localStorageFalso(), scoring: S, latenciaMs: 0, semente: false });
+  const grande = 'x'.repeat(30000);
+  assert.deepEqual(sim.processar({ acao: 'listar', token: 'a', lixo: grande }), { ok: false, erro: 'Requisição grande demais.' });
+  assert.deepEqual(sim.processar({ acao: 'relatorio.salvar', token: 'a', lixo: grande }), { ok: false, erro: 'Sessão expirada. Entre de novo.', sessaoExpirada: true });
+  assert.deepEqual(sim.processar({ acao: 'relatorio.salvar', token: 'a', lixo: 'x'.repeat(460000) }), { ok: false, erro: 'Requisição grande demais.' });
+});
+
+test('js/api.js: ações novas mandam o corpo do contrato (token da sessão + relatorioToken) e relatorioPublico é pública', async () => {
+  const API = require('../js/api.js');
+  const corpos = [];
+  const fetchAntigo = global.fetch;
+  global.fetch = async (url, op) => {
+    corpos.push(JSON.parse(op.body));
+    return { ok: true, status: 200, text: async () => JSON.stringify({ ok: true }) };
+  };
+  try {
+    API.definirUrl('https://script.google.com/macros/s/teste/exec');
+    const S1 = 'a'.repeat(64);
+    const R = 'b'.repeat(64);
+    await API.processosListar(S1);
+    await API.processosSalvar(S1, { nome: 'P' });
+    await API.processosExcluir(S1, 'ava_1');
+    await API.processoDados(S1, 'ava_1');
+    await API.clickupStatus(S1);
+    await API.clickupListas(S1);
+    await API.relatorioRascunho(S1, 'ava_1');
+    await API.relatorioSalvar(S1, R, { versao: 1, capa: { titulo: 'grande' }, textos: { t1: { texto: 'novo', origem: 'regra' } } });
+    await API.relatorioPublicar(S1, R, 'https://site/admin.html');
+    await API.relatorioDespublicar(S1, R);
+    await API.relatoriosListar(S1, 'ava_1');
+    await API.relatorioMelhorarTextos(S1, R, ['t1']);
+    await API.relatorioPublico(R);
+    assert.deepEqual(corpos, [
+      { acao: 'processos.listar', token: S1 },
+      { acao: 'processos.salvar', token: S1, processo: { nome: 'P' } },
+      { acao: 'processos.excluir', token: S1, id: 'ava_1' },
+      { acao: 'processo.dados', token: S1, id: 'ava_1' },
+      { acao: 'clickup.status', token: S1 },
+      { acao: 'clickup.listas', token: S1 },
+      { acao: 'relatorio.rascunho', token: S1, processoId: 'ava_1' },
+      { acao: 'relatorio.salvar', token: S1, relatorioToken: R, relatorio: { textos: { t1: { texto: 'novo', origem: 'regra' } } } },
+      { acao: 'relatorio.publicar', token: S1, relatorioToken: R, baseUrl: 'https://site/admin.html' },
+      { acao: 'relatorio.despublicar', token: S1, relatorioToken: R },
+      { acao: 'relatorios.listar', token: S1, processoId: 'ava_1' },
+      { acao: 'relatorio.melhorarTextos', token: S1, relatorioToken: R, ids: ['t1'] },
+      { acao: 'relatorioPublico', token: R }
+    ]);
+    // sem sessão: recusa antes de chamar o servidor
+    await assert.rejects(API.processosListar(''), (e) => e.sessaoExpirada === true);
+    await assert.rejects(API.relatorioSalvar(S1, ''), { message: 'Relatório não informado.' });
+    assert.equal(corpos.length, 13);
+    assert.ok(API.TIMEOUT_LONGO_MS > API.TIMEOUT_MS);
+  } finally {
+    global.fetch = fetchAntigo;
+    API.definirUrl(null);
+  }
 });

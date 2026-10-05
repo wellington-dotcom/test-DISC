@@ -10,19 +10,28 @@ Este guia mostra, passo a passo, como fazer as respostas dos participantes chega
 
 1. Acesse <https://sheets.new> (abre uma planilha nova no seu Google Drive).
 2. Dê um nome, por exemplo **Teste DISC – Respostas**.
-3. Não precisa criar nada dentro dela: as abas **Respostas**, **Usuarios**, **Empresas** e **Avaliacoes** são criadas automaticamente.
+3. Não precisa criar nada dentro dela: as abas **Respostas**, **Usuarios**, **Empresas**, **Avaliacoes** (os processos) e **Relatorios** são criadas automaticamente.
 
 > Use uma planilha **nova**, separada da planilha original do teste DISC.
 
-## 2. Colar o código do servidor
+## 2. Colar o código do servidor (4 arquivos)
+
+O servidor tem **4 arquivos** `.gs`. No Apps Script todos ficam no mesmo projeto e "se enxergam" (não precisa ligar um ao outro):
+
+| Arquivo do projeto (pasta `apps-script/`) | Para que serve |
+|---|---|
+| `Code.gs` | Respostas do teste, logins, processos (links) |
+| `ClickUp.gs` | Leitura dos candidatos no ClickUp e gravação do resultado do DISC nas tarefas |
+| `Relatorio.gs` | Relatórios do processo (rascunho, edição, publicação, IA opcional, gatilho) |
+| `RelatorioMotor.gs` | O "motor" que escreve o relatório (o mesmo do site). É gerado a partir de `js/relatorio-motor.js` com `npm run montar:apps-script` — não edite à mão |
 
 1. Na planilha, clique no menu **Extensões > Apps Script**. Abre uma nova aba com um editor.
-2. No editor, apague todo o conteúdo do arquivo `Código.gs` (ou `Code.gs`).
-3. Abra o arquivo `apps-script/Code.gs` deste projeto, copie **todo** o conteúdo e cole no editor.
+2. No editor, apague todo o conteúdo do arquivo `Código.gs` (ou `Code.gs`), copie **todo** o conteúdo de `apps-script/Code.gs` deste projeto e cole.
+3. Para cada um dos outros 3 arquivos (`ClickUp`, `Relatorio`, `RelatorioMotor`): clique no **+** ao lado de "Arquivos" > **Script**, digite o nome **sem** o `.gs` (o editor acrescenta sozinho), apague o conteúdo de exemplo e cole o conteúdo do arquivo correspondente.
 4. Clique no ícone de disquete (**Salvar projeto**) ou pressione `Ctrl + S`.
 5. (Opcional) Dê um nome ao projeto no topo, por exemplo **DISC servidor**.
 
-> O arquivo `apps-script/appsscript.json` é opcional. Ele só define o fuso horário (São Paulo). Para usá-lo: no editor, clique na engrenagem **Configurações do projeto**, marque **Mostrar arquivo de manifesto "appsscript.json" no editor**, abra esse arquivo e substitua o conteúdo.
+> **Recomendado: o manifesto `apps-script/appsscript.json`.** Ele define o fuso horário (São Paulo) e as permissões que o servidor usa — e só essas: planilha (`spreadsheets`), chamadas para fora do Google, ou seja ClickUp e IA (`script.external_request`), e o gatilho de 10 minutos (`script.scriptapp`). Para usá-lo: no editor, clique na engrenagem **Configurações do projeto**, marque **Mostrar arquivo de manifesto "appsscript.json" no editor**, abra esse arquivo e substitua o conteúdo. Ao rodar `setup` de novo, o Google pede para autorizar as permissões novas.
 
 ## 3. Rodar a configuração inicial (`setup`) e copiar a chave de primeiro acesso
 
@@ -110,6 +119,8 @@ https://seu-usuario.github.io/teste-disc/?a=K7QM
 
 ### 5.3 Gestores (acesso do cliente)
 
+> **A partir da versão com ClickUp, o painel é só para administradores**: a interface não cria nem mostra gestores e não tem mais a aba Empresas (a empresa virou um texto no processo). O servidor ainda entende os papéis abaixo, para não quebrar planilhas antigas.
+
 No painel, em **Usuários**, o administrador pode criar logins de **gestor** para as empresas atendidas. Defina uma **senha temporária** (mínimo 8 caracteres) e passe-a à pessoa por um canal seguro; ela pode trocá-la depois de entrar.
 
 | Pode | Administrador | Gestor |
@@ -122,18 +133,62 @@ No painel, em **Usuários**, o administrador pode criar logins de **gestor** par
 - Desativar um usuário derruba o acesso dele na hora. **Redefinir senha** troca a senha e desbloqueia o login.
 - Ninguém pode excluir o próprio acesso, e sempre precisa existir pelo menos um administrador ativo.
 
-## 6. Atualizar o servidor (quando o `Code.gs` mudar)
+### 5.4 ClickUp, processos e relatórios
+
+O **ClickUp é a fonte dos candidatos**: cada processo seletivo é **uma lista** do ClickUp. A planilha guarda só os logins, os processos (configuração), as respostas do DISC (cópia de segurança) e os relatórios publicados.
+
+**1. Guardar o token do ClickUp (e as outras chaves) nas Propriedades do script**
+
+1. No ClickUp: avatar > **Configurações** > **Apps** > **API Token** > **Gerar** e copie o token (começa com `pk_`).
+2. No editor do Apps Script: engrenagem **Configurações do projeto** > role até **Propriedades do script** > **Adicionar propriedade do script**.
+3. Crie as propriedades (nome exatamente como abaixo) e clique em **Salvar propriedades do script**:
+
+| Propriedade | Obrigatória? | O que é |
+|---|---|---|
+| `CLICKUP_TOKEN` | sim, para usar o ClickUp | Token pessoal do ClickUp (`pk_...`) |
+| `CLICKUP_PASTA_ID` | não | Número da pasta do ClickUp com as listas dos processos (aparece na URL da pasta). Sem ela, o painel mostra todas as listas a que o token tem acesso |
+| `SITE_URL` | recomendada | Endereço do site, ex.: `https://seu-usuario.github.io/teste-disc/`. Usado no link do relatório comentado no ClickUp |
+| `ANTHROPIC_API_KEY` | não | Chave da API da Anthropic (`sk-ant-...`), só para o botão "Melhorar textos com IA". Sem ela o botão responde "IA não configurada." |
+
+> Esses valores **nunca** vão para o navegador nem para a planilha. Não cole o token em `js/config.js` nem em nenhum arquivo do site.
+
+**2. Campos da lista no ClickUp**
+
+O servidor acha os campos pelo **nome** (sem diferença de maiúsculas/acentos):
+
+- Formulário: `WhatsApp` (ou `Telefone`/`Celular`), `Idade` (número, ou lista de faixas), `Status de trabalho`, `Pretensão salarial`, `Último salário`, `Formação` (ou `Escolaridade`/`Curso`).
+- Notas das etapas: um campo **numérico de 0 a 10** por etapa, com o nome que você escrever na configuração do processo (ex.: `Bloco A`).
+- Resultado do DISC (o sistema preenche): `DISC D %`, `DISC I %`, `DISC S %`, `DISC C %` (números), `DISC Perfil`, `DISC Confiabilidade`, `DISC Código` (texto curto). Se algum não existir, o resultado vai num **comentário** da tarefa e o painel mostra um aviso.
+- Quando um candidato faz o teste pelo link do processo, o servidor procura a tarefa dele pelo **WhatsApp** (últimos 8 dígitos e DDD). Se não achar, cria a tarefa **"Nome (DISC)"** com a etiqueta **sem formulário**. Se o ClickUp estiver fora do ar, o candidato conclui o teste do mesmo jeito (fica um aviso no painel).
+
+> **Dados sensíveis nunca são lidos**: campos cujo nome fala de sexo, gênero, estado civil, filhos, religião, gravidez, etnia, raça, cor da pele, orientação, deficiência, doença, saúde, antecedentes, "processo em seu nome" ou criminal são ignorados (nem chegam ao painel). Antecedentes só aparecem no painel se o processo marcar **permitir antecedentes**, e **nunca** no relatório do contratante. No relatório o candidato aparece como "Primeiro nome + inicial" (ex.: "Ana S."); telefone e e-mail nunca.
+
+**3. Relatório do processo**
+
+No painel: **Processos > Gerar rascunho** (lê o ClickUp e escreve os textos), revise/edite, e **Publicar**. O link `relatorio.html?r=…` vai para o contratante e também é comentado na tarefa **📌 Briefing…** da lista (ou na própria lista, se não houver essa tarefa). **Despublicar** tira o link do ar na hora.
+
+**4. Gatilho pelo ClickUp (opcional)**
+
+Para gerar o rascunho direto do ClickUp, sem abrir o painel:
+
+1. No editor do Apps Script, escolha a função **instalarGatilho** e clique em **Executar** (autorize, se pedir). Isso cria um gatilho que roda **a cada 10 minutos** (rodar de novo não duplica; **removerGatilho** desliga).
+2. Na lista do processo, crie a tarefa **📌 Briefing – (nome da vaga)** e os status **gerar relatório** e **relatório em revisão**.
+3. Quando quiser o relatório, mude a tarefa de briefing para **gerar relatório**. Em até 10 minutos o sistema gera o rascunho, comenta "Rascunho pronto para revisão no painel" e muda a tarefa para **relatório em revisão**.
+
+## 6. Atualizar o servidor (quando algum `.gs` mudar)
 
 > **Sempre que atualizar o `Code.gs`, reimplante o App da Web como "Nova versão"** (passos abaixo). Só salvar o código **não basta**: a URL `/exec` continua rodando a versão antiga até você publicar a nova. Exemplo: o **código do candidato** (seção 6.1) e os **logins** (seção 5.1) só começam a funcionar depois dessa reimplantação.
 
 Se você receber uma versão nova do `Code.gs`:
 
-1. Em **Extensões > Apps Script**, substitua todo o conteúdo pelo novo e salve.
+1. Em **Extensões > Apps Script**, substitua o conteúdo de **cada arquivo que mudou** (`Code`, `ClickUp`, `Relatorio`, `RelatorioMotor`) pelo novo e salve. Arquivo que ainda não existe no projeto: crie com **+ > Script** (seção 2).
 2. Clique em **Implantar > Gerenciar implantações**.
 3. Clique no lápis (**Editar**) da implantação existente.
 4. Em **Versão**, escolha **Nova versão** e clique em **Implantar**.
 
 Assim a **URL continua a mesma** e não é preciso mexer no `js/config.js`.
+
+**Vindo da versão sem ClickUp?** Cole os 4 arquivos (seção 2), o `appsscript.json`, rode **setup** uma vez (autorize as permissões novas), crie as propriedades da seção 5.4 e reimplante como **Nova versão**. A aba **Avaliacoes** ganha sozinha as colunas novas no fim (`empresa`, `vaga`, `cidade`, `consultor`, `contratante`, `periodoInicio`, `periodoFim`, `clickupListId`, `config`) e a aba **Relatorios** é criada; os links antigos continuam valendo.
 
 **Vindo da versão com "chave de administrador" (sem logins)?** Depois de colar o `Code.gs` novo:
 
@@ -219,6 +274,12 @@ Uso das outras opções:
 | Gestor vê "Sem permissão." | Gestores só mudam status e observações dos participantes da própria empresa. O resto é com o administrador. |
 | Participante vê "Link inválido ou avaliação encerrada" | A avaliação foi desativada ou o código do link está errado. Confira o link no painel, em **Avaliações**. |
 | Mudei o `Code.gs` e nada mudou | Faltou publicar **Nova versão** na implantação existente (seção 6). |
+| "ClickUp não configurado: falta a propriedade CLICKUP_TOKEN…" | Crie a propriedade `CLICKUP_TOKEN` (seção 5.4) e tente de novo (não precisa reimplantar). |
+| Painel mostra "o ClickUp respondeu 401" | Token errado ou revogado. Gere outro no ClickUp e troque o valor de `CLICKUP_TOKEN`. |
+| Aviso `Campo "Bloco A" não encontrado na lista` | O nome do campo na configuração do processo está diferente do nome no ClickUp. Corrija um dos dois. |
+| "Falta o arquivo RelatorioMotor.gs no projeto" | Crie o arquivo `RelatorioMotor` no editor (seção 2) e reimplante. |
+| "IA não configurada." | Crie a propriedade `ANTHROPIC_API_KEY` (opcional; sem ela os textos continuam sendo escritos pelas regras). |
+| O gatilho não gera o rascunho | Confira se rodou **instalarGatilho**, se o processo está **ativo**, ligado à lista, e se a tarefa começa com **📌 Briefing** e está no status **gerar relatório**. Erros aparecem nos avisos do ClickUp no painel e em **Execuções** no editor. |
 | O candidato não recebeu o código curto (ex.: `47K`) | O servidor ainda está na versão antiga: reimplante como **Nova versão** (seção 6). |
 | Candidato vê "Limite de códigos atingido" | Os 2.400 códigos estão em uso na planilha. Exclua candidatos antigos ou de teste. |
 | Candidato diz que deu erro ao enviar | Peça para ele enviar o **Código de segurança** (o código longo exibido na tela, ou pelo botão do WhatsApp) e importe no painel, na aba **Importar códigos**. Com o servidor ligado, o código vai para a planilha como se o candidato tivesse enviado e ganha um código curto na hora. |
@@ -229,7 +290,10 @@ Uso das outras opções:
 ## Referência técnica (para quem for mexer no código)
 
 - Aba `Respostas`, colunas: `id, recebidoEm, nome, telefone, vaga, inicio, fim, duracaoSeg, respostas, D, I, S, C, perfil, status, observacoes, payloadJson, protocolo, idade, funcao, empresa, avaliacao, empresaId`. Em planilhas antigas as colunas que faltam (`protocolo`, `idade`, `funcao`, `empresa`, `avaliacao`, `empresaId`) são acrescentadas automaticamente no fim, no primeiro acesso; as linhas antigas ficam com essas células vazias (o painel mostra "—").
-- Abas de cadastro (criadas sozinhas): `Usuarios (id, email, nome, papel, empresaId, hash, sal, ativo, tentativas, bloqueadoAte, criadoEm)`, `Empresas (id, nome, criadaEm)`, `Avaliacoes (id, codigo, empresaId, nome, tipo, mostrarResultado, ativa, criadaEm)`.
+- Abas de cadastro (criadas sozinhas): `Usuarios (id, email, nome, papel, empresaId, hash, sal, ativo, tentativas, bloqueadoAte, criadoEm)`, `Empresas (id, nome, criadaEm)`, `Avaliacoes (id, codigo, empresaId, nome, tipo, mostrarResultado, ativa, criadaEm, empresa, vaga, cidade, consultor, contratante, periodoInicio, periodoFim, clickupListId, config)` (na interface: **Processos**; `config` é JSON) e `Relatorios (token, processoId, status, parte, json, criadoEm, publicadoEm, atualizadoEm)`. Um relatório ocupa várias linhas (mesmo `token`, `parte` 0, 1, 2…) porque cada célula aceita no máximo 50.000 caracteres; cada parte é gravada com `#` na frente.
+- Ações novas (todas só admin, com `token` da sessão): `processos.listar` → `{processos}`, `processos.salvar {processo:{id?, nome, empresa, vaga, cidade, consultor, contratante, periodo:{inicio,fim}, clickupListId, config, ativa, tipo?}}` → `{processo}` (campo ausente na edição fica como estava; campo sensível em etapa/bônus é recusado), `processos.excluir {id}` (`avaliacoes.*` continuam como apelido); `clickup.status` → `{configurado, conectado, usuario, iaConfigurada, avisos}`; `clickup.listas` → `{listas:[{id,nome,pasta}]}`; `processo.dados {id}` → `{processo, config, status, candidatos, avisos}`; `relatorio.rascunho {processoId}` → `{relatorio, token, avisos}`; `relatorio.salvar {relatorioToken, relatorio:{textos}}` (ou `textos`; só textos existentes, marcados `origem:'editado'`; único corpo aceito acima de 20 KB, até 450 KB); `relatorio.publicar {relatorioToken, baseUrl?}` → `{url, aviso?}`; `relatorio.despublicar {relatorioToken}`; `relatorios.listar {processoId?}`; `relatorio.melhorarTextos {relatorioToken, ids?}` (Messages API da Anthropic, modelo `claude-opus-5-5`, saída em JSON; sem chave `{ok:false, erro:'IA não configurada.'}`). Pública: `relatorioPublico {token}` → `{relatorio}` só se publicado (senão "Relatório não encontrado ou fora do ar."). **Atenção:** nas ações com sessão o campo `token` é sempre o da sessão; o do relatório vai em `relatorioToken`.
+- ClickUp (API v2, `https://api.clickup.com/api/v2`, cabeçalho `Authorization: <token>`): leituras guardadas durante a requisição (nada é lido duas vezes), tarefas paginadas até `last_page`, no máximo 90 chamadas por minuto e nova tentativa após 429. `drop_down` (orderindex ou id da opção), `labels`, `currency`/`number`, `phone`, `text`, `checkbox` e `date` são convertidos para valores legíveis.
+- Confiabilidade no servidor: se `js/scoring.js` e `js/confiabilidade.js` também estiverem no projeto (como arquivos `.gs`), o servidor calcula a confiabilidade e grava em `DISC Confiabilidade`; sem eles grava "Indisponível".
 - Senha: 8 a 100 caracteres; `hash` = SHA-256 iterado 2000× (`x = sal + senha`; 2000×: `x = hex(SHA-256(x))`) com `sal` aleatório de 16 bytes. A senha nunca é gravada nem devolvida; `hash`/`sal`/`tentativas` nunca saem do servidor. E-mail sempre aparado e em minúsculas. 5 erros seguidos → `bloqueadoAte` = agora + 15 min.
 - Sessão: `token` de 64 caracteres hexadecimais guardado só no `CacheService` (`sessao_<token>` → `{usuarioId, h}`, onde `h` é o começo do hash da senha: trocar/redefinir a senha derruba as sessões antigas), validade de 6 h renovada a cada uso. Token inválido/expirado, usuário desativado ou excluído → `{ok:false, erro:'Sessão expirada. Entre de novo.', sessaoExpirada:true}`.
 - Ações (POST `{acao, ...}`): públicas `enviar {payload}`, `avaliacaoPublica {codigo}` → `{avaliacao:{codigo,nome,tipo,empresaNome,mostrarResultado}}`, `login {email,senha}` → `{token, usuario:{id,nome,email,papel,empresaId,empresaNome}}`, `primeiroAcesso {chave,nome,email,senha}` → `{token, usuario, redefinida}`. Com `token`: `eu`, `sair`, `trocarSenha {senhaAtual,novaSenha}`, `listar`, `atualizar {id,campos}`, `excluir {id}`*, `excluirTodos {avaliacao?}`*, `empresas.listar|salvar {empresa}|excluir {id}`*, `avaliacoes.listar` (gestor: filtrado), `avaliacoes.salvar {avaliacao}|excluir {id}`*, `usuarios.listar|salvar {usuario, senhaTemporaria?}|excluir {id}|redefinirSenha {id, senhaTemporaria}`* (* só admin; gestor recebe "Sem permissão."). A antiga autenticação por `chave` nas ações do painel não existe mais: a `ADMIN_KEY` serve só para `primeiroAcesso`.
@@ -241,7 +305,7 @@ Uso das outras opções:
 - `API_URL: 'simulada'` (prévia): `js/api-simulada.js` troca o `DISC_API` por um backend falso em `localStorage` (`disc_planilha_simulada` para as respostas; `disc_simulada_usuarios`, `disc_simulada_empresas`, `disc_simulada_avaliacoes`, `disc_simulada_sessoes`, `disc_simulada_semente`) com as mesmas regras e mensagens deste arquivo (o hash usa o mesmo cálculo, em JS puro), chave de primeiro acesso `previa`, semente da seção 6.2 e latência de ~400 ms. `DISC_API.reiniciarSimulada()` volta a prévia ao estado inicial.
 - `doGet` → `{ok:true, servico:'DISC'}`. `doPost` recebe `text/plain` com JSON `{acao, ...}`.
 - O servidor **recalcula** D/I/S/C e o perfil a partir de `respostas` (100 dígitos, cada bloco de 4 é uma permutação de 1..4; percentual = total / 2,5). O campo `resultado` enviado pelo navegador é ignorado.
-- Proteções: corpo limitado a 20 KB; papel e empresa conferidos em toda ação com sessão; textos aparados e com tamanho máximo; telefone só com dígitos e prefixo `55`; valores que começam com `= + - @` recebem apóstrofo (evita fórmulas maliciosas na planilha); escrita com `LockService`; `id` repetido responde `{ok:true, duplicado:true}` sem gravar de novo; limite de 500 linhas; no máximo 40 envios a cada 10 minutos (todos os candidatos juntos, via `CacheService`) para impedir que alguém encha a planilha com envios falsos.
-- Funções para rodar no editor: `setup()`, `gerarNovaChave()` (troca a chave de primeiro acesso), `apagarTodosOsDados()`.
+- Proteções: corpo limitado a 20 KB (exceto `relatorio.salvar`); papel e empresa conferidos em toda ação com sessão; textos aparados e com tamanho máximo; telefone só com dígitos e prefixo `55`; valores que começam com `= + - @` recebem apóstrofo (evita fórmulas maliciosas na planilha); escrita com `LockService`; `id` repetido responde `{ok:true, duplicado:true}` sem gravar de novo; limite de 500 linhas; no máximo 40 envios a cada 10 minutos (todos os candidatos juntos, via `CacheService`) para impedir que alguém encha a planilha com envios falsos.
+- Funções para rodar no editor: `setup()`, `gerarNovaChave()` (troca a chave de primeiro acesso), `apagarTodosOsDados()`, `instalarGatilho()` / `removerGatilho()` (gatilho de 10 min do briefing), `verificarBriefingsClickUp()` (roda a verificação na hora).
 - Custo: cada login faz 2.000 cálculos de SHA-256 (`Utilities.computeDigest`), o que leva uma fração de segundo no Apps Script — aceitável para poucos usuários.
-- Depois de qualquer mudança no `Code.gs`: **Implantar > Gerenciar implantações > Editar > Versão: Nova versão > Implantar** (mantém a URL).
+- Depois de qualquer mudança em um `.gs`: **Implantar > Gerenciar implantações > Editar > Versão: Nova versão > Implantar** (mantém a URL).

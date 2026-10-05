@@ -5,8 +5,10 @@
   "description": "Teste de perfil comportamental DISC para candidatos de processo seletivo, com painel do recrutador e Guia para a Liderança.",
   "license": "UNLICENSED",
   "scripts": {
-    "test": "node scripts/checar-visual.mjs && node --test tests/*.test.js",
+    "test": "node scripts/checar-visual.mjs && node scripts/montar-apps-script.mjs --checar && node --test tests/*.test.js",
     "checar:visual": "node scripts/checar-visual.mjs",
+    "montar:apps-script": "node scripts/montar-apps-script.mjs",
+    "montar:fixture": "node scripts/montar-fixture.mjs",
     "test:e2e": "playwright test",
     "start": "node tests/e2e/server.js"
   },

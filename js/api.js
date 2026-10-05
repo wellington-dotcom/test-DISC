@@ -24,10 +24,22 @@
  *              mostrarResultado, ativa}) · excluirAvaliacao(token, id)
  *              listarUsuarios(token) · salvarUsuario(token, {id?, nome, email, papel, empresaId, ativo}, senhaTemporaria?)
  *              excluirUsuario(token, id) · redefinirSenha(token, id, senhaTemporaria)
+ *   Processos (nome novo das avaliações na interface; os métodos *Avaliacao* acima continuam valendo):
+ *              processosListar(token) · processosSalvar(token, {id?, nome, empresa, vaga, cidade, consultor,
+ *              contratante, periodo:{inicio,fim}, clickupListId, config, ativa}) · processosExcluir(token, id)
+ *              processoDados(token, id) -> dados normalizados do processo lidos do ClickUp
+ *   ClickUp:   clickupStatus(token) -> {configurado, usuario?, iaConfigurada?…} · clickupListas(token) -> {listas}
+ *   Relatório: relatorioRascunho(token, processoId) -> {relatorio, token: relatorioToken}
+ *              relatorioSalvar(token, relatorioToken, relatorio|{textos}) · relatorioPublicar(token, relatorioToken, baseUrl?)
+ *              relatorioDespublicar(token, relatorioToken) · relatoriosListar(token, processoId?)
+ *              relatorioMelhorarTextos(token, relatorioToken, ids?)
+ *              (o 1º argumento é sempre o token da SESSÃO; o do relatório vai no corpo como "relatorioToken")
+ *   Pública:   relatorioPublico(relatorioToken) -> {relatorio} (só relatório publicado)
  *   Utilitários: protocoloValido, normalizarProtocolo, normalizarCodigoAvaliacao, codigoAvaliacaoDaUrl.
  */
 (function (root) {
   var TIMEOUT_MS = 20000;
+  var TIMEOUT_LONGO_MS = 120000; // ações que leem o ClickUp ou chamam a IA (o Apps Script pode demorar)
   var urlManual = null;
 
   function obterUrl() {
@@ -40,7 +52,8 @@
 
   function configurado() { return !!obterUrl(); }
 
-  function chamar(corpo) {
+  function chamar(corpo, limiteMs) {
+    var espera = typeof limiteMs === 'number' && limiteMs > 0 ? limiteMs : TIMEOUT_MS;
     var url = obterUrl();
     if (!url) return Promise.reject(new Error('O endereço do servidor (API_URL) não está configurado.'));
     if (typeof fetch !== 'function') return Promise.reject(new Error('Este navegador não suporta envio de dados. Atualize o navegador e tente novamente.'));
@@ -62,7 +75,7 @@
         expirou = true;
         if (controller) controller.abort();
         rejeitar(new Error('O servidor demorou demais para responder. Verifique sua conexão e tente novamente.'));
-      }, TIMEOUT_MS);
+      }, espera);
     });
 
     return Promise.race([requisicao, tempo])
@@ -135,15 +148,22 @@
   }
 
   // Ação com sessão: { acao, token, ...dados }.
-  function comSessao(acao, token, dados) {
+  function comSessao(acao, token, dados, limiteMs) {
     exigirToken(token);
     var corpo = { acao: acao, token: token };
     if (dados) for (var k in dados) if (Object.prototype.hasOwnProperty.call(dados, k)) corpo[k] = dados[k];
-    return chamar(corpo);
+    return chamar(corpo, limiteMs);
+  }
+
+  // Na edição só os textos mudam: manda só eles (o servidor ignora o resto e devolve o relatório inteiro).
+  function soTextos(relatorio) {
+    var textos = relatorio && typeof relatorio === 'object' ? relatorio.textos : null;
+    return { textos: textos && typeof textos === 'object' ? textos : {} };
   }
 
   var DISC_API = {
     TIMEOUT_MS: TIMEOUT_MS,
+    TIMEOUT_LONGO_MS: TIMEOUT_LONGO_MS,
     ALFABETO_CODIGO: ALFABETO_CODIGO,
     definirUrl: definirUrl,
     configurado: configurado,
@@ -209,6 +229,60 @@
     excluirUsuario: seguro(function (token, id) { return comSessao('usuarios.excluir', token, { id: id }); }),
     redefinirSenha: seguro(function (token, id, senhaTemporaria) {
       return comSessao('usuarios.redefinirSenha', token, { id: id, senhaTemporaria: senhaTemporaria });
+    }),
+
+    // --- processos, ClickUp e relatórios (só admin) ---
+    processosListar: seguro(function (token) { return comSessao('processos.listar', token); }),
+    processosSalvar: seguro(function (token, processo) { return comSessao('processos.salvar', token, { processo: processo || {} }); }),
+    processosExcluir: seguro(function (token, id) {
+      exigirToken(token);
+      exigir(id, 'Processo não informado.');
+      return comSessao('processos.excluir', token, { id: id });
+    }),
+    processoDados: seguro(function (token, id) {
+      exigirToken(token);
+      exigir(id, 'Processo não informado.');
+      return comSessao('processo.dados', token, { id: id }, TIMEOUT_LONGO_MS);
+    }),
+    clickupStatus: seguro(function (token) { return comSessao('clickup.status', token); }),
+    clickupListas: seguro(function (token) { return comSessao('clickup.listas', token, null, TIMEOUT_LONGO_MS); }),
+    relatorioRascunho: seguro(function (token, processoId) {
+      exigirToken(token);
+      exigir(processoId, 'Processo não informado.');
+      return comSessao('relatorio.rascunho', token, { processoId: processoId }, TIMEOUT_LONGO_MS);
+    }),
+    relatorioSalvar: seguro(function (token, relatorioToken, relatorio) {
+      exigirToken(token);
+      exigir(relatorioToken, 'Relatório não informado.');
+      return comSessao('relatorio.salvar', token, { relatorioToken: relatorioToken, relatorio: soTextos(relatorio) });
+    }),
+    relatorioPublicar: seguro(function (token, relatorioToken, baseUrl) {
+      exigirToken(token);
+      exigir(relatorioToken, 'Relatório não informado.');
+      var dados = { relatorioToken: relatorioToken };
+      if (baseUrl) dados.baseUrl = String(baseUrl);
+      return comSessao('relatorio.publicar', token, dados, TIMEOUT_LONGO_MS);
+    }),
+    relatorioDespublicar: seguro(function (token, relatorioToken) {
+      exigirToken(token);
+      exigir(relatorioToken, 'Relatório não informado.');
+      return comSessao('relatorio.despublicar', token, { relatorioToken: relatorioToken });
+    }),
+    relatoriosListar: seguro(function (token, processoId) {
+      return comSessao('relatorios.listar', token, processoId ? { processoId: processoId } : null);
+    }),
+    relatorioMelhorarTextos: seguro(function (token, relatorioToken, ids) {
+      exigirToken(token);
+      exigir(relatorioToken, 'Relatório não informado.');
+      var dados = { relatorioToken: relatorioToken };
+      if (Array.isArray(ids) && ids.length) dados.ids = ids.slice();
+      return comSessao('relatorio.melhorarTextos', token, dados, TIMEOUT_LONGO_MS);
+    }),
+
+    // --- pública: página do relatório para o contratante ---
+    relatorioPublico: seguro(function (relatorioToken) {
+      exigir(relatorioToken, 'Relatório não encontrado ou fora do ar.');
+      return chamar({ acao: 'relatorioPublico', token: relatorioToken });
     })
   };
 
@@ -216,7 +290,10 @@
   DISC_API.METODOS = ['enviar', 'avaliacaoPublica', 'login', 'primeiroAcesso', 'eu', 'sair', 'trocarSenha',
     'listar', 'atualizar', 'excluir', 'excluirTodos', 'listarEmpresas', 'salvarEmpresa', 'excluirEmpresa',
     'listarAvaliacoes', 'salvarAvaliacao', 'excluirAvaliacao', 'listarUsuarios', 'salvarUsuario',
-    'excluirUsuario', 'redefinirSenha'];
+    'excluirUsuario', 'redefinirSenha',
+    'processosListar', 'processosSalvar', 'processosExcluir', 'processoDados', 'clickupStatus', 'clickupListas',
+    'relatorioRascunho', 'relatorioSalvar', 'relatorioPublicar', 'relatorioDespublicar', 'relatoriosListar',
+    'relatorioMelhorarTextos', 'relatorioPublico'];
 
   if (typeof module !== 'undefined' && module.exports) module.exports = DISC_API;
   else root.DISC_API = DISC_API;

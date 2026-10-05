@@ -57,3 +57,18 @@ Tons funcionais permitidos:
 14. **Respiro:** cards com padding de 24px no celular e 28px no computador, e cantos de 24px.
 15. **Nada pula de lugar:** ao interagir, os elementos não podem trocar de posição de repente nem empurrar os botões. Movimento só animado e quando a pessoa pede (por exemplo, ao arrastar).
 16. **Animação:** só a entrada `surgir` (0,45s) e as transições curtas. Sempre respeite `prefers-reduced-motion`.
+
+## Documentos (relatórios e manuais)
+
+Variante **editorial** da identidade, só para documentos de leitura que vão para o cliente (hoje: o relatório público do processo seletivo, `relatorio.html` + `assets/relatorio.css` + `js/relatorio-view.js`). Telas do sistema (candidato e painel) continuam com as regras acima, sem exceção.
+
+- **Papel:** fundo creme `#F5F1EA` (`--papel`); páginas de apoio (índice) em `#ECE5D8` (`--creme`); fios `#D6CFC1` (`--linha-doc`); rótulos `#6B6960` (`--mudo`). Cartões de conteúdo são brancos com fio, cantos de 2px (jeito de documento impresso).
+- **Cores da marca:** azul-escuro `#13283F` (texto, capa, encerramento, cartão de recomendação), laranja médio `#F2762E` (divisores de seção, número de destaque grande), laranja principal `#F34405` só como "olhe aqui" (selo "aderência ideal", contorno de destaque), âmbar `#FF9F40` (2ª série e destaque sobre o azul-escuro), azul `#324E73`. Texto pequeno em laranja sobre o papel usa `--notus-forte`. Verde e vermelho só para "aprovado"/erro.
+- **Moldura pode ser cor cheia:** capa, divisores de seção ("01 Sumário executivo"), cartão da recomendação e encerramento são moldura do documento, não área de dado. Dentro das seções, o conteúdo segue minimalista (cartões brancos, barras com trilho liso, sem listras/hachuras).
+- **Fontes do documento** (locais em `assets/fonts`, licença OFL, só latin e latin-ext): **Bricolage Grotesque** nos títulos e números, **Instrument Sans** no texto, **Instrument Serif itálico** nos destaques (abertura de seção, encerramento), **JetBrains Mono** nos rótulos pequenos em caixa alta. Pesos 400, 500, 600 e 700.
+- **Escala do documento** (px, via tokens `--f-*`): 11 · 12 · 13 · 15 · 16 · 18 · 20 · 22 · 24 · 28 · 32 · 40 · 44 · 56 · 64 · 72 · 96 · 120 · 160. Os grandes ficam para capa, divisores e o score final; no celular os tokens encolhem.
+- **Estrutura:** capa (título, cliente, consultoria, período, números grandes, líder), índice, seções numeradas 01–06 com divisor, cabeçalho de página em mono ("01 · SUMÁRIO EXECUTIVO ——"), rodapé com o logo, o consultor e "Notus Agência".
+- **Gráficos:** barras e colunas em SVG/CSS, feito em azul-escuro e trilho liso; DISC com as cores e letras de sempre (D azul-escuro, I âmbar, S azul acinzentado claro, C azul acinzentado).
+- **Celular primeiro (375px)** sem rolagem lateral (tabelas largas viram cartões) e **impressão A4** limpa: capa em página inteira, cada seção começa em página nova, cores preservadas, cartões não quebram no meio.
+- **Privacidade no documento:** nomes como "Primeiro nome + inicial"; nunca telefone, e-mail ou dados sensíveis. Idade só como faixa agregada do público, nunca por candidato nem como critério.
+- `scripts/checar-visual.mjs` confere `assets/relatorio.css` e `js/relatorio-view.js` com esta paleta e esta escala.

@@ -406,7 +406,7 @@
 .vazio { text-align: center; padding: 40px 24px; }
 .vazio__texto { color: var(--suave); font-size: var(--t-corpo); max-width: 32rem; margin: 0 auto; }
 
-/* ---------- Avaliações, empresas e usuários ---------- */
+/* ---------- Processos e usuários (cards e linhas) ---------- */
 .gestao-lista { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; }
 @media (min-width: 900px) { .gestao-lista:not(.gestao-lista--linhas) { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .gestao-card { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
@@ -420,8 +420,107 @@
 .gestao-linha { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px 16px; }
 .gestao-linha__texto { display: grid; gap: 4px; min-width: 0; flex: 1 1 240px; }
 .gestao-linha__nome { overflow-wrap: anywhere; }
-.empresa-nova { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
-.empresa-nova .entrada { flex: 1 1 220px; min-width: 0; }
+
+/* ---------- Processos: cards, formulário, página do processo ---------- */
+.proc-card__nome { font-size: var(--t-titulo); font-weight: 600; }
+.gestao-linha--antigo { background: var(--nevoa); }
+
+.form-processo { display: grid; gap: 12px; }
+.form-secao { display: grid; gap: 16px; overflow: visible; }
+.form-secao .caixa__titulo { margin-bottom: 0; }
+.form-secao > .botao { justify-self: start; }
+.form-secao__texto { font-size: var(--t-rotulo); color: var(--suave); margin-top: -8px; max-width: 46rem; }
+.form-grade { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
+@media (min-width: 640px) { .form-grade { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 900px) {
+  .form-grade--etapa { grid-template-columns: minmax(0, 1.4fr) minmax(0, .5fr) minmax(0, 1.4fr); }
+}
+.form-marcas { display: grid; gap: 12px; }
+.form-rodape { display: grid; gap: 12px; padding: 4px 0 8px; }
+.form-erro:empty { display: none; }
+.form-rodape .confirmar__acoes { justify-content: flex-end; }
+
+/* ClickUp: passo a passo quando não está ligado */
+.clickup-corpo { display: grid; gap: 16px; }
+.clickup-passos { display: grid; gap: 8px; color: var(--tinta); }
+.clickup-passos__lista { margin: 0; padding-left: 20px; display: grid; gap: 4px; color: var(--medio); line-height: 1.5; }
+
+/* Perfil ideal: 4 pílulas D/I/S/C; a escolhida ganha contorno azul-escuro e o número da ordem */
+.perfil-escolha { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+@media (min-width: 480px) { .perfil-escolha { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (min-width: 900px) { .perfil-escolha { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.perfil-letra {
+  position: relative; display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 14px 8px 8px;
+  border: 0; border-radius: var(--raio-pilula); background: var(--branco); color: var(--tinta);
+  box-shadow: inset 0 0 0 1px var(--linha); font: inherit; font-size: var(--t-rotulo); text-align: left; cursor: pointer;
+  transition: box-shadow .15s, background-color .15s;
+}
+.perfil-letra:hover { box-shadow: inset 0 0 0 1px var(--tinta-30); }
+.perfil-letra[aria-pressed="true"] { background: var(--nevoa); box-shadow: inset 0 0 0 2px var(--tinta); font-weight: 600; }
+.perfil-letra[aria-pressed="true"]::after {
+  content: attr(data-ordem) 'º'; position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+  font-size: var(--t-eixo); color: var(--notus-forte); font-weight: 600;
+}
+.perfil-letra__sigla { width: 36px; height: 36px; flex: none; }
+.perfil-letra__nome { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 18px; }
+.perfil-resumo { display: flex; align-items: center; gap: 8px; font-size: var(--t-rotulo); }
+.perfil-codigo--vazio { background: var(--fundo); color: var(--suave); }
+.perfil-explicacao { font-size: var(--t-rotulo); color: var(--medio); margin-top: 6px; }
+.form-secao .perfil-explicacao { margin-top: -8px; }
+
+/* Etapas e bônus: itens empilhados em card suave */
+.config-lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.config-lista:empty { display: none; }
+.config-item { display: grid; gap: 14px; padding: 16px; border-radius: 20px; background: var(--fundo); }
+.config-item__topo { display: flex; align-items: center; gap: 12px; }
+.config-item__num { font-size: var(--t-rotulo); font-weight: 600; }
+.config-item__peso { margin-right: auto; font-size: var(--t-nota); color: var(--suave); }
+.config-item__topo .botao { margin-left: auto; }
+.config-item .entrada { background: var(--branco); }
+.mapa { display: grid; gap: 8px; }
+.mapa__lista { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.mapa__par { display: grid; grid-template-columns: minmax(0, 1fr) auto 88px auto; align-items: center; gap: 8px; }
+.mapa__seta { color: var(--suave); font-size: var(--t-rotulo); }
+.mapa .botao { justify-self: start; }
+
+/* Página do processo */
+.proc-grade { display: grid; grid-template-columns: minmax(0, 1fr); gap: 12px; align-items: start; }
+@media (min-width: 900px) { .proc-grade { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.proc-aviso { margin-bottom: 12px; }
+.proc-link-acoes { margin-top: 12px; }
+.proc-etapas-resumo__nome { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: var(--t-rotulo); }
+.proc-config .lista-simples li { justify-content: space-between; padding: 8px 0; }
+.proc-corte { margin-top: 14px; }
+.rel-linha { flex-wrap: wrap; justify-content: space-between; }
+.rel-linha__texto { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+
+/* ---------- Editor do relatório ---------- */
+.rel-publicado { display: grid; gap: 12px; margin-bottom: 12px; }
+.rel-publicado .caixa__titulo { margin-bottom: 0; }
+.rel-mensagem { font-size: var(--t-rotulo); color: var(--medio); white-space: pre-wrap; overflow-wrap: anywhere; background: var(--fundo); border-radius: var(--raio-campo); padding: 10px 14px; }
+.editor-avisos { display: grid; gap: 6px; margin-bottom: 12px; color: var(--tinta); background: var(--branco); box-shadow: inset 0 0 0 1px var(--linha); }
+.editor-avisos__lista { margin: 0; padding-left: 20px; color: var(--medio); display: grid; gap: 2px; }
+
+/* Alternância em pílula: Editar textos | Ver como o contratante vê */
+.segmento { display: inline-flex; gap: 4px; padding: 4px; margin-bottom: 12px; border-radius: var(--raio-pilula); background: var(--branco); max-width: 100%; }
+.segmento__botao {
+  min-height: 36px; padding: 6px 14px; border: 0; border-radius: var(--raio-pilula); background: none; color: var(--medio);
+  font: inherit; font-size: var(--t-rotulo); font-weight: 600; cursor: pointer; white-space: nowrap;
+}
+.segmento__botao[aria-pressed="true"] { background: var(--tinta); color: var(--branco); }
+@media (max-width: 400px) { .segmento { display: flex; } .segmento__botao { flex: 1; padding: 6px 8px; white-space: normal; } }
+
+.editor-textos { display: grid; gap: 12px; }
+.editor-secao__itens { display: grid; gap: 18px; }
+.texto-item { display: grid; gap: 6px; }
+.texto-item__topo { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.texto-item__rotulo { font-size: var(--t-rotulo); color: var(--medio); min-width: 0; overflow-wrap: anywhere; }
+.texto-campo { line-height: 1.55; resize: vertical; min-height: 64px; }
+.texto-origem[data-origem="editado"] { background: var(--nevoa); color: var(--tinta); }
+.texto-origem[data-origem="ia"] { background: var(--branco); color: var(--notus-forte); box-shadow: inset 0 0 0 1px var(--linha); }
+
+.previa-moldura { padding: 0; }
+.previa-doc { display: block; width: 100%; height: 900px; border: 0; border-radius: var(--raio-caixa); background: var(--branco); }
 
 /* ---------- Importar ---------- */
 .importar__codigos { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; min-height: 180px; }

@@ -435,6 +435,84 @@ test.describe('Candidato: lista ordenável dos grupos', () => {
   });
 });
 
+test.describe('Candidato: régua e demonstração do arraste', () => {
+  async function irParaGrupo1(page) {
+    await page.goto('/index.html');
+    await page.locator('[data-acao="comecar"]').click();
+    await preencherIdentificacao(page, DADOS);
+    await page.locator('#form-identificacao button[type="submit"]').click();
+    await expect(page.locator('.progresso-topo')).toContainText('Grupo 1 de 25');
+  }
+
+  test('cartões compactos; régua MAIS/MENOS; pergunta, cartões e botões cabem na tela', async ({ page }) => {
+    const erros = coletarErros(page);
+    await irParaGrupo1(page);
+    await expect(page.locator('.regua-texto--mais')).toHaveText('MAIS me identifica');
+    await expect(page.locator('.regua-texto--menos')).toHaveText('MENOS me identifica');
+    await expect(page.locator('.posicao')).toHaveText(['4', '3', '2', '1']);
+    const alturas = await page.locator('.cartao').evaluateAll((els) => els.map((e) => e.getBoundingClientRect().height));
+    alturas.forEach((h) => { expect(h).toBeGreaterThanOrEqual(44); expect(h).toBeLessThanOrEqual(60); });
+    const m = await page.evaluate(() => ({
+      titulo: document.querySelector('h1').getBoundingClientRect().top,
+      fimLista: document.querySelector('.regua-texto--menos').getBoundingClientRect().bottom,
+      barra: document.querySelector('.barra-nav').getBoundingClientRect().top,
+      sw: document.documentElement.scrollWidth, vw: innerWidth
+    }));
+    expect(m.titulo).toBeGreaterThan(0);
+    expect(m.fimLista).toBeLessThanOrEqual(m.barra);
+    expect(m.sw).toBeLessThanOrEqual(m.vw);
+    expect(erros).toEqual([]);
+  });
+
+  test('demonstração no 1º grupo: não muda a ordem nem libera o Avançar; some no toque e não volta', async ({ page }) => {
+    const erros = coletarErros(page);
+    await irParaGrupo1(page);
+    const demo = page.locator('.demo');
+    await expect(demo).toHaveCount(1);
+    await expect(demo.locator('.demo-balao')).toHaveText('Arraste para ordenar');
+    await expect(page.locator('.cartao')).toHaveCount(4);
+    const ordem = await ordemNaTela(page);
+    await page.waitForTimeout(1500);   // no meio da animação
+    expect(await ordemNaTela(page)).toEqual(ordem);
+    await expect(page.locator('[data-acao="proximo"]')).toBeDisabled();
+    // Primeiro toque (fora da lista) some com a demonstração e grava no progresso
+    await page.locator('.regua-texto--menos').click();
+    await expect(demo).toHaveCount(0);
+    expect(await ordemNaTela(page)).toEqual(ordem);
+    await expect(page.locator('[data-acao="proximo"]')).toBeDisabled();
+    const salvo = await page.evaluate(() => JSON.parse(localStorage.getItem('disc_progresso_v1')));
+    expect(salvo.demoVista).toBe(true);
+    expect(salvo.respondidos[0]).toBeFalsy();
+    // Recarregar não mostra de novo; "Ver como funciona" repete
+    await page.reload();
+    await page.locator('[data-acao="continuar"]').click();
+    await expect(page.locator('.progresso-topo')).toContainText('Grupo 1 de 25');
+    await expect(demo).toHaveCount(0);
+    await page.locator('[data-acao="ver-demo"]').click();
+    await expect(demo).toHaveCount(1);
+    // Arrastar continua funcionando com a demonstração na tela (ela some no toque)
+    await page.locator('.cartao[data-letra="' + ordem[3] + '"]').focus();
+    await expect(demo).toHaveCount(0);
+    await page.keyboard.press('Home');
+    expect(await ordemNaTela(page)).toEqual([ordem[3], ordem[0], ordem[1], ordem[2]]);
+    // Grupo 2 não tem demonstração automática
+    await page.locator('[data-acao="proximo"]').click();
+    await expect(page.locator('.progresso-topo')).toContainText('Grupo 2 de 25');
+    await expect(demo).toHaveCount(0);
+    expect(erros).toEqual([]);
+  });
+
+  test('prefers-reduced-motion: só a dica parada', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await irParaGrupo1(page);
+    await expect(page.locator('.demo')).toHaveCount(1);
+    const anim = await page.locator('.demo-arrasto').evaluate((e) => getComputedStyle(e).animationName);
+    expect(anim).toBe('none');
+    await page.waitForTimeout(1200);
+    await expect(page.locator('.demo')).toHaveCount(1);
+  });
+});
+
 test.describe('Candidato: dicas (botão "i")', () => {
   async function irParaGrupo1(page) {
     await page.goto('/index.html');
@@ -491,7 +569,7 @@ test.describe('Candidato: dicas (botão "i")', () => {
     expect(caixa.x + caixa.width).toBeLessThanOrEqual(vw - 16 + 0.5);
 
     // Só um aberto: abrir outro fecha o anterior
-    const outro = page.locator('.cartao[data-letra="' + ordem[2] + '"] .info');
+    const outro = page.locator('.cartao[data-letra="' + ordem[0] + '"] .info');   // acima: o painel abre embaixo do botão
     await outro.click();
     await expect(janela).toBeVisible();
     await expect(info).toHaveAttribute('aria-expanded', 'false');
@@ -503,7 +581,7 @@ test.describe('Candidato: dicas (botão "i")', () => {
     // Clique fora fecha
     await info.click();
     await expect(janela).toBeVisible();
-    await page.locator('.instrucao').click();
+    await page.locator('.regua-texto--menos').click();
     await expect(janela).toBeHidden();
 
     await expect(proximo).toBeDisabled();
@@ -848,4 +926,11 @@ test.describe('Candidato: etapa de confirmação', () => {
     salvo = await page.evaluate(() => JSON.parse(localStorage.getItem('disc_progresso_v1')));
     expect(salvo.aceitos[0]).toBe(false);
   });
+});
+
+test('boas-vindas tem link discreto para a área do recrutador', async ({ page }) => {
+  await page.goto('/index.html');
+  const link = page.locator('.acesso-recrutador a');
+  await expect(link).toHaveText('Área do recrutador');
+  await expect(link).toHaveAttribute('href', 'admin.html');
 });

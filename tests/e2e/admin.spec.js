@@ -202,8 +202,8 @@ test.describe('Admin com API (servidor simulado por page.route)', () => {
       }
       if (corpo.token !== TOKEN) return { ok: false, erro: 'Sessão expirada. Entre de novo.', sessaoExpirada: true };
       if (corpo.acao === 'listar') return { ok: true, itens };
-      if (corpo.acao === 'avaliacoes.listar') return { ok: true, avaliacoes: [{ id: 'a1', codigo: 'AB23', empresaId: 'emp1', empresaNome: 'Loja Modelo', nome: 'Vendedor 2026', tipo: 'selecao', mostrarResultado: false, ativa: true, respostas: 1 }] };
-      if (corpo.acao === 'empresas.listar') return { ok: true, empresas: [{ id: 'emp1', nome: 'Loja Modelo' }] };
+      if (corpo.acao === 'processos.listar') return { ok: true, processos: [{ id: 'a1', codigo: 'AB23', empresa: 'Loja Modelo', nome: 'Vendedor 2026', tipo: 'selecao', mostrarResultado: false, ativa: true, respostas: 1, config: {} }] };
+      if (corpo.acao === 'clickup.status') return { ok: true, configurado: false, iaConfigurada: false };
       if (corpo.acao === 'usuarios.listar') return { ok: true, usuarios: [{ id: 'u1', nome: 'Ana Admin', email: 'ana@empresa.com', papel: 'admin', empresaId: '', empresaNome: '', ativo: true }] };
       if (corpo.acao === 'sair') return { ok: true };
       if (corpo.acao === 'atualizar') {
@@ -231,7 +231,8 @@ test.describe('Admin com API (servidor simulado por page.route)', () => {
     expect(await page.evaluate(() => sessionStorage.getItem('disc_admin_token'))).toBe(TOKEN);
     expect(await page.evaluate(() => JSON.stringify(sessionStorage))).not.toContain('senha-certa-1');
     await expect(page.locator('#usuario-nome')).toHaveText('Ana Admin');
-    expect(await abasVisiveis(page)).toEqual(['lista', 'avaliacoes', 'empresas', 'usuarios', 'comparativo', 'importar']);
+    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'usuarios', 'comparativo', 'importar']);
+    await expect(page.locator('.aba[data-aba="processos"]')).toHaveText('Processos');
 
     // Card mostra avaliação e empresa; o perfil é recalculado das respostas (2143 -> SC), ignorando resultado.codigo
     await expect(page.locator('#lista-candidatos > li', { hasText: 'Rafael' }).locator('.card-origem')).toHaveText('Vendedor 2026 · Loja Modelo');
@@ -258,13 +259,13 @@ test.describe('Admin com API (servidor simulado por page.route)', () => {
     await expect(page.locator('#lista-candidatos > li')).toHaveCount(0);
     await page.fill('#filtro-busca', '');
 
-    // Filtros em pílula: empresa, avaliação e status
-    await escolher(page, '#filtro-empresa', 'emp1');
+    // Filtros em pílula: processo e status (sem filtro de empresa)
+    await expect(page.locator('#filtro-empresa')).toHaveCount(0);
+    await escolher(page, '#filtro-processo', 'AB23');
     await expect(page.locator('#lista-candidatos > li')).toHaveCount(1);
-    await escolher(page, '#filtro-empresa', '');
-    await escolher(page, '#filtro-avaliacao', '-');
+    await escolher(page, '#filtro-processo', '-');
     await expect(page.locator('#lista-candidatos > li')).toHaveCount(2);
-    await escolher(page, '#filtro-avaliacao', '');
+    await escolher(page, '#filtro-processo', '');
     await escolher(page, '#filtro-status', 'reprovado');
     await expect(page.locator('#lista-candidatos > li')).toHaveCount(1);
     await escolher(page, '#filtro-status', '');
@@ -335,8 +336,8 @@ test.describe('Admin com API (servidor simulado por page.route)', () => {
       }
       if (corpo.token !== TOKEN) return { ok: false, erro: 'Sessão expirada. Entre de novo.', sessaoExpirada: true };
       if (corpo.acao === 'listar') return { ok: true, itens };
-      if (corpo.acao === 'avaliacoes.listar') return { ok: true, avaliacoes: [] };
-      if (corpo.acao === 'empresas.listar') return { ok: true, empresas: [] };
+      if (corpo.acao === 'processos.listar') return { ok: true, processos: [] };
+      if (corpo.acao === 'clickup.status') return { ok: false, erro: 'Falha temporária.' };
       if (corpo.acao === 'usuarios.listar') return { ok: true, usuarios: [] };
       return { ok: false, erro: 'Ação inesperada no teste.' };
     });
@@ -358,6 +359,198 @@ test.describe('Admin com API (servidor simulado por page.route)', () => {
     await expect(page.locator('#lista-candidatos > li', { hasText: 'Helena Prado Souza' })).toHaveCount(1);
     expect(erros).toEqual([]);
   });
+
+  test('processos: cria com config e lista do ClickUp, gera rascunho, edita, publica e o link público abre', async ({ page, context }) => {
+    const erros = coletarErros(page);
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    const TOKEN = 'token-e2e-proc';
+    const REL = 'relTokenE2E' + 'x'.repeat(30);
+    const motor = require('../../js/relatorio-motor.js');
+    const dadosExemplo = JSON.parse(fs.readFileSync(require('node:path').join(__dirname, '..', 'fixtures', 'processo-exemplo.json'), 'utf8'));
+    const processos = [];
+    const relatorios = {};
+    const servidor = (corpo) => {
+      if (corpo.acao === 'login') {
+        const papel = corpo.email === 'gestor@empresa.com' ? 'gestor' : 'admin';
+        return { ok: true, token: TOKEN + papel, usuario: { id: 'u-' + papel, nome: 'Pessoa ' + papel, email: corpo.email, papel, empresaId: '', empresaNome: '' } };
+      }
+      if (corpo.acao === 'relatorioPublico') {
+        const r = relatorios[corpo.token];
+        return r && r.status === 'publicado' ? { ok: true, relatorio: r.relatorio } : { ok: false, erro: 'Relatório não encontrado ou fora do ar.' };
+      }
+      if (corpo.acao === 'sair') return { ok: true };
+      if (corpo.token !== TOKEN + 'admin') return { ok: false, erro: 'Sessão expirada. Entre de novo.', sessaoExpirada: true };
+      switch (corpo.acao) {
+        case 'listar': return { ok: true, itens: [] };
+        case 'usuarios.listar': return { ok: true, usuarios: [
+          { id: 'u-admin', nome: 'Pessoa admin', email: 'ana@empresa.com', papel: 'admin', ativo: true },
+          { id: 'u-g', nome: 'Gestor Antigo', email: 'gestor@empresa.com', papel: 'gestor', empresaId: 'e1', empresaNome: 'Loja', ativo: true }] };
+        case 'processos.listar': return { ok: true, processos };
+        case 'clickup.status': return { ok: true, configurado: true, conectado: true, usuario: 'notus', iaConfigurada: true, avisos: [] };
+        case 'clickup.listas': return { ok: true, listas: [{ id: '900000000001', nome: 'Escrevente 2026', pasta: 'Cartório' }, { id: '900000000002', nome: 'Recepção', pasta: 'Clínica' }] };
+        case 'processos.salvar': {
+          const p = Object.assign({ id: 'proc-' + (processos.length + 1), codigo: 'K7QZ', respostas: 0 }, corpo.processo);
+          processos.push(p);
+          return { ok: true, processo: p };
+        }
+        case 'relatorio.rascunho': {
+          const rel = motor.montar(JSON.parse(JSON.stringify(dadosExemplo)));
+          relatorios[REL] = { processoId: corpo.processoId, status: 'rascunho', relatorio: rel, criadoEm: '2026-10-05T12:00:00.000Z' };
+          return { ok: true, relatorio: rel, token: REL, avisos: ['Campo "Bloco A" não encontrado na lista'] };
+        }
+        case 'relatorio.salvar': {
+          const r = relatorios[corpo.relatorioToken];
+          Object.keys(corpo.relatorio.textos || {}).forEach((id) => {
+            if (r.relatorio.textos[id] && r.relatorio.textos[id].texto !== corpo.relatorio.textos[id].texto) r.relatorio.textos[id] = { texto: corpo.relatorio.textos[id].texto, origem: 'editado' };
+          });
+          return { ok: true, relatorio: r.relatorio };
+        }
+        case 'relatorio.melhorarTextos': return { ok: false, erro: 'Não foi possível melhorar os textos: limite de uso.' };
+        case 'relatorio.publicar': relatorios[corpo.relatorioToken].status = 'publicado'; return { ok: true, url: 'relatorio.html?r=' + corpo.relatorioToken };
+        case 'relatorio.despublicar': relatorios[corpo.relatorioToken].status = 'rascunho'; return { ok: true };
+        case 'relatorios.listar': return { ok: true, relatorios: Object.keys(relatorios).map((t) => ({ token: t, processoId: relatorios[t].processoId, status: relatorios[t].status, criadoEm: relatorios[t].criadoEm })) };
+        default: return { ok: false, erro: 'Ação inesperada no teste: ' + corpo.acao };
+      }
+    };
+    await configurar(page, { API_URL: API_FALSA });
+    const chamadas = await simularApi(page, servidor);
+    await page.goto('/admin.html');
+
+    // Gestor (desativado nesta versão) não entra
+    await page.fill('#campo-email', 'gestor@empresa.com');
+    await page.fill('#campo-senha', 'senha-do-gestor');
+    await page.click('#btn-entrar');
+    await expect(page.locator('#erro-login')).toHaveText('Este painel é só para administradores. O acesso de gestor foi desativado nesta versão.');
+    await expect(page.locator('#tela-painel')).toBeHidden();
+    await expect.poll(() => chamadas.filter((c) => c.corpo.acao === 'sair').length).toBe(1);
+
+    await entrar(page, 'ana@empresa.com', 'senha-certa-1');
+    // Usuários: só administrador; gestor antigo aparece como desativado
+    await page.locator('.aba[data-aba="usuarios"]').click();
+    await expect(page.locator('#lista-usuarios [data-email="gestor@empresa.com"]')).toContainText('gestor (desativado nesta versão)');
+    await page.click('#btn-novo-usuario');
+    await expect(page.locator('#us-papel')).toHaveCount(0);
+    await page.click('#janela-cancelar');
+
+    // Novo processo com config
+    await page.locator('.aba[data-aba="processos"]').click();
+    await page.click('#btn-novo-processo');
+    await page.fill('#proc-nome', 'Escrevente 2026');
+    await page.fill('#proc-empresa', 'Cartório Exemplo');
+    await page.fill('#proc-vaga', 'Escrevente de atendimento');
+    await page.fill('#proc-cidade', 'Boa Vista / RR');
+    await page.fill('#proc-consultor', 'Paulo Lima');
+    await page.fill('#proc-contratante', 'Marina Souza');
+    await page.fill('#proc-inicio', '2026-08-03');
+    await page.fill('#proc-fim', '2026-10-02');
+    await escolher(page, '#proc-lista', '900000000001');
+    await page.click('#proc-perfil-C');
+    await page.click('#proc-perfil-D');
+    await expect(page.locator('#proc-perfil-codigo')).toHaveText('CD');
+    await expect(page.locator('#proc-perfil-explicacao')).toHaveText('C (Conformidade) como traço principal e D (Dominância) como segundo traço.');
+    await page.fill('#proc-explicacao', 'Rigor na conferência e firmeza no balcão.');
+    await page.click('#btn-add-etapa');
+    await page.fill('#etapa-nome-0', 'Revisão documental');
+    await page.fill('#etapa-peso-0', '30');
+    await page.fill('#etapa-campo-0', 'Nota Revisão documental');
+    await page.click('#btn-add-etapa');
+    await page.fill('#etapa-nome-1', 'Digitação');
+    await page.fill('#etapa-peso-1', '10');
+    await page.fill('#etapa-campo-1', 'Estado civil');
+    await expect(page.locator('#proc-etapas [data-peso-pct]').first()).toHaveText('75% do total');
+    await page.click('#btn-add-bonus');
+    await page.fill('#bonus-nome-0', 'Perfil presencial');
+    await page.fill('#bonus-campo-0', 'Perfil presencial');
+    await escolher(page, '#bonus-tipo-0', 'mapa');
+    await page.fill('#bonus-0-valor-0', '4');
+    await page.fill('#bonus-0-pontos-0', '10');
+    await page.click('#bonus-0-add-valor');
+    await page.fill('#bonus-0-valor-1', '5');
+    await page.fill('#bonus-0-pontos-1', '15');
+    await page.fill('#proc-corte', '70');
+    await page.fill('#proc-faixa', '55');
+    await page.fill('#proc-finalistas', 'finalista, aprovado');
+    // Campo sensível é recusado na tela
+    await page.click('#btn-salvar-processo');
+    await expect(page.locator('#proc-erro')).toHaveText('O campo "Estado civil" é um dado sensível e não pode ser usado.');
+    await page.fill('#etapa-campo-1', 'Nota Digitação');
+    await page.click('#btn-salvar-processo');
+    await expect(page.locator('#aviso-geral')).toContainText('Processo criado. Código K7QZ');
+    const salvo = chamadas.find((c) => c.corpo.acao === 'processos.salvar').corpo.processo;
+    expect(salvo).toMatchObject({
+      nome: 'Escrevente 2026', empresa: 'Cartório Exemplo', vaga: 'Escrevente de atendimento', cidade: 'Boa Vista / RR',
+      consultor: 'Paulo Lima', contratante: 'Marina Souza', periodo: { inicio: '2026-08-03', fim: '2026-10-02' }, clickupListId: '900000000001', ativa: true
+    });
+    expect(salvo.config).toEqual({
+      perfilIdeal: 'CD', explicacaoPerfil: 'Rigor na conferência e firmeza no balcão.',
+      etapas: [
+        { id: 'revisao_documental', nome: 'Revisão documental', peso: 30, campo: 'Nota Revisão documental', descricao: '' },
+        { id: 'digitacao', nome: 'Digitação', peso: 10, campo: 'Nota Digitação', descricao: '' }
+      ],
+      bonus: [{ id: 'perfil_presencial', nome: 'Perfil presencial', campo: 'Perfil presencial', regra: { tipo: 'mapa', pontos: { 4: 10, 5: 15 } } }],
+      corte: 70, faixaAvaliar: 55, statusFinalistas: ['finalista', 'aprovado'], permitirAntecedentes: false
+    });
+
+    // Página do processo: link do teste e geração do rascunho
+    await expect(page.locator('#vista-processos h2')).toHaveText('Escrevente 2026');
+    await expect(page.locator('#proc-link')).toHaveText('http://localhost:4173/index.html?a=K7QZ');
+    await expect(page.locator('#proc-perfil')).toHaveText('CD');
+    await page.click('#btn-gerar-rascunho');
+    await expect(page.locator('#vista-processos h2')).toHaveText('Rascunho do relatório');
+    await expect(page.locator('#editor-avisos')).toContainText('Campo "Bloco A" não encontrado na lista');
+
+    // Editar um texto marca "Editado" e o salvar manda o relatório com o texto novo
+    const ta = page.locator('textarea[data-texto-id="recomendacao"]');
+    await expect(ta).toBeVisible();
+    await ta.fill('Recomendamos Ana E. para a vaga: liderou a técnica e tem o perfil pedido.');
+    await expect(page.locator('.texto-item[data-texto-id="recomendacao"] .texto-origem')).toHaveText('Editado');
+    await page.click('#btn-salvar-rascunho');
+    await expect(page.locator('#aviso-geral')).toHaveText('Rascunho salvo.');
+    const salvar = chamadas.filter((c) => c.corpo.acao === 'relatorio.salvar').pop().corpo;
+    expect(salvar.relatorioToken).toBe(REL);
+    expect(salvar.relatorio.textos.recomendacao).toEqual({ texto: 'Recomendamos Ana E. para a vaga: liderou a técnica e tem o perfil pedido.', origem: 'editado' });
+
+    // IA configurada: botão aparece; erro do servidor vira aviso
+    await page.click('#btn-melhorar-ia');
+    await expect(page.locator('#aviso-geral')).toContainText('limite de uso');
+    await expect(page.locator('#btn-melhorar-ia')).toBeEnabled();
+
+    // Pré-visualização do documento
+    await page.click('#btn-ver-previa');
+    const previa = page.frameLocator('#editor-previa');
+    await expect(previa.locator('body')).toContainText('Recomendamos Ana E. para a vaga');
+    await page.click('#btn-ver-textos');
+
+    // Publicar: link + mensagem para o contratante
+    await page.click('#btn-publicar');
+    const url = 'http://localhost:4173/relatorio.html?r=' + REL;
+    await expect(page.locator('#rel-link')).toHaveText(url);
+    await expect(page.locator('#rel-mensagem')).toContainText('Olá, Marina! O relatório do processo seletivo de Escrevente de atendimento (Cartório Exemplo) está pronto:');
+    await page.click('#btn-copiar-link-relatorio');
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(url);
+    expect(chamadas.find((c) => c.corpo.acao === 'relatorio.publicar').corpo.relatorioToken).toBe(REL);
+
+    // O link público abre o relatório (outra aba, mesmo "servidor")
+    const pub = await context.newPage();
+    await configurar(pub, { API_URL: API_FALSA });
+    await simularApi(pub, servidor);
+    await pub.goto(url);
+    await expect(pub.locator('#relatorio')).toHaveAttribute('data-estado', 'pronto');
+    await expect(pub.locator('#relatorio')).toContainText('Recomendamos Ana E. para a vaga');
+    await pub.close();
+
+    // Lista de relatórios na página do processo e despublicar
+    await page.click('#btn-voltar-processo');
+    await expect(page.locator('#lista-relatorios [data-status="publicado"]')).toHaveCount(1);
+    await page.locator('#lista-relatorios [data-acao="abrir-relatorio"]').click();
+    await page.click('#btn-despublicar');
+    await page.click('#confirmar-ok');
+    await expect(page.locator('#aviso-geral')).toContainText('Relatório despublicado');
+    await expect(page.locator('#btn-publicar')).toBeVisible();
+    expect(relatorios[REL].status).toBe('rascunho');
+    // A pré-visualização roda num iframe sem scripts (sandbox): o aviso de bloqueio do Chromium não é erro do painel.
+    expect(erros.filter((e) => !/Blocked script execution in 'about:srcdoc'/.test(e))).toEqual([]);
+  });
 });
 
 test.describe('Admin na prévia (API_URL "simulada")', () => {
@@ -369,7 +562,7 @@ test.describe('Admin na prévia (API_URL "simulada")', () => {
     await page.goto('/admin.html');
     await expect(page.locator('#tela-login')).toBeVisible();
     await expect(page.locator('#dica-previa')).toBeVisible();
-    await expect(page.locator('#dica-previa')).toHaveText('Prévia: admin@previa.com ou gestor@previa.com, senha previa123');
+    await expect(page.locator('#dica-previa')).toHaveText('Prévia: admin@previa.com, senha previa123');
     await expect(page.locator('#modo-indicador')).toHaveText('Prévia (dados de demonstração)');
 
     await page.fill('#campo-email', 'admin@previa.com');
@@ -417,90 +610,75 @@ test.describe('Admin na prévia (API_URL "simulada")', () => {
     expect(erros).toEqual([]);
   });
 
-  test('admin cria empresa, avaliação e gestor, copia o link; o gestor vê só a própria empresa', async ({ page, context }) => {
+  test('admin cria processo, copia o link e filtra os participantes pelo processo; gestor não entra', async ({ page, context }) => {
     const erros = coletarErros(page);
     await context.grantPermissions(['clipboard-read', 'clipboard-write']);
     await configurar(page, { API_URL: 'simulada' });
     await page.goto('/admin.html');
+
+    // O papel gestor foi desativado nesta versão: o login dele é recusado na tela
+    await page.fill('#campo-email', 'gestor@previa.com');
+    await page.fill('#campo-senha', 'previa123');
+    await page.click('#btn-entrar');
+    await expect(page.locator('#erro-login')).toHaveText('Este painel é só para administradores. O acesso de gestor foi desativado nesta versão.');
+    await expect(page.locator('#tela-painel')).toBeHidden();
+
     await entrar(page, 'admin@previa.com', 'previa123');
+    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'usuarios', 'comparativo', 'importar']);
 
-    // Empresa
-    await page.locator('.aba[data-aba="empresas"]').click();
-    await page.fill('#empresa-nova', 'Padaria Teste E2E');
-    await page.click('#btn-adicionar-empresa');
-    await expect(page.locator('#lista-empresas')).toContainText('Padaria Teste E2E');
-
-    // Avaliação (janela com seletor em pílula)
-    await page.locator('.aba[data-aba="avaliacoes"]').click();
-    await page.click('#btn-nova-avaliacao');
-    await expect(page.locator('#janela-avaliacao')).toBeVisible();
-    await page.click('#av-empresa');
-    await page.locator('#av-empresa-lista [role="option"]', { hasText: 'Padaria Teste E2E' }).click();
-    await page.fill('#av-nome', 'Atendente 2027');
-    await expect(page.locator('#av-tipo')).toHaveAttribute('value', 'selecao');
-    await page.click('#janela-ok');
-    await expect(page.locator('#janela')).toHaveCount(0);
-    const card = page.locator('.av-card', { hasText: 'Atendente 2027' });
-    await expect(card).toContainText('Padaria Teste E2E · 0 respostas');
-    const codigo = (await card.locator('.av-codigo').innerText()).trim();
+    // Processo novo
+    await page.locator('.aba[data-aba="processos"]').click();
+    await page.click('#btn-novo-processo');
+    await page.fill('#proc-nome', 'Atendente 2027');
+    await page.fill('#proc-empresa', 'Padaria Teste E2E');
+    await page.fill('#proc-vaga', 'Atendente');
+    await page.click('#proc-perfil-I');
+    await page.click('#btn-add-etapa');
+    await page.fill('#etapa-nome-0', 'Entrevista');
+    await page.fill('#etapa-peso-0', '10');
+    await page.fill('#etapa-campo-0', 'Nota Entrevista');
+    await page.click('#btn-salvar-processo');
+    await expect(page.locator('#aviso-geral')).toContainText('Processo criado');
+    await expect(page.locator('#vista-processos h2')).toHaveText('Atendente 2027');
+    const link = (await page.locator('#proc-link').innerText()).trim();
+    const codigo = link.split('?a=')[1];
     expect(codigo).toMatch(/^[ABCDEFGHJKLMNPQRSTUVWXYZ23456789]{4}$/);
-    const link = 'http://localhost:4173/index.html?a=' + codigo;
-    await expect(card.locator('.av-link')).toHaveText(link);
-    await card.locator('[data-acao="copiar-link"]').click();
+    expect(link).toBe('http://localhost:4173/index.html?a=' + codigo);
+    await page.locator('.proc-link-acoes [data-acao="copiar-link"]').click();
     await expect(page.locator('#aviso-geral')).toHaveText('Link copiado.');
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(link);
-    await card.locator('[data-acao="copiar-mensagem"]').click();
+    await page.locator('.proc-link-acoes [data-acao="copiar-mensagem"]').click();
     await expect(page.locator('#aviso-geral')).toContainText('Mensagem copiada');
     const msg = await page.evaluate(() => navigator.clipboard.readText());
     expect(msg).toContain(link);
     expect(msg).toContain('Padaria Teste E2E');
-    // Sem respostas: pode excluir; o card das avaliações com respostas oferece desativar
+
+    // Lista de processos: card com código; sem respostas pode excluir
+    await page.locator('.aba[data-aba="processos"]').click();
+    const card = page.locator('.proc-card', { hasText: 'Atendente 2027' });
+    await expect(card.locator('.av-codigo')).toHaveText(codigo);
+    await expect(card).toContainText('Padaria Teste E2E');
     await expect(card.locator('[data-acao="excluir"]')).toHaveCount(1);
-    await expect(page.locator('.av-card', { hasText: 'Recepcionista 2026' }).locator('[data-acao="excluir"]')).toHaveCount(0);
-    await expect(page.locator('.av-card', { hasText: 'Recepcionista 2026' }).locator('[data-acao="alternar-ativa"]')).toHaveText('Desativar');
 
-    // Uma resposta chega pelo link novo
+    // Uma resposta chega pelo link novo; o filtro "Processo" mostra só ela
     await page.evaluate((p) => window.DISC_API.enviar(p), payload({ id: 'e2e-padaria-01', nome: 'Marcos Padaria Teste', idade: 25, avaliacao: codigo }));
-
-    // Gestor da padaria
-    await page.locator('.aba[data-aba="usuarios"]').click();
-    await page.click('#btn-novo-usuario');
-    await page.fill('#us-nome', 'Gestora Padaria');
-    await page.fill('#us-email', 'gestora@padaria.com');
-    await expect(page.locator('#us-papel')).toHaveAttribute('value', 'gestor');
-    await page.click('#us-empresa');
-    await page.locator('#us-empresa-lista [role="option"]', { hasText: 'Padaria Teste E2E' }).click();
-    await page.click('#us-senha-gerar');
-    const senha = await page.inputValue('#us-senha');
-    expect(senha).toMatch(/^[a-hjkmnp-z2-9]{10}$/);
-    await page.click('#janela-ok');
-    await expect(page.locator('#janela')).toHaveCount(0);
-    await expect(page.locator('#lista-usuarios [data-email="gestora@padaria.com"]')).toContainText('Padaria Teste E2E');
-
-    // Admin vê as 5 respostas e filtra por avaliação
     await page.locator('.aba[data-aba="lista"]').click();
-    await expect(page.locator('#lista-candidatos > li')).toHaveCount(5);
-    await escolher(page, '#filtro-avaliacao', codigo);
+    await page.click('#btn-atualizar');
+    await expect(page.locator('#lista-candidatos > li', { hasText: 'Marcos Padaria Teste' })).toHaveCount(1);
+    const total = await page.locator('#lista-candidatos > li').count();
+    await escolher(page, '#filtro-processo', codigo);
     await expect(page.locator('#lista-candidatos > li')).toHaveCount(1);
     await expect(page.locator('#lista-candidatos > li .card-origem')).toHaveText('Atendente 2027 · Padaria Teste E2E');
-    await escolher(page, '#filtro-avaliacao', '');
-
-    // Nova gestora: só a padaria, sem excluir nem criar
-    await sairDoPainel(page);
-    await entrar(page, 'gestora@padaria.com', senha);
-    expect(await abasVisiveis(page)).toEqual(['lista', 'comparativo']);
+    await escolher(page, '#filtro-processo', '');
+    // "Ver participantes" na página do processo já aplica o filtro
+    await page.locator('.aba[data-aba="processos"]').click();
+    await page.locator('.proc-card', { hasText: 'Atendente 2027' }).locator('[data-acao="abrir"]').click();
+    await page.click('#btn-ver-participantes');
+    await expect(page.locator('#filtro-processo')).toHaveAttribute('value', codigo);
     await expect(page.locator('#lista-candidatos > li')).toHaveCount(1);
-    await expect(page.locator('#lista-candidatos > li')).toContainText('Marcos Padaria Teste');
+    await escolher(page, '#filtro-processo', '');
 
-    // Gestor da Clínica Exemplo não vê a resposta da padaria
-    await sairDoPainel(page);
-    await entrar(page, 'gestor@previa.com', 'previa123');
-    await expect(page.locator('#lista-candidatos > li')).toHaveCount(4);
-    await expect(page.locator('#vista-lista')).not.toContainText('Marcos Padaria Teste');
-
-    // Admin exclui as respostas só daquela avaliação, digitando EXCLUIR
-    await sairDoPainel(page);
-    await entrar(page, 'admin@previa.com', 'previa123');
+    // Exclui as respostas só daquele processo, digitando EXCLUIR
     await page.click('#btn-excluir-todos');
     await page.click('#excluir-avaliacao');
     await page.locator('#excluir-avaliacao-lista [role="option"][data-valor="' + codigo + '"]').click();
@@ -508,39 +686,49 @@ test.describe('Admin na prévia (API_URL "simulada")', () => {
     await page.fill('#confirmar-texto', 'EXCLUIR');
     await page.click('#confirmar-ok');
     await expect(page.locator('#confirmar')).toHaveCount(0);
-    await expect(page.locator('#lista-candidatos > li')).toHaveCount(4);
+    await expect(page.locator('#lista-candidatos > li')).toHaveCount(total - 1);
     await expect(page.locator('#vista-lista')).not.toContainText('Marcos Padaria Teste');
     expect(erros).toEqual([]);
   });
 
-  test('gestor: só participantes e comparativo, muda status mas não exclui', async ({ page }) => {
+  test('prévia: processo de exemplo gera rascunho, edita um texto, publica e o link público abre', async ({ page, context }) => {
     const erros = coletarErros(page);
     await configurar(page, { API_URL: 'simulada' });
     await page.goto('/admin.html');
-    await entrar(page, 'gestor@previa.com', 'previa123');
-    expect(await abasVisiveis(page)).toEqual(['lista', 'comparativo']);
-    await expect(page.locator('#btn-excluir-todos')).toBeHidden();
-    await expect(page.locator('#filtro-empresa')).toHaveCount(0);
-    await expect(page.locator('#filtro-avaliacao')).toBeVisible();
-    await expect(page.locator('#sobretitulo-lista')).toHaveText('Clínica Exemplo');
-    await page.click('#btn-usuario');
-    await expect(page.locator('#menu-papel')).toHaveText('Gestor · Clínica Exemplo');
-    await page.keyboard.press('Escape');
-    await expect(page.locator('#menu-usuario')).toBeHidden();
+    await entrar(page, 'admin@previa.com', 'previa123');
+    await page.locator('.aba[data-aba="processos"]').click();
+    // O processo de exemplo da prévia é o que tem lista do ClickUp ligada
+    const card = page.locator('.proc-card', { hasText: 'Lista do ClickUp ligada' }).first();
+    await card.locator('[data-acao="abrir"]').click();
+    await page.click('#btn-gerar-rascunho');
+    await expect(page.locator('#vista-processos h2')).toHaveText('Rascunho do relatório');
+    const primeiro = page.locator('#editor-textos textarea').first();
+    const id = await primeiro.getAttribute('data-texto-id');
+    await primeiro.fill('Texto revisado pelo consultor na prévia.');
+    await expect(page.locator('.texto-item[data-texto-id="' + id + '"] .texto-origem')).toHaveText('Editado');
+    await page.click('#btn-salvar-rascunho');
+    await expect(page.locator('#aviso-geral')).toHaveText('Rascunho salvo.');
+    await page.click('#btn-publicar');
+    const link = (await page.locator('#rel-link').innerText()).trim();
+    expect(link).toMatch(/relatorio\.html\?r=[A-Za-z0-9_-]{32,}$/);
+    await expect(page.locator('#rel-mensagem')).toContainText(link);
 
-    const card = page.locator('#lista-candidatos > li', { hasText: 'Carla Modelo Demonstração' });
-    await card.getByRole('button', { name: /Ver detalhes/ }).click();
-    await expect(page.locator('#vista-detalhe h2')).toHaveText('Carla Modelo Demonstração');
-    // Avaliação de equipe: sem vaga nem empresa anterior; "Cargo/função"
-    await expect(page.locator('#vista-detalhe .sobretitulo').first()).toHaveText('Avaliação de equipe · Colaborador');
-    await expect(page.locator('#det-empresa')).toHaveCount(0);
-    await expect(page.locator('#vista-detalhe')).toContainText('Cargo/função');
-    await expect(page.locator('#btn-excluir-participante')).toHaveCount(0);
-    await escolher(page, '#det-status', 'aprovado');
-    await expect(page.locator('#aviso-geral')).toContainText('Aprovado');
-    // O servidor também recusa a exclusão para o gestor
-    const recusa = await page.evaluate(() => window.DISC_API.excluir(sessionStorage.getItem('disc_admin_token'), 'previa-exemplo-03').then(() => 'ok', (e) => e.message));
-    expect(recusa).toBe('Sem permissão.');
+    // Mesma origem (mesmo localStorage da prévia): a página pública lê o relatório publicado
+    const pub = await context.newPage();
+    await configurar(pub, { API_URL: 'simulada' });
+    await pub.goto(link);
+    await expect(pub.locator('#relatorio')).toHaveAttribute('data-estado', 'pronto');
+    await expect(pub.locator('#relatorio')).toContainText('Texto revisado pelo consultor na prévia.');
+    await pub.close();
+
+    await page.click('#btn-despublicar');
+    await page.click('#confirmar-ok');
+    await expect(page.locator('#btn-publicar')).toBeVisible();
+    const fora = await context.newPage();
+    await configurar(fora, { API_URL: 'simulada' });
+    await fora.goto(link);
+    await expect(fora.locator('#relatorio')).toContainText('Relatório não encontrado ou fora do ar.');
+    await fora.close();
     expect(erros).toEqual([]);
   });
 

@@ -6,7 +6,10 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 const raiz = join(dirname(fileURLToPath(import.meta.url)), '..');
-const ARQUIVOS = ['assets/styles.css', 'assets/admin.css', 'js/app.js', 'js/admin.js', 'index.html', 'admin.html'];
+const ARQUIVOS = ['assets/styles.css', 'assets/admin.css', 'js/app.js', 'js/admin.js', 'index.html', 'admin.html', 'relatorio.html'];
+// Documentos (relatório público): variante EDITORIAL — docs/IDENTIDADE-VISUAL.md, seção "Documentos (relatórios e manuais)".
+// Mesmas proibições das telas, mas com o papel creme, a escala de tipos do documento e o peso 500.
+const ARQUIVOS_DOCUMENTO = ['assets/relatorio.css', 'js/relatorio-view.js'];
 
 // Tokens da identidade (assets/notus.css) + vermelho/verde funcionais + cores do próprio ícone.
 const CORES_LIBERADAS = new Set([
@@ -18,12 +21,20 @@ const CORES_LIBERADAS = new Set([
 ]);
 const ESCALA_PX = new Set([11, 12, 13, 15, 16, 18, 24, 28, 32, 44]);
 const PESOS = new Set(['400', '600', '700', 'normal', 'bold', 'inherit']);
+// Paleta editorial = tokens Notus + papel/creme/fio/rótulo do documento.
+const CORES_DOCUMENTO = new Set([...CORES_LIBERADAS, '#f5f1ea', '#ece5d8', '#d6cfc1', '#6b6960']);
+const ESCALA_DOCUMENTO_PX = new Set([11, 12, 13, 15, 16, 18, 20, 22, 24, 28, 32, 40, 44, 56, 64, 72, 96, 120, 160]);
+const PESOS_DOCUMENTO = new Set([...PESOS, '500']);
 const CLASSES_ANTIGAS = ['botao--preto', 'botao--amarelo', 'caixa--preta', 'caixa--amarela', 'caixa--gradiente', 'hachura', 'selo--amarelo', 'selo--preto', 'class="marca"'];
 
 const problemas = [];
 const anotar = (arq, n, msg) => problemas.push(`${arq}:${n}: ${msg}`);
 
-for (const arq of ARQUIVOS) {
+for (const arq of [...ARQUIVOS, ...ARQUIVOS_DOCUMENTO]) {
+  const documento = ARQUIVOS_DOCUMENTO.includes(arq);
+  const cores = documento ? CORES_DOCUMENTO : CORES_LIBERADAS;
+  const escala = documento ? ESCALA_DOCUMENTO_PX : ESCALA_PX;
+  const pesos = documento ? PESOS_DOCUMENTO : PESOS;
   const linhas = readFileSync(join(raiz, arq), 'utf8').split('\n');
   const ehHtml = arq.endsWith('.html');
   let dentroCores = false;
@@ -45,19 +56,28 @@ for (const arq of ARQUIVOS) {
       if (ehHtml && /(href|id|for|aria-[a-z]+)=["'][^"']*$/.test(antes)) continue; // âncoras e ids
       if (![3, 4, 6, 8].includes(m[1].length)) continue;
       const cor = `#${m[1].toLowerCase()}`;
-      if (!CORES_LIBERADAS.has(cor)) anotar(arq, n, `cor fora da paleta ${m[0]} (use os tokens de notus.css)`);
+      if (!cores.has(cor)) anotar(arq, n, `cor fora da paleta ${m[0]} (use os tokens de notus.css)`);
     }
     for (const m of semComentario.matchAll(/font-size\s*:\s*([0-9.]+)px/gi)) {
-      if (!ESCALA_PX.has(Number(m[1]))) anotar(arq, n, `font-size ${m[1]}px fora da escala (use var(--t-*))`);
+      if (!escala.has(Number(m[1]))) anotar(arq, n, `font-size ${m[1]}px fora da escala (use var(--t-*))`);
+    }
+    // No documento os tamanhos vêm dos tokens --f-*: eles também precisam estar na escala editorial.
+    if (documento) {
+      for (const m of semComentario.matchAll(/--f-[a-z-]+\s*:\s*([0-9.]+)px/gi)) {
+        if (!escala.has(Number(m[1]))) anotar(arq, n, `token de fonte ${m[1]}px fora da escala editorial`);
+      }
+      if (/font-size\s*:\s*[0-9.]+(rem|em|vw|vh|pt)\b|font-size\s*:\s*(clamp|calc|min|max)\(/i.test(semComentario)) {
+        anotar(arq, n, 'font-size do documento só em px da escala ou var(--f-*)');
+      }
     }
     for (const m of semComentario.matchAll(/fontSize\s*[:=]\s*['"]?([0-9.]+)(px)?/g)) {
-      if (!ESCALA_PX.has(Number(m[1]))) anotar(arq, n, `fontSize ${m[1]} fora da escala`);
+      if (!escala.has(Number(m[1]))) anotar(arq, n, `fontSize ${m[1]} fora da escala`);
     }
     for (const m of semComentario.matchAll(/font-weight\s*:\s*([a-z0-9]+)/gi)) {
-      if (!PESOS.has(m[1].toLowerCase())) anotar(arq, n, `font-weight ${m[1]} fora dos três pesos (400/600/700)`);
+      if (!pesos.has(m[1].toLowerCase())) anotar(arq, n, `font-weight ${m[1]} fora dos pesos permitidos (${documento ? '400/500/600/700' : '400/600/700'})`);
     }
     for (const m of semComentario.matchAll(/font-weight=["']?([a-z0-9]+)/gi)) {
-      if (!PESOS.has(m[1].toLowerCase())) anotar(arq, n, `font-weight ${m[1]} fora dos três pesos (400/600/700)`);
+      if (!pesos.has(m[1].toLowerCase())) anotar(arq, n, `font-weight ${m[1]} fora dos pesos permitidos (${documento ? '400/500/600/700' : '400/600/700'})`);
     }
     if (/<select\b/i.test(semComentario)) anotar(arq, n, '<select> nativo proibido (use o seletor em pílula)');
     if (/(^|[^.\w])(window\.)?(confirm|prompt|alert)\s*\(/.test(semComentario) && !/function\s+(confirm|prompt|alert)/.test(semComentario)) {
@@ -72,4 +92,4 @@ if (problemas.length) {
   console.error(`checar-visual: ${problemas.length} problema(s)\n` + problemas.join('\n'));
   process.exit(1);
 }
-console.log(`checar-visual: ok (${ARQUIVOS.length} arquivos)`);
+console.log(`checar-visual: ok (${ARQUIVOS.length + ARQUIVOS_DOCUMENTO.length} arquivos)`);

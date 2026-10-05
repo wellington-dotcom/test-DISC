@@ -21,7 +21,19 @@
  *     avaliacoes.listar (gestor: só a empresa dele) | avaliacoes.salvar | avaliacoes.excluir (só admin)
  *     usuarios.listar | usuarios.salvar {usuario, senhaTemporaria?} | usuarios.excluir {id}
  *       | usuarios.redefinirSenha {id, senhaTemporaria}                                (só admin)
+ *     processos.listar | processos.salvar {processo} | processos.excluir {id}           (só admin;
+ *       "avaliacoes.*" continuam valendo como apelido)
+ *     clickup.status | clickup.listas | processo.dados {id}                           (só admin; ClickUp.gs)
+ *     relatorio.rascunho {processoId} | relatorio.salvar {relatorioToken, relatorio|textos}
+ *       | relatorio.publicar {relatorioToken, baseUrl?} | relatorio.despublicar {relatorioToken}
+ *       | relatorios.listar {processoId?} | relatorio.melhorarTextos {relatorioToken, ids?}  (só admin; Relatorio.gs)
+ *     (o "token" do corpo é sempre o da sessão; o do relatório vai em "relatorioToken")
+ *   Pública: relatorioPublico {token} -> {ok, relatorio} (só relatório publicado)
  * GET -> {"ok":true,"servico":"DISC"} (teste de saúde).
+ *
+ * Arquivos do projeto no Apps Script (todos no mesmo escopo global): Code.gs (este), ClickUp.gs,
+ * Relatorio.gs e RelatorioMotor.gs (gerado a partir de js/relatorio-motor.js). Segredos (CLICKUP_TOKEN,
+ * ANTHROPIC_API_KEY) ficam só nas Propriedades do script e nunca voltam para o navegador.
  *
  * Papéis: "admin" faz tudo; "gestor" só vê os participantes e as avaliações da própria empresa e só
  * muda status/observações (não exclui nem cria nada).
@@ -44,6 +56,8 @@ CABECALHO.forEach(function (nome, i) { COL[nome] = i; });
 var LETRAS = ['D', 'I', 'S', 'C'];
 var TOTAL_GRUPOS = 25;
 var LIMITE_CORPO = 20000;      // bytes/caracteres aceitos no corpo da requisição
+var LIMITE_CORPO_RELATORIO = 450000; // só "relatorio.salvar" (o relatório inteiro volta do painel)
+var ACOES_CORPO_GRANDE = ['relatorio.salvar'];
 var LIMITE_LINHAS = 500;       // proteção contra abuso (o uso esperado é de poucas dezenas)
 var LIMITE_ENVIOS_JANELA = 40; // envios aceitos por janela de tempo (todos os candidatos juntos)
 var JANELA_ENVIOS_SEG = 600;   // janela de 10 minutos
@@ -74,10 +88,20 @@ var TABELAS = {
     booleanas: [],
     numericas: []
   },
+  // Aba "Avaliacoes" = processos seletivos (na interface: "Processos"). As colunas a partir de "empresa"
+  // foram acrescentadas depois (planilhas antigas ganham as colunas no fim, sem perder nada).
   Avaliacoes: {
-    cabecalho: ['id', 'codigo', 'empresaId', 'nome', 'tipo', 'mostrarResultado', 'ativa', 'criadaEm'],
+    cabecalho: ['id', 'codigo', 'empresaId', 'nome', 'tipo', 'mostrarResultado', 'ativa', 'criadaEm',
+      'empresa', 'vaga', 'cidade', 'consultor', 'contratante', 'periodoInicio', 'periodoFim', 'clickupListId', 'config'],
     booleanas: ['mostrarResultado', 'ativa'],
     numericas: []
+  },
+  // Relatórios do processo (rascunho ou publicado). Um relatório grande ocupa várias linhas com o mesmo
+  // token ("parte" 0, 1, 2…), porque cada célula aceita no máximo 50.000 caracteres.
+  Relatorios: {
+    cabecalho: ['token', 'processoId', 'status', 'parte', 'json', 'criadoEm', 'publicadoEm', 'atualizadoEm'],
+    booleanas: [],
+    numericas: ['parte']
   }
 };
 var PAPEIS = ['admin', 'gestor'];
@@ -142,6 +166,18 @@ var ACOES_COM_SESSAO = {
   'avaliacoes.listar': { fn: function (u) { return acaoAvaliacoesListar_(u); } },
   'avaliacoes.salvar': { soAdmin: true, fn: function (u, c) { return acaoAvaliacoesSalvar_(c.avaliacao); } },
   'avaliacoes.excluir': { soAdmin: true, fn: function (u, c) { return acaoAvaliacoesExcluir_(c.id); } },
+  'processos.listar': { soAdmin: true, fn: function () { return acaoProcessosListar_(); } },
+  'processos.salvar': { soAdmin: true, fn: function (u, c) { return acaoProcessosSalvar_(c.processo); } },
+  'processos.excluir': { soAdmin: true, fn: function (u, c) { return acaoAvaliacoesExcluir_(c.id); } },
+  'clickup.status': { soAdmin: true, fn: function () { return acaoClickupStatus_(); } },
+  'clickup.listas': { soAdmin: true, fn: function () { return acaoClickupListas_(); } },
+  'processo.dados': { soAdmin: true, fn: function (u, c) { return acaoProcessoDados_(c.id); } },
+  'relatorio.rascunho': { soAdmin: true, fn: function (u, c) { return acaoRelatorioRascunho_(c.processoId); } },
+  'relatorio.salvar': { soAdmin: true, fn: function (u, c) { return acaoRelatorioSalvar_(c); } },
+  'relatorio.publicar': { soAdmin: true, fn: function (u, c) { return acaoRelatorioPublicar_(c.relatorioToken, c.baseUrl); } },
+  'relatorio.despublicar': { soAdmin: true, fn: function (u, c) { return acaoRelatorioDespublicar_(c.relatorioToken); } },
+  'relatorios.listar': { soAdmin: true, fn: function (u, c) { return acaoRelatoriosListar_(c.processoId); } },
+  'relatorio.melhorarTextos': { soAdmin: true, fn: function (u, c) { return acaoRelatorioMelhorarTextos_(c.relatorioToken, c.ids); } },
   'usuarios.listar': { soAdmin: true, fn: function () { return acaoUsuariosListar_(); } },
   'usuarios.salvar': { soAdmin: true, fn: function (u, c) { return acaoUsuariosSalvar_(u, c.usuario, c.senhaTemporaria); } },
   'usuarios.excluir': { soAdmin: true, fn: function (u, c) { return acaoUsuariosExcluir_(u, c.id); } },
@@ -152,14 +188,21 @@ var ACOES_COM_SESSAO = {
 function processarRequisicao_(conteudo) {
   conteudo = typeof conteudo === 'string' ? conteudo : '';
   if (!conteudo) return erro_('Requisição vazia.');
-  if (conteudo.length > LIMITE_CORPO) return erro_('Requisição grande demais.');
+  if (conteudo.length > LIMITE_CORPO_RELATORIO) return erro_('Requisição grande demais.');
+  // Corpo grande só é lido se for a edição do relatório (conferido de novo depois do JSON.parse).
+  if (conteudo.length > LIMITE_CORPO && conteudo.indexOf('"relatorio.salvar"') === -1) return erro_('Requisição grande demais.');
 
   var corpo;
   try { corpo = JSON.parse(conteudo); } catch (err) { return erro_('JSON inválido.'); }
   if (!corpo || typeof corpo !== 'object' || Array.isArray(corpo)) return erro_('Formato de requisição inválido.');
 
   var acao = corpo.acao;
+  // Só a edição do relatório pode mandar um corpo maior; todo o resto continua com o limite pequeno.
+  if (conteudo.length > LIMITE_CORPO && ACOES_CORPO_GRANDE.indexOf(acao) === -1) return erro_('Requisição grande demais.');
+  if (typeof cuReiniciar_ === 'function') cuReiniciar_(); // cada requisição começa sem leituras do ClickUp guardadas (ClickUp.gs)
+
   if (acao === 'enviar') return acaoEnviar_(corpo.payload);
+  if (acao === 'relatorioPublico') return acaoRelatorioPublico_(corpo.token);
   if (acao === 'avaliacaoPublica') return acaoAvaliacaoPublica_(corpo.codigo);
   if (acao === 'login') return acaoLogin_(corpo.email, corpo.senha);
   if (acao === 'primeiroAcesso') return acaoPrimeiroAcesso_(corpo);
@@ -335,7 +378,7 @@ function lerTabela_(nome) {
         else if (def.numericas.indexOf(campo) >= 0) r[campo] = Number(linha[c]) || 0;
         else r[campo] = celulaTexto_(linha[c]);
       });
-      if (String(r.id).trim()) registros.push(r);
+      if (String(r[def.cabecalho[0]]).trim()) registros.push(r); // linha sem a 1ª coluna (id/token) é ignorada
     });
   }
   return { nome: nome, aba: aba, def: def, registros: registros };
@@ -883,8 +926,9 @@ function acaoEnviar_(payloadBruto) {
   var v = validarPayload(payloadBruto);
   if (!v.ok) return v;
   var payload = v.payload;
+  var processo = null; // processo (avaliação) do link, para a cópia no ClickUp depois de gravar
 
-  return comTrava_(function () {
+  var r = comTrava_(function () {
     var aba = obterAba_();
     var existente = localizarLinha_(aba, payload.id);
     if (existente !== -1) {
@@ -903,6 +947,7 @@ function acaoEnviar_(payloadBruto) {
       var av = buscarPor_(lerTabela_('Avaliacoes').registros, 'codigo', payload.avaliacao);
       if (!av || !av.ativa) return erro_(MSG_LINK_INATIVO);
       payload.empresaId = av.empresaId;
+      processo = av;
     }
     if (aba.getLastRow() - 1 >= LIMITE_LINHAS) {
       return erro_('Limite de respostas atingido. Avise o recrutador.');
@@ -915,6 +960,16 @@ function acaoEnviar_(payloadBruto) {
     aba.appendRow(montarLinha(payload, new Date().toISOString(), protocolo));
     return { ok: true, id: payload.id, protocolo: protocolo };
   });
+  // Fora da trava: copia o resultado para a tarefa do candidato no ClickUp. Qualquer falha vira só
+  // um aviso (registro de execução + clickup.status): o candidato conclui o teste de qualquer jeito.
+  if (r.ok && !r.duplicado && processo && processo.clickupListId && typeof cuSincronizarEnvio === 'function') {
+    try {
+      cuSincronizarEnvio(processo, payload, r.protocolo);
+    } catch (err) {
+      try { cuRegistrarAviso_('Envio ' + r.protocolo + ': não foi possível gravar no ClickUp (' + err.message + ').'); } catch (e2) { /* nunca derruba o envio */ }
+    }
+  }
+  return r;
 }
 
 function acaoAvaliacaoPublica_(codigoBruto) {
@@ -926,7 +981,7 @@ function acaoAvaliacaoPublica_(codigoBruto) {
     ok: true,
     avaliacao: {
       codigo: av.codigo, nome: av.nome, tipo: av.tipo,
-      empresaNome: mapaEmpresas_()[av.empresaId] || '',
+      empresaNome: mapaEmpresas_()[av.empresaId] || av.empresa || '',
       mostrarResultado: av.mostrarResultado === true
     }
   };
@@ -1195,9 +1250,150 @@ function acaoEmpresasExcluir_(idBruto) {
 
 function avaliacaoPublica_(a, empresas, contagem) {
   return {
-    id: a.id, codigo: a.codigo, empresaId: a.empresaId, empresaNome: empresas[a.empresaId] || '',
+    id: a.id, codigo: a.codigo, empresaId: a.empresaId, empresaNome: empresas[a.empresaId] || a.empresa || '',
     nome: a.nome, tipo: a.tipo, mostrarResultado: a.mostrarResultado === true, ativa: a.ativa === true,
     criadaEm: a.criadaEm, respostas: contagem[a.codigo] || 0
+  };
+}
+
+/** Processo = avaliação + campos da rodada ClickUp (vazios em avaliações antigas). */
+function processoPublico_(a, empresas, contagem) {
+  var p = avaliacaoPublica_(a, empresas, contagem);
+  p.empresa = a.empresa || empresas[a.empresaId] || '';
+  p.vaga = a.vaga || '';
+  p.cidade = a.cidade || '';
+  p.consultor = a.consultor || '';
+  p.contratante = a.contratante || '';
+  p.periodo = { inicio: a.periodoInicio || '', fim: a.periodoFim || '' };
+  p.clickupListId = a.clickupListId || '';
+  p.config = configDoProcesso_(a);
+  return p;
+}
+
+/** Config do processo gravada (JSON na coluna "config"), sempre completa com os padrões. */
+function configDoProcesso_(a) {
+  var bruto = {};
+  try { bruto = a && a.config ? JSON.parse(a.config) : {}; } catch (err) { bruto = {}; }
+  var v = validarConfigProcesso(bruto);
+  return v.ok ? v.config : validarConfigProcesso({}).config;
+}
+
+/** Processo (aba Avaliacoes) pelo id, ou null. */
+function processoPorId_(id) {
+  id = limparTexto(id, 40);
+  return id ? buscarPor_(lerTabela_('Avaliacoes').registros, 'id', id) : null;
+}
+
+var TERMOS_SENSIVEIS = ['sexo', 'genero', 'estado civil', 'filho', 'religi', 'gravid', 'etnia', 'raca',
+  'cor da pele', 'orientacao', 'deficien', 'doenca', 'saude', 'antecedente', 'processo em seu nome', 'criminal'];
+var TERMOS_ANTECEDENTES = ['antecedente', 'processo em seu nome', 'criminal'];
+
+/** Nome de campo normalizado: minúsculas, sem acento, só letras/algarismos/% separados por 1 espaço. */
+function normalizarNomeCampo(nome) {
+  var s = String(nome === null || nome === undefined ? '' : nome).toLowerCase();
+  if (s.normalize) s = s.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  return s.replace(/[^a-z0-9%]+/g, ' ').trim();
+}
+
+/**
+ * Classifica o nome de um campo do ClickUp: '' (pode ler), 'sensivel' (nunca ler) ou 'antecedente'
+ * (só com config.permitirAntecedentes === true; e nunca vai para o relatório do contratante).
+ * "saude" só passa com config.permitirSaude === true. Os termos valem no começo de uma palavra
+ * ("filhos" casa com "filho"; "graça" não casa com "raca").
+ */
+function classificarCampo(nome, config) {
+  var n = ' ' + normalizarNomeCampo(nome);
+  config = config || {};
+  for (var i = 0; i < TERMOS_SENSIVEIS.length; i++) {
+    var termo = TERMOS_SENSIVEIS[i];
+    if (n.indexOf(' ' + termo) === -1) continue;
+    if (termo === 'saude' && config.permitirSaude === true) continue;
+    if (TERMOS_ANTECEDENTES.indexOf(termo) >= 0) return config.permitirAntecedentes === true ? 'antecedente' : 'sensivel';
+    return 'sensivel';
+  }
+  return '';
+}
+
+function numeroOu_(v, padrao, min, max) {
+  var n = typeof v === 'number' ? v : (typeof v === 'string' && v.trim() !== '' ? Number(v.replace(',', '.')) : NaN);
+  if (!isFinite(n)) return padrao;
+  return Math.max(min, Math.min(max, n));
+}
+
+function idSimples_(v, prefixo, i) {
+  var s = limparTexto(v, 40);
+  return /^[A-Za-z0-9_-]{1,40}$/.test(s) ? s : prefixo + (i + 1);
+}
+
+/**
+ * Valida e completa a config do processo (contrato da rodada ClickUp). Retorna {ok, config} ou {ok:false, erro}.
+ * Campos do ClickUp com nome sensível são recusados com mensagem clara.
+ */
+function validarConfigProcesso(c) {
+  if (c === undefined || c === null) c = {};
+  if (typeof c !== 'object' || Array.isArray(c)) return erro_('Configuração do processo inválida.');
+  var json;
+  try { json = JSON.stringify(c); } catch (err) { return erro_('Configuração do processo inválida.'); }
+  if (json.length > 40000) return erro_('Configuração do processo grande demais.');
+  var perfil = String(c.perfilIdeal || '').toUpperCase().replace(/[^DISC]/g, '');
+  if (perfil.length > 2 || (perfil.length === 2 && perfil[0] === perfil[1])) return erro_('Perfil ideal inválido: use 1 ou 2 letras entre D, I, S e C.');
+  var permitirAntecedentes = c.permitirAntecedentes === true;
+  var base = { permitirAntecedentes: permitirAntecedentes, permitirSaude: c.permitirSaude === true };
+  var problema = null;
+  function campo(v) {
+    var nome = limparTexto(v, 120);
+    if (nome && classificarCampo(nome, base) === 'sensivel') problema = problema || ('O campo "' + nome + '" é um dado sensível e não pode ser usado.');
+    return nome;
+  }
+  var ids = {};
+  function idUnico(v, prefixo, i) {
+    var id = idSimples_(v, prefixo, i);
+    while (ids[id]) id = id + '_';
+    ids[id] = true;
+    return id;
+  }
+  var etapas = (Array.isArray(c.etapas) ? c.etapas : []).slice(0, 20).map(function (e, i) {
+    e = e && typeof e === 'object' ? e : {};
+    return {
+      id: idUnico(e.id, 'etapa', i), nome: limparTexto(e.nome, 80) || ('Etapa ' + (i + 1)),
+      peso: numeroOu_(e.peso, 0, 0, 1000), campo: campo(e.campo), descricao: limparTextoLongo(e.descricao, 1000)
+    };
+  });
+  var bonus = (Array.isArray(c.bonus) ? c.bonus : []).slice(0, 20).map(function (b, i) {
+    b = b && typeof b === 'object' ? b : {};
+    var regra = b.regra && typeof b.regra === 'object' ? b.regra : {};
+    var r;
+    if (regra.tipo === 'mapa') {
+      var pontos = {};
+      var origem = regra.pontos && typeof regra.pontos === 'object' ? regra.pontos : {};
+      Object.keys(origem).slice(0, 50).forEach(function (k) {
+        var chave = limparTexto(k, 120);
+        if (chave) pontos[chave] = numeroOu_(origem[k], 0, -100, 100);
+      });
+      r = { tipo: 'mapa', pontos: pontos };
+    } else {
+      r = { tipo: 'checkbox', pontos: numeroOu_(regra.pontos, 0, -100, 100) };
+    }
+    return { id: idUnico(b.id, 'bonus', i), nome: limparTexto(b.nome, 80) || ('Bônus ' + (i + 1)), campo: campo(b.campo), regra: r };
+  });
+  if (problema) return erro_(problema);
+  var corte = numeroOu_(c.corte, 70, 0, 200);
+  var faixa = numeroOu_(c.faixaAvaliar, 55, 0, 200);
+  if (faixa > corte) return erro_('A faixa "avaliar" precisa ser menor ou igual à nota de corte.');
+  return {
+    ok: true,
+    config: {
+      perfilIdeal: perfil,
+      explicacaoPerfil: limparTextoLongo(c.explicacaoPerfil, 2000),
+      etapas: etapas,
+      bonus: bonus,
+      corte: corte,
+      faixaAvaliar: faixa,
+      statusFinalistas: (Array.isArray(c.statusFinalistas) ? c.statusFinalistas : []).slice(0, 30)
+        .map(function (x) { return limparTexto(x, 80); }).filter(Boolean),
+      permitirAntecedentes: permitirAntecedentes,
+      permitirSaude: c.permitirSaude === true
+    }
   };
 }
 
@@ -1211,22 +1407,67 @@ function acaoAvaliacoesListar_(usuario) {
 }
 
 function acaoAvaliacoesSalvar_(dados) {
-  if (!dados || typeof dados !== 'object') return erro_('Dados da avaliação ausentes.');
+  return salvarProcesso_(dados, true);
+}
+
+/** Processos (interface nova): só admin, empresa como texto, campos do ClickUp e config. */
+function acaoProcessosListar_() {
+  var empresas = mapaEmpresas_();
+  var contagem = respostasPorAvaliacao_();
+  return { ok: true, processos: lerTabela_('Avaliacoes').registros.map(function (a) { return processoPublico_(a, empresas, contagem); }) };
+}
+
+function acaoProcessosSalvar_(dados) {
+  return salvarProcesso_(dados, false);
+}
+
+/**
+ * Grava avaliação/processo. legado=true (avaliacoes.salvar): exige empresaId e tipo, como antes.
+ * legado=false (processos.salvar): empresa é texto, tipo padrão "selecao", empresaId opcional.
+ * Em edição, campo que não veio no corpo fica como estava.
+ */
+function salvarProcesso_(dados, legado) {
+  var rotulo = legado ? 'avaliação' : 'processo';
+  if (!dados || typeof dados !== 'object') return erro_('Dados da ' + rotulo + ' ausentes.');
+  function veio(k) { return Object.prototype.hasOwnProperty.call(dados, k) && dados[k] !== undefined; }
   var id = limparTexto(dados.id, 40);
   var nome = limparTexto(dados.nome, 80);
-  if (letrasContadas_(nome) < 2) return erro_('Informe o nome da avaliação.');
+  if (letrasContadas_(nome) < 2) return erro_('Informe o nome ' + (legado ? 'da avaliação.' : 'do processo.'));
   var tipo = limparTexto(dados.tipo, 20);
+  if (!legado && !tipo) tipo = 'selecao';
   if (TIPOS_AVALIACAO.indexOf(tipo) === -1) return erro_('Tipo inválido. Use: selecao ou equipe.');
   var empresaId = limparTexto(dados.empresaId, 40);
+  var extras = {};
+  var textos = { empresa: 80, vaga: 120, cidade: 80, consultor: 80, contratante: 80 };
+  Object.keys(textos).forEach(function (k) { if (veio(k)) extras[k] = limparTexto(dados[k], textos[k]); });
+  if (veio('periodo')) {
+    var per = dados.periodo && typeof dados.periodo === 'object' ? dados.periodo : {};
+    var dataOk = function (d) { d = limparTexto(d, 10); return /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : ''; };
+    extras.periodoInicio = dataOk(per.inicio);
+    extras.periodoFim = dataOk(per.fim);
+  }
+  if (veio('clickupListId')) {
+    var lista = limparTexto(dados.clickupListId, 40);
+    if (lista && !/^[A-Za-z0-9_-]{1,40}$/.test(lista)) return erro_('ID da lista do ClickUp inválido.');
+    extras.clickupListId = lista;
+  }
+  if (veio('config')) {
+    var cfg = validarConfigProcesso(dados.config);
+    if (!cfg.ok) return cfg;
+    extras.config = JSON.stringify(cfg.config);
+  }
   return comTrava_(function () {
     var empresas = mapaEmpresas_();
-    if (!empresaId || !Object.prototype.hasOwnProperty.call(empresas, empresaId)) return erro_('Escolha uma empresa válida.');
+    if (legado || empresaId) {
+      if (!empresaId || !Object.prototype.hasOwnProperty.call(empresas, empresaId)) return erro_('Escolha uma empresa válida.');
+    }
     var tabela = lerTabela_('Avaliacoes');
     var contagem = respostasPorAvaliacao_();
     var a;
     if (id) {
       a = buscarPor_(tabela.registros, 'id', id);
-      if (!a) return erro_('Avaliação não encontrada.');
+      if (!a) return erro_(legado ? 'Avaliação não encontrada.' : 'Processo não encontrado.');
+      if (!legado && !veio('empresaId')) empresaId = a.empresaId;
       if (a.empresaId !== empresaId && contagem[a.codigo]) {
         return erro_('Esta avaliação já tem respostas: não dá para trocar a empresa dela.');
       }
@@ -1235,13 +1476,16 @@ function acaoAvaliacoesSalvar_(dados) {
       var usados = {};
       tabela.registros.forEach(function (r) { usados[r.codigo] = true; });
       a = { id: novoId_('ava'), codigo: gerarCodigoAvaliacao(usados), criadaEm: new Date(agora_()).toISOString(), ativa: dados.ativa !== false };
+      if (!extras.config) extras.config = JSON.stringify(validarConfigProcesso({}).config);
     }
     a.empresaId = empresaId;
     a.nome = nome;
     a.tipo = tipo;
-    a.mostrarResultado = dados.mostrarResultado === true;
+    if (legado || veio('mostrarResultado') || !id) a.mostrarResultado = dados.mostrarResultado === true;
+    Object.keys(extras).forEach(function (k) { a[k] = extras[k]; });
     gravarRegistro_(tabela, a);
-    return { ok: true, avaliacao: avaliacaoPublica_(a, empresas, contagem) };
+    return legado ? { ok: true, avaliacao: avaliacaoPublica_(a, empresas, contagem) }
+      : { ok: true, processo: processoPublico_(a, empresas, contagem) };
   });
 }
 
@@ -1357,7 +1601,7 @@ function acaoUsuariosRedefinirSenha_(idBruto, senhaTemporaria) {
 // Funções para executar manualmente no editor do Apps Script
 // ---------------------------------------------------------------------------
 
-/** Cria as abas (Respostas, Usuarios, Empresas, Avaliacoes) e a chave de primeiro acesso (se ainda não existir). */
+/** Cria as abas (Respostas, Usuarios, Empresas, Avaliacoes, Relatorios) e a chave de primeiro acesso (se ainda não existir). */
 function setup() {
   obterAba_();
   Object.keys(TABELAS).forEach(function (nome) { abaTabela_(nome); });
@@ -1408,6 +1652,7 @@ if (typeof module !== 'undefined' && module.exports) {
     protocoloValido: protocoloValido, normalizarProtocolo: normalizarProtocolo, gerarProtocolo: gerarProtocolo,
     LETRAS_PROTOCOLO: LETRAS_PROTOCOLO, TOTAL_PROTOCOLOS: TOTAL_PROTOCOLOS,
     hashSenha: hashSenha, validarValidacao: validarValidacao, normalizarCodigoAvaliacao: normalizarCodigoAvaliacao,
-    gerarCodigoAvaliacao: gerarCodigoAvaliacao
+    gerarCodigoAvaliacao: gerarCodigoAvaliacao, validarConfigProcesso: validarConfigProcesso,
+    classificarCampo: classificarCampo, normalizarNomeCampo: normalizarNomeCampo
   };
 }

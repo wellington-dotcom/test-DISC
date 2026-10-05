@@ -58,7 +58,7 @@
       <div class="login__noite moldura-noite">
         <form id="form-login" class="login__form" novalidate>
           <h1 id="titulo-login" class="login__h">Acesso ao painel</h1>
-          <p class="login__texto">Entre com seu e-mail e senha.</p>
+          <p class="login__texto">Entre com seu e-mail e senha de administrador.</p>
           <p class="login__sessao" id="aviso-sessao" role="status" hidden>Sua sessão expirou. Entre de novo.</p>
           <label class="login__rotulo" for="campo-email">E-mail</label>
           <input id="campo-email" class="entrada" type="email" autocomplete="username" inputmode="email" placeholder="voce@empresa.com" required>
@@ -68,7 +68,7 @@
           <button type="submit" class="botao botao--branco botao--grande botao--bloco login__botao" id="btn-entrar">Entrar</button>
           <button type="button" class="login__link" id="btn-ir-primeiro">Primeiro acesso</button>
           <p class="login__nota">Esqueceu a senha? Peça ao administrador para redefinir.</p>
-          <p class="login__nota login__previa" id="dica-previa" hidden>Prévia: <span class="negrito">admin@previa.com</span> ou <span class="negrito">gestor@previa.com</span>, senha <span class="negrito">previa123</span></p>
+          <p class="login__nota login__previa" id="dica-previa" hidden>Prévia: <span class="negrito">admin@previa.com</span>, senha <span class="negrito">previa123</span></p>
         </form>
 
         <form id="form-primeiro" class="login__form" novalidate hidden>
@@ -96,8 +96,7 @@
     <section id="tela-painel" hidden>
       <nav class="abas nao-imprimir" aria-label="Seções do painel">
         <button type="button" class="aba" data-aba="lista" aria-current="page">Participantes</button>
-        <button type="button" class="aba" data-aba="avaliacoes" hidden>Avaliações</button>
-        <button type="button" class="aba" data-aba="empresas" hidden>Empresas</button>
+        <button type="button" class="aba" data-aba="processos" hidden>Processos</button>
         <button type="button" class="aba" data-aba="usuarios" hidden>Usuários</button>
         <button type="button" class="aba" data-aba="comparativo">Comparativo</button>
         <button type="button" class="aba" data-aba="importar" id="aba-importar" hidden>Importar códigos</button>
@@ -127,7 +126,7 @@
           <label class="filtros__busca">
             <span class="visualmente-oculto">Buscar</span>
             <svg class="filtros__lupa" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-            <input id="filtro-busca" class="entrada" type="search" placeholder="Nome, código, telefone, avaliação…">
+            <input id="filtro-busca" class="entrada" type="search" placeholder="Nome, código, telefone, processo…">
           </label>
           <div class="filtros__escolhas" id="filtros-escolhas"></div>
         </form>
@@ -138,9 +137,8 @@
       <!-- Detalhe -->
       <article id="vista-detalhe" class="vista detalhe" hidden></article>
 
-      <!-- Avaliações, empresas e usuários (só admin) -->
-      <div id="vista-avaliacoes" class="vista nao-imprimir" hidden></div>
-      <div id="vista-empresas" class="vista nao-imprimir" hidden></div>
+      <!-- Processos (lista, formulário, página do processo e editor do relatório) e usuários (só admin) -->
+      <div id="vista-processos" class="vista nao-imprimir" hidden></div>
       <div id="vista-usuarios" class="vista nao-imprimir" hidden></div>
 
       <!-- Comparativo -->
@@ -178,6 +176,7 @@
   <script src="js/lideranca.js"></script>
   <script src="js/validacao.js"></script>
   <script src="js/confiabilidade.js"></script>
+  <script src="js/relatorio-view.js"></script>
   <script src="js/admin.js"></script>
 </body>
 </html>

@@ -156,18 +156,57 @@ body[data-etapa="boasvindas"] .conteudo { max-width: 1120px; }
 .instrucao strong { color: var(--tinta); }
 
 .ordenar {
-  --linha-alt: 68px;           /* altura fixa de cada linha */
-  --vao: 8px;
-  --passo: 76px;               /* linha + vão: usado pelo arraste e pelo transform */
-  display: grid; grid-template-columns: 60px minmax(0, 1fr); gap: 8px;
-  margin-top: 16px;
+  --linha-alt: 54px;           /* altura fixa de cada cartão (compacto no celular; toque >= 44px) */
+  --vao: 6px;
+  --passo: 60px;               /* linha + vão: usado pelo arraste e pelo transform */
+  --rotulo-alt: 20px;          /* linhas "MAIS / MENOS me identifica" */
+  --rotulo-vao: 6px;
+  display: grid; grid-template-columns: 24px minmax(0, 1fr);
+  grid-template-rows: var(--rotulo-alt) auto var(--rotulo-alt);
+  column-gap: 8px; row-gap: var(--rotulo-vao);
+  margin-top: 12px;
 }
-.posicoes, .cartoes { list-style: none; margin: 0; padding: 0; }
-.posicoes { display: grid; grid-template-rows: repeat(4, var(--linha-alt)); row-gap: var(--vao); }
-.posicao { display: flex; flex-direction: column; justify-content: center; min-width: 0; }
-.posicao-num { font-size: var(--t-indicador); font-weight: 700; line-height: 1; color: var(--tinta); font-variant-numeric: normal; }
-.posicao--topo .posicao-num { color: var(--notus-forte); }
-.posicao-texto { font-size: var(--t-nota); line-height: 1.2; color: var(--suave); margin-top: 3px; }
+/* Régua vertical: seta no topo (MAIS), linha do azul-escuro ao cinza claro, números 4..1 pequenos */
+.regua { grid-column: 1; grid-row: 1 / 4; position: relative; }
+.regua::before {
+  content: ''; position: absolute; left: 50%; top: 10px; bottom: 6px; width: 2px; margin-left: -1px;
+  border-radius: var(--raio-pilula);
+  background: linear-gradient(to bottom, var(--tinta), var(--cinza-claro));
+}
+.regua::after {
+  content: ''; position: absolute; left: 50%; bottom: 3px; width: 8px; height: 8px; margin-left: -4px;
+  border-radius: 50%; background: var(--cinza-claro);
+}
+.regua-seta { position: absolute; left: 50%; top: 2px; width: 16px; margin-left: -8px; color: var(--tinta); line-height: 0; }
+.regua-seta svg { display: block; fill: currentColor; }
+.posicoes { list-style: none; margin: 0; padding: 0; }
+.posicao {
+  position: absolute; left: 50%; width: 20px; height: 20px; margin-left: -10px;
+  top: calc(var(--rotulo-alt) + var(--rotulo-vao) + var(--pos, 0) * var(--passo) + var(--linha-alt) / 2 - 10px);
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 50%; background: var(--branco); border: 1px solid var(--cinza-claro);
+  font-size: var(--t-eixo); font-weight: 600; line-height: 1; color: var(--suave);
+}
+.posicao--topo { border-color: var(--tinta); color: var(--tinta); }
+
+.regua-topo { grid-column: 2; grid-row: 1; display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 0; }
+.regua-texto {
+  font-size: var(--t-rotulo); font-weight: 600; line-height: var(--rotulo-alt); color: var(--tinta);
+  white-space: nowrap; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+}
+.regua-texto--mais .regua-forte { color: var(--notus-forte); }
+.regua-texto--menos { grid-column: 2; grid-row: 3; }
+.regua-forte { letter-spacing: .04em; }
+/* "Ver como funciona": discreto, área de toque maior sem ocupar espaço */
+.ver-demo {
+  position: relative; flex: none; margin: 0; padding: 0; border: 0; background: none;
+  font: inherit; font-size: var(--t-nota); line-height: var(--rotulo-alt); color: var(--suave);
+  text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.ver-demo::after { content: ''; position: absolute; inset: -12px -8px; }
+.ver-demo:hover { color: var(--tinta); }
+.lista-ordenar { grid-column: 2; grid-row: 2; position: relative; min-width: 0; }
 
 .cartoes { position: relative; height: calc(4 * var(--linha-alt) + 3 * var(--vao)); }
 .cartao {
@@ -178,7 +217,7 @@ body[data-etapa="boasvindas"] .conteudo { max-width: 1120px; }
   display: flex; align-items: center; gap: 8px;
   padding: 0 4px 0 6px;
   background: var(--branco); color: var(--tinta);
-  border: 1px solid var(--linha); border-radius: 16px;
+  border: 1px solid var(--linha); border-radius: 14px;
   cursor: grab;
   touch-action: none;           /* arrastar não rola a página; fora da lista a página rola normal */
   -webkit-user-select: none; user-select: none;
@@ -199,7 +238,50 @@ body[data-etapa="boasvindas"] .conteudo { max-width: 1120px; }
   flex: 1; min-width: 0;
   font-size: var(--t-corpo); font-weight: 600; line-height: 1.25; letter-spacing: -0.01em;
   overflow-wrap: anywhere;
-  display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+
+/* ---------- Demonstração do arraste (só desenho por cima: não muda a ordem nem recebe toque) ---------- */
+.demo { position: absolute; inset: 0; z-index: 4; pointer-events: none; }
+.lista-ordenar--demo .cartao:last-child { opacity: .35; }
+.demo-arrasto {
+  position: absolute; left: 0; right: 0; top: 0; height: var(--linha-alt);
+  transform: translateY(calc(3 * var(--passo)));
+  animation: demo-arrastar 2.8s var(--curva) .5s 2 both;
+}
+.demo-cartao {
+  height: 100%; display: flex; align-items: center; gap: 8px; padding: 0 4px 0 6px;
+  background: var(--branco); color: var(--tinta);
+  border: 1px solid color-mix(in srgb, var(--notus) 60%, transparent); border-radius: 14px;
+  box-shadow: 0 14px 30px -14px color-mix(in srgb, var(--tinta) 45%, transparent), 0 0 0 3px color-mix(in srgb, var(--notus) 12%, transparent);
+}
+.demo-mao { position: absolute; left: 10px; top: 50%; width: 34px; height: 40px; margin-top: -4px; animation: demo-apertar 2.8s var(--curva) .5s 2 both; }
+.demo-mao svg { display: block; position: relative; }
+.mao-corpo { fill: var(--branco); stroke: var(--tinta); stroke-width: 1.6; stroke-linejoin: round; }
+.mao-dobra { fill: none; stroke: var(--tinta); stroke-width: 1.4; stroke-linecap: round; }
+.demo-toque {
+  position: absolute; left: 5px; top: -4px; width: 16px; height: 16px; border-radius: 50%;
+  background: color-mix(in srgb, var(--notus) 35%, transparent);
+}
+.demo-balao {
+  position: absolute; right: 6px; top: calc(1.5 * var(--passo) + var(--linha-alt) / 2 - 17px);
+  margin: 0; padding: 7px 12px; border-radius: var(--raio-pilula);
+  font-size: var(--t-nota); font-weight: 600; line-height: 1.6; color: var(--tinta); white-space: nowrap;
+  animation: surgir .45s var(--curva) both;
+}
+@keyframes demo-arrastar {
+  0%   { transform: translateY(calc(3 * var(--passo))); opacity: 0; }
+  10%  { transform: translateY(calc(3 * var(--passo))); opacity: 1; }
+  20%  { transform: translateY(calc(3 * var(--passo))); }
+  50%  { transform: translateY(0); }
+  62%  { transform: translateY(0); }
+  88%  { transform: translateY(calc(3 * var(--passo))); opacity: 1; }
+  100% { transform: translateY(calc(3 * var(--passo))); opacity: 0; }
+}
+@keyframes demo-apertar {
+  0%, 12% { transform: scale(1); }
+  20%, 88% { transform: scale(.9); }
+  100% { transform: scale(1); }
 }
 
 /* ---------- Botão "i" (padrão Info do BI) e painel da dica ---------- */
@@ -263,16 +345,17 @@ body[data-etapa="confirmacao"] .conteudo { padding-bottom: calc(132px + env(safe
 
 /* ---------- Confirmação (depois dos grupos): retratos e frases ---------- */
 /* Seleção = contorno laranja (borda + sombra interna, sem mudar o tamanho): nada pula de lugar. */
-.rodada { margin-top: 20px; }
-.rodada + .rodada { margin-top: 24px; }
-.rodada-titulo { font-size: var(--t-rotulo); color: var(--suave); margin-bottom: 8px; font-variant-numeric: tabular-nums; }
-.retratos { display: grid; gap: 10px; }
+.rodada { margin-top: 16px; }
+.rodada + .rodada { margin-top: 18px; }
+.rodada-titulo { font-size: var(--t-rotulo); color: var(--suave); margin-bottom: 6px; font-variant-numeric: tabular-nums; }
+.retratos { display: grid; gap: 8px; }
+/* Retrato compacto no celular (texto 13px, padding menor); toque é o cartão inteiro */
 .retrato {
-  display: flex; align-items: flex-start; gap: 12px;
-  width: 100%; margin: 0; padding: 16px;
+  display: flex; align-items: flex-start; gap: 10px;
+  width: 100%; min-height: 44px; margin: 0; padding: 12px 14px;
   background: var(--branco); color: var(--tinta);
   border: 1px solid var(--linha); border-radius: 18px;
-  font: inherit; font-size: var(--t-corpo); line-height: 1.5; text-align: left;
+  font: inherit; font-size: var(--t-rotulo); line-height: 1.5; text-align: left;
   cursor: pointer; -webkit-tap-highlight-color: transparent;
   transition: border-color .15s, box-shadow .15s;
 }
@@ -280,7 +363,7 @@ body[data-etapa="confirmacao"] .conteudo { padding-bottom: calc(132px + env(safe
 .retrato[aria-pressed="true"] { border-color: var(--notus); box-shadow: inset 0 0 0 1px var(--notus); }
 .retrato-texto { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .escolha-marca {
-  flex: none; width: 22px; height: 22px; margin-top: 1px; border-radius: 50%;
+  flex: none; width: 20px; height: 20px; margin-top: 0; border-radius: 50%;
   display: inline-flex; align-items: center; justify-content: center;
   border: 1.5px solid var(--ardosia-clara); background: var(--branco); color: transparent;
   transition: background-color .15s, border-color .15s, color .15s;
@@ -289,11 +372,11 @@ body[data-etapa="confirmacao"] .conteudo { padding-bottom: calc(132px + env(safe
 .escolha-marca svg { display: block; }
 
 .frases { list-style: none; margin: 8px 0 0; padding: 0; }
-.frase { padding: 18px 0; border-bottom: 1px solid var(--linha); }
+.frase { padding: 14px 0; border-bottom: 1px solid var(--linha); }
 .frase:last-child { border-bottom: 0; padding-bottom: 4px; }
 .frase-texto { font-size: var(--t-corpo); font-weight: 600; line-height: 1.4; letter-spacing: -0.01em; }
 .escala-legenda {
-  display: flex; justify-content: space-between; gap: 12px; margin-top: 10px;
+  display: flex; justify-content: space-between; gap: 12px; margin-top: 8px;
   font-size: var(--t-eixo); color: var(--suave);
 }
 .escala { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin-top: 6px; }
@@ -424,11 +507,9 @@ body[data-etapa="confirmacao"] .conteudo { padding-bottom: calc(132px + env(safe
   .protocolo-acoes.acoes-coluna { flex-direction: row; justify-content: flex-start; }
   .protocolo-acoes.acoes-coluna > .botao { width: auto; }
 
-  .ordenar { --linha-alt: 72px; --passo: 80px; grid-template-columns: 128px minmax(0, 1fr); gap: 12px; }
-  .posicao { flex-direction: row; align-items: center; justify-content: flex-start; gap: 10px; }
-  .posicao-num { font-size: var(--t-numero); min-width: 22px; }
-  .posicao-texto { margin-top: 0; max-width: 84px; }
-  .cartao { padding: 0 14px 0 10px; gap: 10px; border-radius: 18px; }
+  .ordenar { --linha-alt: 60px; --vao: 8px; --passo: 68px; --rotulo-alt: 22px; --rotulo-vao: 8px; grid-template-columns: 28px minmax(0, 1fr); column-gap: 12px; margin-top: 16px; }
+  .cartao, .demo-cartao { padding: 0 14px 0 10px; gap: 10px; border-radius: 16px; }
+  .demo-mao { left: 16px; }
 
   /* No computador a barra fica no fim do card, sempre na mesma altura */
   .barra-nav {
@@ -445,7 +526,8 @@ body[data-etapa="confirmacao"] .conteudo { padding-bottom: calc(132px + env(safe
 
   /* Confirmação: 2 cartões lado a lado; escala com os rótulos completos */
   .retratos { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
-  .retrato { padding: 18px; }
+  .retrato { padding: 18px; font-size: var(--t-corpo); }
+  .escolha-marca { width: 22px; height: 22px; margin-top: 1px; }
   .escala-legenda { display: none; }
   .escala { margin-top: 12px; gap: 8px; }
   .escala-opcao { min-height: 48px; padding: 6px 10px; font-size: var(--t-rotulo); }
@@ -462,6 +544,26 @@ body[data-etapa="confirmacao"] .conteudo { padding-bottom: calc(132px + env(safe
   .boasvindas-destaque { font-size: var(--t-indicador); }
 }
 
+/* Celular: no teste e na confirmação o cabeçalho e a barra de progresso ficam compactos,
+   para pergunta + 4 cartões + botões caberem numa tela de 375x667 sem rolar. */
+@media (max-width: 639px) {
+  body[data-etapa="teste"] .topo-interno,
+  body[data-etapa="confirmacao"] .topo-interno { padding-top: 6px; padding-bottom: 6px; }
+  body[data-etapa="teste"] .topo .logo,
+  body[data-etapa="confirmacao"] .topo .logo { width: 28px; height: 28px; }
+  body[data-etapa="teste"] .conteudo,
+  body[data-etapa="confirmacao"] .conteudo { padding-top: 10px; }
+  .tela-grupo .progresso-topo, .tela-confirmacao .progresso-topo { line-height: 1.2; }
+  .tela-grupo .progresso-num, .tela-confirmacao .progresso-num { font-size: var(--t-titulo); }
+  .tela-grupo .progresso-barra, .tela-confirmacao .progresso-barra { height: 20px; margin-top: 6px; }
+  .tela-grupo .progresso-ponto, .tela-confirmacao .progresso-ponto { width: 26px; height: 26px; }
+  .tela-grupo .titulo-grupo, .tela-confirmacao .titulo-grupo { margin-top: 12px; }
+  .barra-nav { padding-top: 8px; }
+  .barra-dica { margin-bottom: 6px; }
+  .tela-grupo .confirmar { margin-top: 8px; min-height: 44px; }
+  .tela-grupo .confirmar .botao { min-height: 44px; }
+}
+
 @media (max-width: 360px) {
   .barra-botoes .botao { font-size: var(--t-rotulo); }
 }
@@ -470,19 +572,26 @@ body[data-etapa="confirmacao"] .conteudo { padding-bottom: calc(132px + env(safe
   .passos { grid-template-columns: 1fr; }
   .passo { min-height: 0; flex-direction: row; align-items: center; }
   /* 320px: a coluna das posições cabe "identifica" inteiro e o cartão ganha largura sem a alça (o cartão todo continua arrastável) */
-  .ordenar { grid-template-columns: 56px minmax(0, 1fr); gap: 6px; }
-  .posicao-texto { font-size: var(--t-eixo); overflow-wrap: normal; }
+  .ordenar { column-gap: 6px; }
   .cartao { padding: 0 4px 0 12px; }
   .cartao-alca { display: none; }
+  .ver-demo { font-size: var(--t-eixo); }
   .cartao-texto { font-size: var(--t-rotulo); }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .progresso-feito, .progresso-ponto, .cartao, .retrato, .escala-opcao, .escolha-marca { transition: none; }
   .dica-janela:not([hidden]) { animation: none; }
+  /* Sem movimento: fica só a dica parada (cópia do último cartão com a mão e o balão) */
+  .demo-arrasto, .demo-mao, .demo-balao { animation: none; }
 }
 
 @media print {
-  .topo, .acoes, .barra-nav, .confirmar, .rodape .botao, .info, .dica-janela { display: none !important; }
+  .topo, .acoes, .barra-nav, .confirmar, .rodape .botao, .info, .dica-janela, .demo, .ver-demo { display: none !important; }
   body { background: var(--branco); }
 }
+
+/* Link discreto para o painel (login do recrutador) */
+.acesso-recrutador { margin: 16px 0 0; text-align: center; font-size: var(--t-nota); }
+.acesso-recrutador a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 8px; color: rgba(255, 255, 255, .65); text-underline-offset: 3px; }
+.acesso-recrutador a:hover, .acesso-recrutador a:focus-visible { color: #fff; }

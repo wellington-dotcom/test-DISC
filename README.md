@@ -106,6 +106,15 @@ Abra `admin.html` (ex.: `https://seu-usuario.github.io/teste-disc/admin.html`).
 - **Confiabilidade:** no fim do teste, o participante passa por uma confirmação rápida. Ele escolhe entre descrições e diz o quanto concorda com algumas frases, inclusive o lado "sombra" dos pontos fortes. O painel mostra se o resultado é de confiabilidade **alta**, **média** ou **baixa** e explica o motivo. O participante nunca vê essa informação.
 - **Prévia:** com `API_URL: 'simulada'`, entre com `admin@previa.com` ou `gestor@previa.com` e a senha `previa123`. Os links de exemplo são `index.html#a-SEL1` e `index.html#a-EQP1`.
 
+### ClickUp e relatórios
+
+- **Cada processo seletivo é uma lista do ClickUp.** Os candidatos vêm de lá; o painel não tem cadastro próprio de candidatos.
+- **Configurar uma vez:** crie os campos na pasta "Recrutamento e Seleção" (WhatsApp, notas das etapas, campos do DISC…) e coloque o token do ClickUp nas Propriedades do script. O passo a passo está em [docs/CLICKUP.md](docs/CLICKUP.md).
+- **Ligar o processo:** na aba **Processos**, escolha a lista do ClickUp e preencha empresa, vaga, cidade, consultor, contratante, período, perfil ideal, etapas (nome do campo da nota e peso), bônus e nota de corte. O link do teste continua o mesmo (`index.html?a=CODIGO`).
+- **DISC no ClickUp:** quando o candidato termina o teste, o resultado vai sozinho para a tarefa dele (achada pelo WhatsApp). Se não achar, o sistema cria a tarefa "<nome> (DISC)" com a etiqueta `sem formulário`.
+- **Relatório para o contratante:** em **Gerar rascunho do relatório**, revise os textos, toque em **Publicar** e mande o link. O relatório mostra só primeiro nome + inicial do sobrenome; nunca telefone, e-mail, idade individual ou dado sensível.
+- **Prévia:** com `API_URL: 'simulada'`, o processo "Cartório Exemplo — Escrevente" usa candidatos fictícios (nada é enviado ao ClickUp) e o relatório de exemplo abre em `relatorio.html#r-exemplo-cartorio`. Para quem mexe no código: os dados de exemplo saem de `tests/fixtures/processo-exemplo.json`; depois de mudar esse arquivo, rode `npm run montar:fixture`.
+
 ---
 
 ## 6. LGPD e como apagar os dados

@@ -13,6 +13,7 @@ Contrato compartilhado entre todos os módulos. Se algo aqui conflitar com o có
 
 - Site estático (HTML + CSS + JS puro, sem frameworks, sem bundler), publicável no GitHub Pages.
 - Backend: **Google Apps Script** publicado como Web App, gravando numa **Google Sheet** do recrutador.
+- **ClickUp é a fonte dos candidatos** do processo seletivo (um processo = uma lista do ClickUp). A planilha guarda só: usuários admin, processos (config), respostas DISC (cópia de segurança) e relatórios.
 - Com backend, o servidor devolve um **protocolo** curto (ex. `47K`) que o candidato vê na conclusão e informa ao recrutador.
 - Plano B sem backend (ou envio com falha): ao concluir, o candidato vê um **código de segurança** longo (e botão "Enviar pelo WhatsApp" quando `CONFIG.WHATSAPP_RECRUTADOR` está preenchido). O admin cola o código no painel para importar.
 
@@ -32,14 +33,18 @@ Contrato compartilhado entre todos os módulos. Se algo aqui conflitar com o có
 | `index.html`, `js/app.js`, `assets/styles.css` | Fluxo do candidato |
 | `admin.html`, `js/admin.js`, `assets/admin.css` | Painel do recrutador |
 | `js/lideranca.js` | `DISC_LIDERANCA = { gerarGuia(resultado, nome) -> {titulo, resumo, secoes:[{titulo, itens:[]}]}, combinacoes: {...} }` |
-| `apps-script/Code.gs`, `docs/BACKEND.md` | Backend |
+| `js/relatorio-motor.js` | `DISC_RELATORIO = { montar(processoDados, opcoes?), calcularScore, aderenciaDisc, primeiroNome, funil, ... }` — motor do relatório, ES5 puro, copiado para `apps-script/RelatorioMotor.gs` por `npm run montar:apps-script` (o `npm test` confere que estão idênticos) |
+| `relatorio.html`, `js/relatorio-view.js`, `assets/relatorio.css` | Página pública do relatório (`DISC_RELATORIO_VIEW.montarHtml`, escapa tudo) |
+| `js/fixture-processo-exemplo.js` | Gerado de `tests/fixtures/processo-exemplo.json` por `npm run montar:fixture` (usado só pela prévia) |
+| `apps-script/Code.gs`, `ClickUp.gs`, `Relatorio.gs`, `RelatorioMotor.gs`, `docs/BACKEND.md`, `docs/CLICKUP.md` | Backend |
 | `tests/*.test.js`, `tests/e2e/*.spec.js`, `package.json` | Testes |
 | `README.md` | Guia de uso para o recrutador (pt-BR, leigo) |
 
 Todos os módulos JS usam o padrão UMD já usado em `scoring.js` (global no navegador, `module.exports` no Node) para serem testáveis com `node --test`.
 Ordem de scripts nas páginas: `config.js`, `disc-data.js`, `scoring.js`, `codec.js`, `api.js`, `api-simulada.js`, depois
 - candidato (`index.html`): `dicas.js`, `validacao.js`, `app.js`;
-- painel (`admin.html`): `lideranca.js`, `validacao.js`, `confiabilidade.js`, `admin.js`.
+- painel (`admin.html`): `lideranca.js`, `validacao.js`, `confiabilidade.js`, `relatorio-view.js`, `admin.js`.
+- relatório (`relatorio.html`): só `config.js`, `api.js`, `api-simulada.js`, `relatorio-view.js` (na prévia, a simulada carrega `relatorio-motor.js` e a fixture sob demanda).
 
 ## Payload de resultado (candidato → backend / código)
 
@@ -129,13 +134,30 @@ Depois do último grupo e antes da revisão ("Confirmação 1 de 2" e "2 de 2"; 
 
 ## Logins, papéis, empresas e avaliações
 
-- **Papéis:** `admin` (tudo) e `gestor` (só a própria `empresaId`: lista participantes e avaliações da empresa e muda status/observações; não exclui nem cria nada). O servidor confere o papel e a empresa em **toda** ação; campos extras no corpo (ex. `empresaId`) são ignorados.
+- **Papéis:** o painel é **só para administradores** (login de gestor é recusado e a sessão encerrada; a aba Empresas saiu da interface; "empresa" agora é texto no processo). O servidor mantém o código abaixo por compatibilidade: `admin` (tudo) e `gestor` (só a própria `empresaId`: lista participantes e avaliações da empresa e muda status/observações; não exclui nem cria nada). O servidor confere o papel e a empresa em **toda** ação; campos extras no corpo (ex. `empresaId`) são ignorados.
 - **Senha:** 8 a 100 caracteres. `hash = x`, com `x = sal + senha` e 2.000 rodadas de `x = hex(SHA-256(x))`; sal aleatório de 16 bytes. Hash e sal nunca saem do servidor.
 - **Login:** mensagem genérica "E-mail ou senha incorretos."; 5 erros seguidos → "Muitas tentativas. Tente de novo em 15 minutos." (bloqueio de 15 min). E-mail inexistente recebe **as mesmas** mensagens e o mesmo bloqueio (contado só no `CacheService`), para não revelar quem tem cadastro.
 - **Sessão:** token de 64 hex (2 UUIDs) no `CacheService` (`sessao_<token>` → `{usuarioId, marca da senha}`), 6 h de validade renovadas a cada uso. Usuário desativado, senha trocada/redefinida ou "sair" derrubam a sessão. Resposta: `{ok:false, erro:'Sessão expirada. Entre de novo.', sessaoExpirada:true}`. O painel guarda o token em `sessionStorage` (`disc_admin_token`).
 - **Primeiro acesso / recuperação:** a `ADMIN_KEY` (Script Properties, criada por `setup()`) cria um admin; se o e-mail já for de um admin, redefine a senha dele.
 - **Empresas** e **avaliações** são criadas pelo admin. Cada avaliação tem código único de 4 caracteres (`ABCDEFGHJKLMNPQRSTUVWXYZ23456789`), tipo `selecao` ou `equipe`, `mostrarResultado` e `ativa`. Link: `index.html?a=CODIGO` (ou `#a-CODIGO`).
 - **Personalização no participante:** `selecao` → "Processo seletivo · <empresa>", "candidato", campo "Vaga pretendida"; `equipe` → "Avaliação de equipe · <empresa>", "colaborador", sem vaga nem empresa anterior, "Seu cargo/função". Consentimento: "…apenas nesta avaliação da <empresa>, conduzida pela Notus…". Código inválido/inativo → "Link inválido ou avaliação encerrada. Fale com quem enviou o link.". Com `mostrarResultado`, a tela final mostra o resumo do perfil (retrato + pontos fortes; nunca o Guia nem a confiabilidade). Sem código vale o fluxo geral e `CONFIG.MOSTRAR_RESULTADO_AO_CANDIDATO`. A conclusão guardada na aba é ligada ao código do link: abrir outro link começa do zero.
+
+## Processos, ClickUp e relatório
+
+- **Processo** (antes "avaliação"; aba `Avaliacoes` ganhou colunas no fim): `id, codigo, nome, empresa (texto), vaga, cidade, consultor, contratante, periodo {inicio, fim}, clickupListId, ativa, mostrarResultado, config`. Link do teste continua `index.html?a=CODIGO` / `#a-CODIGO`.
+- **config**: `{ perfilIdeal ('C', 'CD'…), explicacaoPerfil, etapas:[{id, nome, peso, campo (campo numérico 0–10 do ClickUp), descricao}], bonus:[{id, nome, campo, regra:{tipo:'checkbox', pontos} | {tipo:'mapa', pontos:{valor: n}}}], corte (70), faixaAvaliar (55), statusFinalistas:[], permitirAntecedentes (false), permitirSaude (false) }`. O servidor e o painel recusam campo sensível em etapa ou bônus.
+- **processoDados** (`processo.dados`, montado do ClickUp): `{ processo, config, status:[{nome, tipo, cor}], candidatos:[{id, nome, status, criadoEm, idade, idadeFaixa, statusTrabalho, pretensao, ultimoSalario, formacao, notas, bonusValores, disc, finalista}], avisos }`. Campos achados pelo nome normalizado com apelidos (whatsapp|telefone|celular; idade; status de trabalho; pretensao salarial; ultimo salario; formacao|escolaridade|curso). Telefone/e-mail **nunca** saem do servidor (só servem para casar a resposta DISC com a tarefa).
+- **Envio do candidato** (`enviar`): grava na planilha e, se o processo tiver `clickupListId` e houver `CLICKUP_TOKEN`, acha a tarefa pelo WhatsApp (últimos 8 dígitos + DDD) e grava `DISC D %`, `DISC I %`, `DISC S %`, `DISC C %`, `DISC Perfil`, `DISC Confiabilidade`, `DISC Código`; sem esses campos, grava um comentário; sem tarefa, cria `<nome> (DISC)` com a etiqueta `sem formulário`. Falha no ClickUp vira aviso (em `clickup.status`) e **nunca** impede o candidato de concluir.
+- **Motor** (`DISC_RELATORIO.montar`): score técnico = Σ nota/10 × peso normalizado sobre as etapas com alguma nota (as demais são "peso em aberto"); nota vazia numa etapa aplicada = 0 e marca `incompleto`; bônus por fora; situação `aprovado` (≥ corte), `avaliar` (≥ faixaAvaliar) ou `nao_recomendado`; empate por técnico e nome. Aderência DISC: `indefinida` (confiabilidade baixa), `ideal`, `boa`, `media`, `baixa`. Textos por regras `{texto, origem:'regra'|'ia'|'editado'}`; nunca citam idade nem dado sensível. Números com 1 casa (ponto no JSON, vírgula na tela).
+- **Relatório**: rascunho (aba `Relatorios`, JSON dividido em partes de 45.000 caracteres) → edição dos textos → publicar (link `relatorio.html?r=TOKEN`, token aleatório de 64 hex; comentário com o link na tarefa `📌 Briefing…` da lista, ou na lista) → despublicar. IA opcional (`ANTHROPIC_API_KEY`) reescreve textos escolhidos e marca `origem:'ia'`. Gatilho opcional `instalarGatilho()` (10 min): briefing no status `gerar relatório` → rascunho + comentário + status `relatório em revisão`.
+- **Página do relatório** (`relatorio.html?r=TOKEN` ou `#r-TOKEN`): visual editorial Notus para documentos (ver `docs/IDENTIDADE-VISUAL.md`, "Documentos"), celular primeiro e impressão A4. Sem token/inválido/despublicado: "Relatório não encontrado ou fora do ar.".
+
+### Privacidade (obrigatório)
+
+- Campo do ClickUp cujo nome normalizado (minúsculas, sem acento) tenha uma palavra começando por `sexo, genero, estado civil, filho, religi, gravid, etnia, raca, cor da pele, orientacao, deficien, doenca, saude, antecedente, processo em seu nome, criminal` **nunca é lido** (mesma lista em `Code.gs`, `api-simulada.js` e `admin.js`). Saúde só com `config.permitirSaude === true`; antecedentes só com `config.permitirAntecedentes === true` e **nunca** no relatório (o servidor apaga antes de rodar o motor).
+- Relatório do contratante: nomes como "Primeiro S." (o servidor troca qualquer nome completo que tenha sobrado); **nunca** telefone, e-mail, id de tarefa ou da lista do ClickUp. `relatorioPublico` devolve só `{ok, relatorio, publicadoEm}` e só de relatório publicado.
+- `CLICKUP_TOKEN`, `ANTHROPIC_API_KEY`, `CLICKUP_PASTA_ID`, `SITE_URL` ficam só nas Propriedades do script e nunca voltam ao navegador.
+- Todo texto do relatório (inclusive os editados) e todo nome entram na página escapados; a pré-visualização do painel roda num iframe sem scripts (teste E2E em `tests/e2e/seguranca.spec.js` e `tests/e2e/relatorio.spec.js`).
 
 ## API do Apps Script
 
@@ -146,6 +168,7 @@ Ações públicas:
 - `avaliacaoPublica {codigo}` → `{ok, avaliacao:{codigo, nome, tipo, empresaNome, mostrarResultado}}` (só avaliações ativas).
 - `login {email, senha}` → `{ok, token, usuario:{id, nome, email, papel, empresaId, empresaNome}}`.
 - `primeiroAcesso {chave, nome, email, senha}` → igual ao login (+ `redefinida`).
+- `relatorioPublico {token}` → `{ok, relatorio, publicadoEm}` só se publicado; senão "Relatório não encontrado ou fora do ar.".
 
 Com sessão (`token` no corpo):
 - `eu`, `sair`, `trocarSenha {senhaAtual, novaSenha}` (a sessão atual continua; as outras caem).
@@ -153,24 +176,25 @@ Com sessão (`token` no corpo):
 - `atualizar {id, campos:{status?, observacoes?}}` (gestor só na própria empresa).
 - Só admin: `excluir {id}`, `excluirTodos {avaliacao?}`, `empresas.listar|salvar {empresa:{id?, nome}}|excluir {id}` (recusa com avaliações ou gestores), `avaliacoes.salvar {avaliacao:{id?, empresaId, nome, tipo, mostrarResultado, ativa}}`, `avaliacoes.excluir {id}` (recusa com respostas: sugere desativar), `usuarios.listar|salvar {usuario, senhaTemporaria?}|excluir {id}|redefinirSenha {id, senhaTemporaria}` (ninguém exclui/desativa/rebaixa a si mesmo; sempre sobra 1 admin ativo).
 - `avaliacoes.listar`: admin e gestor (filtrado), com a contagem de `respostas`.
+- Só admin (processos, ClickUp, relatórios): `processos.listar`, `processos.salvar {processo}`, `processos.excluir {id}` (os `avaliacoes.*` continuam como apelidos), `clickup.status` → `{ok, configurado, conectado, usuario?, iaConfigurada, avisos}`, `clickup.listas` → `{ok, listas:[{id, nome, pasta}]}` (pasta `CLICKUP_PASTA_ID` ou todo o workspace), `processo.dados {id}` → processoDados, `relatorio.rascunho {processoId}` → `{ok, relatorio, token, avisos}`, `relatorio.salvar {relatorioToken, relatorio:{textos}}` (só textos existentes; marca `editado`; única ação com corpo até 450 KB), `relatorio.publicar {relatorioToken, baseUrl?}` → `{ok, url, aviso?}`, `relatorio.despublicar {relatorioToken}`, `relatorios.listar {processoId}`, `relatorio.melhorarTextos {relatorioToken, ids?}` (sem chave: "IA não configurada."). Nas ações com sessão, `token` é o da sessão; o do relatório vai em **`relatorioToken`**.
 - Gestor em ação de admin → "Sem permissão.".
 
 Abas (criadas sozinhas na primeira requisição; `setup()` também cria): `Usuarios (id, email, nome, papel, empresaId, hash, sal, ativo, tentativas, bloqueadoAte, criadoEm)`, `Empresas (id, nome, criadaEm)`, `Avaliacoes (id, codigo, empresaId, nome, tipo, mostrarResultado, ativa, criadaEm)`. Todo texto gravado passa por proteção contra fórmula (`= + - @` e dígitos iniciais recebem apóstrofo). Escritas sob `LockService` (liberado em `finally`).
 
 Colunas da aba `Respostas`: `id, recebidoEm, nome, telefone, vaga, inicio, fim, duracaoSeg, respostas, D, I, S, C, perfil, status, observacoes, payloadJson, protocolo, idade, funcao, empresa, avaliacao, empresaId`. As colunas novas ficam sempre **no fim**: planilhas antigas sem `protocolo` / `idade` / `funcao` / `empresa` / `avaliacao` / `empresaId` ganham as colunas automaticamente no primeiro acesso (`funcao` e `empresa` em formato texto; `idade` é número); se a aba tiver menos colunas físicas, elas são inseridas. As linhas antigas ficam com essas células vazias.
 
-Prévia: com `API_URL: 'simulada'` a mesma API roda em `js/api-simulada.js` (logins da prévia acima; chave de primeiro acesso `previa`).
+Prévia: com `API_URL: 'simulada'` a mesma API roda em `js/api-simulada.js` (logins da prévia acima; chave de primeiro acesso `previa`). O ClickUp nunca é chamado: o processo "Cartório Exemplo — Escrevente" (código `CRT1`) usa a fixture, e o relatório publicado `relatorio.html#r-exemplo-cartorio` já existe; a IA só põe o prefixo `[IA] `.
 
 ## Painel admin
 
 - Login por e-mail e senha (token em `sessionStorage`; a senha nunca é guardada), com "Primeiro acesso", "Trocar senha" e "Sair" no menu do cabeçalho. Sessão expirada volta ao login com aviso. Se `API_URL` vazio, funciona só em modo "importar código" (salvo em `localStorage`).
-- Abas: admin vê Participantes, Avaliações, Empresas, Usuários, Comparativo e Importar códigos; gestor só Participantes (da empresa dele) e Comparativo, sem botões de excluir/criar.
-- Avaliações: card com código, link, "Copiar link", "Copiar mensagem" (WhatsApp), Editar, Ativar/Desativar e Excluir (só com 0 respostas). Empresas: criar, renomear, excluir. Usuários: criar/editar (empresa só para gestor), gerar senha temporária, redefinir senha, desativar, excluir.
+- Só administradores. Abas: Participantes, Processos, Usuários, Comparativo e Importar códigos (`data-aba`: `lista, processos, usuarios, comparativo, importar`).
+- Processos: card com código, link, "Copiar link", "Copiar mensagem" (WhatsApp), Editar, Ativar/Desativar e Excluir (só com 0 respostas). Formulário com dados do processo, lista do ClickUp (seletor; sem ClickUp, campo para colar o ID/endereço), perfil ideal, etapas, bônus, corte, faixa "avaliar", status finalistas e antecedentes. Página do processo: relatórios, "Ver participantes" e "Gerar rascunho do relatório". Editor do rascunho: textos por seção (selo Regra/IA/Editado), pré-visualização, Salvar, Publicar (link + mensagem para o contratante), Despublicar e "Melhorar textos com IA" (só com `iaConfigurada`). Usuários: só cria administradores; gestores antigos aparecem como desativados e podem ser excluídos.
 - Todo texto vindo do servidor (nomes de participante, empresa, avaliação, usuário) entra no DOM por `textContent` (teste E2E de XSS em `tests/e2e/seguranca.spec.js`).
 - Lista: nome, telefone (link `https://wa.me/55...`), vaga, data, uma linha discreta "Função · Empresa" (só se houver), perfil (badge colorido), barras D/I/S/C, status.
 - **Idade só no detalhe** do candidato (bloco "Dados do candidato", com "—" quando não há). Ela **não** aparece na lista/cards, nos cards de resumo, no comparativo, na busca nem como filtro. Motivo: evitar discriminação por idade na seleção (Lei 9.029/95); a idade é dado cadastral. Fica também no CSV (coluna `idade`), que é a exportação completa do cadastro.
 - Protocolo em cada card ("Código 47K", ou `—`), no detalhe abaixo do nome, no CSV (coluna `protocolo`) e no "Copiar guia".
-- Filtros: busca por nome, vaga, função, empresa, código (ignora maiúsculas e espaços) ou telefone (nunca pela idade); pílulas de Empresa (só admin), Avaliação, Perfil e Status. Card mostra "Avaliação · Empresa" (ou "Link geral") e o selo de confiabilidade.
+- Filtros: busca por nome, vaga, função, empresa, código (ignora maiúsculas e espaços) ou telefone (nunca pela idade); pílulas de Processo (`#filtro-processo`), Perfil e Status. Card mostra "Processo · Empresa" (ou "Link geral") e o selo de confiabilidade.
 - Detalhe mostra também Idade, Vaga pretendida, Função atual/última e Empresa atual/última.
 - CSV (`participantes-disc-AAAA-MM-DD.csv`): colunas `idade`, `funcao`, `empresa` logo após `vaga` (vazias para registros antigos) e, no fim, avaliação, empresa da avaliação e confiabilidade.
 - Detalhe do candidato: gráfico de barras DISC (SVG/CSS, sem libs), características do perfil (de `DISC_DATA.perfis`), e o **Guia para a Liderança** de `DISC_LIDERANCA.gerarGuia`. Botão imprimir/salvar PDF (CSS `@media print`) e "copiar guia" (texto).

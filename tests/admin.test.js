@@ -241,20 +241,20 @@ test('recalcular calcula a confiabilidade (objeto ou texto JSON) e o selo do car
   assert.equal(AD.seloConfiabilidade(null), null);
 });
 
-test('abas e permissões por papel', () => {
-  assert.deepEqual(AD.abasDoPapel('admin', true), ['lista', 'avaliacoes', 'empresas', 'usuarios', 'comparativo', 'importar']);
-  assert.deepEqual(AD.abasDoPapel('gestor', true), ['lista', 'comparativo']);
+test('abas e permissões: só o administrador usa o painel (gestor desativado nesta versão)', () => {
+  assert.deepEqual(AD.abasDoPapel('admin', true), ['lista', 'processos', 'usuarios', 'comparativo', 'importar']);
+  assert.deepEqual(AD.abasDoPapel('gestor', true), [], 'gestor não vê nada');
   assert.deepEqual(AD.abasDoPapel('', true), []);
   assert.deepEqual(AD.abasDoPapel('', false), ['lista', 'comparativo', 'importar'], 'modo local, sem login');
   const g = AD.permissoes('gestor', true);
   assert.equal(g.excluir, false);
   assert.equal(g.criar, false);
   assert.equal(g.importar, false);
-  assert.equal(g.filtrarEmpresa, false);
-  assert.equal(g.statusObservacoes, true);
+  assert.equal(g.statusObservacoes, false);
   const a = AD.permissoes('admin', true);
-  assert.ok(a.excluir && a.criar && a.importar && a.filtrarEmpresa && a.statusObservacoes);
+  assert.ok(a.excluir && a.criar && a.importar && a.statusObservacoes);
   assert.equal(AD.permissoes('', false).excluir, true, 'modo local continua podendo excluir');
+  assert.match(AD.MSG_SO_ADMIN, /só para administradores/);
 });
 
 test('gerarSenhaTemporaria: 10 caracteres fáceis de ditar', () => {
@@ -268,7 +268,7 @@ test('gerarSenhaTemporaria: 10 caracteres fáceis de ditar', () => {
   assert.notEqual(AD.gerarSenhaTemporaria(), AD.gerarSenhaTemporaria());
 });
 
-test('link e mensagem da avaliação', () => {
+test('link e mensagem do processo (empresa em texto ou empresaNome antigo)', () => {
   assert.equal(AD.linkAvaliacao('https://site.com/disc/admin.html?x=1#topo', 'SEL1'), 'https://site.com/disc/index.html?a=SEL1');
   assert.equal(AD.linkAvaliacao('http://localhost:4173/admin.html', 'K7QZ'), 'http://localhost:4173/index.html?a=K7QZ');
   const link = 'https://site.com/index.html?a=SEL1';
@@ -278,6 +278,88 @@ test('link e mensagem da avaliação', () => {
   const eqp = AD.mensagemConvite({ nome: 'Equipe comercial', empresaNome: 'Clínica Exemplo', tipo: 'equipe' }, link);
   assert.match(eqp, /A Clínica Exemplo está fazendo uma avaliação de perfil da equipe \(Equipe comercial\)/);
   assert.ok(eqp.indexOf(link) !== -1);
+});
+
+test('mensagem de convite usa a vaga e a empresa (texto) do processo', () => {
+  const link = 'https://site.com/index.html?a=AB23';
+  const m = AD.mensagemConvite({ nome: 'Escrevente 2026', vaga: 'Escrevente de atendimento', empresa: 'Cartório Exemplo', tipo: 'selecao' }, link);
+  assert.match(m, /processo seletivo de Escrevente de atendimento da Cartório Exemplo/);
+  assert.ok(m.indexOf(link) !== -1);
+});
+
+test('link e mensagem do relatório para o contratante', () => {
+  assert.equal(AD.linkRelatorio('https://site.com/disc/admin.html?x=1#y', 'abc123TOKEN'), 'https://site.com/disc/relatorio.html?r=abc123TOKEN');
+  assert.equal(AD.urlAbsoluta('relatorio.html?r=T1', 'https://site.com/disc/admin.html'), 'https://site.com/disc/relatorio.html?r=T1');
+  assert.equal(AD.urlAbsoluta('https://outro.com/relatorio.html?r=T1', 'https://site.com/admin.html'), 'https://outro.com/relatorio.html?r=T1');
+  const msg = AD.mensagemRelatorio({ contratante: 'Marina Souza', vaga: 'Escrevente', empresa: 'Cartório Exemplo', consultor: 'Paulo Lima' }, 'https://x/relatorio.html?r=T');
+  assert.match(msg, /^Olá, Marina! O relatório do processo seletivo de Escrevente \(Cartório Exemplo\) está pronto:/);
+  assert.match(msg, /https:\/\/x\/relatorio\.html\?r=T/);
+  assert.match(msg, /Paulo Lima · Notus Agência$/);
+  assert.doesNotMatch(AD.mensagemRelatorio({}, 'u'), /undefined/);
+});
+
+test('perfil ideal: 1 ou 2 letras D/I/S/C, toque alterna e explica em pt-BR', () => {
+  assert.equal(AD.normalizarPerfilIdeal('cd'), 'CD');
+  assert.equal(AD.normalizarPerfilIdeal('C x D s'), 'CD');
+  assert.equal(AD.normalizarPerfilIdeal('CC'), 'C');
+  assert.equal(AD.alternarLetraPerfil('', 'C'), 'C');
+  assert.equal(AD.alternarLetraPerfil('C', 'D'), 'CD');
+  assert.equal(AD.alternarLetraPerfil('CD', 'I'), 'CI', 'com 2 letras troca a segunda');
+  assert.equal(AD.alternarLetraPerfil('CD', 'C'), 'D', 'tocar de novo tira a letra');
+  assert.equal(AD.alternarLetraPerfil('CD', 'X'), 'CD');
+  assert.equal(AD.explicarPerfil('CD'), 'C (Conformidade) como traço principal e D (Dominância) como segundo traço.');
+  assert.match(AD.explicarPerfil(''), /Escolha 1 ou 2 letras/);
+});
+
+test('campo sensível do ClickUp é recusado (antecedentes só com permissão)', () => {
+  ['Sexo', 'Gênero', 'Estado civil', 'Tem filhos?', 'Religião', 'Grávida', 'Raça / cor da pele', 'Orientação sexual', 'Deficiência', 'Doença crônica', 'Saúde', 'Antecedentes criminais', 'Possui processo em seu nome?']
+    .forEach((n) => assert.equal(AD.campoSensivel(n), true, n));
+  ['Nota Revisão', 'Graduação na área', 'Pretensão salarial', ''].forEach((n) => assert.equal(AD.campoSensivel(n), false, n));
+  assert.equal(AD.campoSensivel('Antecedentes', { permitirAntecedentes: true }), false);
+  assert.equal(AD.campoSensivel('Estado civil', { permitirAntecedentes: true }), true);
+});
+
+test('pesos normalizados, ids simples e ID da lista do ClickUp', () => {
+  assert.deepEqual(AD.pesosNormalizados([{ peso: 30 }, { peso: 15 }, { peso: 5 }]), [60, 30, 10]);
+  assert.deepEqual(AD.pesosNormalizados([{ peso: 1 }, { peso: 2 }]), [33.3, 66.7]);
+  assert.deepEqual(AD.pesosNormalizados([{ peso: 0 }, { peso: 'x' }]), [0, 0]);
+  const usados = {};
+  assert.equal(AD.idSimples('Revisão documental', usados), 'revisao_documental');
+  assert.equal(AD.idSimples('Revisão documental', usados), 'revisao_documental_2');
+  assert.equal(AD.idSimples('', usados, 'etapa'), 'etapa');
+  assert.equal(AD.idListaDoTexto('https://app.clickup.com/9012/v/li/901234567890'), '901234567890');
+  assert.equal(AD.idListaDoTexto(' 901234567890 '), '901234567890');
+});
+
+test('validarConfig: mensagens claras antes de mandar ao servidor', () => {
+  const ok = { perfilIdeal: 'CD', etapas: [{ nome: 'Revisão', peso: 30, campo: 'Nota Revisão' }], bonus: [{ nome: 'Graduação', campo: 'Graduação na área', regra: { tipo: 'checkbox', pontos: 10 } }], corte: 70, faixaAvaliar: 55 };
+  assert.equal(AD.validarConfig(ok), '');
+  assert.equal(AD.validarConfig(Object.assign({}, ok, { perfilIdeal: 'CC' })), 'Perfil ideal inválido: use 1 ou 2 letras entre D, I, S e C.');
+  assert.equal(AD.validarConfig(Object.assign({}, ok, { faixaAvaliar: 80 })), 'A faixa "avaliar" precisa ser menor ou igual à nota de corte.');
+  assert.equal(AD.validarConfig(Object.assign({}, ok, { etapas: [{ nome: '', peso: 1 }] })), 'Dê um nome para a etapa 1.');
+  assert.equal(AD.validarConfig(Object.assign({}, ok, { etapas: [{ nome: 'X', peso: 1, campo: 'Estado civil' }] })), 'O campo "Estado civil" é um dado sensível e não pode ser usado.');
+  assert.equal(AD.validarConfig(Object.assign({}, ok, { bonus: [{ nome: 'Presencial', campo: 'Perfil', regra: { tipo: 'mapa', pontos: {} } }] })), 'Informe ao menos um valor com pontos no bônus "Presencial".');
+  assert.equal(AD.validarConfig(Object.assign({}, ok, { corte: null })), 'Informe a nota de corte.');
+  assert.equal(AD.validarConfig(AD.configPadrao()), '', 'config vazia de processo novo é válida');
+});
+
+test('editor: textos editáveis na ordem do documento e edição marca origem "editado"', () => {
+  const M = require('../js/relatorio-motor.js');
+  const rel = M.montar(JSON.parse(JSON.stringify(require('./fixtures/processo-exemplo.json'))));
+  const lista = AD.textosEditaveis(rel);
+  assert.equal(lista.length, Object.keys(rel.textos).length, 'todos os textos aparecem uma vez');
+  assert.equal(new Set(lista.map((t) => t.id)).size, lista.length);
+  assert.equal(lista[0].id, rel.sumario.recomendacao.textoId);
+  assert.equal(lista[0].secao, 'Sumário executivo');
+  const secoes = [...new Set(lista.map((t) => t.secao))];
+  assert.deepEqual(secoes.slice(0, 5), ['Sumário executivo', 'Painel de atração', 'Avaliação técnica', 'Análise DISC', 'Ranking final']);
+  const passo = lista.find((t) => t.rotulo === 'Próximo passo 1');
+  assert.ok(passo && passo.secao === 'Encerramento');
+  assert.equal(AD.editarTexto(rel, 'recomendacao', rel.textos.recomendacao.texto), false, 'sem mudança não marca');
+  assert.equal(AD.editarTexto(rel, 'recomendacao', 'Texto novo.'), true);
+  assert.deepEqual(rel.textos.recomendacao, { texto: 'Texto novo.', origem: 'editado' });
+  assert.equal(AD.editarTexto(rel, 'nao-existe', 'x'), false, 'não cria texto novo');
+  assert.deepEqual(AD.textosEditaveis(null), []);
 });
 
 test('textoOrigem: avaliação e empresa no card; "Link geral" sem código', () => {
@@ -321,7 +403,7 @@ test('guia copiado leva o aviso quando a confiabilidade é baixa', () => {
   assert.equal(AD.AVISO_GUIA_BAIXA, 'Atenção: a confiabilidade deste resultado é baixa. Use o guia com cautela e confirme em entrevista.');
 });
 
-test('admin.html: login por e-mail e senha, sem a tela de chave, e carrega validacao/confiabilidade antes do admin.js', () => {
+test('admin.html: login por e-mail e senha, sem a tela de chave, carrega validacao/confiabilidade/relatorio-view antes do admin.js e não tem Empresas', () => {
   const fs = require('node:fs');
   const path = require('node:path');
   const html = fs.readFileSync(path.join(__dirname, '..', 'admin.html'), 'utf8');
@@ -334,5 +416,10 @@ test('admin.html: login por e-mail e senha, sem a tela de chave, e carrega valid
   assert.match(html, /id="campo-senha"/);
   assert.match(html, /id="form-primeiro"/);
   assert.doesNotMatch(html, /campo-chave/);
-  assert.match(html, /Prévia: <span class="negrito">admin@previa\.com<\/span> ou <span class="negrito">gestor@previa\.com<\/span>, senha <span class="negrito">previa123<\/span>/);
+  assert.ok(scripts.indexOf('js/relatorio-view.js') !== -1 && scripts.indexOf('js/relatorio-view.js') < iAdmin);
+  assert.match(html, /Prévia: <span class="negrito">admin@previa\.com<\/span>, senha <span class="negrito">previa123<\/span>/);
+  assert.doesNotMatch(html, /gestor@previa/);
+  assert.match(html, /data-aba="processos"[^>]*>Processos</);
+  assert.doesNotMatch(html, /data-aba="(empresas|avaliacoes)"/);
+  assert.match(html, /id="vista-processos"/);
 });

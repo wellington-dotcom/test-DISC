@@ -239,7 +239,9 @@ test('setup cria as abas e a chave de 40 caracteres hexadecimais e não troca a 
   assert.ok(ctx.aba(), 'aba Respostas criada');
   assert.deepEqual(ctx.abas.Usuarios.linhas[0], ['id', 'email', 'nome', 'papel', 'empresaId', 'hash', 'sal', 'ativo', 'tentativas', 'bloqueadoAte', 'criadoEm']);
   assert.deepEqual(ctx.abas.Empresas.linhas[0], ['id', 'nome', 'criadaEm']);
-  assert.deepEqual(ctx.abas.Avaliacoes.linhas[0], ['id', 'codigo', 'empresaId', 'nome', 'tipo', 'mostrarResultado', 'ativa', 'criadaEm']);
+  assert.deepEqual(ctx.abas.Avaliacoes.linhas[0], ['id', 'codigo', 'empresaId', 'nome', 'tipo', 'mostrarResultado', 'ativa', 'criadaEm',
+    'empresa', 'vaga', 'cidade', 'consultor', 'contratante', 'periodoInicio', 'periodoFim', 'clickupListId', 'config']);
+  assert.deepEqual(ctx.abas.Relatorios.linhas[0], ['token', 'processoId', 'status', 'parte', 'json', 'criadoEm', 'publicadoEm', 'atualizadoEm']);
   assert.match(ctx.props.ADMIN_KEY, /^[0-9a-f]{40}$/);
   assert.ok(ctx.logs.some((l) => l === ctx.props.ADMIN_KEY), 'chave registrada no log');
   assert.ok(ctx.logs.includes("Use esta chave uma única vez no painel, em 'Primeiro acesso', para criar o seu login de administrador."));

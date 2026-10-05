@@ -1,10 +1,11 @@
 /*
  * Painel — participantes, filtros, detalhe com confiabilidade, Guia para a Liderança, comparativo, CSV,
- * e (admin) avaliações, empresas e usuários.
+ * e (admin) processos seletivos (config + ClickUp + editor do relatório) e usuários.
  * Segurança: todo dado do participante entra no DOM via textContent / setAttribute (nunca innerHTML).
+ *   A pré-visualização do relatório usa DISC_RELATORIO_VIEW.montarHtml (que escapa tudo) dentro de um iframe.
  * Modo com API (CONFIG.API_URL preenchido): login por e-mail e senha; o token da sessão fica no sessionStorage
- *   e vai explícito em cada chamada do DISC_API. Papéis: 'admin' (tudo) e 'gestor' (só a própria empresa:
- *   participantes e comparativo; muda status e observações; não exclui nem cria).
+ *   e vai explícito em cada chamada do DISC_API. Só administradores usam o painel (o papel "gestor" foi
+ *   desativado nesta versão: o login de um gestor é recusado na tela).
  * Modo sem API: importação de códigos DISC1.* guardados em localStorage (status/observações locais).
  */
 (function (root) {
@@ -24,7 +25,8 @@
     trilho: '#e9ecef', texto: '#13283f', suave: '#6b7586'
   };
   var NOMES = { D: 'Dominância', I: 'Influência', S: 'Estabilidade', C: 'Conformidade' };
-  var PAPEIS = { admin: 'Administrador', gestor: 'Gestor' };
+  var PAPEIS = { admin: 'Administrador', gestor: 'Gestor (desativado nesta versão)' };
+  var MSG_SO_ADMIN = 'Este painel é só para administradores. O acesso de gestor foi desativado nesta versão.';
   var TIPOS = { selecao: 'Processo seletivo', equipe: 'Avaliação de equipe' };
   var NIVEIS_CONF = { alta: 'Alta', media: 'Média', baixa: 'Baixa', indisponivel: 'Sem dados' };
   var CLASSE_CONF = { alta: 'selo--verde', media: '', baixa: 'selo--vermelho' };
@@ -178,10 +180,10 @@
   }
 
   // Abas que cada papel vê. Sem API (modo local) não há login: lista, comparativo e importação.
+  // Com API, só o administrador usa o painel (gestor desativado nesta versão).
   function abasDoPapel(papel, modoApi) {
     if (!modoApi) return ['lista', 'comparativo', 'importar'];
-    if (papel === 'admin') return ['lista', 'avaliacoes', 'empresas', 'usuarios', 'comparativo', 'importar'];
-    if (papel === 'gestor') return ['lista', 'comparativo'];
+    if (papel === 'admin') return ['lista', 'processos', 'usuarios', 'comparativo', 'importar'];
     return [];
   }
 
@@ -192,8 +194,7 @@
       excluir: admin,
       importar: admin,
       criar: !!modoApi && papel === 'admin',
-      filtrarEmpresa: !!modoApi && papel === 'admin',
-      statusObservacoes: !modoApi || papel === 'admin' || papel === 'gestor'
+      statusObservacoes: admin
     };
   }
 
@@ -221,18 +222,215 @@
     return base + 'index.html?a=' + encodeURIComponent(String(codigo || ''));
   }
 
-  // Texto para colar no WhatsApp.
+  // Link público do relatório: pasta da página atual + relatorio.html?r=TOKEN.
+  function linkRelatorio(href, token) {
+    var base = String(href || '').split('#')[0].split('?')[0].replace(/[^/]*$/, '');
+    return base + 'relatorio.html?r=' + encodeURIComponent(String(token || ''));
+  }
+
+  // Endereço devolvido pelo servidor: absoluto fica como está; relativo (sem SITE_URL) vira absoluto a partir do painel.
+  function urlAbsoluta(url, href) {
+    var u = String(url || '');
+    if (/^https?:\/\//i.test(u)) return u;
+    var base = String(href || '').split('#')[0].split('?')[0].replace(/[^/]*$/, '');
+    return base + u.replace(/^\.?\//, '');
+  }
+
+  function empresaDe(p) { return p ? String(p.empresa || p.empresaNome || '') : ''; }
+
+  // Texto para colar no WhatsApp (convite do participante).
   function mensagemConvite(av, link) {
-    var empresa = av && av.empresaNome ? String(av.empresaNome) : '';
-    var nome = av && av.nome ? String(av.nome) : '';
+    var empresa = empresaDe(av);
+    var nome = av && (av.vaga || av.nome) ? String(av.vaga || av.nome) : '';
     if (av && av.tipo === 'equipe') {
       return 'Olá! ' + (empresa ? 'A ' + empresa + ' está' : 'Estamos') + ' fazendo uma avaliação de perfil da equipe' +
-        (nome ? ' (' + nome + ')' : '') + '. Responda pelo link abaixo:\n' + link +
+        (av.nome ? ' (' + av.nome + ')' : '') + '. Responda pelo link abaixo:\n' + link +
         '\n\nLeva cerca de 10 minutos e não existe resposta certa ou errada. Faça com calma, num lugar tranquilo.';
     }
     return 'Olá! Para seguir no processo seletivo' + (nome ? ' de ' + nome : '') + (empresa ? ' da ' + empresa : '') +
       ', responda o questionário de perfil pelo link abaixo:\n' + link +
       '\n\nLeva cerca de 10 minutos e não existe resposta certa ou errada. Faça com calma, num lugar tranquilo.';
+  }
+
+  // Mensagem pronta para o contratante receber o relatório publicado.
+  function mensagemRelatorio(processo, url) {
+    var p = processo || {};
+    var contratante = String(p.contratante || '').trim().split(/\s+/)[0] || '';
+    var vaga = String(p.vaga || p.nome || '').trim();
+    var empresa = empresaDe(p).trim();
+    var consultor = String(p.consultor || '').trim();
+    return 'Olá' + (contratante ? ', ' + contratante : '') + '! O relatório do processo seletivo' +
+      (vaga ? ' de ' + vaga : '') + (empresa ? ' (' + empresa + ')' : '') + ' está pronto:\n' + url +
+      '\n\nAbre no celular ou no computador e dá para salvar em PDF. Qualquer dúvida, estou à disposição.' +
+      '\n' + (consultor ? consultor + ' · ' : '') + 'Notus Agência';
+  }
+
+  /* ---------- Processo: config (perfil ideal, etapas, bônus, cortes) ---------- */
+
+  // Mesmos termos do servidor (Code.gs, TERMOS_SENSIVEIS): campo do ClickUp com esses nomes nunca é usado.
+  var TERMOS_SENSIVEIS = ['sexo', 'genero', 'estado civil', 'filho', 'religi', 'gravid', 'etnia', 'raca',
+    'cor da pele', 'orientacao', 'deficien', 'doenca', 'saude', 'antecedente', 'processo em seu nome', 'criminal'];
+  var TERMOS_ANTECEDENTES = ['antecedente', 'processo em seu nome', 'criminal'];
+
+  // minúsculas, sem acento, espaços simples
+  function normalizarNome(s) {
+    var t = String(s == null ? '' : s).toLowerCase();
+    try { t = t.normalize('NFD').replace(/[\u0300-\u036f]/g, ''); } catch (e) { /* navegador antigo */ }
+    return t.replace(/\s+/g, ' ').trim();
+  }
+
+  // true se o nome do campo do ClickUp é dado sensível (antecedentes só com config.permitirAntecedentes).
+  function campoSensivel(nome, config) {
+    var n = normalizarNome(nome);
+    if (!n) return false;
+    var cfg = config || {};
+    return TERMOS_SENSIVEIS.some(function (t) {
+      if (n.indexOf(t) === -1) return false;
+      if (TERMOS_ANTECEDENTES.indexOf(t) !== -1 && cfg.permitirAntecedentes === true) return false;
+      if (t === 'saude' && cfg.permitirSaude === true) return false;
+      return true;
+    });
+  }
+
+  // 'dc', 'C D', 'cdx' -> 'DC', 'CD', 'CD' (1 ou 2 letras D/I/S/C, sem repetir)
+  function normalizarPerfilIdeal(v) {
+    var out = '';
+    String(v == null ? '' : v).toUpperCase().replace(/[^DISC]/g, '').split('').forEach(function (l) {
+      if (out.length < 2 && out.indexOf(l) === -1) out += l;
+    });
+    return out;
+  }
+
+  // Toque numa letra: tira se já está; põe se cabe; com 2 letras, troca a segunda.
+  function alternarLetraPerfil(atual, letra) {
+    var p = normalizarPerfilIdeal(atual);
+    if (LETRAS.indexOf(letra) === -1) return p;
+    if (p.indexOf(letra) !== -1) return p.replace(letra, '');
+    if (p.length < 2) return p + letra;
+    return p.charAt(0) + letra;
+  }
+
+  // 'CD' -> 'C (Conformidade) como traço principal e D (Dominância) como segundo traço.'
+  function explicarPerfil(codigo) {
+    var p = normalizarPerfilIdeal(codigo);
+    if (!p) return 'Escolha 1 ou 2 letras. A primeira é o traço principal que a vaga pede.';
+    var t = p.charAt(0) + ' (' + NOMES[p.charAt(0)] + ') como traço principal';
+    if (p.length === 2) t += ' e ' + p.charAt(1) + ' (' + NOMES[p.charAt(1)] + ') como segundo traço';
+    return t + '.';
+  }
+
+  // Peso de cada etapa em % do total (1 casa). Pesos inválidos contam 0.
+  function pesosNormalizados(etapas) {
+    var lista = Array.isArray(etapas) ? etapas : [];
+    var pesos = lista.map(function (e) { var n = Number(e && e.peso); return isFinite(n) && n > 0 ? n : 0; });
+    var soma = pesos.reduce(function (a, b) { return a + b; }, 0);
+    return pesos.map(function (p) { return soma ? Math.round(p / soma * 1000) / 10 : 0; });
+  }
+
+  // id simples a partir do nome ('Revisão documental' -> 'revisao_documental'), único entre os usados.
+  function idSimples(nome, usados, prefixo) {
+    var base = normalizarNome(nome).replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 30) || (prefixo || 'item');
+    var id = base, i = 2;
+    while (usados && usados[id]) id = base + '_' + (i++);
+    if (usados) usados[id] = true;
+    return id;
+  }
+
+  function numeroOuNulo(v) {
+    if (v === '' || v === null || v === undefined) return null;
+    var n = Number(String(v).replace(',', '.'));
+    return isFinite(n) ? n : null;
+  }
+
+  // Confere a config antes de mandar ao servidor (que confere de novo). '' se ok, senão a mensagem.
+  function validarConfig(c) {
+    if (!c || typeof c !== 'object') return 'Configuração do processo inválida.';
+    var perfil = String(c.perfilIdeal || '');
+    if (perfil && normalizarPerfilIdeal(perfil) !== perfil) return 'Perfil ideal inválido: use 1 ou 2 letras entre D, I, S e C.';
+    var etapas = Array.isArray(c.etapas) ? c.etapas : [];
+    var bonus = Array.isArray(c.bonus) ? c.bonus : [];
+    for (var i = 0; i < etapas.length; i++) {
+      var e = etapas[i] || {};
+      if (!String(e.nome || '').trim()) return 'Dê um nome para a etapa ' + (i + 1) + '.';
+      if (!(Number(e.peso) >= 0) || e.peso === null || e.peso === '') return 'Informe o peso da etapa "' + e.nome + '".';
+      if (campoSensivel(e.campo, c)) return 'O campo "' + e.campo + '" é um dado sensível e não pode ser usado.';
+    }
+    for (var j = 0; j < bonus.length; j++) {
+      var b = bonus[j] || {};
+      if (!String(b.nome || '').trim()) return 'Dê um nome para o bônus ' + (j + 1) + '.';
+      if (!String(b.campo || '').trim()) return 'Informe o campo do ClickUp do bônus "' + b.nome + '".';
+      if (campoSensivel(b.campo, c)) return 'O campo "' + b.campo + '" é um dado sensível e não pode ser usado.';
+      var r = b.regra || {};
+      if (r.tipo === 'mapa') {
+        if (!r.pontos || !Object.keys(r.pontos).length) return 'Informe ao menos um valor com pontos no bônus "' + b.nome + '".';
+      } else if (!isFinite(Number(r.pontos)) || r.pontos === null || r.pontos === '') {
+        return 'Informe os pontos do bônus "' + b.nome + '".';
+      }
+    }
+    var corte = Number(c.corte), faixa = Number(c.faixaAvaliar);
+    if (!isFinite(corte) || corte < 0 || c.corte === null || c.corte === '') return 'Informe a nota de corte.';
+    if (!isFinite(faixa) || faixa < 0 || c.faixaAvaliar === null || c.faixaAvaliar === '') return 'Informe a nota da faixa "avaliar".';
+    if (faixa > corte) return 'A faixa "avaliar" precisa ser menor ou igual à nota de corte.';
+    return '';
+  }
+
+  // Config vazia de um processo novo (o servidor completa com os mesmos padrões).
+  function configPadrao() {
+    return { perfilIdeal: '', explicacaoPerfil: '', etapas: [], bonus: [], corte: 70, faixaAvaliar: 55, statusFinalistas: [], permitirAntecedentes: false };
+  }
+
+  // Aceita o ID puro ou o endereço da lista copiado do ClickUp (…/v/li/901234…).
+  function idListaDoTexto(t) {
+    var s = String(t || '').trim();
+    var m = /\/li\/([A-Za-z0-9_-]+)/.exec(s) || /\/l\/(?:[^/]+\/)?([A-Za-z0-9_-]+)\/?$/.exec(s);
+    if (m) return m[1];
+    return s.replace(/[^A-Za-z0-9_-]/g, '');
+  }
+
+  /* ---------- Editor do relatório ---------- */
+
+  var ORIGENS = { regra: 'Automático', ia: 'Melhorado com IA', editado: 'Editado' };
+
+  // Lista dos textos editáveis do relatório, na ordem do documento: [{id, secao, rotulo}].
+  function textosEditaveis(rel) {
+    var out = [];
+    var vistos = {};
+    var textos = (rel && rel.textos) || {};
+    function add(id, secao, rotulo) {
+      if (!id || vistos[id] || !Object.prototype.hasOwnProperty.call(textos, id)) return;
+      vistos[id] = true;
+      out.push({ id: String(id), secao: secao, rotulo: rotulo });
+    }
+    function arr(v) { return Array.isArray(v) ? v : []; }
+    if (!rel) return out;
+    var sum = rel.sumario || {};
+    if (sum.recomendacao) add(sum.recomendacao.textoId, 'Sumário executivo', 'Recomendação' + (sum.recomendacao.nome ? ' · ' + sum.recomendacao.nome : ''));
+    arr(sum.leituras).forEach(function (l) { add(l.textoId, 'Sumário executivo', 'Leitura · ' + (l.titulo || '')); });
+    if (rel.atracao) add(rel.atracao.textoId, 'Painel de atração', 'Comentário sobre a atração');
+    arr(rel.etapas).forEach(function (e) {
+      arr(e.destaques).forEach(function (d) { add(d.textoId, 'Avaliação técnica', (e.nome || 'Etapa') + ' · ' + (d.titulo || '')); });
+    });
+    var disc = rel.disc || {};
+    add(disc.explicacaoTextoId, 'Análise DISC', 'Por que este perfil');
+    arr(disc.achados).forEach(function (a) { add(a.textoId, 'Análise DISC', 'Achado · ' + (a.titulo || '')); });
+    arr(rel.ranking && rel.ranking.linhas).forEach(function (l) {
+      add(l.analiseTextoId, 'Ranking final', l.posicao + 'º · ' + (l.nome || ''));
+    });
+    var enc = rel.encerramento || {};
+    add(enc.textoId, 'Encerramento', 'Encerramento');
+    arr(enc.proximosPassos).forEach(function (id, i) { add(id, 'Encerramento', 'Próximo passo ' + (i + 1)); });
+    Object.keys(textos).forEach(function (id) { add(id, 'Outros textos', id); });
+    return out;
+  }
+
+  // Grava a edição de um texto: muda o texto e marca origem 'editado'. Devolve true se mudou.
+  function editarTexto(rel, id, texto) {
+    if (!rel || !rel.textos || !Object.prototype.hasOwnProperty.call(rel.textos, id)) return false;
+    var atual = rel.textos[id] || {};
+    var novo = String(texto == null ? '' : texto);
+    if (atual.texto === novo) return false;
+    rel.textos[id] = { texto: novo, origem: 'editado' };
+    return true;
   }
 
   // Respostas da etapa de confirmação, prontas para o recrutador ler (aqui pode nomear os perfis).
@@ -405,7 +603,22 @@
     permissoes: permissoes,
     gerarSenhaTemporaria: gerarSenhaTemporaria,
     linkAvaliacao: linkAvaliacao,
+    linkRelatorio: linkRelatorio,
+    urlAbsoluta: urlAbsoluta,
     mensagemConvite: mensagemConvite,
+    mensagemRelatorio: mensagemRelatorio,
+    campoSensivel: campoSensivel,
+    normalizarPerfilIdeal: normalizarPerfilIdeal,
+    alternarLetraPerfil: alternarLetraPerfil,
+    explicarPerfil: explicarPerfil,
+    pesosNormalizados: pesosNormalizados,
+    idSimples: idSimples,
+    validarConfig: validarConfig,
+    configPadrao: configPadrao,
+    textosEditaveis: textosEditaveis,
+    editarTexto: editarTexto,
+    idListaDoTexto: idListaDoTexto,
+    MSG_SO_ADMIN: MSG_SO_ADMIN,
     resumoValidacao: resumoValidacao,
     extrairCodigos: extrairCodigos,
     validarImportado: validarImportado,
@@ -427,9 +640,14 @@
   var SIMULADA = String(CONFIG.API_URL || '').trim() === 'simulada';
   var estado = {
     token: '', usuario: null,
-    registros: [], avaliacoes: [], empresas: [], usuarios: [],
+    registros: [], processos: [], usuarios: [],
+    clickup: { configurado: false, iaConfigurada: false, carregado: false },
     abertoId: null, aba: 'lista', listaMostrada: false,
-    filtros: { empresa: '', avaliacao: '', perfil: '', status: '' }
+    filtros: { processo: '', perfil: '', status: '' },
+    // Tela dentro da aba Processos: 'lista' | 'form' | 'pagina' | 'editor'
+    proc: { tela: 'lista', id: null },
+    relatorios: {},   // processoId -> [{token, status, criadoEm, publicadoEm}]
+    editor: null      // {processoId, token, relatorio, avisos, status, url, sujo}
   };
 
   function $(id) { return document.getElementById(id); }
@@ -549,23 +767,45 @@
       return Promise.resolve();
     }
     $('contagem').textContent = 'Carregando…';
-    var admin = papel() === 'admin';
     return Promise.all([
       api('listar'),
-      api('listarAvaliacoes'),
-      admin ? api('listarEmpresas') : null,
-      admin ? api('listarUsuarios') : null
+      api('processosListar'),
+      api('listarUsuarios'),
+      // Status do ClickUp/IA: se falhar, o painel segue (o ClickUp é opcional).
+      api('clickupStatus').catch(function (e) { if (e && e.tratado) throw e; return null; })
     ]).then(function (rs) {
-      estado.registros = ordenar((rs[0].itens || []).map(recalcular));
-      estado.avaliacoes = rs[1].avaliacoes || [];
-      estado.empresas = rs[2] ? (rs[2].empresas || []) : [];
-      estado.usuarios = rs[3] ? (rs[3].usuarios || []) : [];
+      estado.processos = rs[1].processos || [];
+      estado.registros = ordenar((rs[0].itens || []).map(function (r) { return recalcular(comProcesso(r)); }));
+      estado.usuarios = rs[2].usuarios || [];
+      var cu = rs[3] || {};
+      estado.clickup = { configurado: cu.configurado === true, conectado: cu.conectado !== false, usuario: cu.usuario || '',
+        iaConfigurada: cu.iaConfigurada === true, avisos: Array.isArray(cu.avisos) ? cu.avisos : [], carregado: !!rs[3] };
       montarFiltros();
       renderizarTudo();
     }).catch(function (e) {
       $('contagem').textContent = '';
       falhou(e);
     });
+  }
+
+  // O registro mostra o nome e a empresa do processo (empresa agora é texto no processo).
+  function comProcesso(r) {
+    if (!r || !r.avaliacao) return r;
+    var p = acharProcessoPorCodigo(r.avaliacao);
+    if (p) {
+      if (!r.avaliacaoNome) r.avaliacaoNome = p.nome;
+      if (!r.empresaNome && p.empresa) r.empresaNome = p.empresa;
+      if (!r.avaliacaoTipo && p.tipo) r.avaliacaoTipo = p.tipo;
+    }
+    return r;
+  }
+  function acharProcessoPorCodigo(codigo) {
+    for (var i = 0; i < estado.processos.length; i++) if (estado.processos[i].codigo === codigo) return estado.processos[i];
+    return null;
+  }
+  function acharProcesso(id) {
+    for (var i = 0; i < estado.processos.length; i++) if (estado.processos[i].id === id) return estado.processos[i];
+    return null;
   }
 
   function acharRegistro(id) {
@@ -690,8 +930,8 @@
   function excluirTodos() {
     var escAv = null;
     if (MODO_API) {
-      var comResp = estado.avaliacoes.filter(function (a) { return a.respostas || estado.registros.some(function (r) { return r.avaliacao === a.codigo; }); });
-      var inicial = comResp.some(function (a) { return a.codigo === estado.filtros.avaliacao; }) ? estado.filtros.avaliacao : '';
+      var comResp = estado.processos.filter(function (a) { return a.respostas || estado.registros.some(function (r) { return r.avaliacao === a.codigo; }); });
+      var inicial = comResp.some(function (a) { return a.codigo === estado.filtros.processo; }) ? estado.filtros.processo : '';
       escAv = criarEscolha({
         id: 'excluir-avaliacao', rotulo: 'Quais respostas', rotuloId: 'excluir-avaliacao-rotulo', valor: inicial, classe: 'escolha--campo escolha--larga',
         opcoes: [{ valor: '', rotulo: 'Todas as respostas' }].concat(comResp.map(function (a) { return { valor: a.codigo, rotulo: a.nome + ' (' + a.codigo + ')' }; }))
@@ -700,7 +940,7 @@
     confirmar({
       titulo: MODO_API ? 'Excluir respostas?' : 'Excluir todos os participantes?',
       texto: MODO_API
-        ? 'Escolha a avaliação. As respostas dela são apagadas e não podem ser recuperadas. O histórico de versões da planilha continua guardando os dados: para eliminá-los de vez, exclua a planilha do Google Drive e esvazie a lixeira.'
+        ? 'Escolha o processo. As respostas dele são apagadas e não podem ser recuperadas. O histórico de versões da planilha continua guardando os dados: para eliminá-los de vez, exclua a planilha do Google Drive e esvazie a lixeira.'
         : 'Esta ação apaga todos os participantes deste navegador e não pode ser desfeita.',
       extra: escAv ? campoEscolha('Quais respostas', escAv, 'excluir-avaliacao-rotulo') : null,
       exigir: 'EXCLUIR',
@@ -712,7 +952,7 @@
     if (MODO_API) {
       api('excluirTodos', avaliacao || undefined).then(function () {
         fecharDetalhe();
-        avisar(avaliacao ? 'Respostas da avaliação ' + avaliacao + ' excluídas.' : 'Todas as respostas foram excluídas.', 'ok');
+        avisar(avaliacao ? 'Respostas do processo ' + avaliacao + ' excluídas.' : 'Todas as respostas foram excluídas.', 'ok');
         return carregar();
       }).catch(falhou);
       return;
@@ -965,16 +1205,10 @@
     limpar(box);
     var defs = [];
     var temGeral = estado.registros.some(function (r) { return !r.avaliacao; });
-    if (pode('filtrarEmpresa')) {
-      defs.push({ id: 'filtro-empresa', chave: 'empresa', rotulo: 'Empresa', prefixo: 'Empresa',
-        opcoes: [{ valor: '', rotulo: 'Todas' }]
-          .concat(estado.empresas.map(function (e) { return { valor: e.id, rotulo: e.nome }; }))
-          .concat(temGeral ? [{ valor: '-', rotulo: 'Sem empresa (link geral)' }] : []) });
-    }
     if (MODO_API) {
-      defs.push({ id: 'filtro-avaliacao', chave: 'avaliacao', rotulo: 'Avaliação', prefixo: 'Avaliação',
-        opcoes: [{ valor: '', rotulo: 'Todas' }]
-          .concat(estado.avaliacoes.map(function (a) { return { valor: a.codigo, rotulo: a.nome }; }))
+      defs.push({ id: 'filtro-processo', chave: 'processo', rotulo: 'Processo', prefixo: 'Processo',
+        opcoes: [{ valor: '', rotulo: 'Todos' }]
+          .concat(estado.processos.map(function (a) { return { valor: a.codigo, rotulo: a.nome + (empresaDe(a) ? ' · ' + empresaDe(a) : '') }; }))
           .concat(temGeral ? [{ valor: '-', rotulo: 'Link geral' }] : []) });
     }
     defs.push({ id: 'filtro-perfil', chave: 'perfil', rotulo: 'Perfil primário', prefixo: 'Perfil',
@@ -995,10 +1229,8 @@
     var busca = $('filtro-busca').value;
     var f = estado.filtros;
     return estado.registros.filter(function (r) {
-      if (f.empresa === '-' && r.avaliacao) return false;
-      if (f.empresa && f.empresa !== '-' && r.empresaId !== f.empresa) return false;
-      if (f.avaliacao === '-' && r.avaliacao) return false;
-      if (f.avaliacao && f.avaliacao !== '-' && r.avaliacao !== f.avaliacao) return false;
+      if (f.processo === '-' && r.avaliacao) return false;
+      if (f.processo && f.processo !== '-' && r.avaliacao !== f.processo) return false;
       if (f.perfil && (!r.calc || r.calc.primario !== f.perfil)) return false;
       if (f.status === 'invalido' && !r.invalido) return false;
       if (f.status && f.status !== 'invalido' && (r.invalido || r.status !== f.status)) return false;
@@ -1069,7 +1301,7 @@
   /* ---------- Detalhe ---------- */
 
   function esconderVistas() {
-    ['vista-lista', 'vista-avaliacoes', 'vista-empresas', 'vista-usuarios', 'vista-comparativo', 'vista-importar']
+    ['vista-lista', 'vista-processos', 'vista-usuarios', 'vista-comparativo', 'vista-importar']
       .forEach(function (id) { $(id).hidden = true; });
   }
 
@@ -1207,7 +1439,7 @@
         equipe ? null : el('div', null, [el('dt', { texto: 'Vaga pretendida' }), el('dd', { texto: r.vaga || '—' })]),
         el('div', null, [el('dt', { texto: equipe ? 'Cargo/função' : 'Função atual/última' }), el('dd', { id: 'det-funcao', texto: r.funcao || '—' })]),
         equipe ? null : el('div', null, [el('dt', { texto: 'Empresa atual/última' }), el('dd', { id: 'det-empresa', texto: r.empresa || '—' })]),
-        MODO_API ? el('div', { classe: 'det-dl__largo' }, [el('dt', { texto: 'Avaliação' }), el('dd', { id: 'det-avaliacao', texto: textoOrigem(r) })]) : null,
+        MODO_API ? el('div', { classe: 'det-dl__largo' }, [el('dt', { texto: 'Processo' }), el('dd', { id: 'det-avaliacao', texto: textoOrigem(r) })]) : null,
         el('div', null, [el('dt', { texto: 'Concluído em' }), el('dd', { texto: formatarData(r.fim || r.recebidoEm) })]),
         el('div', null, [el('dt', { texto: 'Duração' }), el('dd', { texto: formatarDuracao(r.duracaoSeg) })]),
         el('div', null, [el('dt', { texto: 'Perfil' }), el('dd', { classe: 'det-perfil' }, [badgePerfil(r), r.calc ? ' ' + NOMES[r.calc.primario] + ' / ' + NOMES[r.calc.secundario] : ''])]),
@@ -1406,7 +1638,7 @@
     ]));
   }
 
-  /* ---------- Avaliações (admin) ---------- */
+  /* ---------- Processos (admin): lista, formulário, página do processo e editor do relatório ---------- */
 
   function cabecalhoVista(sobre, titulo, texto, acoes) {
     return el('div', { classe: 'cabecalho' }, [
@@ -1421,58 +1653,79 @@
 
   function linkDe(av) { return linkAvaliacao(root.location.href, av.codigo); }
 
-  function renderizarAvaliacoes() {
-    var box = $('vista-avaliacoes');
+  function copiar(txt, msgOk) {
+    copiarTexto(txt).then(function () { avisar(msgOk, 'ok'); }, function () { avisar('Não foi possível copiar. Selecione o texto e copie.', 'erro'); });
+  }
+
+  function botao(classe, texto, onclick, extra) {
+    var a = { type: 'button', classe: 'botao ' + classe, texto: texto, onclick: onclick };
+    for (var k in extra || {}) a[k] = extra[k];
+    return el('button', a);
+  }
+
+  // Muda a tela dentro da aba Processos e leva o foco ao título.
+  function irParaProcessos(tela, id) {
+    estado.proc = { tela: tela || 'lista', id: id || null };
+    renderizarProcessos();
+    mostrarAba('processos');
+    root.scrollTo(0, 0);
+    var h = $('vista-processos').querySelector('h2');
+    if (h) { h.setAttribute('tabindex', '-1'); h.focus(); }
+  }
+
+  function renderizarProcessos() {
+    var box = $('vista-processos');
     limpar(box);
     if (papel() !== 'admin') return;
-    box.appendChild(cabecalhoVista('Links de avaliação', 'Avaliações',
-      'Crie um link para cada vaga ou equipe e envie aos participantes. As respostas chegam já ligadas à empresa.',
-      [el('button', { type: 'button', classe: 'botao botao--principal', id: 'btn-nova-avaliacao', texto: 'Nova avaliação', onclick: function () { janelaAvaliacao(null); } })]));
-    if (!estado.empresas.length) {
-      box.appendChild(el('p', { classe: 'aviso', texto: 'Cadastre uma empresa na aba "Empresas" antes de criar avaliações.' }));
-    }
-    if (!estado.avaliacoes.length) {
-      box.appendChild(el('div', { classe: 'caixa vazio' }, el('p', { classe: 'vazio__texto', texto: 'Nenhuma avaliação criada ainda.' })));
+    var t = estado.proc.tela;
+    var p = estado.proc.id ? acharProcesso(estado.proc.id) : null;
+    if (t === 'form') return renderizarFormProcesso(box, p);
+    if (t === 'pagina' && p) return renderizarPaginaProcesso(box, p);
+    if (t === 'editor' && p && estado.editor && estado.editor.processoId === p.id) return renderizarEditor(box, p);
+    estado.proc = { tela: 'lista', id: null };
+    renderizarListaProcessos(box);
+  }
+
+  function textoLocal(p) {
+    return [empresaDe(p), p.vaga && p.vaga !== p.nome ? p.vaga : '', p.cidade].filter(Boolean).join(' · ');
+  }
+
+  function renderizarListaProcessos(box) {
+    box.appendChild(cabecalhoVista('Processos seletivos', 'Processos',
+      'Cada processo tem o link do teste DISC, a lista do ClickUp com os candidatos e a configuração do relatório.',
+      [botao('botao--principal', 'Novo processo', function () { irParaProcessos('form', null); }, { id: 'btn-novo-processo' })]));
+    if (!estado.processos.length) {
+      box.appendChild(el('div', { classe: 'caixa vazio' }, el('p', { classe: 'vazio__texto', texto: 'Nenhum processo criado ainda.' })));
       return;
     }
-    box.appendChild(el('ul', { classe: 'gestao-lista', id: 'lista-avaliacoes' }, estado.avaliacoes.map(function (av) {
-      var link = linkDe(av);
-      var n = Number(av.respostas) || 0;
+    box.appendChild(el('ul', { classe: 'gestao-lista', id: 'lista-processos' }, estado.processos.map(function (p) {
+      var link = linkDe(p);
+      var n = Number(p.respostas) || 0;
+      var abrir = function () { irParaProcessos('pagina', p.id); };
       var acoes = [
-        el('button', { type: 'button', classe: 'botao botao--claro botao--pequeno', 'data-acao': 'copiar-link', texto: 'Copiar link', onclick: function () {
-          copiarTexto(link).then(function () { avisar('Link copiado.', 'ok'); }, function () { avisar('Não foi possível copiar. Selecione o link e copie.', 'erro'); });
-        } }),
-        el('button', { type: 'button', classe: 'botao botao--claro botao--pequeno', 'data-acao': 'copiar-mensagem', texto: 'Copiar mensagem', onclick: function () {
-          copiarTexto(mensagemConvite(av, link)).then(function () { avisar('Mensagem copiada. Cole no WhatsApp.', 'ok'); }, function () { avisar('Não foi possível copiar.', 'erro'); });
-        } }),
-        el('button', { type: 'button', classe: 'botao botao--claro botao--pequeno', 'data-acao': 'editar', texto: 'Editar', onclick: function () { janelaAvaliacao(av); } }),
-        el('button', { type: 'button', classe: 'botao botao--claro botao--pequeno', 'data-acao': 'alternar-ativa', texto: av.ativa ? 'Desativar' : 'Ativar', onclick: function () {
-          api('salvarAvaliacao', { id: av.id, empresaId: av.empresaId, nome: av.nome, tipo: av.tipo, mostrarResultado: av.mostrarResultado, ativa: !av.ativa })
-            .then(function () { avisar(av.ativa ? 'Avaliação desativada: o link deixa de aceitar respostas.' : 'Avaliação ativada.', 'ok'); return carregar(); })
-            .catch(falhou);
-        } }),
-        n === 0 ? el('button', { type: 'button', classe: 'botao botao--perigo botao--pequeno', 'data-acao': 'excluir', texto: 'Excluir', onclick: function () {
-          confirmar({ titulo: 'Excluir a avaliação?', texto: '"' + av.nome + '" ainda não tem respostas. O link ' + av.codigo + ' deixa de existir.', botao: 'Excluir avaliação' }).then(function (ok) {
-            if (!ok) return;
-            api('excluirAvaliacao', av.id).then(function () { avisar('Avaliação excluída.', 'ok'); return carregar(); }).catch(falhou);
-          });
-        } }) : null
+        botao('botao--principal botao--pequeno', 'Abrir', abrir, { 'data-acao': 'abrir' }),
+        botao('botao--claro botao--pequeno', 'Copiar link', function () { copiar(link, 'Link copiado.'); }, { 'data-acao': 'copiar-link' }),
+        botao('botao--claro botao--pequeno', 'Copiar mensagem', function () { copiar(mensagemConvite(p, link), 'Mensagem copiada. Cole no WhatsApp.'); }, { 'data-acao': 'copiar-mensagem' }),
+        botao('botao--claro botao--pequeno', 'Editar', function () { irParaProcessos('form', p.id); }, { 'data-acao': 'editar' }),
+        botao('botao--claro botao--pequeno', p.ativa ? 'Desativar' : 'Ativar', function () { alternarAtivo(p); }, { 'data-acao': 'alternar-ativa' }),
+        n === 0 ? botao('botao--perigo botao--pequeno', 'Excluir', function () { excluirProcesso(p); }, { 'data-acao': 'excluir' }) : null
       ];
-      return el('li', { classe: 'caixa gestao-card av-card', 'data-codigo': av.codigo }, [
+      return el('li', { classe: 'caixa gestao-card av-card proc-card', 'data-codigo': p.codigo, 'data-id': p.id }, [
         el('div', { classe: 'gestao-card__topo' }, [
           el('div', { classe: 'gestao-card__titulo-area' }, [
-            el('h3', { classe: 'gestao-card__titulo seminegrito', texto: av.nome }),
-            el('p', { classe: 'gestao-card__sub', texto: (av.empresaNome || '—') + ' · ' + n + ' resposta' + (n === 1 ? '' : 's') })
+            el('h3', { classe: 'gestao-card__titulo seminegrito' }, el('button', { type: 'button', classe: 'link-botao proc-card__nome', texto: p.nome, onclick: abrir })),
+            el('p', { classe: 'gestao-card__sub', texto: [textoLocal(p) || '—', n + ' resposta' + (n === 1 ? '' : 's')].join(' · ') })
           ]),
           el('span', { classe: 'protocolo', title: 'Código do link' }, [
             el('span', { classe: 'protocolo__rotulo', texto: 'Código' }),
-            el('span', { classe: 'protocolo__valor t-titulo negrito tabular av-codigo', texto: av.codigo })
+            el('span', { classe: 'protocolo__valor t-titulo negrito tabular av-codigo', texto: p.codigo })
           ])
         ]),
         el('div', { classe: 'card-selos' }, [
-          el('span', { classe: 'selo', texto: TIPOS[av.tipo] || av.tipo }),
-          el('span', { classe: 'selo av-ativa ' + (av.ativa ? 'selo--verde' : ''), texto: av.ativa ? 'Ativa' : 'Desativada' }),
-          av.mostrarResultado ? el('span', { classe: 'selo', texto: 'Mostra o resultado' }) : null
+          el('span', { classe: 'selo av-ativa ' + (p.ativa ? 'selo--verde' : ''), texto: p.ativa ? 'Ativo' : 'Desativado' }),
+          el('span', { classe: 'selo proc-clickup', texto: p.clickupListId ? 'Lista do ClickUp ligada' : 'Sem lista do ClickUp' }),
+          p.tipo === 'equipe' ? el('span', { classe: 'selo', texto: TIPOS.equipe }) : null,
+          p.mostrarResultado ? el('span', { classe: 'selo', texto: 'Mostra o resultado' }) : null
         ]),
         el('p', { classe: 'av-link', texto: link }),
         el('div', { classe: 'gestao-card__acoes' }, acoes),
@@ -1481,105 +1734,677 @@
     })));
   }
 
-  function janelaAvaliacao(av) {
-    if (!av && !estado.empresas.length) { avisar('Cadastre uma empresa antes de criar avaliações.', 'erro'); mostrarAba('empresas'); return; }
-    var escEmpresa = criarEscolha({
-      id: 'av-empresa', rotulo: 'Empresa', rotuloId: 'av-empresa-rotulo', classe: 'escolha--campo escolha--larga',
-      valor: av ? av.empresaId : (estado.empresas.length === 1 ? estado.empresas[0].id : ''),
-      opcoes: [{ valor: '', rotulo: 'Escolha a empresa' }].concat(estado.empresas.map(function (e) { return { valor: e.id, rotulo: e.nome }; }))
-    });
-    var escTipo = criarEscolha({
-      id: 'av-tipo', rotulo: 'Tipo', rotuloId: 'av-tipo-rotulo', classe: 'escolha--campo escolha--larga', valor: av ? av.tipo : 'selecao',
-      opcoes: [{ valor: 'selecao', rotulo: TIPOS.selecao }, { valor: 'equipe', rotulo: TIPOS.equipe }]
-    });
-    var campoNome = campoTexto('av-nome', 'Nome (vaga ou equipe)', { maxlength: 80, placeholder: 'Ex.: Recepcionista 2026' });
-    campoNome.querySelector('input').value = av ? av.nome : '';
-    abrirJanela({
-      id: 'janela-avaliacao',
-      titulo: av ? 'Editar avaliação' : 'Nova avaliação',
-      texto: av ? 'Código do link: ' + av.codigo : 'O link fica pronto para copiar assim que você salvar.',
-      botao: av ? 'Salvar alterações' : 'Criar avaliação',
-      corpo: [
-        campoEscolha('Empresa', escEmpresa, 'av-empresa-rotulo'),
-        campoNome,
-        campoEscolha('Tipo', escTipo, 'av-tipo-rotulo'),
-        campoMarcar('av-mostrar', 'Mostrar resultado ao participante (resumo do perfil no final)', av ? av.mostrarResultado : false),
-        campoMarcar('av-ativa', 'Avaliação ativa (o link aceita respostas)', av ? av.ativa : true)
-      ],
-      aoConfirmar: function () {
-        var dados = {
-          empresaId: escEmpresa.botao.value,
-          nome: $('av-nome').value.trim(),
-          tipo: escTipo.botao.value,
-          mostrarResultado: $('av-mostrar').checked,
-          ativa: $('av-ativa').checked
-        };
-        if (!dados.empresaId) throw new Error('Escolha a empresa.');
-        if (!dados.nome) throw new Error('Informe o nome da avaliação.');
-        if (av) dados.id = av.id;
-        return api('salvarAvaliacao', dados).then(function (resp) {
-          var cod = resp.avaliacao && resp.avaliacao.codigo;
-          avisar(av ? 'Avaliação salva.' : 'Avaliação criada. Código ' + cod + ': copie o link e envie.', 'ok');
-          return carregar();
-        });
-      }
+  function alternarAtivo(p) {
+    api('processosSalvar', { id: p.id, nome: p.nome, tipo: p.tipo || 'selecao', ativa: !p.ativa })
+      .then(function () { avisar(p.ativa ? 'Processo desativado: o link deixa de aceitar respostas.' : 'Processo ativado.', 'ok'); return carregar(); })
+      .catch(falhou);
+  }
+
+  function excluirProcesso(p) {
+    confirmar({ titulo: 'Excluir o processo?', texto: '"' + p.nome + '" ainda não tem respostas. O link ' + p.codigo + ' deixa de existir.', botao: 'Excluir processo' }).then(function (ok) {
+      if (!ok) return;
+      api('processosExcluir', p.id).then(function () {
+        avisar('Processo excluído.', 'ok');
+        estado.proc = { tela: 'lista', id: null };
+        return carregar();
+      }).catch(falhou);
     });
   }
 
-  /* ---------- Empresas (admin) ---------- */
+  /* ----- Formulário do processo ----- */
 
-  function renderizarEmpresas() {
-    var box = $('vista-empresas');
-    limpar(box);
-    if (papel() !== 'admin') return;
-    box.appendChild(cabecalhoVista('Clientes', 'Empresas', 'Cada avaliação e cada gestor pertencem a uma empresa.'));
-    var entrada = el('input', { id: 'empresa-nova', classe: 'entrada', type: 'text', maxlength: 80, autocomplete: 'off', placeholder: 'Nome da empresa' });
-    var form = el('form', { classe: 'caixa caixa--compacta empresa-nova', novalidate: true }, [
-      el('label', { classe: 'visualmente-oculto', for: 'empresa-nova', texto: 'Nome da nova empresa' }),
-      entrada,
-      el('button', { type: 'submit', classe: 'botao botao--principal', id: 'btn-adicionar-empresa', texto: 'Adicionar empresa' })
-    ]);
-    form.addEventListener('submit', function (e) {
-      e.preventDefault();
-      var nome = entrada.value.trim();
-      if (!nome) { avisar('Informe o nome da empresa.', 'erro'); entrada.focus(); return; }
-      api('salvarEmpresa', { nome: nome }).then(function () {
-        avisar('Empresa "' + nome + '" criada.', 'ok');
-        return carregar();
-      }).then(function () { var n = $('empresa-nova'); if (n) n.focus(); }).catch(falhou);
+  function campoArea(id, rotulo, valor, attrs) {
+    var a = { id: id, classe: 'entrada', rows: 3, maxlength: 2000 };
+    for (var k in attrs || {}) a[k] = attrs[k];
+    var ta = el('textarea', a);
+    ta.value = valor || '';
+    return el('label', { classe: 'campo', for: id }, [el('span', { classe: 'campo__rotulo', texto: rotulo }), ta]);
+  }
+
+  function campoCom(id, rotulo, valor, attrs) {
+    var c = campoTexto(id, rotulo, attrs);
+    c.querySelector('input').value = valor == null ? '' : String(valor);
+    return c;
+  }
+
+  function secaoForm(titulo, texto, filhos, extraClasse) {
+    return el('section', { classe: 'caixa form-secao' + (extraClasse ? ' ' + extraClasse : '') }, [
+      el('h3', { classe: 'caixa__titulo', texto: titulo }),
+      texto ? el('p', { classe: 'form-secao__texto', texto: texto }) : null
+    ].concat(filhos));
+  }
+
+  function renderizarFormProcesso(box, p) {
+    var cfgBase = (p && p.config) || configPadrao();
+    // Cópia de trabalho da config (o formulário mexe só nela até salvar)
+    var f = {
+      perfil: normalizarPerfilIdeal(cfgBase.perfilIdeal),
+      etapas: (cfgBase.etapas || []).map(function (e) { return { id: e.id, nome: e.nome || '', peso: e.peso, campo: e.campo || '', descricao: e.descricao || '' }; }),
+      bonus: (cfgBase.bonus || []).map(function (b) {
+        var r = b.regra || {};
+        return { id: b.id, nome: b.nome || '', campo: b.campo || '', tipo: r.tipo === 'mapa' ? 'mapa' : 'checkbox',
+          pontos: r.tipo === 'mapa' ? '' : r.pontos,
+          pares: r.tipo === 'mapa' ? Object.keys(r.pontos || {}).map(function (k) { return { valor: k, pontos: r.pontos[k] }; }) : [] };
+      })
+    };
+    var per = (p && p.periodo) || {};
+
+    box.appendChild(cabecalhoVista(p ? 'Editar processo · código ' + p.codigo : 'Novo processo', p ? p.nome : 'Novo processo',
+      'Preencha os dados, ligue a lista do ClickUp e diga como o relatório deve pontuar os candidatos.',
+      [botao('botao--claro', '← Voltar', function () { irParaProcessos(p ? 'pagina' : 'lista', p ? p.id : null); })]));
+
+    var form = el('form', { classe: 'form-processo', id: 'form-processo', novalidate: true });
+
+    // 1. Dados
+    form.appendChild(secaoForm('Dados do processo', null, [
+      el('div', { classe: 'form-grade' }, [
+        campoCom('proc-nome', 'Nome do processo', p && p.nome, { maxlength: 80, placeholder: 'Ex.: Escrevente de atendimento 2026' }),
+        campoCom('proc-empresa', 'Empresa contratante', p && empresaDe(p), { maxlength: 80 }),
+        campoCom('proc-vaga', 'Vaga', p && p.vaga, { maxlength: 120 }),
+        campoCom('proc-cidade', 'Cidade', p && p.cidade, { maxlength: 80, placeholder: 'Ex.: Boa Vista / RR' }),
+        campoCom('proc-consultor', 'Consultor responsável', p && p.consultor, { maxlength: 80 }),
+        campoCom('proc-contratante', 'Quem recebe o relatório (nome)', p && p.contratante, { maxlength: 80 }),
+        campoCom('proc-inicio', 'Início', per.inicio, { type: 'date' }),
+        campoCom('proc-fim', 'Fim', per.fim, { type: 'date' })
+      ]),
+      el('div', { classe: 'form-marcas' }, [
+        campoMarcar('proc-ativa', 'Processo ativo (o link aceita respostas)', p ? p.ativa : true),
+        campoMarcar('proc-mostrar', 'Mostrar resultado ao participante (resumo do perfil no final)', p ? p.mostrarResultado : false)
+      ])
+    ]));
+
+    // 2. ClickUp
+    var clickupCorpo = el('div', { classe: 'clickup-corpo', id: 'proc-clickup' });
+    form.appendChild(secaoForm('Lista do ClickUp', 'Os candidatos do processo vêm dessa lista: notas das etapas, status e respostas do formulário.', [clickupCorpo]));
+    var listaAtual = p ? String(p.clickupListId || '') : '';
+    var lerLista = montarClickup(clickupCorpo, listaAtual);
+
+    // 3. Link do teste
+    if (p) {
+      var link = linkDe(p);
+      form.appendChild(secaoForm('Link do teste DISC', 'Envie aos candidatos. As respostas chegam ligadas a este processo.', [
+        el('p', { classe: 'av-link', id: 'proc-link', texto: link }),
+        el('div', { classe: 'gestao-card__acoes' }, [
+          botao('botao--claro botao--pequeno', 'Copiar link', function () { copiar(link, 'Link copiado.'); }),
+          botao('botao--claro botao--pequeno', 'Copiar mensagem', function () { copiar(mensagemConvite(p, link), 'Mensagem copiada. Cole no WhatsApp.'); })
+        ])
+      ]));
+    }
+
+    // 4. Perfil ideal
+    var codigoPerfil = el('span', { classe: 'badge perfil-codigo', id: 'proc-perfil-codigo' });
+    var explicacao = el('p', { classe: 'perfil-explicacao', id: 'proc-perfil-explicacao', 'aria-live': 'polite' });
+    var letras = LETRAS.map(function (l) {
+      return el('button', { type: 'button', classe: 'perfil-letra', 'data-letra': l, id: 'proc-perfil-' + l, 'aria-pressed': 'false',
+        onclick: function () { f.perfil = alternarLetraPerfil(f.perfil, l); atualizarPerfil(); } }, [
+        letraDisc(l, 'perfil-letra__sigla'),
+        el('span', { classe: 'perfil-letra__nome', texto: NOMES[l] })
+      ]);
+    });
+    function atualizarPerfil() {
+      letras.forEach(function (b) {
+        var l = b.getAttribute('data-letra');
+        var pos = f.perfil.indexOf(l);
+        b.setAttribute('aria-pressed', pos === -1 ? 'false' : 'true');
+        b.setAttribute('data-ordem', pos === -1 ? '' : String(pos + 1));
+      });
+      codigoPerfil.textContent = f.perfil || '—';
+      codigoPerfil.className = 'badge perfil-codigo' + (f.perfil ? ' disc-' + f.perfil.charAt(0) : ' perfil-codigo--vazio');
+      explicacao.textContent = explicarPerfil(f.perfil);
+    }
+    form.appendChild(secaoForm('Perfil DISC ideal', 'Toque em 1 ou 2 letras. A primeira é o traço principal; a segunda, o traço de apoio.', [
+      el('div', { classe: 'perfil-escolha', role: 'group', 'aria-label': 'Letras do perfil ideal' }, letras),
+      el('p', { classe: 'perfil-resumo' }, [el('span', { classe: 'texto-suave', texto: 'Perfil ideal: ' }), codigoPerfil]),
+      explicacao,
+      campoArea('proc-explicacao', 'Por que este perfil (aparece no relatório)', cfgBase.explicacaoPerfil, { maxlength: 2000, placeholder: 'Ex.: a rotina pede conferência rigorosa (C) e firmeza para decidir no balcão (D).' })
+    ]));
+    atualizarPerfil();
+
+    // 5. Etapas
+    var listaEtapas = el('ol', { classe: 'config-lista', id: 'proc-etapas' });
+    var somaEtapas = el('p', { classe: 'form-secao__texto tabular', id: 'proc-etapas-soma', 'aria-live': 'polite' });
+    function atualizarPesos() {
+      var pct = pesosNormalizados(f.etapas);
+      Array.prototype.forEach.call(listaEtapas.querySelectorAll('[data-peso-pct]'), function (s, i) {
+        s.textContent = String(pct[i] || 0).replace('.', ',') + '% do total';
+      });
+      var soma = f.etapas.reduce(function (a, e) { var n = Number(e.peso); return a + (isFinite(n) && n > 0 ? n : 0); }, 0);
+      somaEtapas.textContent = f.etapas.length ? 'Soma dos pesos: ' + String(soma).replace('.', ',') + '. Cada peso vira uma fatia proporcional dos 100 pontos técnicos.' : 'Nenhuma etapa ainda.';
+    }
+    function desenharEtapas() {
+      limpar(listaEtapas);
+      f.etapas.forEach(function (e, i) {
+        function ligar(campo, input) { input.addEventListener('input', function () { e[campo] = input.value; if (campo === 'peso') atualizarPesos(); }); return input; }
+        var nome = campoCom('etapa-nome-' + i, 'Nome da etapa', e.nome, { maxlength: 80, 'data-campo': 'nome' });
+        var peso = campoCom('etapa-peso-' + i, 'Peso', e.peso, { type: 'number', min: 0, step: 'any', inputmode: 'decimal', 'data-campo': 'peso' });
+        var campo = campoCom('etapa-campo-' + i, 'Campo da nota no ClickUp (0 a 10)', e.campo, { maxlength: 120, placeholder: 'Ex.: Nota Revisão', 'data-campo': 'campo' });
+        var desc = campoArea('etapa-desc-' + i, 'Descrição (aparece no relatório)', e.descricao, { rows: 2, maxlength: 1000 });
+        ligar('nome', nome.querySelector('input'));
+        ligar('peso', peso.querySelector('input'));
+        ligar('campo', campo.querySelector('input'));
+        ligar('descricao', desc.querySelector('textarea'));
+        listaEtapas.appendChild(el('li', { classe: 'config-item etapa-item', 'data-indice': String(i) }, [
+          el('div', { classe: 'config-item__topo' }, [
+            el('span', { classe: 'config-item__num tabular', texto: 'Etapa ' + (i + 1) }),
+            el('span', { classe: 'config-item__peso tabular', 'data-peso-pct': '' }),
+            botao('botao--perigo botao--pequeno', 'Remover', function () { f.etapas.splice(i, 1); desenharEtapas(); }, { 'aria-label': 'Remover etapa ' + (i + 1) })
+          ]),
+          el('div', { classe: 'form-grade form-grade--etapa' }, [nome, peso, campo]),
+          desc
+        ]));
+      });
+      atualizarPesos();
+    }
+    form.appendChild(secaoForm('Etapas avaliadas', 'Cada etapa tem uma nota de 0 a 10 num campo numérico do ClickUp. Etapa sem nenhuma nota ainda aparece como "peso em aberto".', [
+      somaEtapas, listaEtapas,
+      botao('botao--contorno', 'Adicionar etapa', function () {
+        f.etapas.push({ nome: '', peso: 10, campo: '', descricao: '' });
+        desenharEtapas();
+        var n = $('etapa-nome-' + (f.etapas.length - 1)); if (n) n.focus();
+      }, { id: 'btn-add-etapa' })
+    ]));
+    desenharEtapas();
+
+    // 6. Bônus
+    var listaBonus = el('ol', { classe: 'config-lista', id: 'proc-bonus' });
+    function desenharBonus() {
+      limpar(listaBonus);
+      f.bonus.forEach(function (b, i) {
+        var nome = campoCom('bonus-nome-' + i, 'Nome do bônus', b.nome, { maxlength: 80 });
+        var campo = campoCom('bonus-campo-' + i, 'Campo no ClickUp', b.campo, { maxlength: 120 });
+        nome.querySelector('input').addEventListener('input', function (ev) { b.nome = ev.target.value; });
+        campo.querySelector('input').addEventListener('input', function (ev) { b.campo = ev.target.value; });
+        var escTipo = criarEscolha({ id: 'bonus-tipo-' + i, rotulo: 'Como pontua', rotuloId: 'bonus-tipo-' + i + '-rotulo', classe: 'escolha--campo escolha--larga', valor: b.tipo,
+          opcoes: [{ valor: 'checkbox', rotulo: 'Caixa marcada vale pontos' }, { valor: 'mapa', rotulo: 'Cada valor vale uma pontuação' }] });
+        escTipo.botao.addEventListener('change', function () {
+          b.tipo = escTipo.botao.value;
+          if (b.tipo === 'mapa' && !b.pares.length) b.pares.push({ valor: '', pontos: '' });
+          desenharBonus();
+        });
+        var regra;
+        if (b.tipo === 'mapa') {
+          regra = el('div', { classe: 'mapa' }, [
+            el('ul', { classe: 'mapa__lista' }, b.pares.map(function (par, k) {
+              var v = el('input', { classe: 'entrada', id: 'bonus-' + i + '-valor-' + k, type: 'text', maxlength: 120, 'aria-label': 'Valor exibido no ClickUp', placeholder: 'Valor (como aparece no ClickUp)' });
+              var pt = el('input', { classe: 'entrada mapa__pontos', id: 'bonus-' + i + '-pontos-' + k, type: 'number', step: 'any', inputmode: 'decimal', 'aria-label': 'Pontos', placeholder: 'Pontos' });
+              v.value = par.valor; pt.value = par.pontos == null ? '' : par.pontos;
+              v.addEventListener('input', function () { par.valor = v.value; });
+              pt.addEventListener('input', function () { par.pontos = pt.value; });
+              return el('li', { classe: 'mapa__par' }, [v, el('span', { classe: 'mapa__seta', 'aria-hidden': 'true', texto: '→' }), pt,
+                botao('botao--claro botao--pequeno', 'Tirar', function () { b.pares.splice(k, 1); desenharBonus(); }, { 'aria-label': 'Tirar valor ' + (k + 1) })]);
+            })),
+            botao('botao--claro botao--pequeno', 'Adicionar valor', function () { b.pares.push({ valor: '', pontos: '' }); desenharBonus(); }, { id: 'bonus-' + i + '-add-valor' })
+          ]);
+        } else {
+          regra = campoCom('bonus-pontos-' + i, 'Pontos quando marcada', b.pontos, { type: 'number', step: 'any', inputmode: 'decimal' });
+          regra.querySelector('input').addEventListener('input', function (ev) { b.pontos = ev.target.value; });
+        }
+        listaBonus.appendChild(el('li', { classe: 'config-item bonus-item', 'data-indice': String(i) }, [
+          el('div', { classe: 'config-item__topo' }, [
+            el('span', { classe: 'config-item__num tabular', texto: 'Bônus ' + (i + 1) }),
+            botao('botao--perigo botao--pequeno', 'Remover', function () { f.bonus.splice(i, 1); desenharBonus(); }, { 'aria-label': 'Remover bônus ' + (i + 1) })
+          ]),
+          el('div', { classe: 'form-grade' }, [nome, campo]),
+          campoEscolha('Como pontua', escTipo, 'bonus-tipo-' + i + '-rotulo'),
+          regra
+        ]));
+      });
+    }
+    form.appendChild(secaoForm('Bônus', 'Pontos extras somados por fora da nota técnica (ex.: graduação na área).', [
+      listaBonus,
+      botao('botao--contorno', 'Adicionar bônus', function () {
+        f.bonus.push({ nome: '', campo: '', tipo: 'checkbox', pontos: 5, pares: [] });
+        desenharBonus();
+        var n = $('bonus-nome-' + (f.bonus.length - 1)); if (n) n.focus();
+      }, { id: 'btn-add-bonus' })
+    ]));
+    desenharBonus();
+
+    // 7. Corte, faixa e finalistas
+    var cfgCorte = cfgBase.corte == null ? 70 : cfgBase.corte;
+    var cfgFaixa = cfgBase.faixaAvaliar == null ? 55 : cfgBase.faixaAvaliar;
+    form.appendChild(secaoForm('Corte e finalistas', 'Score total = nota técnica (0 a 100) + bônus. Quem passa do corte é "aprovado"; entre a faixa e o corte, "avaliar".', [
+      el('div', { classe: 'form-grade' }, [
+        campoCom('proc-corte', 'Nota de corte (aprovado)', cfgCorte, { type: 'number', min: 0, step: 'any', inputmode: 'decimal' }),
+        campoCom('proc-faixa', 'A partir de (faixa "avaliar")', cfgFaixa, { type: 'number', min: 0, step: 'any', inputmode: 'decimal' })
+      ]),
+      campoCom('proc-finalistas', 'Status do ClickUp que contam como finalistas (separe por vírgula)', (cfgBase.statusFinalistas || []).join(', '),
+        { maxlength: 400, placeholder: 'Vazio = quem tem nota de etapa ou DISC' }),
+      campoMarcar('proc-antecedentes', 'Permitir campo de antecedentes (nunca aparece no relatório do contratante)', cfgBase.permitirAntecedentes === true)
+    ]));
+
+    var erro = el('p', { classe: 'campo__erro form-erro', id: 'proc-erro', role: 'alert' });
+    var btnSalvar = el('button', { type: 'submit', classe: 'botao botao--principal botao--grande', id: 'btn-salvar-processo', texto: p ? 'Salvar alterações' : 'Criar processo' });
+    form.appendChild(el('div', { classe: 'form-rodape' }, [
+      erro,
+      el('div', { classe: 'confirmar__acoes' }, [
+        botao('botao--claro botao--grande', 'Cancelar', function () { irParaProcessos(p ? 'pagina' : 'lista', p ? p.id : null); }),
+        btnSalvar
+      ])
+    ]));
+
+    function montarDados() {
+      var usados = {};
+      f.etapas.forEach(function (e) { if (e.id) usados[e.id] = true; });
+      f.bonus.forEach(function (b) { if (b.id) usados[b.id] = true; });
+      var config = {
+        perfilIdeal: f.perfil,
+        explicacaoPerfil: $('proc-explicacao').value.trim(),
+        etapas: f.etapas.map(function (e) {
+          return { id: e.id || idSimples(e.nome, usados, 'etapa'), nome: String(e.nome).trim(), peso: numeroOuNulo(e.peso),
+            campo: String(e.campo).trim(), descricao: String(e.descricao).trim() };
+        }),
+        bonus: f.bonus.map(function (b) {
+          var regra;
+          if (b.tipo === 'mapa') {
+            var pontos = {};
+            b.pares.forEach(function (par) { var v = String(par.valor).trim(); var n = numeroOuNulo(par.pontos); if (v && n !== null) pontos[v] = n; });
+            regra = { tipo: 'mapa', pontos: pontos };
+          } else regra = { tipo: 'checkbox', pontos: numeroOuNulo(b.pontos) };
+          return { id: b.id || idSimples(b.nome, usados, 'bonus'), nome: String(b.nome).trim(), campo: String(b.campo).trim(), regra: regra };
+        }),
+        corte: numeroOuNulo($('proc-corte').value),
+        faixaAvaliar: numeroOuNulo($('proc-faixa').value),
+        statusFinalistas: $('proc-finalistas').value.split(',').map(function (x) { return x.trim(); }).filter(Boolean),
+        permitirAntecedentes: $('proc-antecedentes').checked
+      };
+      if (cfgBase.permitirSaude === true) config.permitirSaude = true;
+      var dados = {
+        nome: $('proc-nome').value.trim(),
+        empresa: $('proc-empresa').value.trim(),
+        vaga: $('proc-vaga').value.trim(),
+        cidade: $('proc-cidade').value.trim(),
+        consultor: $('proc-consultor').value.trim(),
+        contratante: $('proc-contratante').value.trim(),
+        periodo: { inicio: $('proc-inicio').value, fim: $('proc-fim').value },
+        clickupListId: lerLista(),
+        tipo: (p && p.tipo) || 'selecao',
+        mostrarResultado: $('proc-mostrar').checked,
+        ativa: $('proc-ativa').checked,
+        config: config
+      };
+      if (p) dados.id = p.id;
+      return dados;
+    }
+
+    form.addEventListener('submit', function (ev) {
+      ev.preventDefault();
+      erro.textContent = '';
+      var dados = montarDados();
+      var problema = !dados.nome ? 'Informe o nome do processo.' : validarConfig(dados.config);
+      if (!problema && dados.periodo.inicio && dados.periodo.fim && dados.periodo.fim < dados.periodo.inicio) problema = 'O fim do período precisa ser depois do início.';
+      if (problema) { erro.textContent = problema; return; }
+      btnSalvar.disabled = true;
+      api('processosSalvar', dados).then(function (resp) {
+        var novo = resp.processo || {};
+        avisar(p ? 'Processo salvo.' : 'Processo criado. Código ' + (novo.codigo || '') + ': copie o link e envie.', 'ok');
+        estado.proc = { tela: 'pagina', id: novo.id || (p && p.id) };
+        return carregar().then(function () { irParaProcessos(estado.proc.tela, estado.proc.id); });
+      }).catch(function (e) {
+        if (e && e.tratado) return;
+        erro.textContent = (e && e.message) || 'Não foi possível salvar.';
+      }).then(function () { btnSalvar.disabled = false; });
     });
     box.appendChild(form);
-    if (!estado.empresas.length) {
-      box.appendChild(el('div', { classe: 'caixa vazio' }, el('p', { classe: 'vazio__texto', texto: 'Nenhuma empresa cadastrada ainda.' })));
-      return;
+  }
+
+  // Bloco da lista do ClickUp. Configurado: seletor em pílula com as listas. Senão: passo a passo + campo do ID.
+  // Devolve a função que lê o ID escolhido.
+  function montarClickup(corpo, atual) {
+    var lerManual = null;
+    function manual(textoAviso) {
+      var entrada = el('input', { id: 'proc-lista-id', classe: 'entrada tabular', type: 'text', maxlength: 200, autocomplete: 'off', placeholder: 'Ex.: 901234567890 ou o endereço da lista' });
+      entrada.value = atual;
+      lerManual = function () { return idListaDoTexto(entrada.value); };
+      return [
+        textoAviso,
+        el('label', { classe: 'campo', for: 'proc-lista-id' }, [
+          el('span', { classe: 'campo__rotulo', texto: 'ID da lista do ClickUp' }), entrada,
+          el('span', { classe: 'campo__ajuda', texto: 'Abra a lista no ClickUp e copie o endereço: o ID é o número depois de "/li/". Pode colar o endereço inteiro.' })
+        ])
+      ];
     }
-    box.appendChild(el('ul', { classe: 'gestao-lista gestao-lista--linhas', id: 'lista-empresas' }, estado.empresas.map(function (emp) {
-      var nAv = estado.avaliacoes.filter(function (a) { return a.empresaId === emp.id; }).length;
-      var nGe = estado.usuarios.filter(function (u) { return u.papel === 'gestor' && u.empresaId === emp.id; }).length;
-      return el('li', { classe: 'caixa caixa--compacta gestao-linha', 'data-id': emp.id }, [
-        el('div', { classe: 'gestao-linha__texto' }, [
-          el('p', { classe: 'seminegrito gestao-linha__nome', texto: emp.nome }),
-          el('p', { classe: 'gestao-card__sub', texto: nAv + ' avaliaç' + (nAv === 1 ? 'ão' : 'ões') + ' · ' + nGe + ' gestor' + (nGe === 1 ? '' : 'es') })
+    if (!estado.clickup.configurado) {
+      adicionar(corpo, manual(el('div', { classe: 'aviso clickup-passos', id: 'clickup-desligado' }, [
+        el('p', { classe: 'seminegrito', texto: 'O ClickUp ainda não está ligado ao sistema.' }),
+        el('ol', { classe: 'clickup-passos__lista' }, [
+          el('li', { texto: 'No ClickUp, abra seu avatar > Configurações > Apps e gere o "API Token" pessoal.' }),
+          el('li', { texto: 'No Apps Script do sistema, vá em Configurações do projeto > Propriedades do script e crie CLICKUP_TOKEN com esse token.' }),
+          el('li', { texto: 'Volte aqui e atualize a página. Enquanto isso, cole o ID da lista abaixo.' })
+        ])
+      ])));
+      return function () { return lerManual(); };
+    }
+    var esc = null;
+    var area = el('div', { classe: 'clickup-escolha' }, el('p', { classe: 'texto-suave t-rotulo', id: 'proc-lista-carregando', texto: 'Carregando as listas do ClickUp…' }));
+    corpo.appendChild(area);
+    api('clickupListas').then(function (resp) {
+      var listas = resp.listas || [];
+      var opcoes = [{ valor: '', rotulo: 'Sem lista (só o teste DISC)' }].concat(listas.map(function (l) {
+        return { valor: String(l.id), rotulo: (l.pasta ? l.pasta + ' · ' : '') + l.nome };
+      }));
+      if (atual && !listas.some(function (l) { return String(l.id) === atual; })) opcoes.push({ valor: atual, rotulo: 'Lista ' + atual + ' (não encontrada)' });
+      esc = criarEscolha({ id: 'proc-lista', rotulo: 'Lista do ClickUp', rotuloId: 'proc-lista-rotulo', classe: 'escolha--campo escolha--larga', valor: atual, opcoes: opcoes });
+      limpar(area);
+      area.appendChild(campoEscolha('Lista do ClickUp', esc, 'proc-lista-rotulo'));
+      if (!listas.length) area.appendChild(el('p', { classe: 'campo__ajuda', texto: 'Nenhuma lista encontrada. Confira a pasta configurada (CLICKUP_PASTA_ID) ou o acesso do token.' }));
+    }).catch(function (e) {
+      if (e && e.tratado) return;
+      limpar(area);
+      adicionar(area, manual(el('p', { classe: 'aviso aviso--erro', texto: 'Não deu para ler as listas do ClickUp (' + ((e && e.message) || 'erro') + '). Cole o ID da lista.' })));
+    });
+    return function () {
+      if (esc && $('proc-lista')) return $('proc-lista').value;
+      if (lerManual) return lerManual();
+      return atual;
+    };
+  }
+
+  /* ----- Página do processo ----- */
+
+  function textoPeriodo(per) {
+    function br(d) { var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(d || '')); return m ? m[3] + '/' + m[2] + '/' + m[1] : ''; }
+    var a = br(per && per.inicio), b = br(per && per.fim);
+    return a && b ? a + ' a ' + b : (a ? 'desde ' + a : (b ? 'até ' + b : '—'));
+  }
+
+  function dlItem(rotulo, valor, id, largo) {
+    return el('div', { classe: largo ? 'det-dl__largo' : null }, [el('dt', { texto: rotulo }), el('dd', { id: id || null, texto: valor || '—' })]);
+  }
+
+  function verParticipantes(p) {
+    estado.filtros.processo = p.codigo;
+    $('filtro-busca').value = '';
+    montarFiltros();
+    renderizarLista();
+    mostrarAba('lista');
+  }
+
+  function gerarRascunho(p, btn) {
+    btn.disabled = true;
+    btn.textContent = 'Gerando… (lendo o ClickUp)';
+    api('relatorioRascunho', p.id).then(function (resp) {
+      estado.editor = { processoId: p.id, token: resp.token, relatorio: resp.relatorio, avisos: resp.avisos || (resp.relatorio && resp.relatorio.avisos) || [],
+        status: 'rascunho', url: '', sujo: false, modo: 'textos' };
+      delete estado.relatorios[p.id];
+      avisar('Rascunho gerado. Revise os textos antes de publicar.', 'ok');
+      irParaProcessos('editor', p.id);
+    }).catch(function (e) {
+      falhou(e);
+      btn.disabled = false;
+      btn.textContent = 'Gerar rascunho do relatório';
+    });
+  }
+
+  // Abre um relatório da lista no editor. O conteúdo vem de "relatorio.salvar" sem mudanças
+  // (devolve o relatório como está, rascunho ou publicado).
+  function abrirRelatorio(p, r) {
+    if (estado.editor && estado.editor.token === r.token) { irParaProcessos('editor', p.id); return; }
+    api('relatorioSalvar', r.token, { textos: {} }).then(function (resp) {
+      if (!resp.relatorio) throw new Error('Relatório não encontrado.');
+      estado.editor = { processoId: p.id, token: r.token, relatorio: resp.relatorio, avisos: [], status: r.status,
+        url: r.status === 'publicado' ? linkRelatorio(root.location.href, r.token) : '', sujo: false, modo: 'textos' };
+      irParaProcessos('editor', p.id);
+    }).catch(falhou);
+  }
+
+  function blocoRelatorios(p) {
+    var sec = el('section', { classe: 'caixa proc-relatorios', id: 'proc-relatorios' }, [el('h3', { classe: 'caixa__titulo', texto: 'Relatórios deste processo' })]);
+    var lista = estado.relatorios[p.id];
+    if (!lista) {
+      sec.appendChild(el('p', { classe: 'texto-suave t-rotulo', texto: 'Carregando…' }));
+      api('relatoriosListar', p.id).then(function (resp) {
+        estado.relatorios[p.id] = resp.relatorios || [];
+        if (estado.proc.tela === 'pagina' && estado.proc.id === p.id) {
+          var velho = $('proc-relatorios');
+          if (velho) velho.parentNode.replaceChild(blocoRelatorios(p), velho);
+        }
+      }).catch(falhou);
+      return sec;
+    }
+    if (!lista.length) {
+      sec.appendChild(el('p', { classe: 'texto-suave t-corpo', texto: 'Nenhum relatório ainda. Use "Gerar rascunho do relatório".' }));
+      return sec;
+    }
+    sec.appendChild(el('ul', { classe: 'lista-simples', id: 'lista-relatorios' }, lista.map(function (r) {
+      var pub = r.status === 'publicado';
+      var url = linkRelatorio(root.location.href, r.token);
+      return el('li', { classe: 'rel-linha', 'data-token': r.token, 'data-status': pub ? 'publicado' : 'rascunho' }, [
+        el('div', { classe: 'rel-linha__texto' }, [
+          el('span', { classe: 'selo ' + (pub ? 'selo--verde' : ''), texto: pub ? 'Publicado' : 'Rascunho' }),
+          el('span', { classe: 'texto-suave t-rotulo tabular', texto: 'Gerado em ' + formatarData(r.criadoEm) + (pub && r.publicadoEm ? ' · publicado em ' + formatarData(r.publicadoEm) : '') })
         ]),
         el('div', { classe: 'gestao-card__acoes' }, [
-          el('button', { type: 'button', classe: 'botao botao--claro botao--pequeno', 'data-acao': 'renomear', texto: 'Renomear', onclick: function () {
-            var campo = campoTexto('empresa-renomear', 'Novo nome', { maxlength: 80 });
-            campo.querySelector('input').value = emp.nome;
-            abrirJanela({ id: 'janela-empresa', titulo: 'Renomear empresa', botao: 'Salvar', corpo: [campo], aoConfirmar: function () {
-              var nome = $('empresa-renomear').value.trim();
-              if (!nome) throw new Error('Informe o nome da empresa.');
-              return api('salvarEmpresa', { id: emp.id, nome: nome }).then(function () { avisar('Empresa renomeada.', 'ok'); return carregar(); });
-            } });
-          } }),
-          el('button', { type: 'button', classe: 'botao botao--perigo botao--pequeno', 'data-acao': 'excluir', texto: 'Excluir', onclick: function () {
-            confirmar({ titulo: 'Excluir a empresa?', texto: '"' + emp.nome + '" será apagada. Empresas com avaliações ou gestores não podem ser excluídas.', botao: 'Excluir empresa' }).then(function (ok) {
-              if (!ok) return;
-              api('excluirEmpresa', emp.id).then(function () { avisar('Empresa excluída.', 'ok'); return carregar(); }).catch(falhou);
-            });
-          } })
+          botao('botao--claro botao--pequeno', 'Abrir no editor', function () { abrirRelatorio(p, r); }, { 'data-acao': 'abrir-relatorio' }),
+          pub ? botao('botao--claro botao--pequeno', 'Copiar link', function () { copiar(url, 'Link do relatório copiado.'); }, { 'data-acao': 'copiar-link-relatorio' }) : null,
+          pub ? el('a', { classe: 'botao botao--claro botao--pequeno', href: url, target: '_blank', rel: 'noopener', texto: 'Ver publicado' }) : null
         ])
       ]);
     })));
+    return sec;
+  }
+
+  function renderizarPaginaProcesso(box, p) {
+    var n = Number(p.respostas) || 0;
+    var link = linkDe(p);
+    var cfg = p.config || configPadrao();
+    var btnGerar = botao('botao--laranja', 'Gerar rascunho do relatório', function () { gerarRascunho(p, btnGerar); }, { id: 'btn-gerar-rascunho' });
+    box.appendChild(cabecalhoVista('Processo seletivo · código ' + p.codigo, p.nome, textoLocal(p) || null, [
+      botao('botao--claro', '← Processos', function () { irParaProcessos('lista'); }),
+      botao('botao--claro', 'Editar', function () { irParaProcessos('form', p.id); }, { id: 'btn-editar-processo' }),
+      botao('botao--claro', 'Ver participantes', function () { verParticipantes(p); }, { id: 'btn-ver-participantes' }),
+      btnGerar
+    ]));
+    if (!p.clickupListId) {
+      box.appendChild(el('p', { classe: 'aviso proc-aviso', texto: 'Este processo ainda não está ligado a uma lista do ClickUp. Edite o processo para escolher a lista: o relatório lê os candidatos de lá.' }));
+    }
+
+    var dados = el('section', { classe: 'caixa' }, [
+      el('h3', { classe: 'caixa__titulo', texto: 'Dados' }),
+      el('dl', { classe: 'det-dl' }, [
+        dlItem('Empresa', empresaDe(p)), dlItem('Vaga', p.vaga), dlItem('Cidade', p.cidade),
+        dlItem('Período', textoPeriodo(p.periodo)), dlItem('Consultor', p.consultor), dlItem('Recebe o relatório', p.contratante),
+        dlItem('Lista do ClickUp', p.clickupListId, 'proc-lista-ligada'),
+        dlItem('Respostas do teste DISC', String(n), 'proc-respostas'),
+        dlItem('Situação', p.ativa ? 'Ativo (link aceita respostas)' : 'Desativado', null, true)
+      ])
+    ]);
+    var linkBox = el('section', { classe: 'caixa' }, [
+      el('h3', { classe: 'caixa__titulo', texto: 'Link do teste DISC' }),
+      el('p', { classe: 'av-link', id: 'proc-link', texto: link }),
+      el('div', { classe: 'gestao-card__acoes proc-link-acoes' }, [
+        botao('botao--claro botao--pequeno', 'Copiar link', function () { copiar(link, 'Link copiado.'); }, { 'data-acao': 'copiar-link' }),
+        botao('botao--claro botao--pequeno', 'Copiar mensagem', function () { copiar(mensagemConvite(p, link), 'Mensagem copiada. Cole no WhatsApp.'); }, { 'data-acao': 'copiar-mensagem' })
+      ])
+    ]);
+    var pct = pesosNormalizados(cfg.etapas);
+    var configBox = el('section', { classe: 'caixa proc-config' }, [
+      el('h3', { classe: 'caixa__titulo', texto: 'Como o relatório pontua' }),
+      el('p', { classe: 'perfil-resumo' }, [
+        el('span', { classe: 'texto-suave', texto: 'Perfil DISC ideal: ' }),
+        cfg.perfilIdeal ? el('span', { classe: 'badge disc-' + cfg.perfilIdeal.charAt(0), id: 'proc-perfil', texto: cfg.perfilIdeal }) : el('span', { id: 'proc-perfil', texto: 'não definido' })
+      ]),
+      cfg.perfilIdeal ? el('p', { classe: 'perfil-explicacao', texto: explicarPerfil(cfg.perfilIdeal) }) : null,
+      el('h4', { classe: 'conf-subtitulo', texto: 'Etapas' }),
+      cfg.etapas && cfg.etapas.length ? el('ul', { classe: 'lista-simples proc-etapas-resumo' }, cfg.etapas.map(function (e, i) {
+        return el('li', null, [
+          el('span', { classe: 'proc-etapas-resumo__nome', texto: e.nome }),
+          el('span', { classe: 'texto-suave t-rotulo tabular', texto: 'peso ' + String(e.peso).replace('.', ',') + ' · ' + String(pct[i]).replace('.', ',') + '%' })
+        ]);
+      })) : el('p', { classe: 'texto-suave t-rotulo', texto: 'Nenhuma etapa configurada.' }),
+      cfg.bonus && cfg.bonus.length ? el('h4', { classe: 'conf-subtitulo', texto: 'Bônus' }) : null,
+      cfg.bonus && cfg.bonus.length ? el('ul', { classe: 'lista-simples' }, cfg.bonus.map(function (b) {
+        var r = b.regra || {};
+        var txt = r.tipo === 'mapa' ? Object.keys(r.pontos || {}).map(function (k) { return k + ' → ' + r.pontos[k]; }).join(' · ') : '+' + r.pontos + ' se marcado';
+        return el('li', null, [el('span', { classe: 'proc-etapas-resumo__nome', texto: b.nome }), el('span', { classe: 'texto-suave t-rotulo tabular', texto: txt })]);
+      })) : null,
+      el('p', { classe: 'texto-medio t-rotulo proc-corte', texto: 'Corte: ' + cfg.corte + ' pontos · faixa "avaliar" a partir de ' + cfg.faixaAvaliar + '.' })
+    ]);
+    box.appendChild(el('div', { classe: 'proc-grade' }, [
+      el('div', { classe: 'det-lado' }, [dados, linkBox]),
+      el('div', { classe: 'det-lado' }, [configBox, blocoRelatorios(p)])
+    ]));
+  }
+
+  /* ----- Editor do relatório ----- */
+
+  function documentoPrevia(rel) {
+    var VIEW = root.DISC_RELATORIO_VIEW;
+    var corpo = VIEW && typeof VIEW.montarHtml === 'function' ? VIEW.montarHtml(rel) : '<p>Pré-visualização indisponível (relatorio-view.js não carregado).</p>';
+    return '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
+      '<link rel="stylesheet" href="assets/notus.css"><link rel="stylesheet" href="assets/relatorio.css"></head>' +
+      '<body class="corpo-doc"><main id="relatorio" class="relatorio" data-estado="pronto">' + corpo + '</main></body></html>';
+  }
+
+  function idTexto(id) { return 'texto-' + String(id).replace(/[^A-Za-z0-9_-]/g, '_'); }
+
+  function salvarEditor(ed) {
+    return api('relatorioSalvar', ed.token, ed.relatorio).then(function (resp) {
+      if (resp.relatorio) ed.relatorio = resp.relatorio;
+      ed.sujo = false;
+      return resp;
+    });
+  }
+
+  function renderizarEditor(box, p) {
+    var ed = estado.editor;
+    var rel = ed.relatorio || {};
+    var publicado = ed.status === 'publicado';
+
+    var acoes = [botao('botao--claro', '← Processo', function () { irParaProcessos('pagina', p.id); }, { id: 'btn-voltar-processo' })];
+    if (estado.clickup.iaConfigurada) {
+      var btnIa = botao('botao--contorno', 'Melhorar textos com IA', function () {
+        btnIa.disabled = true; btnIa.textContent = 'Melhorando…';
+        (ed.sujo ? salvarEditor(ed) : Promise.resolve()).then(function () {
+          return api('relatorioMelhorarTextos', ed.token);
+        }).then(function (resp) {
+          if (resp.relatorio) ed.relatorio = resp.relatorio;
+          avisar(resp.alterados != null ? resp.alterados + ' texto(s) reescrito(s) pela IA. Revise antes de publicar.' : 'Textos melhorados. Revise antes de publicar.', 'ok');
+          renderizarProcessos();
+        }).catch(function (e) { falhou(e); btnIa.disabled = false; btnIa.textContent = 'Melhorar textos com IA'; });
+      }, { id: 'btn-melhorar-ia' });
+      acoes.push(btnIa);
+    }
+    var btnSalvar = botao('botao--principal', publicado ? 'Salvar alterações' : 'Salvar rascunho', function () {
+      btnSalvar.disabled = true;
+      salvarEditor(ed).then(function () {
+        avisar(publicado ? 'Alterações salvas: o link publicado já mostra a versão nova.' : 'Rascunho salvo.', 'ok');
+        renderizarProcessos();
+      }).catch(falhou).then(function () { btnSalvar.disabled = false; });
+    }, { id: 'btn-salvar-rascunho' });
+    acoes.push(btnSalvar);
+    if (!publicado) {
+      var btnPub = botao('botao--laranja', 'Publicar', function () {
+        btnPub.disabled = true;
+        (ed.sujo ? salvarEditor(ed) : Promise.resolve()).then(function () {
+          return api('relatorioPublicar', ed.token, root.location.href);
+        }).then(function (resp) {
+          ed.status = 'publicado';
+          ed.url = urlAbsoluta(resp.url || linkRelatorio(root.location.href, ed.token), root.location.href);
+          delete estado.relatorios[p.id];
+          avisar(resp.aviso || 'Relatório publicado. Copie o link e envie ao contratante.', resp.aviso ? '' : 'ok');
+          renderizarProcessos();
+        }).catch(function (e) { falhou(e); btnPub.disabled = false; });
+      }, { id: 'btn-publicar' });
+      acoes.push(btnPub);
+    } else {
+      acoes.push(botao('botao--perigo', 'Despublicar', function () {
+        confirmar({ titulo: 'Tirar o relatório do ar?', texto: 'O link para de abrir na hora. Dá para publicar de novo depois, com o mesmo link.', botao: 'Despublicar' }).then(function (ok) {
+          if (!ok) return;
+          api('relatorioDespublicar', ed.token).then(function () {
+            ed.status = 'rascunho';
+            delete estado.relatorios[p.id];
+            avisar('Relatório despublicado: o link não abre mais.', 'ok');
+            renderizarProcessos();
+          }).catch(falhou);
+        });
+      }, { id: 'btn-despublicar' }));
+    }
+    box.appendChild(cabecalhoVista('Relatório · ' + p.nome, publicado ? 'Relatório publicado' : 'Rascunho do relatório',
+      'Revise cada texto. O que você mudar fica marcado como "Editado". Números e tabelas vêm do ClickUp e do DISC.', acoes));
+
+    if (publicado && ed.url) {
+      var msg = mensagemRelatorio(p, ed.url);
+      box.appendChild(el('section', { classe: 'caixa caixa--destaque rel-publicado', id: 'rel-publicado' }, [
+        el('h3', { classe: 'caixa__titulo', texto: 'Link para o contratante' }),
+        el('p', { classe: 'av-link', id: 'rel-link', texto: ed.url }),
+        el('p', { classe: 'rel-mensagem', id: 'rel-mensagem', texto: msg }),
+        el('div', { classe: 'gestao-card__acoes' }, [
+          botao('botao--principal botao--pequeno', 'Copiar link', function () { copiar(ed.url, 'Link do relatório copiado.'); }, { id: 'btn-copiar-link-relatorio' }),
+          botao('botao--claro botao--pequeno', 'Copiar mensagem para WhatsApp', function () { copiar(msg, 'Mensagem copiada. Cole no WhatsApp do contratante.'); }, { id: 'btn-copiar-msg-relatorio' }),
+          el('a', { classe: 'botao botao--claro botao--pequeno', id: 'link-abrir-relatorio', href: ed.url, target: '_blank', rel: 'noopener', texto: 'Abrir relatório' })
+        ])
+      ]));
+    }
+
+    var avisos = Array.isArray(ed.avisos) ? ed.avisos : [];
+    if (avisos.length) {
+      box.appendChild(el('div', { classe: 'aviso editor-avisos', id: 'editor-avisos', role: 'note' }, [
+        el('p', { classe: 'seminegrito', texto: 'Avisos da leitura do ClickUp' }),
+        el('ul', { classe: 'editor-avisos__lista' }, avisos.map(function (a) { return el('li', { texto: String(a) }); }))
+      ]));
+    }
+
+    // Alternância: textos editáveis ou documento como o contratante vê
+    var modo = ed.modo === 'previa' ? 'previa' : 'textos';
+    function alternar(m) { ed.modo = m; renderizarProcessos(); }
+    box.appendChild(el('div', { classe: 'segmento', role: 'group', 'aria-label': 'Modo do editor' }, [
+      el('button', { type: 'button', classe: 'segmento__botao', id: 'btn-ver-textos', 'aria-pressed': modo === 'textos' ? 'true' : 'false', texto: 'Editar textos', onclick: function () { alternar('textos'); } }),
+      el('button', { type: 'button', classe: 'segmento__botao', id: 'btn-ver-previa', 'aria-pressed': modo === 'previa' ? 'true' : 'false', texto: 'Pré-visualização', title: 'Ver como o contratante vê', onclick: function () { alternar('previa'); } })
+    ]));
+
+    if (modo === 'previa') {
+      var frame = el('iframe', { classe: 'previa-doc', id: 'editor-previa', title: 'Pré-visualização do relatório', sandbox: 'allow-same-origin', loading: 'eager' });
+      frame.addEventListener('load', function () {
+        try {
+          var d = frame.contentDocument;
+          if (d && d.documentElement) frame.style.height = Math.max(600, d.documentElement.scrollHeight) + 'px';
+        } catch (e) { /* mantém a altura padrão */ }
+      });
+      frame.srcdoc = documentoPrevia(rel);
+      box.appendChild(el('div', { classe: 'caixa caixa--compacta previa-moldura' }, frame));
+      return;
+    }
+
+    // Textos agrupados por seção, na ordem do documento
+    var lista = textosEditaveis(rel);
+    var grupos = [];
+    lista.forEach(function (t) {
+      var g = grupos.length && grupos[grupos.length - 1].secao === t.secao ? grupos[grupos.length - 1] : null;
+      if (!g) { g = { secao: t.secao, itens: [] }; grupos.push(g); }
+      g.itens.push(t);
+    });
+    var area = el('div', { classe: 'editor-textos', id: 'editor-textos' });
+    grupos.forEach(function (g) {
+      area.appendChild(el('section', { classe: 'caixa editor-secao' }, [
+        el('h3', { classe: 'caixa__titulo', texto: g.secao }),
+        el('div', { classe: 'editor-secao__itens' }, g.itens.map(function (t) {
+          var info = rel.textos[t.id] || {};
+          var origem = ORIGENS[info.origem] ? info.origem : 'regra';
+          var selo = el('span', { classe: 'selo texto-origem', 'data-origem': origem, texto: ORIGENS[origem] });
+          var txt = String(info.texto || '');
+          var ta = el('textarea', { id: idTexto(t.id), classe: 'entrada texto-campo', 'data-texto-id': t.id, maxlength: 4000,
+            rows: Math.min(10, Math.max(2, Math.ceil(txt.length / 70) + 1)) });
+          ta.value = txt;
+          ta.addEventListener('input', function () {
+            if (editarTexto(rel, t.id, ta.value)) {
+              ed.sujo = true;
+              selo.textContent = ORIGENS.editado;
+              selo.setAttribute('data-origem', 'editado');
+            }
+          });
+          return el('div', { classe: 'texto-item', 'data-texto-id': t.id }, [
+            el('div', { classe: 'texto-item__topo' }, [
+              el('label', { classe: 'texto-item__rotulo', for: idTexto(t.id), texto: t.rotulo }),
+              selo
+            ]),
+            ta
+          ]);
+        }))
+      ]));
+    });
+    if (!grupos.length) area.appendChild(el('div', { classe: 'caixa vazio' }, el('p', { classe: 'vazio__texto', texto: 'Este relatório não tem textos para editar.' })));
+    box.appendChild(area);
   }
 
   /* ---------- Usuários (admin) ---------- */
@@ -1589,38 +2414,42 @@
     limpar(box);
     if (papel() !== 'admin') return;
     box.appendChild(cabecalhoVista('Acessos', 'Usuários',
-      'Administradores veem tudo. Gestores veem só os participantes da própria empresa e não excluem nada.',
-      [el('button', { type: 'button', classe: 'botao botao--principal', id: 'btn-novo-usuario', texto: 'Novo usuário', onclick: function () { janelaUsuario(null); } })]));
+      'Só administradores entram no painel. Crie um acesso para cada pessoa da equipe Notus que conduz processos.',
+      [botao('botao--principal', 'Novo administrador', function () { janelaUsuario(null); }, { id: 'btn-novo-usuario' })]));
     var eu = estado.usuario || {};
     box.appendChild(el('ul', { classe: 'gestao-lista gestao-lista--linhas', id: 'lista-usuarios' }, estado.usuarios.map(function (u) {
       var euMesmo = u.id === eu.id;
+      var gestor = u.papel !== 'admin';
       var situacao = u.bloqueado ? { t: 'Bloqueado', c: 'selo--vermelho' } : (u.ativo ? { t: 'Ativo', c: 'selo--verde' } : { t: 'Desativado', c: '' });
-      return el('li', { classe: 'caixa caixa--compacta gestao-linha', 'data-email': u.email }, [
+      return el('li', { classe: 'caixa caixa--compacta gestao-linha' + (gestor ? ' gestao-linha--antigo' : ''), 'data-email': u.email, 'data-papel': u.papel }, [
         el('div', { classe: 'gestao-linha__texto' }, [
           el('p', { classe: 'seminegrito gestao-linha__nome', texto: u.nome + (euMesmo && !/você/i.test(u.nome) ? ' (você)' : '') }),
           el('p', { classe: 'gestao-card__sub', texto: u.email }),
           el('div', { classe: 'card-selos' }, [
-            el('span', { classe: 'selo', texto: PAPEIS[u.papel] || u.papel }),
-            u.papel === 'gestor' ? el('span', { classe: 'selo', texto: u.empresaNome || 'Sem empresa' }) : null,
-            el('span', { classe: 'selo ' + situacao.c, texto: situacao.t })
+            el('span', { classe: 'selo usuario-papel', texto: gestor ? 'gestor (desativado nesta versão)' : PAPEIS.admin }),
+            gestor ? null : el('span', { classe: 'selo ' + situacao.c, texto: situacao.t })
           ])
         ]),
-        el('div', { classe: 'gestao-card__acoes' }, [
-          el('button', { type: 'button', classe: 'botao botao--claro botao--pequeno', 'data-acao': 'editar', texto: 'Editar', onclick: function () { janelaUsuario(u); } }),
-          el('button', { type: 'button', classe: 'botao botao--claro botao--pequeno', 'data-acao': 'redefinir', texto: 'Redefinir senha', onclick: function () { janelaRedefinir(u); } }),
-          euMesmo ? null : el('button', { type: 'button', classe: 'botao botao--claro botao--pequeno', 'data-acao': 'alternar-ativo', texto: u.ativo ? 'Desativar' : 'Ativar', onclick: function () {
-            api('salvarUsuario', { id: u.id, nome: u.nome, email: u.email, papel: u.papel, empresaId: u.empresaId, ativo: !u.ativo })
+        el('div', { classe: 'gestao-card__acoes' }, gestor ? [
+          botao('botao--perigo botao--pequeno', 'Excluir', function () { excluirUsuario(u); }, { 'data-acao': 'excluir' })
+        ] : [
+          botao('botao--claro botao--pequeno', 'Editar', function () { janelaUsuario(u); }, { 'data-acao': 'editar' }),
+          botao('botao--claro botao--pequeno', 'Redefinir senha', function () { janelaRedefinir(u); }, { 'data-acao': 'redefinir' }),
+          euMesmo ? null : botao('botao--claro botao--pequeno', u.ativo ? 'Desativar' : 'Ativar', function () {
+            api('salvarUsuario', { id: u.id, nome: u.nome, email: u.email, papel: 'admin', empresaId: '', ativo: !u.ativo })
               .then(function () { avisar(u.ativo ? 'Acesso desativado.' : 'Acesso ativado.', 'ok'); return carregar(); }).catch(falhou);
-          } }),
-          euMesmo ? null : el('button', { type: 'button', classe: 'botao botao--perigo botao--pequeno', 'data-acao': 'excluir', texto: 'Excluir', onclick: function () {
-            confirmar({ titulo: 'Excluir o acesso?', texto: u.nome + ' (' + u.email + ') não vai mais conseguir entrar no painel.', botao: 'Excluir acesso' }).then(function (ok) {
-              if (!ok) return;
-              api('excluirUsuario', u.id).then(function () { avisar('Acesso excluído.', 'ok'); return carregar(); }).catch(falhou);
-            });
-          } })
+          }, { 'data-acao': 'alternar-ativo' }),
+          euMesmo ? null : botao('botao--perigo botao--pequeno', 'Excluir', function () { excluirUsuario(u); }, { 'data-acao': 'excluir' })
         ])
       ]);
     })));
+  }
+
+  function excluirUsuario(u) {
+    confirmar({ titulo: 'Excluir o acesso?', texto: u.nome + ' (' + u.email + ') não vai mais conseguir entrar no painel.', botao: 'Excluir acesso' }).then(function (ok) {
+      if (!ok) return;
+      api('excluirUsuario', u.id).then(function () { avisar('Acesso excluído.', 'ok'); return carregar(); }).catch(falhou);
+    });
   }
 
   function campoSenhaTemporaria(id) {
@@ -1636,44 +2465,32 @@
     ]);
   }
 
+  // Criar/editar acesso: sempre administrador (o papel gestor foi desativado nesta versão).
   function janelaUsuario(u) {
-    var escPapel = criarEscolha({
-      id: 'us-papel', rotulo: 'Papel', rotuloId: 'us-papel-rotulo', classe: 'escolha--campo escolha--larga', valor: u ? u.papel : 'gestor',
-      opcoes: [{ valor: 'gestor', rotulo: 'Gestor (só a própria empresa)' }, { valor: 'admin', rotulo: 'Administrador (tudo)' }]
-    });
-    var escEmpresa = criarEscolha({
-      id: 'us-empresa', rotulo: 'Empresa', rotuloId: 'us-empresa-rotulo', classe: 'escolha--campo escolha--larga',
-      valor: u && u.empresaId ? u.empresaId : (estado.empresas.length === 1 ? estado.empresas[0].id : ''),
-      opcoes: [{ valor: '', rotulo: 'Escolha a empresa' }].concat(estado.empresas.map(function (e) { return { valor: e.id, rotulo: e.nome }; }))
-    });
-    var blocoEmpresa = campoEscolha('Empresa do gestor', escEmpresa, 'us-empresa-rotulo');
-    function atualizarEmpresa() { blocoEmpresa.hidden = escPapel.botao.value !== 'gestor'; }
-    escPapel.botao.addEventListener('change', atualizarEmpresa);
-    atualizarEmpresa();
     var nome = campoTexto('us-nome', 'Nome', { maxlength: 80, autocomplete: 'off' });
     var email = campoTexto('us-email', 'E-mail', { type: 'email', maxlength: 120, inputmode: 'email', autocomplete: 'off' });
     if (u) { nome.querySelector('input').value = u.nome; email.querySelector('input').value = u.email; }
     abrirJanela({
       id: 'janela-usuario',
-      titulo: u ? 'Editar usuário' : 'Novo usuário',
-      botao: u ? 'Salvar alterações' : 'Criar usuário',
-      corpo: [nome, email, campoEscolha('Papel', escPapel, 'us-papel-rotulo'), blocoEmpresa, u ? null : campoSenhaTemporaria('us-senha')],
+      titulo: u ? 'Editar administrador' : 'Novo administrador',
+      texto: u ? null : 'A pessoa entra com o e-mail e a senha temporária e vê tudo no painel.',
+      botao: u ? 'Salvar alterações' : 'Criar acesso',
+      corpo: [nome, email, u ? null : campoSenhaTemporaria('us-senha')],
       aoConfirmar: function () {
         var dados = {
           nome: $('us-nome').value.trim(),
           email: $('us-email').value.trim(),
-          papel: escPapel.botao.value,
-          empresaId: escPapel.botao.value === 'gestor' ? escEmpresa.botao.value : '',
+          papel: 'admin',
+          empresaId: '',
           ativo: u ? u.ativo : true
         };
         if (!dados.nome) throw new Error('Informe o nome.');
         if (!dados.email) throw new Error('Informe o e-mail.');
-        if (dados.papel === 'gestor' && !dados.empresaId) throw new Error('Escolha a empresa do gestor.');
         var senha = u ? '' : $('us-senha').value.trim();
         if (!u && senha.length < 8) throw new Error('A senha temporária precisa ter pelo menos 8 caracteres.');
         if (u) dados.id = u.id;
         return api('salvarUsuario', dados, senha || undefined).then(function () {
-          avisar(u ? 'Usuário salvo.' : 'Usuário criado. Senha temporária: ' + senha, 'ok');
+          avisar(u ? 'Usuário salvo.' : 'Acesso criado. Senha temporária: ' + senha, 'ok');
           return carregar();
         });
       }
@@ -1824,7 +2641,7 @@
   function renderizarTudo() {
     renderizarLista();
     renderizarComparativo();
-    if (MODO_API) { renderizarAvaliacoes(); renderizarEmpresas(); renderizarUsuarios(); }
+    if (MODO_API && papel() === 'admin') { renderizarProcessos(); renderizarUsuarios(); }
     if (estado.abertoId) renderizarDetalhe();
   }
 
@@ -1844,9 +2661,9 @@
       $('usuario-nome').textContent = nome;
       $('menu-nome').textContent = nome;
       $('menu-email').textContent = u.email || '';
-      $('menu-papel').textContent = (PAPEIS[u.papel] || u.papel) + (u.papel === 'gestor' && u.empresaNome ? ' · ' + u.empresaNome : '');
+      $('menu-papel').textContent = PAPEIS[u.papel] || u.papel;
     }
-    $('sobretitulo-lista').textContent = MODO_API ? (u && u.papel === 'gestor' && u.empresaNome ? u.empresaNome : 'Todas as empresas') : 'Processo seletivo';
+    $('sobretitulo-lista').textContent = MODO_API ? 'Todos os processos' : 'Processo seletivo';
   }
 
   function entrarPainel() {
@@ -1863,9 +2680,13 @@
     ss('del', CHAVE_USUARIO);
     estado.token = '';
     estado.usuario = null;
-    estado.registros = []; estado.avaliacoes = []; estado.empresas = []; estado.usuarios = [];
+    estado.registros = []; estado.processos = []; estado.usuarios = [];
+    estado.clickup = { configurado: false, iaConfigurada: false, carregado: false };
     estado.abertoId = null;
-    estado.filtros = { empresa: '', avaliacao: '', perfil: '', status: '' };
+    estado.filtros = { processo: '', perfil: '', status: '' };
+    estado.proc = { tela: 'lista', id: null };
+    estado.relatorios = {};
+    estado.editor = null;
     fecharMenuUsuario();
     var j = $('janela'); if (j) j.remove();
     var c = $('confirmar'); if (c) c.remove();
@@ -1935,7 +2756,12 @@
     if (MODO_API) $('destino-importacao').textContent = 'Os resultados são enviados para a planilha, como se o participante tivesse enviado.';
 
     Array.prototype.forEach.call(document.querySelectorAll('.aba'), function (b) {
-      b.addEventListener('click', function () { mostrarAba(b.getAttribute('data-aba')); });
+      b.addEventListener('click', function () {
+        var aba = b.getAttribute('data-aba');
+        // A aba Processos sempre volta para a lista (o rascunho aberto continua guardado na memória).
+        if (aba === 'processos' && estado.proc.tela !== 'lista') { estado.proc = { tela: 'lista', id: null }; renderizarProcessos(); }
+        mostrarAba(aba);
+      });
     });
     // Busca: só 'input'. Um 'change' na busca dispara no blur (ao tocar em "Ver detalhes") e recriaria
     // a lista no meio do clique, que então se perde no botão já removido.
@@ -1972,6 +2798,11 @@
       btn.disabled = true; btn.textContent = 'Verificando…';
       Promise.resolve().then(function () { return root.DISC_API.login(email, senha); }).then(function (resp) {
         if (!resp || !resp.ok || !resp.token) throw new Error((resp && resp.erro) || 'E-mail ou senha incorretos.');
+        if (!resp.usuario || resp.usuario.papel !== 'admin') {
+          // Gestor (desativado nesta versão): encerra a sessão no servidor e não entra.
+          Promise.resolve().then(function () { return root.DISC_API.sair(resp.token); }).catch(function () { /* ignora */ });
+          throw new Error(MSG_SO_ADMIN);
+        }
         return iniciarSessao(resp);
       }).catch(function (err) {
         erroNoForm('erro-login', (err && err.message) || 'Não foi possível entrar.');
@@ -2011,11 +2842,12 @@
     var token = ss('get', CHAVE_TOKEN);
     var usuario = null;
     try { usuario = JSON.parse(ss('get', CHAVE_USUARIO) || 'null'); } catch (e2) { usuario = null; }
-    if (token && usuario && usuario.papel) {
+    if (token && usuario && usuario.papel === 'admin') {
       estado.token = token;
       estado.usuario = usuario;
       entrarPainel();
     } else {
+      if (token) { ss('del', CHAVE_TOKEN); ss('del', CHAVE_USUARIO); }
       mostrarLogin(false);
     }
   }
