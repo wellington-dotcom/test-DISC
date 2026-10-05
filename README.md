@@ -60,6 +60,19 @@ Os resultados chegam sozinhos na sua planilha e aparecem no painel. O passo a pa
 4. **Implantar > Nova implantação > App da Web** (Executar como: **Eu**; Quem pode acessar: **Qualquer pessoa**).
 5. Copie a URL que termina em `/exec` e cole em `API_URL` no `js/config.js`.
 
+### Opção nova: Supabase (banco de dados + login por e-mail)
+
+O servidor está migrando da planilha para o **Supabase** (grátis no plano básico): banco de dados de verdade, "Esqueci minha senha" por e-mail, convite de administradores por e-mail e integração com o ClickUp na hora (sem o gatilho de 10 minutos). O passo a passo completo, clique por clique, está em **[docs/SUPABASE.md](docs/SUPABASE.md)**. Resumo:
+
+1. Crie o projeto no Supabase (região São Paulo) e copie a **Project URL** e a chave **anon** (públicas).
+2. **SQL Editor**: cole `supabase/migrations/20261005120000_disc.sql` e clique em **Run**.
+3. **Authentication**: desligue o cadastro livre, configure os endereços do site e crie o seu usuário (o primeiro login vira administrador).
+4. **Edge Functions**: crie `admin`, `disc-sync` e `clickup-webhook` colando os arquivos de `dist/funcoes/` e defina os segredos (`SITE_URL`, `CLICKUP_TOKEN`, …).
+5. Em `js/config.js`: `BACKEND: 'supabase'`, `SUPABASE_URL` e `SUPABASE_ANON_KEY`.
+6. Opcional: importe o histórico da planilha (`scripts/migrar-planilha.mjs`) e ligue o "despertador" do GitHub (`.github/workflows/manter-ativo.yml`) para o projeto grátis não pausar.
+
+Enquanto `BACKEND` for `'appsscript'` (padrão), tudo continua funcionando com a planilha, como descrito acima.
+
 ### Opção sem servidor (código + WhatsApp)
 
 Deixe `API_URL` vazio e preencha `WHATSAPP_RECRUTADOR`.
@@ -141,6 +154,7 @@ npm install                     # instala o Playwright (testes de navegador)
 npx playwright install chromium # baixa o navegador usado nos testes (uma vez)
 npm test                        # testes de unidade (cálculo, guia, backend, painel)
 npm run test:e2e                # testes de ponta a ponta no navegador (celular e computador)
+npm run test:supabase           # testes do banco do Supabase num Postgres embutido (baixa o Postgres na 1ª vez)
 npm start                       # servidor local: abra http://localhost:4173
 ```
 
@@ -155,4 +169,6 @@ Estrutura principal:
 | `js/lideranca.js` | Textos do Guia para a Liderança |
 | `js/codec.js`, `js/api.js`, `js/config.js` | Código de resultado, conexão com o servidor e configuração |
 | `apps-script/Code.gs`, `docs/BACKEND.md` | Servidor na planilha do Google e o passo a passo |
+| `supabase/`, `dist/funcoes/`, `js/api-supabase.js`, `docs/SUPABASE.md` | Servidor no Supabase (banco, Edge Functions, cliente do site) e o passo a passo |
+| `scripts/migrar-planilha.mjs` | Converte o CSV da planilha antiga em SQL para importar no Supabase |
 | `docs/SPEC.md` | Especificação técnica |

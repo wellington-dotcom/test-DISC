@@ -1,0 +1,17 @@
+# Configuração do Supabase para a integração GitHub ("Deploy to production").
+# Em produção a integração aplica só: migrações (supabase/migrations) e Edge Functions declaradas aqui.
+# Configurações de Auth/API deste arquivo NÃO são aplicadas em produção (ficam no painel do Supabase).
+project_id = "tevpqngqzxcswmticjnr"
+
+# As funções conferem o acesso por conta própria:
+#  - admin: valida o JWT do usuário e se ele é administrador (tabela admins);
+#  - disc-sync: chamada pelo site do candidato com a chave pública (sb_publishable, que não é JWT); só responde {ok};
+#  - clickup-webhook: chamada pelo ClickUp, valida a assinatura HMAC (CLICKUP_WEBHOOK_SECRET).
+[functions.admin]
+verify_jwt = false
+
+[functions.disc-sync]
+verify_jwt = false
+
+[functions.clickup-webhook]
+verify_jwt = false

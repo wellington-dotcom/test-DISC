@@ -1,0 +1,977 @@
+/*
+ * Cliente do backend Supabase (Postgres + Auth + Edge Functions) — mesma interface do DISC_API (js/api.js).
+ *
+ * Liga só quando CONFIG.BACKEND === 'supabase' (com SUPABASE_URL e SUPABASE_ANON_KEY preenchidos).
+ * Carregue DEPOIS de js/api.js, js/api-simulada.js e assets/vendor/supabase.js:
+ *   <script src="js/api.js"></script>
+ *   <script src="js/api-simulada.js"></script>
+ *   <script src="assets/vendor/supabase.js"></script>
+ *   <script src="js/api-supabase.js"></script>
+ * Com outro BACKEND este arquivo não faz nada (o DISC_API do Apps Script ou da prévia continua valendo).
+ *
+ * Todos os métodos de DISC_API.METODOS são trocados, com os MESMOS nomes, argumentos e respostas {ok, ...}
+ * (erros: Error em pt-BR com erro.sessaoExpirada e erro.resposta, como no js/api.js):
+ *   - públicas pelas funções do banco (RPC, papel anon): enviar -> enviar_resposta (e, em segundo plano,
+ *     a Edge Function "disc-sync", que leva o resultado ao ClickUp; falha nela nunca afeta o candidato),
+ *     avaliacaoPublica -> avaliacao_publica, relatorioPublico -> relatorio_publico;
+ *   - login/sair/trocarSenha pelo Supabase Auth (signInWithPassword, signOut, updateUser). No 1º login,
+ *     garantir_primeiro_admin() torna administrador quem entrar se ainda não houver nenhum;
+ *   - participantes (respostas) e processos direto nas tabelas (PostgREST com RLS: só admin enxerga);
+ *   - ClickUp, relatórios, IA e usuários pela Edge Function "admin" ({acao, ...}).
+ * O "token" (1º argumento dos métodos com sessão) é o access_token do Supabase. A sessão de verdade fica
+ * guardada pelo supabase-js (renovada sozinha): o token passado só precisa existir (mantém a assinatura).
+ *
+ * Diferenças do Supabase (métodos extras, usados pelo painel quando DISC_API.backend === 'supabase'):
+ *   recuperarSenha(email)            -> envia o e-mail "Esqueci minha senha" (link volta para admin.html)
+ *   linkDeAcesso()                   -> {tipo: 'recovery'|'invite'|'signup'|'magiclink'|'', erro} lido do
+ *                                       endereço ao abrir a página (#type=recovery = "Defina sua nova senha")
+ *   definirNovaSenha(novaSenha)      -> grava a senha da sessão aberta pelo link e entra: {ok, token, usuario}
+ *   sessaoAtual()                    -> {ok, token, usuario} da sessão guardada (ou rejeita com sessaoExpirada)
+ *   convidarUsuario(token, {email, nome}) · removerUsuario(token, id)
+ *   primeiroAcesso e redefinirSenha  -> recusam com mensagem explicando o jeito do Supabase.
+ *   Empresas não existem mais (a empresa é texto no processo): listarEmpresas devolve lista vazia.
+ *
+ * No Node (testes): require('./js/api-supabase.js').criar({ supabase: libFalsa, url, chave, local?, timeoutMs? }).
+ */
+(function (root) {
+  'use strict';
+
+  var TIMEOUT_MS = 20000;
+  var TIMEOUT_LONGO_MS = 120000;   // Edge Function que lê o ClickUp ou chama a IA
+  var MSG_SESSAO = 'Sessão expirada. Entre de novo.';
+  var MSG_SEM_PERMISSAO = 'Sem permissão.';
+  var MSG_LOGIN_INVALIDO = 'E-mail ou senha incorretos.';
+  var MSG_BLOQUEIO = 'Muitas tentativas. Tente de novo em 15 minutos.';
+  var MSG_CONEXAO = 'Não foi possível conectar ao servidor. Verifique sua conexão com a internet e tente novamente.';
+  var MSG_DEMORA = 'O servidor demorou demais para responder. Verifique sua conexão e tente novamente.';
+  var MSG_RECUSA = 'O servidor recusou a solicitação.';
+  var MSG_INTERNO = 'Erro interno no servidor. Tente novamente em instantes.';
+  var MSG_LINK_INVALIDO = 'Link inválido ou avaliação encerrada. Fale com quem enviou o link.';
+  var MSG_REL_NAO_ENCONTRADO = 'Relatório não encontrado ou fora do ar.';
+  var MSG_LINK_EXPIRADO = 'O link expirou ou já foi usado. Peça outro em "Esqueci minha senha".';
+  var MSG_PRIMEIRO_ACESSO = 'Com o Supabase não há chave de primeiro acesso: crie o seu usuário no painel do Supabase ' +
+    '(Authentication > Users > Add user) e entre com esse e-mail e senha. O primeiro login vira administrador.';
+  var MSG_REDEFINIR = 'Com o Supabase cada pessoa cria a própria senha nova pelo "Esqueci minha senha", na tela de entrada.';
+  var MSG_SEM_EMPRESAS = 'As empresas não existem mais nesta versão: a empresa agora é um texto no processo.';
+  var SENHA_MIN = 8;
+  var SENHA_MAX = 100;
+  var STATUS_VALIDOS = ['em_analise', 'aprovado', 'reprovado'];
+  var STATUS_PADRAO = 'em_analise';
+  var TIPOS = ['selecao', 'equipe'];
+  var LETRAS = ['D', 'I', 'S', 'C'];
+  var PAGINA = 1000;            // linhas por leitura no PostgREST (o limite padrão do Supabase)
+  var MAX_LINHAS = 5000;
+  var RE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  var TERMOS_SENSIVEIS = ['sexo', 'genero', 'estado civil', 'filho', 'religi', 'gravid', 'etnia', 'raca',
+    'cor da pele', 'orientacao', 'deficien', 'doenca', 'saude', 'antecedente', 'processo em seu nome', 'criminal'];
+  var TERMOS_ANTECEDENTES = ['antecedente', 'processo em seu nome', 'criminal'];
+
+  // ---------------------------------------------------------------------------
+  // Textos e validações (mesmas regras do apps-script/Code.gs)
+  // ---------------------------------------------------------------------------
+
+  function limparTexto(v, max) {
+    if (v === null || v === undefined) return '';
+    var s = String(v).replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (max && s.length > max) s = s.substring(0, max).trim();
+    return s;
+  }
+  function limparTextoLongo(v, max) {
+    if (v === null || v === undefined) return '';
+    var s = String(v).replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000B-\u001F\u007F]/g, ' ').trim();
+    if (max && s.length > max) s = s.substring(0, max).trim();
+    return s;
+  }
+  var RE_LETRA = (function () { try { return new RegExp('\\p{L}', 'gu'); } catch (e) { return /[A-Za-zÀ-ɏ]/g; } })();
+  function letrasContadas(t) { return (String(t).match(RE_LETRA) || []).length; }
+  function normalizarEmail(v) { return limparTexto(v, 120).toLowerCase(); }
+  function emailValido(e) { return typeof e === 'string' && e.length <= 120 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e); }
+  function validarSenhaNova(senha) {
+    if (typeof senha !== 'string' || senha.length < SENHA_MIN) return 'A senha precisa ter pelo menos ' + SENHA_MIN + ' caracteres.';
+    if (senha.length > SENHA_MAX) return 'A senha pode ter no máximo ' + SENHA_MAX + ' caracteres.';
+    return '';
+  }
+  function normalizarCodigo(v) {
+    if (v === null || v === undefined) return '';
+    var s = String(v).replace(/\s+/g, '').toUpperCase();
+    return /^[A-Z0-9]{4}$/.test(s) ? s : '';
+  }
+  function normalizarProtocolo(v) {
+    var s = v === null || v === undefined ? '' : String(v).replace(/\s+/g, '').toUpperCase();
+    return /^[0-9]{2}[A-HJ-NP-Z]$/.test(s) ? s : '';
+  }
+  function iso(v) {
+    if (!v) return '';
+    var t = Date.parse(v);
+    return isNaN(t) ? String(v) : new Date(t).toISOString();
+  }
+  function numero(v) { var n = Number(v); return isFinite(n) ? n : 0; }
+
+  function normalizarNomeCampo(nome) {
+    var s = String(nome === null || nome === undefined ? '' : nome).toLowerCase();
+    if (s.normalize) s = s.normalize('NFD').replace(/[̀-ͯ]/g, '');
+    return s.replace(/[^a-z0-9%]+/g, ' ').trim();
+  }
+  function classificarCampo(nome, config) {
+    var n = ' ' + normalizarNomeCampo(nome);
+    config = config || {};
+    for (var i = 0; i < TERMOS_SENSIVEIS.length; i++) {
+      var termo = TERMOS_SENSIVEIS[i];
+      if (n.indexOf(' ' + termo) === -1) continue;
+      if (termo === 'saude' && config.permitirSaude === true) continue;
+      if (TERMOS_ANTECEDENTES.indexOf(termo) >= 0) return config.permitirAntecedentes === true ? 'antecedente' : 'sensivel';
+      return 'sensivel';
+    }
+    return '';
+  }
+  function numeroOu(v, padrao, min, max) {
+    var n = typeof v === 'number' ? v : (typeof v === 'string' && v.trim() !== '' ? Number(v.replace(',', '.')) : NaN);
+    if (!isFinite(n)) return padrao;
+    return Math.max(min, Math.min(max, n));
+  }
+  function idSimples(v, prefixo, i) {
+    var s = limparTexto(v, 40);
+    return /^[A-Za-z0-9_-]{1,40}$/.test(s) ? s : prefixo + (i + 1);
+  }
+
+  /** Mesma validação do Code.gs (validarConfigProcesso): {ok, config} ou {ok:false, erro}. */
+  function validarConfigProcesso(c) {
+    if (c === undefined || c === null) c = {};
+    if (typeof c !== 'object' || Array.isArray(c)) return { ok: false, erro: 'Configuração do processo inválida.' };
+    var json;
+    try { json = JSON.stringify(c); } catch (e) { return { ok: false, erro: 'Configuração do processo inválida.' }; }
+    if (json.length > 40000) return { ok: false, erro: 'Configuração do processo grande demais.' };
+    var perfil = String(c.perfilIdeal || '').toUpperCase().replace(/[^DISC]/g, '');
+    if (perfil.length > 2 || (perfil.length === 2 && perfil[0] === perfil[1])) return { ok: false, erro: 'Perfil ideal inválido: use 1 ou 2 letras entre D, I, S e C.' };
+    var permitirAntecedentes = c.permitirAntecedentes === true;
+    var base = { permitirAntecedentes: permitirAntecedentes, permitirSaude: c.permitirSaude === true };
+    var problema = null;
+    function campo(v) {
+      var nome = limparTexto(v, 120);
+      if (nome && classificarCampo(nome, base) === 'sensivel') problema = problema || ('O campo "' + nome + '" é um dado sensível e não pode ser usado.');
+      return nome;
+    }
+    var ids = {};
+    function idUnico(v, prefixo, i) {
+      var id = idSimples(v, prefixo, i);
+      while (ids[id]) id = id + '_';
+      ids[id] = true;
+      return id;
+    }
+    var etapas = (Array.isArray(c.etapas) ? c.etapas : []).slice(0, 20).map(function (e, i) {
+      e = e && typeof e === 'object' ? e : {};
+      return {
+        id: idUnico(e.id, 'etapa', i), nome: limparTexto(e.nome, 80) || ('Etapa ' + (i + 1)),
+        peso: numeroOu(e.peso, 0, 0, 1000), campo: campo(e.campo), descricao: limparTextoLongo(e.descricao, 1000)
+      };
+    });
+    var bonus = (Array.isArray(c.bonus) ? c.bonus : []).slice(0, 20).map(function (b, i) {
+      b = b && typeof b === 'object' ? b : {};
+      var regra = b.regra && typeof b.regra === 'object' ? b.regra : {};
+      var r;
+      if (regra.tipo === 'mapa') {
+        var pontos = {};
+        var origem = regra.pontos && typeof regra.pontos === 'object' ? regra.pontos : {};
+        Object.keys(origem).slice(0, 50).forEach(function (k) {
+          var chave = limparTexto(k, 120);
+          if (chave) pontos[chave] = numeroOu(origem[k], 0, -100, 100);
+        });
+        r = { tipo: 'mapa', pontos: pontos };
+      } else {
+        r = { tipo: 'checkbox', pontos: numeroOu(regra.pontos, 0, -100, 100) };
+      }
+      return { id: idUnico(b.id, 'bonus', i), nome: limparTexto(b.nome, 80) || ('Bônus ' + (i + 1)), campo: campo(b.campo), regra: r };
+    });
+    if (problema) return { ok: false, erro: problema };
+    var corte = numeroOu(c.corte, 70, 0, 200);
+    var faixa = numeroOu(c.faixaAvaliar, 55, 0, 200);
+    if (faixa > corte) return { ok: false, erro: 'A faixa "avaliar" precisa ser menor ou igual à nota de corte.' };
+    return {
+      ok: true,
+      config: {
+        perfilIdeal: perfil,
+        explicacaoPerfil: limparTextoLongo(c.explicacaoPerfil, 2000),
+        etapas: etapas,
+        bonus: bonus,
+        corte: corte,
+        faixaAvaliar: faixa,
+        statusFinalistas: (Array.isArray(c.statusFinalistas) ? c.statusFinalistas : []).slice(0, 30)
+          .map(function (x) { return limparTexto(x, 80); }).filter(Boolean),
+        permitirAntecedentes: permitirAntecedentes,
+        permitirSaude: c.permitirSaude === true
+      }
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Erros (mesmo formato do js/api.js)
+  // ---------------------------------------------------------------------------
+
+  function erroDaResposta(json) {
+    var e = new Error((json && json.erro) ? String(json.erro) : MSG_RECUSA);
+    e.sessaoExpirada = !!(json && json.sessaoExpirada);
+    e.resposta = json || null;
+    return e;
+  }
+  function recusa(msg, extra) {
+    var json = { ok: false, erro: msg };
+    if (extra) for (var k in extra) if (Object.prototype.hasOwnProperty.call(extra, k)) json[k] = extra[k];
+    return erroDaResposta(json);
+  }
+  function erroSessao() { return recusa(MSG_SESSAO, { sessaoExpirada: true }); }
+
+  function exigir(valor, mensagem) {
+    if (valor === undefined || valor === null || valor === '') throw new Error(mensagem);
+  }
+  function exigirToken(token) {
+    if (typeof token !== 'string' || !token) throw erroSessao();
+  }
+  function seguro(fn) {
+    return function () {
+      try { return Promise.resolve(fn.apply(null, arguments)); } catch (e) { return Promise.reject(e); }
+    };
+  }
+
+  function ehFalhaDeRede(erro) {
+    var m = String((erro && (erro.message || erro.details)) || '');
+    var nome = String((erro && erro.name) || '');
+    return nome === 'TypeError' || nome === 'AuthRetryableFetchError' || nome === 'FunctionsFetchError' ||
+      /Failed to fetch|NetworkError|Load failed|fetch failed|ECONNREFUSED|ENOTFOUND/i.test(m);
+  }
+  function ehErroDeSessao(erro) {
+    if (!erro) return false;
+    var codigo = String(erro.code || '');
+    var m = String(erro.message || '');
+    return codigo === 'PGRST301' || codigo === 'PGRST302' || codigo === 'PGRST303' || erro.status === 401 ||
+      /JWT|jwt expired|invalid claim|session.*(missing|not found)|refresh token/i.test(m);
+  }
+
+  /** Erro do PostgREST/RPC -> Error em pt-BR. Mensagens dos gatilhos do banco (RAISE) passam como estão. */
+  function erroDoBanco(erro) {
+    if (ehErroDeSessao(erro)) return erroSessao();
+    if (ehFalhaDeRede(erro)) return new Error(MSG_CONEXAO);
+    var codigo = String((erro && erro.code) || '');
+    if (codigo === '42501') return recusa(MSG_SEM_PERMISSAO);
+    if (codigo === 'P0001' && erro.message) return recusa(String(erro.message));
+    if (codigo === '23505') return recusa('Já existe um registro com estes dados.');
+    if (codigo === '23514' || codigo === '22P02' || codigo === '22001' || codigo === '22007' || codigo === '22008') {
+      return recusa('Dados inválidos. Confira os campos e tente de novo.');
+    }
+    return recusa(MSG_INTERNO);
+  }
+
+  /** Erro do Supabase Auth -> Error em pt-BR. */
+  function erroDoAuth(erro, padrao) {
+    if (!erro) return recusa(padrao || MSG_RECUSA);
+    if (ehFalhaDeRede(erro)) return new Error(MSG_CONEXAO);
+    var codigo = String(erro.code || '');
+    var m = String(erro.message || '');
+    if (erro.status === 429 || codigo === 'over_request_rate_limit' || codigo === 'over_email_send_rate_limit' || /rate limit/i.test(m)) {
+      return recusa(codigo === 'over_email_send_rate_limit' || /email/i.test(m) ? 'Muitos e-mails em pouco tempo. Aguarde alguns minutos e tente de novo.' : MSG_BLOQUEIO);
+    }
+    if (codigo === 'invalid_credentials' || /invalid login credentials/i.test(m)) return recusa(MSG_LOGIN_INVALIDO);
+    if (codigo === 'email_not_confirmed' || /email not confirmed/i.test(m)) return recusa('Confirme o seu e-mail pelo link que o Supabase enviou antes de entrar.');
+    if (codigo === 'same_password' || /should be different/i.test(m)) return recusa('A nova senha precisa ser diferente da atual.');
+    if (codigo === 'weak_password' || /weak|password should/i.test(m)) return recusa('Senha fraca demais. Use pelo menos ' + SENHA_MIN + ' caracteres, misturando letras e números.');
+    if (codigo === 'user_banned') return recusa(MSG_SEM_PERMISSAO);
+    if (codigo === 'session_not_found' || codigo === 'session_expired' || codigo === 'refresh_token_not_found' ||
+        erro.name === 'AuthSessionMissingError' || erro.status === 401) return erroSessao();
+    return recusa(padrao || MSG_RECUSA);
+  }
+
+  /** Promise com prazo: depois de ms rejeita com a mensagem de demora (e aborta, se der). */
+  function comPrazo(promessa, ms, controle) {
+    var timer;
+    var tempo = new Promise(function (_, rejeitar) {
+      timer = setTimeout(function () {
+        if (controle) try { controle.abort(); } catch (e) { /* ignora */ }
+        rejeitar(new Error(MSG_DEMORA));
+      }, ms);
+    });
+    return Promise.race([Promise.resolve(promessa), tempo]).then(
+      function (v) { clearTimeout(timer); return v; },
+      function (e) { clearTimeout(timer); throw e; });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Endereço da página (link de recuperação/convite e base do site)
+  // ---------------------------------------------------------------------------
+
+  /** Lê o resultado de um link do Supabase Auth no endereço (#access_token=…&type=recovery, #error=…). */
+  function lerLinkDeAcesso(local) {
+    var hash = String((local && local.hash) || '').replace(/^#/, '');
+    var busca = String((local && local.search) || '').replace(/^\?/, '');
+    var p = {};
+    (hash + '&' + busca).split('&').forEach(function (par) {
+      if (!par) return;
+      var i = par.indexOf('=');
+      var k = i === -1 ? par : par.slice(0, i);
+      var v = i === -1 ? '' : par.slice(i + 1);
+      try { v = decodeURIComponent(v.replace(/\+/g, ' ')); } catch (e) { /* mantém */ }
+      if (!Object.prototype.hasOwnProperty.call(p, k)) p[k] = v;
+    });
+    var tipo = ['recovery', 'invite', 'signup', 'magiclink', 'email_change'].indexOf(p.type) >= 0 ? p.type : '';
+    var erro = '';
+    if (p.error || p.error_code) erro = MSG_LINK_EXPIRADO;
+    return { tipo: (p.access_token || p.code || p.token_hash) ? tipo : (erro ? tipo : ''), erro: erro, temSessao: !!(p.access_token || p.code) };
+  }
+
+  /** Endereço do painel (mesma pasta da página atual + admin.html). */
+  function enderecoDoPainel(local) {
+    if (!local || !local.origin || !/^https?:/.test(String(local.origin))) return '';
+    var caminho = String(local.pathname || '/');
+    return local.origin + caminho.replace(/[^\/]*$/, '') + 'admin.html';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Conversões banco -> formato do Code.gs
+  // ---------------------------------------------------------------------------
+
+  function contagemRespostas(linha) {
+    var r = linha && linha.respostas;
+    if (Array.isArray(r) && r.length && r[0] && r[0].count !== undefined) return numero(r[0].count);
+    if (typeof r === 'number') return r;
+    return 0;
+  }
+
+  /** Processo (linha de public.processos) no formato de processos.listar do Code.gs. */
+  function processoPublico(l) {
+    var cfg = validarConfigProcesso(l.config && typeof l.config === 'object' ? l.config : {});
+    return {
+      id: String(l.id), codigo: l.codigo || '', empresaId: '', empresaNome: l.empresa || '',
+      nome: l.nome || '', tipo: TIPOS.indexOf(l.tipo) >= 0 ? l.tipo : 'selecao',
+      mostrarResultado: l.mostrar_resultado === true, ativa: l.ativo === true,
+      criadaEm: iso(l.criado_em), respostas: contagemRespostas(l),
+      empresa: l.empresa || '', vaga: l.vaga || '', cidade: l.cidade || '', consultor: l.consultor || '',
+      contratante: l.contratante || '',
+      periodo: { inicio: l.periodo_inicio ? String(l.periodo_inicio).slice(0, 10) : '', fim: l.periodo_fim ? String(l.periodo_fim).slice(0, 10) : '' },
+      clickupListId: l.clickup_list_id || '',
+      config: cfg.ok ? cfg.config : validarConfigProcesso({}).config
+    };
+  }
+  function avaliacaoPublica(l) {
+    var p = processoPublico(l);
+    return { id: p.id, codigo: p.codigo, empresaId: '', empresaNome: p.empresaNome, nome: p.nome, tipo: p.tipo,
+      mostrarResultado: p.mostrarResultado, ativa: p.ativa, criadaEm: p.criadaEm, respostas: p.respostas };
+  }
+
+  function calcularDisc(respostas, linha, scoring) {
+    if (!/^[1-4]{100}$/.test(respostas)) return null;
+    if (scoring && typeof scoring.calcular === 'function' && typeof scoring.descompactar === 'function') {
+      try {
+        var r = scoring.calcular(scoring.descompactar(respostas));
+        if (r && r.percentuais) return { percentuais: r.percentuais, codigo: r.codigo };
+      } catch (e) { /* usa o que o servidor gravou */ }
+    }
+    var p = {};
+    LETRAS.forEach(function (l) { p[l] = numero(linha[l.toLowerCase()]); });
+    return { percentuais: p, codigo: linha.perfil || '' };
+  }
+
+  /** Linha de public.respostas (com processos embutido) no item de "listar" do Code.gs. */
+  function itemDaLinha(l, scoring) {
+    var base = l.payload && typeof l.payload === 'object' ? l.payload : {};
+    var proc = l.processos && typeof l.processos === 'object' && !Array.isArray(l.processos) ? l.processos : null;
+    var respostas = String(l.respostas || '').replace(/\D/g, '');
+    var validacao = l.validacao && typeof l.validacao === 'object' && !Array.isArray(l.validacao) ? l.validacao
+      : (base.validacao && typeof base.validacao === 'object' && !Array.isArray(base.validacao) ? base.validacao : null);
+    var idade = l.idade === null || l.idade === undefined || l.idade === '' ? null : Number(l.idade);
+    return {
+      v: 1,
+      id: String(l.id),
+      nome: l.nome || '',
+      telefone: String(l.telefone || '').replace(/\D/g, ''),
+      vaga: l.vaga || '',
+      consentimento: base.consentimento === true,
+      inicio: iso(l.inicio),
+      fim: iso(l.fim),
+      duracaoSeg: numero(l.duracao_seg),
+      respostas: respostas,
+      resultado: calcularDisc(respostas, l, scoring),
+      status: STATUS_VALIDOS.indexOf(l.status) >= 0 ? l.status : STATUS_PADRAO,
+      observacoes: l.observacoes || '',
+      recebidoEm: iso(l.recebido_em),
+      protocolo: normalizarProtocolo(l.protocolo),
+      idade: isFinite(idade) ? idade : null,
+      funcao: l.funcao || '',
+      empresa: l.empresa || '',
+      avaliacao: normalizarCodigo(l.avaliacao),
+      empresaId: '',
+      validacao: validacao,
+      processoId: l.processo_id ? String(l.processo_id) : '',
+      empresaNome: proc ? (proc.empresa || '') : '',
+      avaliacaoNome: proc ? (proc.nome || '') : '',
+      avaliacaoTipo: proc && TIPOS.indexOf(proc.tipo) >= 0 ? proc.tipo : 'selecao'
+    };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Cliente
+  // ---------------------------------------------------------------------------
+
+  /**
+   * opcoes: { supabase (biblioteca com createClient) | cliente (já criado), url, chave, local (window.location),
+   *           scoring (DISC_SCORING), timeoutMs, timeoutLongoMs }
+   */
+  function criar(opcoes) {
+    opcoes = opcoes || {};
+    var local = opcoes.local || null;
+    var prazo = opcoes.timeoutMs || TIMEOUT_MS;
+    var prazoLongo = opcoes.timeoutLongoMs || TIMEOUT_LONGO_MS;
+    var linkInicial = lerLinkDeAcesso(local);
+    var clienteCriado = opcoes.cliente || null;
+
+    function cliente() {
+      if (clienteCriado) return clienteCriado;
+      var lib = opcoes.supabase;
+      if (!lib || typeof lib.createClient !== 'function') throw new Error('A biblioteca do Supabase não carregou. Recarregue a página.');
+      if (!opcoes.url || !opcoes.chave) throw new Error('O Supabase não está configurado (SUPABASE_URL e SUPABASE_ANON_KEY em js/config.js).');
+      clienteCriado = lib.createClient(opcoes.url, opcoes.chave, {
+        auth: {
+          persistSession: true, autoRefreshToken: true, detectSessionInUrl: true,
+          flowType: 'implicit', storageKey: 'disc-supabase-auth'
+        }
+      });
+      return clienteCriado;
+    }
+    // Link de recuperação/convite no endereço: cria o cliente já, para o supabase-js ler a sessão do #.
+    if (linkInicial.temSessao) { try { cliente(); } catch (e) { /* o erro aparece na primeira chamada */ } }
+
+    function scoring() { return opcoes.scoring || (root && root.DISC_SCORING) || null; }
+
+    // ---- banco ----
+    function rpc(nome, args) {
+      return comPrazo(Promise.resolve().then(function () { return cliente().rpc(nome, args || {}); }), prazo)
+        .then(function (r) {
+          if (r && r.error) throw erroDoBanco(r.error);
+          return r ? r.data : null;
+        }, function (e) {
+          if (e && e.message === MSG_DEMORA) throw e;
+          if (e && (e.sessaoExpirada || e.resposta)) throw e;
+          throw ehFalhaDeRede(e) ? new Error(MSG_CONEXAO) : e;
+        });
+    }
+    /** RPC pública que devolve {ok, ...}: resolve com o JSON ou rejeita com erro.resposta. */
+    function rpcOk(nome, args) {
+      return rpc(nome, args).then(function (json) {
+        if (typeof json === 'string') { try { json = JSON.parse(json); } catch (e) { json = null; } }
+        if (!json || json.ok !== true) throw erroDaResposta(json && typeof json === 'object' ? json : { ok: false, erro: MSG_RECUSA });
+        return json;
+      });
+    }
+    /** Executa uma consulta do PostgREST (função que recebe o cliente) e devolve data (ou rejeita). */
+    function consulta(fn) {
+      return comPrazo(Promise.resolve().then(function () { return fn(cliente()); }), prazo).then(function (r) {
+        if (r && r.error) throw erroDoBanco(r.error);
+        return r ? r.data : null;
+      }, function (e) {
+        if (e && (e.message === MSG_DEMORA || e.sessaoExpirada || e.resposta)) throw e;
+        throw ehFalhaDeRede(e) ? new Error(MSG_CONEXAO) : e;
+      });
+    }
+
+    // ---- sessão ----
+    function sessaoGuardada() {
+      return Promise.resolve().then(function () { return cliente().auth.getSession(); }).then(function (r) {
+        var s = r && r.data && r.data.session;
+        if (r && r.error) throw erroDoAuth(r.error);
+        return s || null;
+      }, function (e) {
+        throw ehFalhaDeRede(e) ? new Error(MSG_CONEXAO) : e;
+      });
+    }
+    function exigirSessao(token) {
+      exigirToken(token);
+      return sessaoGuardada().then(function (s) {
+        if (!s || !s.access_token) throw erroSessao();
+        return s;
+      });
+    }
+
+    /** Dados do usuário logado no formato do Code.gs (papel 'admin' só se estiver em public.admins). */
+    function montarUsuario(sessao, eAdmin) {
+      var u = (sessao && sessao.user) || {};
+      var meta = u.user_metadata || {};
+      var usuario = {
+        id: String(u.id || ''), nome: limparTexto(meta.nome || meta.name || '', 120), email: String(u.email || ''),
+        papel: eAdmin ? 'admin' : '', empresaId: '', empresaNome: ''
+      };
+      if (!eAdmin) return Promise.resolve(usuario);
+      return consulta(function (c) { return c.from('admins').select('nome').eq('user_id', usuario.id).maybeSingle(); })
+        .then(function (linha) { if (linha && linha.nome) usuario.nome = linha.nome; return usuario; },
+          function () { return usuario; })
+        .then(function (x) { if (!x.nome) x.nome = x.email; return x; });
+    }
+    /** Depois de entrar: garante o 1º admin e monta {ok, token, usuario, primeiroAdmin?}. */
+    function concluirEntrada(sessao) {
+      return rpc('garantir_primeiro_admin').then(function (r) {
+        if (typeof r === 'string') { try { r = JSON.parse(r); } catch (e) { r = null; } }
+        if (r && r.ok === false) throw erroDaResposta(r);
+        var eAdmin = !!(r && r.admin);
+        return montarUsuario(sessao, eAdmin).then(function (usuario) {
+          var resp = { ok: true, token: sessao.access_token, usuario: usuario };
+          if (r && r.primeiro) {
+            resp.primeiroAdmin = true;
+            resp.aviso = 'Você é o primeiro administrador deste painel. Os próximos são convidados pela aba Usuários.';
+          }
+          return resp;
+        });
+      });
+    }
+
+    // ---- Edge Functions ----
+    function lerCorpoErro(erro) {
+      var ctx = erro && erro.context;
+      if (!ctx || typeof ctx.json !== 'function') return Promise.resolve(null);
+      return Promise.resolve().then(function () { return ctx.clone ? ctx.clone().json() : ctx.json(); }).catch(function () { return null; });
+    }
+    function invocar(nome, corpo, limiteMs) {
+      var controle = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      var opcoesInvoke = { body: corpo };
+      if (controle) opcoesInvoke.signal = controle.signal;
+      return comPrazo(Promise.resolve().then(function () { return cliente().functions.invoke(nome, opcoesInvoke); }), limiteMs || prazo, controle)
+        .then(function (r) {
+          var erro = r && r.error;
+          if (!erro) return r ? r.data : null;
+          return lerCorpoErro(erro).then(function (json) {
+            var status = erro.context && erro.context.status;
+            if (status === 401) throw erroSessao();
+            if (json && typeof json === 'object' && json.erro) throw erroDaResposta(json);
+            if (erro.name === 'FunctionsFetchError' || ehFalhaDeRede(erro)) throw new Error(MSG_CONEXAO);
+            if (erro.name === 'FunctionsRelayError' || status === 404) {
+              throw recusa('A função "' + nome + '" não está publicada no Supabase. Confira as Edge Functions (docs/SUPABASE.md).');
+            }
+            throw recusa('O servidor respondeu com erro' + (status ? ' (código ' + status + ')' : '') + '. Tente novamente em instantes.');
+          });
+        }, function (e) {
+          if (e && (e.message === MSG_DEMORA || e.sessaoExpirada || e.resposta)) throw e;
+          throw ehFalhaDeRede(e) || (e && e.name === 'AbortError') ? new Error(MSG_CONEXAO) : e;
+        })
+        .then(function (data) {
+          if (typeof data === 'string') { try { data = JSON.parse(data); } catch (e) { data = null; } }
+          if (!data || typeof data !== 'object') throw new Error('Resposta inesperada do servidor. Confira se as Edge Functions do Supabase estão publicadas.');
+          if (data.ok !== true) throw erroDaResposta(data);
+          return data;
+        });
+    }
+    /** Ação da Edge Function "admin" (exige sessão de administrador; o supabase-js manda o JWT). */
+    function admin(token, acao, dados, limiteMs) {
+      return exigirSessao(token).then(function () {
+        var corpo = { acao: acao };
+        if (dados) for (var k in dados) if (Object.prototype.hasOwnProperty.call(dados, k)) corpo[k] = dados[k];
+        return invocar('admin', corpo, limiteMs);
+      });
+    }
+
+    // ---- participantes ----
+    function listarTodas(tabela, colunas, ordem) {
+      var todas = [];
+      function pagina(de) {
+        return consulta(function (cl) {
+          return cl.from(tabela).select(colunas).order(ordem, { ascending: true }).range(de, de + PAGINA - 1);
+        }).then(function (linhas) {
+          linhas = Array.isArray(linhas) ? linhas : [];
+          todas = todas.concat(linhas);
+          if (linhas.length < PAGINA || todas.length >= MAX_LINHAS) return todas;
+          return pagina(de + PAGINA);
+        });
+      }
+      return pagina(0);
+    }
+
+    function salvarProcesso(dados, legado) {
+      var rotulo = legado ? 'avaliação' : 'processo';
+      if (!dados || typeof dados !== 'object') return Promise.reject(recusa('Dados da ' + rotulo + ' ausentes.'));
+      function veio(k) { return Object.prototype.hasOwnProperty.call(dados, k) && dados[k] !== undefined; }
+      var id = limparTexto(dados.id, 40);
+      var nome = limparTexto(dados.nome, 80);
+      if (letrasContadas(nome) < 2) return Promise.reject(recusa('Informe o nome ' + (legado ? 'da avaliação.' : 'do processo.')));
+      var tipo = limparTexto(dados.tipo, 20);
+      if (!tipo) tipo = 'selecao';
+      if (TIPOS.indexOf(tipo) === -1) return Promise.reject(recusa('Tipo inválido. Use: selecao ou equipe.'));
+      var linha = { nome: nome, tipo: tipo };
+      var textos = { empresa: 80, vaga: 120, cidade: 80, consultor: 80, contratante: 80 };
+      Object.keys(textos).forEach(function (k) { if (veio(k)) linha[k] = limparTexto(dados[k], textos[k]); });
+      if (!veio('empresa') && veio('empresaNome')) linha.empresa = limparTexto(dados.empresaNome, 80);
+      if (veio('periodo')) {
+        var per = dados.periodo && typeof dados.periodo === 'object' ? dados.periodo : {};
+        var dataOk = function (d) { d = limparTexto(d, 10); return /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(Date.parse(d)) ? d : null; };
+        linha.periodo_inicio = dataOk(per.inicio);
+        linha.periodo_fim = dataOk(per.fim);
+      }
+      if (veio('clickupListId')) {
+        var lista = limparTexto(dados.clickupListId, 40);
+        if (lista && !/^[A-Za-z0-9_-]{1,40}$/.test(lista)) return Promise.reject(recusa('ID da lista do ClickUp inválido.'));
+        linha.clickup_list_id = lista || null;
+      }
+      if (veio('config')) {
+        var cfg = validarConfigProcesso(dados.config);
+        if (!cfg.ok) return Promise.reject(recusa(cfg.erro));
+        linha.config = cfg.config;
+      }
+      var colunas = '*, respostas(count)';
+      var naoAchou = legado ? 'Avaliação não encontrada.' : 'Processo não encontrado.';
+      var feito;
+      if (id) {
+        if (!RE_UUID.test(id)) return Promise.reject(recusa(naoAchou));
+        if (dados.ativa !== undefined) linha.ativo = dados.ativa === true;
+        if (legado || veio('mostrarResultado')) linha.mostrar_resultado = dados.mostrarResultado === true;
+        feito = consulta(function (c) { return c.from('processos').update(linha).eq('id', id).select(colunas); });
+      } else {
+        linha.ativo = dados.ativa !== false;
+        linha.mostrar_resultado = dados.mostrarResultado === true;
+        if (!linha.config) linha.config = validarConfigProcesso({}).config;
+        feito = consulta(function (c) { return c.from('processos').insert(linha).select(colunas); });
+      }
+      return feito.then(function (linhas) {
+        var l = Array.isArray(linhas) ? linhas[0] : linhas;
+        if (!l) throw recusa(naoAchou);
+        return legado ? { ok: true, avaliacao: avaliacaoPublica(l) } : { ok: true, processo: processoPublico(l) };
+      });
+    }
+
+    function excluirProcesso(idBruto) {
+      var id = limparTexto(idBruto, 40);
+      if (!id || !RE_UUID.test(id)) return Promise.reject(recusa('Avaliação não encontrada.'));
+      return consulta(function (c) { return c.from('processos').delete().eq('id', id).select('id'); }).then(function (linhas) {
+        if (!Array.isArray(linhas) || !linhas.length) throw recusa('Avaliação não encontrada.');
+        return { ok: true, id: id };
+      });
+    }
+
+    function listarProcessos() {
+      return consulta(function (c) {
+        return c.from('processos').select('*, respostas(count)').order('criado_em', { ascending: true });
+      }).then(function (linhas) { return Array.isArray(linhas) ? linhas : []; });
+    }
+
+    var linkAtual = { tipo: linkInicial.tipo, erro: linkInicial.erro };
+
+    var api = {
+      supabase: true,
+      backend: 'supabase',
+      cliente: cliente,
+
+      // --- públicas ---
+      enviar: seguro(function (payload) {
+        exigir(payload, 'Nenhum resultado para enviar.');
+        return rpcOk('enviar_resposta', { p_payload: payload }).then(function (resp) {
+          // Leva o resultado ao ClickUp em segundo plano. Idempotente; falha aqui nunca afeta o candidato.
+          var id = resp.id || (payload && payload.id);
+          if (id) {
+            try { Promise.resolve(invocar('disc-sync', { id: String(id) }, prazo)).catch(function () { /* ignora */ }); }
+            catch (e) { /* ignora */ }
+          }
+          var r = { ok: true, id: resp.id, protocolo: resp.protocolo };
+          if (resp.duplicado) r = { ok: true, duplicado: true, id: resp.id, protocolo: resp.protocolo };
+          return r;
+        });
+      }),
+      avaliacaoPublica: seguro(function (codigo) {
+        exigir(codigo, MSG_LINK_INVALIDO);
+        return rpcOk('avaliacao_publica', { p_codigo: String(codigo) }).then(function (r) {
+          var a = r.avaliacao && typeof r.avaliacao === 'object' ? r.avaliacao : r;
+          return { ok: true, avaliacao: { codigo: a.codigo, nome: a.nome, tipo: a.tipo, empresaNome: a.empresaNome || '', mostrarResultado: a.mostrarResultado === true } };
+        });
+      }),
+      relatorioPublico: seguro(function (relatorioToken) {
+        exigir(relatorioToken, MSG_REL_NAO_ENCONTRADO);
+        return rpcOk('relatorio_publico', { p_token: String(relatorioToken) }).then(function (r) {
+          return { ok: true, relatorio: r.relatorio, publicadoEm: r.publicadoEm || '' };
+        });
+      }),
+      login: seguro(function (email, senha) {
+        exigir(email, 'Informe o e-mail e a senha.');
+        exigir(senha, 'Informe o e-mail e a senha.');
+        var e = normalizarEmail(email);
+        return Promise.resolve().then(function () { return cliente().auth.signInWithPassword({ email: e, password: String(senha) }); })
+          .then(function (r) {
+            if (r && r.error) throw erroDoAuth(r.error, MSG_LOGIN_INVALIDO);
+            var s = r && r.data && r.data.session;
+            if (!s) throw recusa(MSG_LOGIN_INVALIDO);
+            return concluirEntrada(s);
+          }, function (err) { throw ehFalhaDeRede(err) ? new Error(MSG_CONEXAO) : err; });
+      }),
+      primeiroAcesso: seguro(function () {
+        return Promise.reject(recusa(MSG_PRIMEIRO_ACESSO));
+      }),
+
+      // --- recuperação de senha e convites (só no Supabase) ---
+      recuperarSenha: seguro(function (email) {
+        var e = normalizarEmail(email);
+        if (!emailValido(e)) throw recusa('E-mail inválido.');
+        var destino = enderecoDoPainel(local);
+        var op = destino ? { redirectTo: destino } : {};
+        return Promise.resolve().then(function () { return cliente().auth.resetPasswordForEmail(e, op); }).then(function (r) {
+          if (r && r.error) throw erroDoAuth(r.error, 'Não foi possível enviar o e-mail. Tente de novo em instantes.');
+          return { ok: true, mensagem: 'Se este e-mail tiver acesso ao painel, enviamos um link para criar uma nova senha. Confira também a caixa de spam.' };
+        }, function (err) { throw ehFalhaDeRede(err) ? new Error(MSG_CONEXAO) : err; });
+      }),
+      linkDeAcesso: function () { return { tipo: linkAtual.tipo, erro: linkAtual.erro }; },
+      definirNovaSenha: seguro(function (novaSenha) {
+        var problema = validarSenhaNova(novaSenha);
+        if (problema) throw recusa(problema);
+        return sessaoGuardada().then(function (s) {
+          if (!s) throw recusa(MSG_LINK_EXPIRADO);
+          return Promise.resolve(cliente().auth.updateUser({ password: novaSenha })).then(function (r) {
+            if (r && r.error) throw erroDoAuth(r.error, 'Não foi possível gravar a nova senha.');
+            linkAtual = { tipo: '', erro: '' };
+            return sessaoGuardada().then(function (s2) { return concluirEntrada(s2 || s); });
+          });
+        });
+      }),
+      sessaoAtual: seguro(function () {
+        return sessaoGuardada().then(function (s) {
+          if (!s || !s.access_token) throw erroSessao();
+          return rpc('e_admin').then(function (eAdmin) {
+            return montarUsuario(s, eAdmin === true).then(function (usuario) { return { ok: true, token: s.access_token, usuario: usuario }; });
+          });
+        });
+      }),
+
+      // --- com sessão ---
+      eu: seguro(function (token) {
+        return exigirSessao(token).then(function (s) {
+          return rpc('e_admin').then(function (eAdmin) {
+            return montarUsuario(s, eAdmin === true).then(function (usuario) { return { ok: true, usuario: usuario }; });
+          });
+        });
+      }),
+      sair: seguro(function (token) {
+        return Promise.resolve().then(function () { return cliente().auth.signOut({ scope: 'local' }); })
+          .then(function () { return { ok: true }; }, function () { return { ok: true }; });
+      }),
+      trocarSenha: seguro(function (token, senhaAtual, novaSenha) {
+        var problema = validarSenhaNova(novaSenha);
+        return exigirSessao(token).then(function (s) {
+          if (problema) throw recusa(problema);
+          var email = s.user && s.user.email;
+          if (!email) throw erroSessao();
+          // Confere a senha atual entrando de novo (a sessão é renovada; o painel continua logado).
+          return Promise.resolve(cliente().auth.signInWithPassword({ email: email, password: String(senhaAtual || '') })).then(function (r) {
+            if (r && r.error) {
+              var e = erroDoAuth(r.error, 'Senha atual incorreta.');
+              if (e.message === MSG_LOGIN_INVALIDO) throw recusa('Senha atual incorreta.');
+              throw e;
+            }
+            return cliente().auth.updateUser({ password: novaSenha });
+          }).then(function (r) {
+            if (r && r.error) throw erroDoAuth(r.error, 'Não foi possível trocar a senha.');
+            return { ok: true };
+          });
+        });
+      }),
+      listar: seguro(function (token) {
+        return exigirSessao(token).then(function () {
+          return listarTodas('respostas', '*, processos(nome, tipo, empresa, codigo)', 'recebido_em');
+        }).then(function (linhas) {
+          var sc = scoring();
+          return { ok: true, itens: linhas.map(function (l) { return itemDaLinha(l, sc); }) };
+        });
+      }),
+      atualizar: seguro(function (token, idBruto, campos) {
+        exigirToken(token);
+        exigir(idBruto, 'Candidato não informado.');
+        var id = limparTexto(idBruto, 80);
+        if (!id) throw recusa('Informe o id do candidato.');
+        if (!campos || typeof campos !== 'object') throw recusa('Nada para atualizar.');
+        var mudar = {};
+        if (campos.status !== undefined) {
+          var st = limparTexto(campos.status, 20);
+          if (STATUS_VALIDOS.indexOf(st) === -1) throw recusa('Status inválido. Use: aprovado, reprovado ou em_analise.');
+          mudar.status = st;
+        }
+        if (campos.observacoes !== undefined) mudar.observacoes = limparTextoLongo(campos.observacoes, 5000);
+        if (!Object.keys(mudar).length) throw recusa('Nada para atualizar.');
+        return exigirSessao(token).then(function () {
+          return consulta(function (c) { return c.from('respostas').update(mudar).eq('id', id).select('id'); });
+        }).then(function (linhas) {
+          if (!Array.isArray(linhas) || !linhas.length) throw recusa('Candidato não encontrado.');
+          return { ok: true, id: id };
+        });
+      }),
+      excluir: seguro(function (token, idBruto) {
+        exigirToken(token);
+        exigir(idBruto, 'Candidato não informado.');
+        var id = limparTexto(idBruto, 80);
+        if (!id) throw recusa('Informe o id do candidato.');
+        return exigirSessao(token).then(function () {
+          return consulta(function (c) { return c.from('respostas').delete().eq('id', id).select('id'); });
+        }).then(function (linhas) {
+          if (!Array.isArray(linhas) || !linhas.length) throw recusa('Candidato não encontrado.');
+          return { ok: true, id: id };
+        });
+      }),
+      excluirTodos: seguro(function (token, avaliacaoBruta) {
+        var filtrar = avaliacaoBruta !== undefined && avaliacaoBruta !== null && String(avaliacaoBruta).trim() !== '';
+        var codigo = filtrar ? normalizarCodigo(avaliacaoBruta) : '';
+        return exigirSessao(token).then(function () {
+          if (filtrar && !codigo) throw recusa('Código de avaliação inválido.');
+          return consulta(function (c) {
+            var q = c.from('respostas').delete();
+            q = filtrar ? q.eq('avaliacao', codigo) : q.neq('id', '');
+            return q.select('id');
+          });
+        }).then(function (linhas) {
+          var n = Array.isArray(linhas) ? linhas.length : 0;
+          return filtrar ? { ok: true, excluidos: n, avaliacao: codigo } : { ok: true, excluidos: n };
+        });
+      }),
+
+      // --- empresas (não existem mais: a empresa é texto no processo) ---
+      listarEmpresas: seguro(function (token) { return exigirSessao(token).then(function () { return { ok: true, empresas: [] }; }); }),
+      salvarEmpresa: seguro(function (token) { return exigirSessao(token).then(function () { throw recusa(MSG_SEM_EMPRESAS); }); }),
+      excluirEmpresa: seguro(function (token) { return exigirSessao(token).then(function () { throw recusa(MSG_SEM_EMPRESAS); }); }),
+
+      // --- avaliações (nome antigo dos processos) ---
+      listarAvaliacoes: seguro(function (token) {
+        return exigirSessao(token).then(listarProcessos).then(function (linhas) { return { ok: true, avaliacoes: linhas.map(avaliacaoPublica) }; });
+      }),
+      salvarAvaliacao: seguro(function (token, avaliacao) {
+        return exigirSessao(token).then(function () { return salvarProcesso(avaliacao || {}, true); });
+      }),
+      excluirAvaliacao: seguro(function (token, id) {
+        return exigirSessao(token).then(function () { return excluirProcesso(id); });
+      }),
+
+      // --- processos (tabela public.processos, direto com RLS) ---
+      processosListar: seguro(function (token) {
+        return exigirSessao(token).then(listarProcessos).then(function (linhas) { return { ok: true, processos: linhas.map(processoPublico) }; });
+      }),
+      processosSalvar: seguro(function (token, processo) {
+        return exigirSessao(token).then(function () { return salvarProcesso(processo || {}, false); });
+      }),
+      processosExcluir: seguro(function (token, id) {
+        exigirToken(token);
+        exigir(id, 'Processo não informado.');
+        return exigirSessao(token).then(function () { return excluirProcesso(id); });
+      }),
+
+      // --- usuários (Supabase Auth, pela Edge Function "admin") ---
+      listarUsuarios: seguro(function (token) { return admin(token, 'usuarios.listar'); }),
+      convidarUsuario: seguro(function (token, usuario) {
+        usuario = usuario || {};
+        return admin(token, 'usuarios.convidar', { email: usuario.email, nome: usuario.nome }, prazoLongo);
+      }),
+      salvarUsuario: seguro(function (token, usuario) {
+        usuario = usuario && typeof usuario === 'object' ? usuario : {};
+        var id = limparTexto(usuario.id, 60);
+        if (!id) return admin(token, 'usuarios.convidar', { email: usuario.email, nome: usuario.nome }, prazoLongo);
+        // Edição: só o nome (cada pessoa cuida da própria senha; para tirar o acesso, exclua o usuário).
+        var nome = limparTexto(usuario.nome, 80);
+        return exigirSessao(token).then(function () {
+          if (letrasContadas(nome) < 2) throw recusa('Informe o nome do usuário.');
+          if (usuario.ativo === false) throw recusa('Para tirar o acesso de alguém, exclua o usuário.');
+          if (!RE_UUID.test(id)) throw recusa('Usuário não encontrado.');
+          return consulta(function (c) { return c.from('admins').update({ nome: nome }).eq('user_id', id).select('user_id, nome, criado_em'); });
+        }).then(function (linhas) {
+          var l = Array.isArray(linhas) ? linhas[0] : null;
+          if (!l) throw recusa('Usuário não encontrado.');
+          return { ok: true, usuario: { id: String(l.user_id), nome: l.nome || '', email: limparTexto(usuario.email, 120), papel: 'admin', empresaId: '', empresaNome: '', ativo: true, criadoEm: iso(l.criado_em) } };
+        });
+      }),
+      excluirUsuario: seguro(function (token, id) { return admin(token, 'usuarios.remover', { id: id }); }),
+      removerUsuario: seguro(function (token, id) { return admin(token, 'usuarios.remover', { id: id }); }),
+      redefinirSenha: seguro(function (token) {
+        return exigirSessao(token).then(function () { throw recusa(MSG_REDEFINIR); });
+      }),
+
+      // --- ClickUp e relatórios (Edge Function "admin") ---
+      processoDados: seguro(function (token, id) {
+        exigirToken(token);
+        exigir(id, 'Processo não informado.');
+        return admin(token, 'processo.dados', { id: id }, prazoLongo);
+      }),
+      clickupStatus: seguro(function (token) { return admin(token, 'clickup.status'); }),
+      clickupListas: seguro(function (token) { return admin(token, 'clickup.listas', null, prazoLongo); }),
+      relatorioRascunho: seguro(function (token, processoId) {
+        exigirToken(token);
+        exigir(processoId, 'Processo não informado.');
+        return admin(token, 'relatorio.rascunho', { processoId: processoId }, prazoLongo);
+      }),
+      relatorioSalvar: seguro(function (token, relatorioToken, relatorio) {
+        exigirToken(token);
+        exigir(relatorioToken, 'Relatório não informado.');
+        var textos = relatorio && typeof relatorio === 'object' && relatorio.textos && typeof relatorio.textos === 'object' ? relatorio.textos : {};
+        return admin(token, 'relatorio.salvar', { relatorioToken: relatorioToken, relatorio: { textos: textos } });
+      }),
+      relatorioPublicar: seguro(function (token, relatorioToken, baseUrl) {
+        exigirToken(token);
+        exigir(relatorioToken, 'Relatório não informado.');
+        var dados = { relatorioToken: relatorioToken };
+        if (baseUrl) dados.baseUrl = String(baseUrl);
+        return admin(token, 'relatorio.publicar', dados, prazoLongo);
+      }),
+      relatorioDespublicar: seguro(function (token, relatorioToken) {
+        exigirToken(token);
+        exigir(relatorioToken, 'Relatório não informado.');
+        return admin(token, 'relatorio.despublicar', { relatorioToken: relatorioToken });
+      }),
+      relatoriosListar: seguro(function (token, processoId) {
+        return admin(token, 'relatorios.listar', processoId ? { processoId: processoId } : null);
+      }),
+      relatorioMelhorarTextos: seguro(function (token, relatorioToken, ids) {
+        exigirToken(token);
+        exigir(relatorioToken, 'Relatório não informado.');
+        var dados = { relatorioToken: relatorioToken };
+        if (Array.isArray(ids) && ids.length) dados.ids = ids.slice();
+        return admin(token, 'relatorio.melhorarTextos', dados, prazoLongo);
+      })
+    };
+    return api;
+  }
+
+  // Métodos que o painel usa só no Supabase (além dos de DISC_API.METODOS).
+  var EXTRAS = ['recuperarSenha', 'linkDeAcesso', 'definirNovaSenha', 'sessaoAtual', 'convidarUsuario', 'removerUsuario'];
+
+  /** Liga no lugar do DISC_API quando CONFIG.BACKEND === 'supabase' (o objeto continua o mesmo). */
+  function instalar(alvo, cfg, opcoes) {
+    if (!alvo || !cfg || String(cfg.BACKEND || '').trim().toLowerCase() !== 'supabase') return null;
+    opcoes = opcoes || {};
+    var url = String(cfg.SUPABASE_URL || '').trim().replace(/\/+$/, '');
+    var chave = String(cfg.SUPABASE_ANON_KEY || '').trim();
+    if (!url || !chave) return null;
+    var api = criar({
+      supabase: opcoes.supabase || (root && root.supabase) || null,
+      cliente: opcoes.cliente || null,
+      url: url, chave: chave,
+      local: opcoes.local || (root && root.location) || null,
+      scoring: opcoes.scoring || null,
+      timeoutMs: opcoes.timeoutMs, timeoutLongoMs: opcoes.timeoutLongoMs
+    });
+    var metodos = Array.isArray(alvo.METODOS) ? alvo.METODOS : METODOS;
+    metodos.concat(EXTRAS).forEach(function (m) { if (typeof api[m] === 'function') alvo[m] = api[m]; });
+    alvo.configurado = function () { return true; };
+    alvo.supabase = true;
+    alvo.backend = 'supabase';
+    alvo.MODO = 'supabase';
+    alvo.clienteSupabase = api.cliente;
+    return api;
+  }
+
+  var METODOS = ['enviar', 'avaliacaoPublica', 'login', 'primeiroAcesso', 'eu', 'sair', 'trocarSenha',
+    'listar', 'atualizar', 'excluir', 'excluirTodos', 'listarEmpresas', 'salvarEmpresa', 'excluirEmpresa',
+    'listarAvaliacoes', 'salvarAvaliacao', 'excluirAvaliacao', 'listarUsuarios', 'salvarUsuario',
+    'excluirUsuario', 'redefinirSenha',
+    'processosListar', 'processosSalvar', 'processosExcluir', 'processoDados', 'clickupStatus', 'clickupListas',
+    'relatorioRascunho', 'relatorioSalvar', 'relatorioPublicar', 'relatorioDespublicar', 'relatoriosListar',
+    'relatorioMelhorarTextos', 'relatorioPublico'];
+
+  var DISC_API_SUPABASE = {
+    METODOS: METODOS,
+    EXTRAS: EXTRAS,
+    TIMEOUT_MS: TIMEOUT_MS,
+    TIMEOUT_LONGO_MS: TIMEOUT_LONGO_MS,
+    criar: criar,
+    instalar: instalar,
+    lerLinkDeAcesso: lerLinkDeAcesso,
+    enderecoDoPainel: enderecoDoPainel,
+    validarConfigProcesso: validarConfigProcesso,
+    processoPublico: processoPublico,
+    itemDaLinha: itemDaLinha
+  };
+
+  if (typeof module !== 'undefined' && module.exports) { module.exports = DISC_API_SUPABASE; return; }
+  root.DISC_API_SUPABASE = DISC_API_SUPABASE;
+  instalar(root.DISC_API, root.CONFIG);
+})(typeof self !== 'undefined' ? self : this);

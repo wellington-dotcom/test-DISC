@@ -87,6 +87,8 @@
   text-decoration: underline; text-underline-offset: 3px; cursor: pointer;
 }
 .login__link:hover { color: var(--branco); }
+.login__link + .login__link { margin-top: 0; }
+.login__sessao--ok { color: var(--branco); }
 .login__sessao { margin-top: 16px; border-radius: 16px; padding: 10px 14px; font-size: var(--t-rotulo); text-align: center; background: var(--sobre-noite-vidro); color: var(--ambar); }
 
 @media (min-width: 640px) {

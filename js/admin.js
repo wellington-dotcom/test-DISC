@@ -7,6 +7,13 @@
  *   e vai explícito em cada chamada do DISC_API. Só administradores usam o painel (o papel "gestor" foi
  *   desativado nesta versão: o login de um gestor é recusado na tela).
  * Modo sem API: importação de códigos DISC1.* guardados em localStorage (status/observações locais).
+ * Com o Supabase (CONFIG.BACKEND 'supabase' / DISC_API.MODO === 'supabase', js/api-supabase.js): o login é o do
+ *   Supabase Auth. Some o "Primeiro acesso" com chave (o primeiro usuário a entrar vira admin pela RPC
+ *   garantir_primeiro_admin, feita dentro de DISC_API.login, que avisa com resp.primeiroAdmin === true);
+ *   aparece "Esqueci minha senha" (DISC_API.recuperarSenha(email, enderecoDoPainel)); a volta do e-mail
+ *   (#type=recovery ou #type=invite) mostra "Defina sua nova senha" (DISC_API.definirNovaSenha(senha) ->
+ *   {ok, token?, usuario?}); a aba Usuários convida por e-mail (DISC_API.convidarUsuario(token, {nome, email}))
+ *   e remove (DISC_API.excluirUsuario), sem redefinir senha manual.
  */
 (function (root) {
   'use strict';
@@ -27,6 +34,9 @@
   var NOMES = { D: 'Dominância', I: 'Influência', S: 'Estabilidade', C: 'Conformidade' };
   var PAPEIS = { admin: 'Administrador', gestor: 'Gestor (desativado nesta versão)' };
   var MSG_SO_ADMIN = 'Este painel é só para administradores. O acesso de gestor foi desativado nesta versão.';
+  var MSG_SEM_ACESSO_SUPABASE = 'Este e-mail ainda não tem acesso ao painel. Peça a um administrador para convidar você pela aba Usuários.';
+  var MSG_PRIMEIRO_ADMIN = 'Primeiro acesso: você agora é o administrador do painel. Convide a equipe na aba Usuários.';
+  var MSG_LINK_EXPIRADO = 'O link do e-mail expirou ou já foi usado. Peça um novo em "Esqueci minha senha".';
   var TIPOS = { selecao: 'Processo seletivo', equipe: 'Avaliação de equipe' };
   var NIVEIS_CONF = { alta: 'Alta', media: 'Média', baixa: 'Baixa', indisponivel: 'Sem dados' };
   var CLASSE_CONF = { alta: 'selo--verde', media: '', baixa: 'selo--vermelho' };
@@ -583,7 +593,48 @@
     return out.join('\n').trim() + '\n';
   }
 
+  /* ---------- Supabase: modo e volta dos e-mails de acesso ---------- */
+
+  // true quando o painel fala com o Supabase (BACKEND 'supabase' no config, DISC_API.MODO ou DISC_API.backend 'supabase').
+  function modoSupabase(cfg, api) {
+    if (api && (api.MODO === 'supabase' || api.backend === 'supabase')) return true;
+    return !!(cfg && String(cfg.BACKEND || '').trim().toLowerCase() === 'supabase');
+  }
+
+  // Lê a volta de um e-mail do Supabase Auth: "#access_token=…&type=recovery" (ou ?type=… / erro).
+  // -> { tipo: 'recovery' | 'invite' | '', erro: '' | mensagem em pt-BR }
+  function lerRetornoAuth(hash, search) {
+    var params = {};
+    [String(search || '').replace(/^\?/, ''), String(hash || '').replace(/^#/, '')].forEach(function (parte) {
+      parte.split('&').forEach(function (par) {
+        if (!par) return;
+        var i = par.indexOf('=');
+        var k = i === -1 ? par : par.slice(0, i);
+        var v = i === -1 ? '' : par.slice(i + 1);
+        try { k = decodeURIComponent(k); v = decodeURIComponent(v.replace(/\+/g, ' ')); } catch (e) { /* mantém cru */ }
+        params[k] = v;
+      });
+    });
+    if (params.error || params.error_code) {
+      var codigo = String(params.error_code || params.error || '');
+      return { tipo: '', erro: /expired|otp|access_denied/i.test(codigo) ? MSG_LINK_EXPIRADO : 'Não foi possível usar o link do e-mail. Peça um novo em "Esqueci minha senha".' };
+    }
+    var tipo = String(params.type || '').toLowerCase();
+    return { tipo: (tipo === 'recovery' || tipo === 'invite') ? tipo : '', erro: '' };
+  }
+
+  // Endereço do painel sem consulta nem âncora (para onde o e-mail de redefinição volta).
+  function enderecoPainel(href) {
+    return String(href || '').split('#')[0].split('?')[0];
+  }
+
   var util = {
+    modoSupabase: modoSupabase,
+    lerRetornoAuth: lerRetornoAuth,
+    enderecoPainel: enderecoPainel,
+    MSG_SEM_ACESSO_SUPABASE: MSG_SEM_ACESSO_SUPABASE,
+    MSG_PRIMEIRO_ADMIN: MSG_PRIMEIRO_ADMIN,
+    MSG_LINK_EXPIRADO: MSG_LINK_EXPIRADO,
     escaparHtml: escaparHtml,
     formatarTelefone: formatarTelefone,
     linkWhatsApp: linkWhatsApp,
@@ -638,6 +689,17 @@
   var CONFIG = root.CONFIG || { API_URL: '', EMPRESA: '' };
   var MODO_API = !!(CONFIG.API_URL && String(CONFIG.API_URL).trim());
   var SIMULADA = String(CONFIG.API_URL || '').trim() === 'simulada';
+  var SUPABASE = MODO_API && modoSupabase(CONFIG, root.DISC_API);
+  // Lido já no carregamento: o supabase-js limpa a âncora da URL depois de ler a sessão do e-mail.
+  var RETORNO_AUTH = SUPABASE && root.location ? lerRetornoAuth(root.location.hash, root.location.search) : { tipo: '', erro: '' };
+  // O js/api-supabase.js também guarda o que leu do endereço ao carregar (linkDeAcesso); vale se aqui não achou nada.
+  if (SUPABASE && !RETORNO_AUTH.tipo && !RETORNO_AUTH.erro && root.DISC_API && typeof root.DISC_API.linkDeAcesso === 'function') {
+    try {
+      var link = root.DISC_API.linkDeAcesso() || {};
+      var tipoLink = String(link.tipo || '');
+      RETORNO_AUTH = { tipo: (tipoLink === 'recovery' || tipoLink === 'invite') ? tipoLink : '', erro: link.erro ? String(link.erro) : '' };
+    } catch (e) { /* segue sem */ }
+  }
   var estado = {
     token: '', usuario: null,
     registros: [], processos: [], usuarios: [],
@@ -716,10 +778,31 @@
     avisar((e && e.message) || 'Algo deu errado. Tente de novo.', 'erro');
   }
 
+  // Primeiro método existente no DISC_API (aceita um nome ou uma lista de nomes alternativos).
+  function metodoApi(nomes) {
+    var lista = Array.isArray(nomes) ? nomes : [nomes];
+    for (var i = 0; i < lista.length; i++) {
+      var fn = root.DISC_API && root.DISC_API[lista[i]];
+      if (typeof fn === 'function') return fn;
+    }
+    return null;
+  }
+
+  // Chamada pública (sem token), mesma regra de resposta {ok, erro}.
+  function apiPublica(nomes) {
+    var args = Array.prototype.slice.call(arguments, 1);
+    var fn = metodoApi(nomes);
+    if (typeof fn !== 'function') return Promise.reject(new Error('Esta função não está disponível neste servidor.'));
+    return Promise.resolve().then(function () { return fn.apply(root.DISC_API, args); }).then(function (resp) {
+      if (!resp || resp.ok !== true) throw new Error((resp && resp.erro) || 'O servidor recusou a solicitação.');
+      return resp;
+    });
+  }
+
   // Chamada autenticada: o token vai como primeiro argumento. Sessão expirada -> volta ao login.
   function api(metodo) {
     var args = [estado.token].concat(Array.prototype.slice.call(arguments, 1));
-    var fn = root.DISC_API && root.DISC_API[metodo];
+    var fn = metodoApi(metodo);
     if (typeof fn !== 'function') return Promise.reject(new Error('Função indisponível: ' + metodo));
     return Promise.resolve().then(function () { return fn.apply(root.DISC_API, args); }).then(function (resp) {
       if (!resp || resp.ok !== true) {
@@ -2413,6 +2496,7 @@
     var box = $('vista-usuarios');
     limpar(box);
     if (papel() !== 'admin') return;
+    if (SUPABASE) { renderizarUsuariosSupabase(box); return; }
     box.appendChild(cabecalhoVista('Acessos', 'Usuários',
       'Só administradores entram no painel. Crie um acesso para cada pessoa da equipe Notus que conduz processos.',
       [botao('botao--principal', 'Novo administrador', function () { janelaUsuario(null); }, { id: 'btn-novo-usuario' })]));
@@ -2443,6 +2527,57 @@
         ])
       ]);
     })));
+  }
+
+  // Supabase: convite por e-mail e remoção; a senha cada um define pelo link do e-mail ("Esqueci minha senha").
+  function renderizarUsuariosSupabase(box) {
+    box.appendChild(cabecalhoVista('Acessos', 'Usuários',
+      'Só administradores entram no painel. Convide cada pessoa por e-mail: ela recebe um link para criar a própria senha. Quem esquecer a senha usa "Esqueci minha senha" na tela de entrada.',
+      [botao('botao--principal', 'Convidar administrador', function () { janelaConvite(); }, { id: 'btn-novo-usuario' })]));
+    var eu = estado.usuario || {};
+    box.appendChild(el('ul', { classe: 'gestao-lista gestao-lista--linhas', id: 'lista-usuarios' }, estado.usuarios.map(function (u) {
+      var euMesmo = u.voce === true || (!!u.id && u.id === eu.id);
+      var situacao = u.convitePendente ? { t: 'Convite pendente', c: '' } : { t: 'Ativo', c: 'selo--verde' };
+      return el('li', { classe: 'caixa caixa--compacta gestao-linha', 'data-email': u.email, 'data-papel': 'admin' }, [
+        el('div', { classe: 'gestao-linha__texto' }, [
+          el('p', { classe: 'seminegrito gestao-linha__nome', texto: (u.nome || u.email || '') + (euMesmo && !/você/i.test(u.nome || '') ? ' (você)' : '') }),
+          el('p', { classe: 'gestao-card__sub', texto: u.email || '' }),
+          el('div', { classe: 'card-selos' }, [
+            el('span', { classe: 'selo usuario-papel', texto: PAPEIS.admin }),
+            el('span', { classe: 'selo ' + situacao.c, texto: situacao.t, 'data-situacao': u.convitePendente ? 'convite' : 'ativo' })
+          ])
+        ]),
+        el('div', { classe: 'gestao-card__acoes' }, [
+          euMesmo ? null : botao('botao--perigo botao--pequeno', 'Remover', function () { excluirUsuario(u); }, { 'data-acao': 'excluir' })
+        ])
+      ]);
+    })));
+  }
+
+  function janelaConvite() {
+    var nome = campoTexto('us-nome', 'Nome', { maxlength: 80, autocomplete: 'off' });
+    var email = campoTexto('us-email', 'E-mail', { type: 'email', maxlength: 120, inputmode: 'email', autocomplete: 'off' });
+    abrirJanela({
+      id: 'janela-usuario',
+      titulo: 'Convidar administrador',
+      texto: 'A pessoa recebe um e-mail com um link para criar a senha e entrar no painel. Ela vê tudo no painel.',
+      botao: 'Enviar convite',
+      corpo: [nome, email],
+      aoConfirmar: function () {
+        var dados = { nome: $('us-nome').value.trim(), email: $('us-email').value.trim() };
+        if (!dados.nome) throw new Error('Informe o nome.');
+        if (!dados.email) throw new Error('Informe o e-mail.');
+        var chamada = metodoApi(['convidarUsuario', 'usuariosConvidar'])
+          ? api(['convidarUsuario', 'usuariosConvidar'], dados)
+          : api('salvarUsuario', { nome: dados.nome, email: dados.email, papel: 'admin', empresaId: '', ativo: true });
+        return chamada.then(function (resp) {
+          avisar(resp && resp.convidado === false
+            ? 'Acesso liberado para ' + dados.email + '. A pessoa já tinha cadastro: entra com a senha dela ou usa "Esqueci minha senha".'
+            : 'Convite enviado para ' + dados.email + '.', 'ok');
+          return carregar();
+        });
+      }
+    });
   }
 
   function excluirUsuario(u) {
@@ -2688,20 +2823,52 @@
     estado.relatorios = {};
     estado.editor = null;
     fecharMenuUsuario();
+    clearTimeout(avisoTimer);
+    $('aviso-geral').hidden = true;
     var j = $('janela'); if (j) j.remove();
     var c = $('confirmar'); if (c) c.remove();
   }
 
-  function mostrarLogin(expirou) {
+  // Mostra só um dos formulários da tela de entrada.
+  function mostrarForm(id) {
     $('tela-painel').hidden = true;
     $('usuario-area').hidden = true;
     $('tela-login').hidden = false;
-    $('form-primeiro').hidden = true;
-    $('form-login').hidden = false;
-    $('aviso-sessao').hidden = !expirou;
+    ['form-login', 'form-primeiro', 'form-esqueci', 'form-nova-senha'].forEach(function (f) { $(f).hidden = f !== id; });
+  }
+
+  // expirou: aviso "Sua sessão expirou"; mensagem: outro aviso no mesmo lugar (ex.: "Senha definida…").
+  function mostrarLogin(expirou, mensagem) {
+    mostrarForm('form-login');
+    var aviso = $('aviso-sessao');
+    aviso.textContent = mensagem || 'Sua sessão expirou. Entre de novo.';
+    aviso.hidden = !(expirou || mensagem);
     $('erro-login').hidden = true;
     $('campo-senha').value = '';
     $('campo-email').focus();
+  }
+
+  function mostrarEsqueci() {
+    mostrarForm('form-esqueci');
+    $('erro-esqueci').hidden = true;
+    $('ok-esqueci').hidden = true;
+    var email = $('campo-email').value.trim();
+    if (email && !$('es-email').value) $('es-email').value = email;
+    $('es-email').focus();
+  }
+
+  // Volta do e-mail do Supabase: redefinição (recovery) ou convite (invite) — a pessoa cria a senha aqui.
+  function mostrarNovaSenha(tipo) {
+    mostrarForm('form-nova-senha');
+    var convite = tipo === 'invite';
+    $('titulo-nova-senha').textContent = convite ? 'Crie sua senha' : 'Defina sua nova senha';
+    $('texto-nova-senha').textContent = convite
+      ? 'Você foi convidado para o painel. Escolha uma senha com pelo menos 8 caracteres para entrar.'
+      : 'Escolha uma senha com pelo menos 8 caracteres. Depois você já entra no painel.';
+    $('erro-nova-senha').hidden = true;
+    $('ns-senha').value = '';
+    $('ns-confirmar').value = '';
+    $('ns-senha').focus();
   }
 
   function sair() {
@@ -2727,6 +2894,16 @@
     return entrarPainel();
   }
 
+  // Resposta de login que não é de administrador: encerra a sessão aberta e explica.
+  function recusarNaoAdmin(resp) {
+    Promise.resolve().then(function () { return root.DISC_API.sair(resp.token); }).catch(function () { /* ignora */ });
+    throw new Error(SUPABASE ? MSG_SEM_ACESSO_SUPABASE : MSG_SO_ADMIN);
+  }
+
+  function primeiroAdmin(resp) {
+    return !!(resp && (resp.primeiroAdmin === true || (resp.usuario && resp.usuario.primeiroAdmin === true)));
+  }
+
   /* ---------- Menu do usuário ---------- */
 
   function abrirMenuUsuario() {
@@ -2750,10 +2927,18 @@
 
   function iniciar() {
     if (CONFIG.EMPRESA) $('nome-empresa').textContent = '· ' + CONFIG.EMPRESA;
-    $('modo-indicador').textContent = SIMULADA ? 'Prévia (dados de demonstração)' : (MODO_API ? 'Conectado à planilha' : 'Modo local (importar códigos)');
+    $('modo-indicador').textContent = SIMULADA ? 'Prévia (dados de demonstração)'
+      : (SUPABASE ? 'Conectado ao servidor' : (MODO_API ? 'Conectado à planilha' : 'Modo local (importar códigos)'));
     $('dica-previa').hidden = !SIMULADA;
     $('dica-previa-chave').hidden = !SIMULADA;
-    if (MODO_API) $('destino-importacao').textContent = 'Os resultados são enviados para a planilha, como se o participante tivesse enviado.';
+    if (MODO_API) $('destino-importacao').textContent = SUPABASE
+      ? 'Os resultados são enviados para o servidor, como se o participante tivesse enviado.'
+      : 'Os resultados são enviados para a planilha, como se o participante tivesse enviado.';
+    // Supabase: sem "Primeiro acesso" com chave (o primeiro login vira admin) e com "Esqueci minha senha".
+    $('btn-ir-primeiro').hidden = SUPABASE;
+    $('btn-esqueci').hidden = !SUPABASE;
+    $('nota-esqueceu').hidden = SUPABASE;
+    $('nota-primeiro-supabase').hidden = !SUPABASE;
 
     Array.prototype.forEach.call(document.querySelectorAll('.aba'), function (b) {
       b.addEventListener('click', function () {
@@ -2798,12 +2983,11 @@
       btn.disabled = true; btn.textContent = 'Verificando…';
       Promise.resolve().then(function () { return root.DISC_API.login(email, senha); }).then(function (resp) {
         if (!resp || !resp.ok || !resp.token) throw new Error((resp && resp.erro) || 'E-mail ou senha incorretos.');
-        if (!resp.usuario || resp.usuario.papel !== 'admin') {
-          // Gestor (desativado nesta versão): encerra a sessão no servidor e não entra.
-          Promise.resolve().then(function () { return root.DISC_API.sair(resp.token); }).catch(function () { /* ignora */ });
-          throw new Error(MSG_SO_ADMIN);
-        }
-        return iniciarSessao(resp);
+        // Gestor (desativado nesta versão) ou, no Supabase, usuário sem convite: encerra a sessão e não entra.
+        if (!resp.usuario || resp.usuario.papel !== 'admin') recusarNaoAdmin(resp);
+        return iniciarSessao(resp).then(function () {
+          if (primeiroAdmin(resp)) avisar(MSG_PRIMEIRO_ADMIN, 'ok');
+        });
       }).catch(function (err) {
         erroNoForm('erro-login', (err && err.message) || 'Não foi possível entrar.');
       }).then(function () { btn.disabled = false; btn.textContent = 'Entrar'; });
@@ -2838,7 +3022,60 @@
       }).then(function () { btn.disabled = false; btn.textContent = 'Criar acesso'; });
     });
 
+    // Esqueci minha senha (Supabase): o e-mail traz um link que volta para este painel.
+    $('btn-esqueci').addEventListener('click', mostrarEsqueci);
+    $('btn-voltar-login-esqueci').addEventListener('click', function () { mostrarLogin(false); });
+    $('form-esqueci').addEventListener('submit', function (e) {
+      e.preventDefault();
+      $('erro-esqueci').hidden = true;
+      $('ok-esqueci').hidden = true;
+      var email = $('es-email').value.trim();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { erroNoForm('erro-esqueci', 'Informe um e-mail válido.'); return; }
+      var btn = $('btn-enviar-link');
+      btn.disabled = true; btn.textContent = 'Enviando…';
+      apiPublica(['recuperarSenha', 'esqueciSenha', 'enviarRecuperacaoSenha'], email, enderecoPainel(root.location.href)).then(function () {
+        var ok = $('ok-esqueci');
+        ok.textContent = 'Se este e-mail tiver acesso ao painel, você vai receber um link para definir uma nova senha. Confira a caixa de entrada e o spam.';
+        ok.hidden = false;
+      }).catch(function (err) {
+        erroNoForm('erro-esqueci', (err && err.message) || 'Não foi possível enviar o link.');
+      }).then(function () { btn.disabled = false; btn.textContent = 'Enviar link'; });
+    });
+
+    // Nova senha (volta do e-mail de redefinição ou de convite).
+    $('btn-voltar-login-nova').addEventListener('click', function () { mostrarLogin(false); });
+    $('form-nova-senha').addEventListener('submit', function (e) {
+      e.preventDefault();
+      $('erro-nova-senha').hidden = true;
+      var senha = $('ns-senha').value;
+      if (senha.length < 8) { erroNoForm('erro-nova-senha', 'A senha precisa ter pelo menos 8 caracteres.'); return; }
+      if (senha !== $('ns-confirmar').value) { erroNoForm('erro-nova-senha', 'As duas senhas não são iguais.'); return; }
+      var btn = $('btn-salvar-nova-senha');
+      btn.disabled = true; btn.textContent = 'Salvando…';
+      apiPublica(['definirNovaSenha', 'atualizarSenhaRecuperacao'], senha).then(function (resp) {
+        $('ns-senha').value = ''; $('ns-confirmar').value = '';
+        if (root.history && root.history.replaceState) {
+          try { root.history.replaceState(null, '', enderecoPainel(root.location.href)); } catch (e2) { /* ignora */ }
+        }
+        if (resp.token && resp.usuario) {
+          if (resp.usuario.papel !== 'admin') recusarNaoAdmin(resp);
+          return iniciarSessao(resp).then(function () {
+            avisar(primeiroAdmin(resp) ? MSG_PRIMEIRO_ADMIN : 'Senha definida.', 'ok');
+          });
+        }
+        mostrarLogin(false, 'Senha definida. Entre com o seu e-mail e a nova senha.');
+      }).catch(function (err) {
+        erroNoForm('erro-nova-senha', (err && err.message) || 'Não foi possível salvar a senha.');
+      }).then(function () { btn.disabled = false; btn.textContent = 'Salvar senha'; });
+    });
+
     if (!MODO_API) { entrarPainel(); return; }
+    if (SUPABASE && RETORNO_AUTH.tipo) { mostrarNovaSenha(RETORNO_AUTH.tipo); return; }
+    if (SUPABASE && RETORNO_AUTH.erro) {
+      mostrarLogin(false);
+      erroNoForm('erro-login', RETORNO_AUTH.erro);
+      return;
+    }
     var token = ss('get', CHAVE_TOKEN);
     var usuario = null;
     try { usuario = JSON.parse(ss('get', CHAVE_USUARIO) || 'null'); } catch (e2) { usuario = null; }
@@ -2849,6 +3086,12 @@
     } else {
       if (token) { ss('del', CHAVE_TOKEN); ss('del', CHAVE_USUARIO); }
       mostrarLogin(false);
+      // Supabase: a sessão fica guardada pelo supabase-js (outra aba, volta depois); se for de admin, entra direto.
+      if (SUPABASE && metodoApi('sessaoAtual')) {
+        apiPublica('sessaoAtual').then(function (resp) {
+          if (resp.token && resp.usuario && resp.usuario.papel === 'admin' && !$('form-login').hidden && !estado.token) return iniciarSessao(resp);
+        }).catch(function () { /* sem sessão: fica no login */ });
+      }
     }
   }
 

@@ -816,3 +816,216 @@ test.describe('Admin na prévia (API_URL "simulada")', () => {
     expect(erros).toEqual([]);
   });
 });
+
+// Backend Supabase: sem rede. O supabase-js vendorizado vira um arquivo vazio e o js/api-supabase.js é trocado
+// por um DISC_API falso mínimo (MODO 'supabase') que guarda as chamadas em window.__sb.
+const API_SUPABASE_FALSA = `
+(function () {
+  var sb = window.__sb = { chamadas: [], primeiroAdmin: true, usuarios: [
+    { id: 'u1', nome: 'Dona do Sistema', email: 'dona@empresa.com', papel: 'admin', ativo: true, voce: true },
+    { id: 'u2', nome: 'Convidada Pendente', email: 'pendente@empresa.com', papel: 'admin', ativo: true, convitePendente: true }
+  ] };
+  function ok(x) { return Promise.resolve(Object.assign({ ok: true }, x || {})); }
+  function anotar(nome, args) { sb.chamadas.push({ nome: nome, args: Array.prototype.slice.call(args) }); }
+  var dona = { id: 'u1', nome: 'Dona do Sistema', email: 'dona@empresa.com', papel: 'admin' };
+  window.DISC_API = Object.assign({}, window.DISC_API, {
+    MODO: 'supabase',
+    configurado: function () { return true; },
+    login: function (email, senha) {
+      anotar('login', arguments);
+      if (email === 'sem@empresa.com') return ok({ token: 'tk-sem', usuario: { id: 'u9', nome: 'Sem Acesso', email: email, papel: '' } });
+      if (email !== 'dona@empresa.com' || senha !== 'senha-boa-1') return Promise.reject(new Error('E-mail ou senha incorretos.'));
+      var primeiro = sb.primeiroAdmin; sb.primeiroAdmin = false;
+      return ok({ token: 'tk-dona', usuario: dona, primeiroAdmin: primeiro });
+    },
+    sair: function () { anotar('sair', arguments); try { localStorage.removeItem('sb-sessao-falsa'); } catch (e) {} return ok(); },
+    sessaoAtual: function () {
+      var guardada = null;
+      try { guardada = localStorage.getItem('sb-sessao-falsa'); } catch (e) {}
+      if (!guardada) { var e2 = new Error('Sessão expirada. Entre de novo.'); e2.sessaoExpirada = true; return Promise.reject(e2); }
+      return ok({ token: 'tk-guardado', usuario: dona });
+    },
+    recuperarSenha: function () { anotar('recuperarSenha', arguments); return ok(); },
+    definirNovaSenha: function () { anotar('definirNovaSenha', arguments); return ok({ token: 'tk-dona', usuario: dona }); },
+    listar: function () { return ok({ itens: [] }); },
+    processosListar: function () { return ok({ processos: [] }); },
+    listarUsuarios: function () { return ok({ usuarios: sb.usuarios.slice() }); },
+    clickupStatus: function () { return ok({ configurado: false }); },
+    convidarUsuario: function (token, dados) {
+      anotar('convidarUsuario', arguments);
+      sb.usuarios.push({ id: 'u' + (sb.usuarios.length + 1), nome: dados.nome, email: dados.email, papel: 'admin', ativo: true, convitePendente: true });
+      return ok({ convidado: true });
+    },
+    excluirUsuario: function (token, id) {
+      anotar('excluirUsuario', arguments);
+      sb.usuarios = sb.usuarios.filter(function (u) { return u.id !== id; });
+      return ok({ id: id });
+    }
+  });
+})();
+`;
+
+async function simularSupabase(page) {
+  await configurar(page, { BACKEND: 'supabase', API_URL: 'https://projeto-teste.supabase.co', SUPABASE_URL: 'https://projeto-teste.supabase.co', SUPABASE_ANON_KEY: 'anon-publica' });
+  await page.route('**/assets/vendor/supabase.js', (route) => route.fulfill({ status: 200, contentType: 'text/javascript; charset=utf-8', body: '/* supabase-js desligado no teste */' }));
+  await page.route('**/js/api-supabase.js', (route) => route.fulfill({ status: 200, contentType: 'text/javascript; charset=utf-8', body: API_SUPABASE_FALSA }));
+  // Nenhuma chamada pode sair para o Supabase de verdade.
+  await page.route('https://projeto-teste.supabase.co/**', (route) => route.abort());
+}
+
+async function chamadasSb(page, nome) {
+  return page.evaluate((n) => window.__sb.chamadas.filter((c) => c.nome === n).map((c) => c.args), nome);
+}
+
+test.describe('Admin com Supabase (DISC_API.MODO "supabase", API falsa)', () => {
+  test('login: sem "Primeiro acesso" com chave, primeiro login vira admin, usuário sem convite é recusado, esqueci a senha', async ({ page }) => {
+    const erros = coletarErros(page);
+    await simularSupabase(page);
+    await page.goto('/admin.html');
+    await expect(page.locator('#form-login')).toBeVisible();
+    await expect(page.locator('#modo-indicador')).toHaveText('Conectado ao servidor');
+    await expect(page.locator('#btn-ir-primeiro')).toBeHidden();
+    await expect(page.locator('#nota-esqueceu')).toBeHidden();
+    await expect(page.locator('#nota-primeiro-supabase')).toBeVisible();
+    await expect(page.locator('#nota-primeiro-supabase')).toContainText('quem entrar primeiro vira o administrador');
+    await expect(page.locator('#dica-previa')).toBeHidden();
+
+    // Esqueci minha senha: e-mail inválido, depois envio com o endereço do painel
+    await page.fill('#campo-email', 'dona@empresa.com');
+    await page.click('#btn-esqueci');
+    await expect(page.locator('#form-esqueci')).toBeVisible();
+    await expect(page.locator('#form-login')).toBeHidden();
+    await expect(page.locator('#es-email')).toHaveValue('dona@empresa.com');
+    await page.fill('#es-email', 'nao-e-email');
+    await page.click('#btn-enviar-link');
+    await expect(page.locator('#erro-esqueci')).toHaveText('Informe um e-mail válido.');
+    await page.fill('#es-email', 'dona@empresa.com');
+    await page.click('#btn-enviar-link');
+    await expect(page.locator('#ok-esqueci')).toContainText('você vai receber um link para definir uma nova senha');
+    await expect(page.locator('#erro-esqueci')).toBeHidden();
+    const pedidos = await chamadasSb(page, 'recuperarSenha');
+    expect(pedidos).toHaveLength(1);
+    expect(pedidos[0][0]).toBe('dona@empresa.com');
+    expect(pedidos[0][1]).toMatch(/\/admin\.html$/);
+    await page.click('#btn-voltar-login-esqueci');
+    await expect(page.locator('#form-login')).toBeVisible();
+
+    // Usuário que existe no Auth mas não é admin
+    await page.fill('#campo-email', 'sem@empresa.com');
+    await page.fill('#campo-senha', 'qualquer-1');
+    await page.click('#btn-entrar');
+    await expect(page.locator('#erro-login')).toHaveText('Este e-mail ainda não tem acesso ao painel. Peça a um administrador para convidar você pela aba Usuários.');
+    await expect(page.locator('#tela-painel')).toBeHidden();
+    expect(await chamadasSb(page, 'sair')).toHaveLength(1);
+
+    // Senha errada
+    await page.fill('#campo-email', 'dona@empresa.com');
+    await page.fill('#campo-senha', 'errada');
+    await page.click('#btn-entrar');
+    await expect(page.locator('#erro-login')).toHaveText('E-mail ou senha incorretos.');
+
+    // Primeiro login: vira admin e recebe o aviso
+    await entrar(page, 'dona@empresa.com', 'senha-boa-1');
+    await expect(page.locator('#aviso-geral')).toContainText('você agora é o administrador do painel');
+    await expect(page.locator('#usuario-nome')).toHaveText('Dona do Sistema');
+    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'usuarios', 'comparativo', 'importar']);
+    expect(await page.evaluate(() => sessionStorage.getItem('disc_admin_token'))).toBe('tk-dona');
+
+    // Segundo login não repete o aviso
+    await sairDoPainel(page);
+    await expect(page.locator('#btn-esqueci')).toBeVisible();
+    await entrar(page, 'dona@empresa.com', 'senha-boa-1');
+    await expect(page.locator('#aviso-geral')).toBeHidden();
+    expect(erros).toEqual([]);
+  });
+
+  test('volta do e-mail de redefinição mostra "Defina sua nova senha" e entra no painel', async ({ page }) => {
+    const erros = coletarErros(page);
+    await simularSupabase(page);
+    await page.goto('/admin.html#access_token=abc&expires_in=3600&refresh_token=r&token_type=bearer&type=recovery');
+    await expect(page.locator('#form-nova-senha')).toBeVisible();
+    await expect(page.locator('#form-login')).toBeHidden();
+    await expect(page.locator('#titulo-nova-senha')).toHaveText('Defina sua nova senha');
+    await page.fill('#ns-senha', 'curta');
+    await page.fill('#ns-confirmar', 'curta');
+    await page.click('#btn-salvar-nova-senha');
+    await expect(page.locator('#erro-nova-senha')).toHaveText('A senha precisa ter pelo menos 8 caracteres.');
+    await page.fill('#ns-senha', 'nova-senha-1');
+    await page.fill('#ns-confirmar', 'nova-senha-2');
+    await page.click('#btn-salvar-nova-senha');
+    await expect(page.locator('#erro-nova-senha')).toHaveText('As duas senhas não são iguais.');
+    await page.fill('#ns-confirmar', 'nova-senha-1');
+    await page.click('#btn-salvar-nova-senha');
+    await expect(page.locator('#tela-painel')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('#aviso-geral')).toHaveText('Senha definida.');
+    expect(await chamadasSb(page, 'definirNovaSenha')).toEqual([['nova-senha-1']]);
+    expect(new URL(page.url()).hash).toBe('');
+    expect(erros).toEqual([]);
+  });
+
+  test('convite (type=invite) pede para criar a senha; link vencido avisa no login', async ({ page }) => {
+    const erros = coletarErros(page);
+    await simularSupabase(page);
+    await page.goto('/admin.html#access_token=abc&type=invite');
+    await expect(page.locator('#titulo-nova-senha')).toHaveText('Crie sua senha');
+    await expect(page.locator('#texto-nova-senha')).toContainText('Você foi convidado');
+    await page.click('#btn-voltar-login-nova');
+    await expect(page.locator('#form-login')).toBeVisible();
+
+    await page.goto('/admin.html?de-novo=1#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired');
+    await expect(page.locator('#form-login')).toBeVisible();
+    await expect(page.locator('#erro-login')).toHaveText('O link do e-mail expirou ou já foi usado. Peça um novo em "Esqueci minha senha".');
+    expect(erros).toEqual([]);
+  });
+
+  test('sessão guardada pelo supabase-js entra direto; sair volta ao login', async ({ page }) => {
+    const erros = coletarErros(page);
+    await simularSupabase(page);
+    await page.goto('/admin.html');
+    await expect(page.locator('#form-login')).toBeVisible();
+    await page.evaluate(() => localStorage.setItem('sb-sessao-falsa', '1'));
+    await page.reload();
+    await expect(page.locator('#tela-painel')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('#usuario-nome')).toHaveText('Dona do Sistema');
+    expect(await page.evaluate(() => sessionStorage.getItem('disc_admin_token'))).toBe('tk-guardado');
+    await sairDoPainel(page);
+    await page.evaluate(() => sessionStorage.clear());
+    await page.reload();
+    await expect(page.locator('#form-login')).toBeVisible();
+    await expect(page.locator('#tela-painel')).toBeHidden();
+    expect(erros).toEqual([]);
+  });
+
+  test('aba Usuários: convida por e-mail, mostra convite pendente e remove (sem redefinir senha manual)', async ({ page }) => {
+    const erros = coletarErros(page);
+    await simularSupabase(page);
+    await page.goto('/admin.html');
+    await entrar(page, 'dona@empresa.com', 'senha-boa-1');
+    await page.locator('.aba[data-aba="usuarios"]').click();
+    const lista = page.locator('#lista-usuarios');
+    await expect(lista.locator('li')).toHaveCount(2);
+    await expect(lista.locator('[data-email="dona@empresa.com"]')).toContainText('Dona do Sistema (você)');
+    await expect(lista.locator('[data-email="dona@empresa.com"] [data-acao="excluir"]')).toHaveCount(0);
+    await expect(lista.locator('[data-email="pendente@empresa.com"] [data-situacao="convite"]')).toHaveText('Convite pendente');
+    await expect(lista.locator('[data-acao="redefinir"], [data-acao="editar"], [data-acao="alternar-ativo"]')).toHaveCount(0);
+
+    await expect(page.locator('#btn-novo-usuario')).toHaveText('Convidar administrador');
+    await page.click('#btn-novo-usuario');
+    await expect(page.locator('#janela-usuario')).toBeVisible();
+    await expect(page.locator('#janela-usuario input[type="password"], #us-senha')).toHaveCount(0);
+    await page.fill('#us-nome', 'Nova Pessoa');
+    await page.fill('#us-email', 'nova@empresa.com');
+    await page.click('#janela-ok');
+    await expect(page.locator('#aviso-geral')).toHaveText('Convite enviado para nova@empresa.com.');
+    await expect(lista.locator('[data-email="nova@empresa.com"]')).toContainText('Convite pendente');
+    const convites = await chamadasSb(page, 'convidarUsuario');
+    expect(convites).toEqual([['tk-dona', { nome: 'Nova Pessoa', email: 'nova@empresa.com' }]]);
+
+    await lista.locator('[data-email="pendente@empresa.com"] [data-acao="excluir"]').click();
+    await page.click('#confirmar-ok');
+    await expect(page.locator('#aviso-geral')).toHaveText('Acesso excluído.');
+    await expect(lista.locator('[data-email="pendente@empresa.com"]')).toHaveCount(0);
+    expect(await chamadasSb(page, 'excluirUsuario')).toEqual([['tk-dona', 'u2']]);
+    expect(erros).toEqual([]);
+  });
+});

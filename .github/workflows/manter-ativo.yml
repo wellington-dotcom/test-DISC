@@ -1,0 +1,58 @@
+# Despertador do Supabase: o plano grátis PAUSA o projeto depois de 7 dias sem uso.
+# A cada 3 dias este robô faz uma consulta inofensiva (avaliacao_publica('ZZZZ'), que só responde
+# "link não encontrado") para o banco continuar acordado. Não grava nada.
+#
+# Precisa de 2 segredos do repositório (Settings > Secrets and variables > Actions > New repository secret):
+#   SUPABASE_URL       -> Project URL, ex.: https://abcd1234.supabase.co
+#   SUPABASE_ANON_KEY  -> a chave pública "anon" (a mesma do js/config.js; NUNCA a service_role/secret)
+# Sem esses segredos o robô não faz nada (e não dá erro). Passo a passo em docs/SUPABASE.md.
+name: Manter Supabase ativo
+
+on:
+  schedule:
+    - cron: '17 11 */3 * *'   # a cada 3 dias, 11:17 UTC (08:17 em Brasília)
+  workflow_dispatch: {}        # botão "Run workflow" para testar na hora
+
+permissions: {}
+
+concurrency:
+  group: manter-ativo
+  cancel-in-progress: true
+
+jobs:
+  despertar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+      SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+    steps:
+      - name: Segredos ausentes (nada a fazer)
+        if: env.SUPABASE_URL == '' || env.SUPABASE_ANON_KEY == ''
+        run: echo "::notice::SUPABASE_URL e/ou SUPABASE_ANON_KEY não configurados nos Secrets do GitHub — despertador desligado."
+
+      - name: Consultar o Supabase
+        if: env.SUPABASE_URL != '' && env.SUPABASE_ANON_KEY != ''
+        run: |
+          set -eu
+          url="${SUPABASE_URL%/}/rest/v1/rpc/avaliacao_publica"
+          # Chave nova (sb_publishable_...) vai só no cabeçalho apikey; a antiga (anon, um JWT) vai também no Authorization.
+          case "$SUPABASE_ANON_KEY" in
+            sb_*) auth=() ;;
+            *)    auth=(-H "Authorization: Bearer $SUPABASE_ANON_KEY") ;;
+          esac
+          for tentativa in 1 2 3; do
+            codigo=$(curl -sS -o resposta.json -w '%{http_code}' --max-time 30 -X POST "$url" \
+              -H "apikey: $SUPABASE_ANON_KEY" "${auth[@]}" \
+              -H 'Content-Type: application/json' \
+              -d '{"p_codigo":"ZZZZ"}' || true)
+            echo "Tentativa $tentativa: HTTP $codigo"
+            if [ "$codigo" = "200" ]; then
+              echo "Supabase respondeu (o projeto está ativo)."
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "::error::O Supabase não respondeu com sucesso (HTTP $codigo). Veja docs/SUPABASE.md, seção 'Se algo der errado'."
+          cat resposta.json 2>/dev/null || true
+          exit 1

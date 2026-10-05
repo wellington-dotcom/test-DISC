@@ -1,0 +1,12 @@
+Bibliotecas de terceiros copiadas para o site (sem CDN). Não edite estes arquivos à mão.
+
+supabase.js
+  Pacote:   @supabase/supabase-js 2.117.2 (npm), arquivo dist/umd/supabase.js (build UMD: cria a global "supabase")
+  Licença:  MIT — ver supabase-js-LICENSE.txt
+  SHA-256:  59d39487c3589843b410322d8a3d562ce022aba1e5ccb16898ef3fb2a0da2ecd
+  Como atualizar:
+    npm pack @supabase/supabase-js@<versão>
+    tar xzf supabase-supabase-js-<versão>.tgz
+    cp package/dist/umd/supabase.js assets/vendor/supabase.js
+    cp package/LICENSE assets/vendor/supabase-js-LICENSE.txt
+  (e atualize a versão e o SHA-256 acima; rode npm test e npm run test:e2e)

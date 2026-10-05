@@ -67,7 +67,9 @@
           <p class="login__erro" id="erro-login" role="alert" hidden></p>
           <button type="submit" class="botao botao--branco botao--grande botao--bloco login__botao" id="btn-entrar">Entrar</button>
           <button type="button" class="login__link" id="btn-ir-primeiro">Primeiro acesso</button>
-          <p class="login__nota">Esqueceu a senha? Peça ao administrador para redefinir.</p>
+          <button type="button" class="login__link" id="btn-esqueci" hidden>Esqueci minha senha</button>
+          <p class="login__nota" id="nota-esqueceu">Esqueceu a senha? Peça ao administrador para redefinir.</p>
+          <p class="login__nota" id="nota-primeiro-supabase" hidden>Primeiro acesso: entre com o usuário criado no Supabase. Se ainda não existe nenhum administrador, quem entrar primeiro vira o administrador. Os demais recebem um convite por e-mail.</p>
           <p class="login__nota login__previa" id="dica-previa" hidden>Prévia: <span class="negrito">admin@previa.com</span>, senha <span class="negrito">previa123</span></p>
         </form>
 
@@ -88,6 +90,31 @@
           <button type="submit" class="botao botao--branco botao--grande botao--bloco login__botao" id="btn-criar-acesso">Criar acesso</button>
           <button type="button" class="login__link" id="btn-voltar-login">Voltar para o login</button>
           <p class="login__nota login__previa" id="dica-previa-chave" hidden>Prévia: a chave é <span class="negrito">previa</span></p>
+        </form>
+
+        <!-- Só com o Supabase: pedir o e-mail de redefinição de senha -->
+        <form id="form-esqueci" class="login__form" novalidate hidden>
+          <h1 class="login__h">Esqueci minha senha</h1>
+          <p class="login__texto">Informe o seu e-mail. Enviamos um link para você definir uma nova senha.</p>
+          <label class="login__rotulo" for="es-email">E-mail</label>
+          <input id="es-email" class="entrada" type="email" autocomplete="username" inputmode="email" placeholder="voce@empresa.com" required>
+          <p class="login__sessao" id="ok-esqueci" role="status" hidden></p>
+          <p class="login__erro" id="erro-esqueci" role="alert" hidden></p>
+          <button type="submit" class="botao botao--branco botao--grande botao--bloco login__botao" id="btn-enviar-link">Enviar link</button>
+          <button type="button" class="login__link" id="btn-voltar-login-esqueci">Voltar para o login</button>
+        </form>
+
+        <!-- Só com o Supabase: volta do e-mail (redefinição ou convite) para definir a senha -->
+        <form id="form-nova-senha" class="login__form" novalidate hidden>
+          <h1 class="login__h" id="titulo-nova-senha">Defina sua nova senha</h1>
+          <p class="login__texto" id="texto-nova-senha">Escolha uma senha com pelo menos 8 caracteres.</p>
+          <label class="login__rotulo" for="ns-senha">Nova senha (mínimo 8 caracteres)</label>
+          <input id="ns-senha" class="entrada" type="password" autocomplete="new-password" required>
+          <label class="login__rotulo login__rotulo--junto" for="ns-confirmar">Confirmar nova senha</label>
+          <input id="ns-confirmar" class="entrada" type="password" autocomplete="new-password" required>
+          <p class="login__erro" id="erro-nova-senha" role="alert" hidden></p>
+          <button type="submit" class="botao botao--branco botao--grande botao--bloco login__botao" id="btn-salvar-nova-senha">Salvar senha</button>
+          <button type="button" class="login__link" id="btn-voltar-login-nova">Voltar para o login</button>
         </form>
       </div>
     </section>
@@ -173,6 +200,8 @@
   <script src="js/codec.js"></script>
   <script src="js/api.js"></script>
   <script src="js/api-simulada.js"></script>
+  <script src="assets/vendor/supabase.js"></script>
+  <script src="js/api-supabase.js"></script>
   <script src="js/lideranca.js"></script>
   <script src="js/validacao.js"></script>
   <script src="js/confiabilidade.js"></script>

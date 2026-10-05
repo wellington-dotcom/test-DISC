@@ -423,3 +423,48 @@ test('admin.html: login por e-mail e senha, sem a tela de chave, carrega validac
   assert.doesNotMatch(html, /data-aba="(empresas|avaliacoes)"/);
   assert.match(html, /id="vista-processos"/);
 });
+
+test('Supabase: modo ligado por BACKEND ou por DISC_API.MODO', () => {
+  assert.equal(AD.modoSupabase({ BACKEND: 'supabase' }, null), true);
+  assert.equal(AD.modoSupabase({ BACKEND: ' Supabase ' }, null), true);
+  assert.equal(AD.modoSupabase({ BACKEND: 'appsscript' }, { MODO: 'supabase' }), true);
+  assert.equal(AD.modoSupabase({ BACKEND: 'appsscript' }, {}), false);
+  assert.equal(AD.modoSupabase({}, { backend: 'supabase' }), true);
+  assert.equal(AD.modoSupabase({ API_URL: 'simulada' }, { MODO: 'simulada' }), false);
+  assert.equal(AD.modoSupabase(null, null), false);
+});
+
+test('Supabase: volta do e-mail (redefinição, convite e link vencido)', () => {
+  assert.deepEqual(AD.lerRetornoAuth('#access_token=abc&expires_in=3600&refresh_token=x&token_type=bearer&type=recovery', ''), { tipo: 'recovery', erro: '' });
+  assert.deepEqual(AD.lerRetornoAuth('#access_token=abc&type=invite', ''), { tipo: 'invite', erro: '' });
+  assert.deepEqual(AD.lerRetornoAuth('', '?type=recovery'), { tipo: 'recovery', erro: '' });
+  assert.deepEqual(AD.lerRetornoAuth('#access_token=abc&type=signup', ''), { tipo: '', erro: '' });
+  assert.deepEqual(AD.lerRetornoAuth('', ''), { tipo: '', erro: '' });
+  assert.deepEqual(AD.lerRetornoAuth('#error=access_denied&error_code=otp_expired&error_description=Email+link+is+invalid+or+has+expired', ''),
+    { tipo: '', erro: AD.MSG_LINK_EXPIRADO });
+  assert.match(AD.lerRetornoAuth('#error=server_error', '').erro, /Não foi possível usar o link/);
+  assert.match(AD.MSG_LINK_EXPIRADO, /Esqueci minha senha/);
+});
+
+test('Supabase: endereço do painel para o link de redefinição não leva consulta nem âncora', () => {
+  assert.equal(AD.enderecoPainel('https://disc.gestaosemcaos.com.br/admin.html?x=1#type=recovery'), 'https://disc.gestaosemcaos.com.br/admin.html');
+  assert.equal(AD.enderecoPainel(''), '');
+});
+
+test('admin.html: carrega supabase-js e api-supabase depois das APIs e tem os fluxos de senha do Supabase', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'admin.html'), 'utf8');
+  const scripts = [...html.matchAll(/<script src="([^"]+)"/g)].map((m) => m[1]);
+  const i = (s) => scripts.indexOf(s);
+  assert.ok(i('js/api.js') !== -1 && i('js/api.js') < i('js/api-simulada.js'));
+  assert.ok(i('js/api-simulada.js') < i('assets/vendor/supabase.js'));
+  assert.ok(i('assets/vendor/supabase.js') < i('js/api-supabase.js'));
+  assert.ok(i('js/api-supabase.js') < i('js/admin.js'));
+  assert.doesNotMatch(html, /<script[^>]+src="https?:/);
+  for (const id of ['btn-esqueci', 'form-esqueci', 'es-email', 'ok-esqueci', 'erro-esqueci', 'form-nova-senha', 'ns-senha', 'ns-confirmar', 'erro-nova-senha', 'nota-primeiro-supabase', 'nota-esqueceu']) {
+    assert.match(html, new RegExp('id="' + id + '"'), id);
+  }
+  assert.match(html, /id="btn-esqueci"[^>]*hidden/);
+  assert.match(html, /id="form-nova-senha"[^>]*hidden/);
+});

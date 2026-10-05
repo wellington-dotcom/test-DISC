@@ -30,7 +30,10 @@ const CLASSES_ANTIGAS = ['botao--preto', 'botao--amarelo', 'caixa--preta', 'caix
 const problemas = [];
 const anotar = (arq, n, msg) => problemas.push(`${arq}:${n}: ${msg}`);
 
-for (const arq of [...ARQUIVOS, ...ARQUIVOS_DOCUMENTO]) {
+// Código de terceiros vendorizado (assets/vendor/: supabase-js minificado) não é tela nossa: nunca é conferido.
+const IGNORAR = (arq) => arq.startsWith('assets/vendor/');
+
+for (const arq of [...ARQUIVOS, ...ARQUIVOS_DOCUMENTO].filter((a) => !IGNORAR(a))) {
   const documento = ARQUIVOS_DOCUMENTO.includes(arq);
   const cores = documento ? CORES_DOCUMENTO : CORES_LIBERADAS;
   const escala = documento ? ESCALA_DOCUMENTO_PX : ESCALA_PX;
