@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex, nofollow">
+  <meta name="color-scheme" content="light dark">
+  <title>Painel DISC</title>
+  <link rel="stylesheet" href="assets/admin.css">
+</head>
+<body>
+  <a class="pular" href="#conteudo">Pular para o conteúdo</a>
+
+  <header class="topo nao-imprimir">
+    <div class="topo-inner">
+      <h1 class="marca">Painel DISC <span class="marca-sub" id="nome-empresa"></span></h1>
+      <span class="modo" id="modo-indicador"></span>
+      <button type="button" class="btn btn-sec" id="btn-sair" hidden>Sair</button>
+    </div>
+  </header>
+
+  <main id="conteudo" class="conteudo" tabindex="-1">
+    <!-- Login (modo com API) -->
+    <section id="tela-login" class="cartao login" hidden aria-labelledby="titulo-login">
+      <h2 id="titulo-login">Acesso do recrutador</h2>
+      <p class="muted">Informe a chave de administrador configurada no Google Apps Script.</p>
+      <form id="form-login" novalidate>
+        <label for="campo-chave">Chave de acesso</label>
+        <input id="campo-chave" type="password" autocomplete="current-password" required>
+        <p class="erro" id="erro-login" role="alert" hidden></p>
+        <button type="submit" class="btn" id="btn-entrar">Entrar</button>
+      </form>
+    </section>
+
+    <!-- Painel -->
+    <section id="tela-painel" hidden>
+      <nav class="abas nao-imprimir" aria-label="Seções do painel">
+        <button type="button" class="aba" data-aba="lista" aria-current="page">Candidatos</button>
+        <button type="button" class="aba" data-aba="comparativo">Comparativo dos aprovados</button>
+        <button type="button" class="aba" data-aba="importar" id="aba-importar" hidden>Importar códigos</button>
+      </nav>
+
+      <p class="aviso" id="aviso-geral" role="status" aria-live="polite" hidden></p>
+
+      <!-- Lista -->
+      <div id="vista-lista" class="vista nao-imprimir">
+        <div class="barra-acoes">
+          <button type="button" class="btn btn-sec" id="btn-atualizar">Atualizar</button>
+          <button type="button" class="btn btn-sec" id="btn-csv">Exportar CSV</button>
+          <button type="button" class="btn btn-perigo" id="btn-excluir-todos">Excluir todos</button>
+        </div>
+
+        <form class="filtros" id="form-filtros" role="search" onsubmit="return false">
+          <div class="campo">
+            <label for="filtro-busca">Buscar</label>
+            <input id="filtro-busca" type="search" placeholder="Nome, telefone ou vaga">
+          </div>
+          <div class="campo">
+            <label for="filtro-perfil">Perfil primário</label>
+            <select id="filtro-perfil">
+              <option value="">Todos</option>
+              <option value="D">D — Dominância</option>
+              <option value="I">I — Influência</option>
+              <option value="S">S — Estabilidade</option>
+              <option value="C">C — Conformidade</option>
+            </select>
+          </div>
+          <div class="campo">
+            <label for="filtro-status">Status</label>
+            <select id="filtro-status">
+              <option value="">Todos</option>
+              <option value="em_analise">Em análise</option>
+              <option value="aprovado">Aprovado</option>
+              <option value="reprovado">Reprovado</option>
+              <option value="invalido">Inválido</option>
+            </select>
+          </div>
+        </form>
+
+        <p class="contagem muted" id="contagem" aria-live="polite"></p>
+        <ul class="lista" id="lista-candidatos"></ul>
+      </div>
+
+      <!-- Detalhe -->
+      <article id="vista-detalhe" class="vista detalhe" hidden></article>
+
+      <!-- Comparativo -->
+      <div id="vista-comparativo" class="vista nao-imprimir" hidden></div>
+
+      <!-- Importar códigos (plano B do candidato; funciona com e sem API) -->
+      <div id="vista-importar" class="vista nao-imprimir" hidden>
+        <div class="cartao">
+          <h2>Importar códigos de resultado</h2>
+          <p class="muted">Cole aqui o código (ou a mensagem inteira do WhatsApp) que o candidato enviou. Pode colar vários de uma vez, um por linha. <span id="destino-importacao">Os dados ficam salvos somente neste navegador.</span></p>
+          <label for="campo-codigos">Códigos</label>
+          <textarea id="campo-codigos" rows="8" spellcheck="false" placeholder="DISC1.eyJ2Ijox..."></textarea>
+          <div class="barra-acoes">
+            <button type="button" class="btn" id="btn-importar">Importar</button>
+          </div>
+          <div id="resultado-importacao" role="status" aria-live="polite"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="js/config.js"></script>
+  <script src="js/disc-data.js"></script>
+  <script src="js/scoring.js"></script>
+  <script src="js/codec.js"></script>
+  <script src="js/api.js"></script>
+  <script src="js/lideranca.js"></script>
+  <script src="js/admin.js"></script>
+</body>
+</html>

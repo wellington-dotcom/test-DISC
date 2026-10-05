@@ -1,0 +1,15 @@
+{
+  "name": "teste-disc",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Teste de perfil comportamental DISC para candidatos de processo seletivo, com painel do recrutador e Guia para a Liderança.",
+  "license": "UNLICENSED",
+  "scripts": {
+    "test": "node --test tests/*.test.js",
+    "test:e2e": "playwright test",
+    "start": "node tests/e2e/server.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1"
+  }
+}
