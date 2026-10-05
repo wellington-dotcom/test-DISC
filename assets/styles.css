@@ -194,19 +194,6 @@ body[data-etapa="boasvindas"] .conteudo { max-width: 1120px; }
   overflow-wrap: anywhere;
   display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
 }
-.cartao-setas { flex: none; display: flex; flex-direction: column; gap: 4px; }
-.seta {
-  width: 36px; height: 28px; padding: 0;
-  display: grid; place-items: center;
-  border-radius: 10px; border: 1px solid var(--linha);
-  background: var(--branco); color: var(--tinta);
-  cursor: pointer; font: inherit;
-  transition: border-color .15s, opacity .15s;
-  -webkit-tap-highlight-color: transparent;
-}
-.seta svg { fill: currentColor; display: block; }
-.seta:hover:not(:disabled) { border-color: color-mix(in srgb, var(--tinta) 30%, transparent); }
-.seta:disabled { opacity: .3; cursor: default; }
 
 /* ---------- Botão "i" (padrão Info do BI) e painel da dica ---------- */
 .info {
@@ -376,8 +363,6 @@ body[data-etapa="teste"] .conteudo { padding-bottom: calc(132px + env(safe-area-
   .posicao-num { font-size: var(--t-numero); min-width: 22px; }
   .posicao-texto { margin-top: 0; max-width: 84px; }
   .cartao { padding: 0 14px 0 10px; gap: 10px; border-radius: 18px; }
-  .cartao-setas { flex-direction: row; gap: 6px; }
-  .seta { width: 40px; height: 40px; border-radius: var(--raio-pilula); }
 
   /* No computador a barra fica no fim do card, sempre na mesma altura */
   .barra-nav {

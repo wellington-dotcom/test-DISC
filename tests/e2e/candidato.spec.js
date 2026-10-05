@@ -263,7 +263,7 @@ test.describe('Candidato: lista ordenável dos grupos', () => {
     const caixa = await cartao.boundingBox();
     const lista = await page.locator('.cartoes').boundingBox();
     const passo = (lista.height - caixa.height) / 3;
-    const x = caixa.x + caixa.width / 2 - 40;      // longe dos botões ▲/▼
+    const x = caixa.x + caixa.width / 2 - 40;      // longe do botão de dica
     const y = caixa.y + caixa.height / 2;
     const yDestino = lista.y + caixa.height / 2 + posicaoDestino * passo;
     await page.mouse.move(x, y);
@@ -295,25 +295,20 @@ test.describe('Candidato: lista ordenável dos grupos', () => {
     expect(erros).toEqual([]);
   });
 
-  test('botões ▲/▼ e teclado reordenam (topo e base desabilitados nas pontas)', async ({ page }) => {
+  test('sem setinhas na tela; teclado reordena (acessibilidade)', async ({ page }) => {
     const erros = coletarErros(page);
     await irParaGrupo1(page);
+    await expect(page.locator('.cartao button[data-mover], .seta')).toHaveCount(0);
     const inicial = await ordemNaTela(page);
-    await expect(page.locator('.cartao').first().locator('[data-mover="-1"]')).toBeDisabled();
-    await expect(page.locator('.cartao').last().locator('[data-mover="1"]')).toBeDisabled();
-    // ▲ no último: troca com o terceiro
-    await page.locator('.cartao[data-letra="' + inicial[3] + '"] [data-mover="-1"]').click();
+    // Teclado: foco no último cartão, seta para cima troca com o terceiro
+    await page.locator('.cartao[data-letra="' + inicial[3] + '"]').focus();
+    await page.keyboard.press('ArrowUp');
     expect(await ordemNaTela(page)).toEqual([inicial[0], inicial[1], inicial[3], inicial[2]]);
     await expect(page.locator('[data-acao="proximo"]')).toBeEnabled();
     await expect(page.locator('#aviso')).toContainText('posição 3 de 4');
-    // ▼ no primeiro
-    await page.locator('.cartao[data-letra="' + inicial[0] + '"] [data-mover="1"]').click();
-    expect(await ordemNaTela(page)).toEqual([inicial[1], inicial[0], inicial[3], inicial[2]]);
-    // Teclado: foco no cartão, seta para cima leva ao topo
-    await page.locator('.cartao[data-letra="' + inicial[3] + '"]').focus();
-    await page.keyboard.press('ArrowUp');
-    await page.keyboard.press('ArrowUp');
-    expect(await ordemNaTela(page)).toEqual([inicial[3], inicial[1], inicial[0], inicial[2]]);
+    // Home leva ao topo
+    await page.keyboard.press('Home');
+    expect(await ordemNaTela(page)).toEqual([inicial[3], inicial[0], inicial[1], inicial[2]]);
     await expect(page.locator('.cartao[data-letra="' + inicial[3] + '"]')).toBeFocused();
     await expect(page.locator('#aviso')).toContainText('posição 1 de 4');
     expect(erros).toEqual([]);
@@ -345,7 +340,8 @@ test.describe('Candidato: lista ordenável dos grupos', () => {
     ];
     const antes = await caixas();
     const inicial = await ordemNaTela(page);
-    await page.locator('.cartao[data-letra="' + inicial[2] + '"] [data-mover="-1"]').click();
+    await page.locator('.cartao[data-letra="' + inicial[2] + '"]').focus();
+    await page.keyboard.press('ArrowUp');
     await page.waitForTimeout(300);
     const depois = await caixas();
     expect(depois).toEqual(antes);

@@ -50,7 +50,7 @@ async function ordemNaTela(page) {
 }
 
 // Responde um grupo deixando as palavras na ordem dada (letras da posição 4 até a 1).
-// Usa os botões ▲ (Subir); se a ordem inicial já for a pedida, toca em "Esta ordem está certa".
+// Move pelo teclado (seta para cima no cartão); se a ordem inicial já for a pedida, toca em "Esta ordem está certa".
 async function responderGrupo(page, ordem) {
   await expect(page.locator('.cartoes .cartao')).toHaveCount(4);
   let mexeu = false;
@@ -58,7 +58,8 @@ async function responderGrupo(page, ordem) {
     const atual = await ordemNaTela(page);
     let j = atual.indexOf(ordem[k]);
     while (j > k) {
-      await page.locator('.cartao[data-letra="' + ordem[k] + '"] [data-mover="-1"]').click();
+      await page.locator('.cartao[data-letra="' + ordem[k] + '"]').focus();
+      await page.keyboard.press('ArrowUp');
       j--;
       mexeu = true;
     }

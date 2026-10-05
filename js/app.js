@@ -579,7 +579,6 @@
   var ICONE_ALCA = '<svg viewBox="0 0 12 20" width="12" height="20" aria-hidden="true" focusable="false">' +
     '<circle cx="3" cy="4" r="1.6"/><circle cx="9" cy="4" r="1.6"/><circle cx="3" cy="10" r="1.6"/>' +
     '<circle cx="9" cy="10" r="1.6"/><circle cx="3" cy="16" r="1.6"/><circle cx="9" cy="16" r="1.6"/></svg>';
-  var ICONE_CIMA = '<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false"><path d="M6 2.5 11 9.5H1z"/></svg>';
   // Ícone "i" (círculo + i), no padrão do componente Info do BI.
   var ICONE_INFO = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" ' +
     'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">' +
@@ -590,7 +589,6 @@
       'aria-label="' + escapar(rotulo) + '" title="' + escapar(rotulo) + '" ' + atributos + '>' + ICONE_INFO + '</button>';
   }
 
-  var ICONE_BAIXO = '<svg viewBox="0 0 12 12" width="12" height="12" aria-hidden="true" focusable="false"><path d="M6 9.5 1 2.5h10z"/></svg>';
 
   function descricaoPosicao(k) {
     var nota = 4 - k;
@@ -611,10 +609,6 @@
         '<span class="cartao-alca" aria-hidden="true">' + ICONE_ALCA + '</span>' +
         '<span class="cartao-texto">' + texto + '<span class="visualmente-oculto cartao-pos">, ' + descricaoPosicao(k) + '</span></span>' +
         (temDicaPalavra(i, letra) ? botaoInfo('O que significa ' + palavraDoGrupo(i, g, letra) + '?', 'data-dica="palavra" data-letra="' + letra + '"') : '') +
-        '<span class="cartao-setas">' +
-          '<button type="button" class="seta" data-mover="-1" aria-label="Subir ' + texto + '"' + (k === 0 ? ' disabled' : '') + '>' + ICONE_CIMA + '</button>' +
-          '<button type="button" class="seta" data-mover="1" aria-label="Descer ' + texto + '"' + (k === 3 ? ' disabled' : '') + '>' + ICONE_BAIXO + '</button>' +
-        '</span>' +
       '</li>';
   }
 
@@ -650,7 +644,7 @@
           (temDicaPergunta(i) ? '\u00a0' + botaoInfo('Entender a pergunta', 'data-dica="pergunta"') : '') +
         '</h1>' +
         '<p class="instrucao" id="instrucao">No topo, a palavra que <strong>mais</strong> combina com você; embaixo, a que <strong>menos</strong> combina.</p>' +
-        '<p class="visualmente-oculto" id="ajuda-teclado">Use as setas para cima e para baixo do teclado, ou os botões Subir e Descer, para mudar a posição.</p>' +
+        '<p class="visualmente-oculto" id="ajuda-teclado">Arraste a palavra ou use as setas para cima e para baixo do teclado para mudar a posição.</p>' +
         '<div class="ordenar">' +
           '<ol class="posicoes" aria-hidden="true">' + posicoes + '</ol>' +
           '<ol class="cartoes" aria-label="Palavras, da que mais à que menos combina com você" aria-describedby="instrucao">' + cartoes + '</ol>' +
@@ -944,11 +938,6 @@
     var alvo = ev.target.closest('button, a[data-acao]');
     if (!alvo || !app.contains(alvo) || alvo.disabled) return;
 
-    if (alvo.hasAttribute('data-mover')) {
-      var cartao = alvo.closest('.cartao');
-      if (cartao) moverPorPasso(cartao.getAttribute('data-letra'), Number(alvo.getAttribute('data-mover')), alvo);
-      return;
-    }
     if (alvo.hasAttribute('data-dica')) {
       alternarDica(alvo);
       return;
@@ -1220,10 +1209,6 @@
       c.classList.remove('arrastando');
       var pos = c.querySelector('.cartao-pos');
       if (pos) pos.textContent = ', ' + descricaoPosicao(k);
-      var cima = c.querySelector('[data-mover="-1"]');
-      var baixo = c.querySelector('[data-mover="1"]');
-      if (cima) cima.disabled = k === 0;
-      if (baixo) baixo.disabled = k === nova.length - 1;
     });
     lista.classList.remove('ordenando');
     // FLIP: inverte (volta visualmente ao lugar antigo sem transição) e depois solta a transição.
@@ -1241,10 +1226,6 @@
     }
     // Mantém o foco onde estava (mover no DOM tira o foco do elemento).
     if (foco && lista.contains(foco)) {
-      if (foco.disabled) {
-        var irmao = foco.parentNode && foco.parentNode.querySelector('.seta:not(:disabled)');
-        foco = irmao || foco.closest('.cartao');
-      }
       if (document.activeElement !== foco) {
         try { foco.focus({ preventScroll: true }); } catch (e) { foco.focus(); }
       }
@@ -1255,22 +1236,6 @@
     var i = estado.grupo;
     var k = ordem.indexOf(letra);
     anunciar(palavraDoGrupo(i, DATA.grupos[i], letra) + ' agora está na ' + descricaoPosicao(k) + '.');
-  }
-
-  function moverPorPasso(letra, delta, origem) {
-    var ordem = ordemNaTela();
-    var de = ordem.indexOf(letra);
-    var para = de + delta;
-    if (de === -1 || para < 0 || para > 3) return;
-    var nova = mover(ordem, de, para);
-    aplicarOrdem(nova);
-    marcarRespondido(nova, true);
-    anunciarPosicao(letra, nova);
-    if (origem && origem.disabled) {
-      var c = app.querySelector('.cartao[data-letra="' + letra + '"]');
-      var outra = c && c.querySelector('.seta:not(:disabled)');
-      if (outra) outra.focus();
-    }
   }
 
   function aoTeclar(ev) {
@@ -1306,7 +1271,7 @@
     if (arraste) return;
     if (ev.pointerType === 'mouse' && ev.button !== 0) return;
     if (ev.target.closest('[data-sem-arraste]')) return; // botão "i": abre a dica, nunca arrasta
-    if (ev.target.closest('button')) return;           // ▲/▼ têm o próprio clique
+    if (ev.target.closest('button')) return;
     var cartao = ev.target.closest('.cartao');
     var lista = app.querySelector('.cartoes');
     if (!cartao || !lista) return;
