@@ -19,22 +19,37 @@
       <img class="logo" src="assets/icone.svg" alt="" width="36" height="36">
       <p class="topo__titulo"><span class="seminegrito">Painel DISC</span> <span class="topo__empresa" id="nome-empresa"></span></p>
       <span class="selo topo__modo" id="modo-indicador"></span>
-      <button type="button" class="botao botao--claro botao--pequeno" id="btn-sair" hidden>Sair</button>
+      <div class="usuario" id="usuario-area" hidden>
+        <button type="button" class="usuario__botao" id="btn-usuario" aria-haspopup="true" aria-expanded="false" aria-controls="menu-usuario">
+          <span class="usuario__inicial" id="usuario-inicial" aria-hidden="true"></span>
+          <span class="usuario__nome" id="usuario-nome"></span>
+          <svg class="icone usuario__seta" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
+        </button>
+        <div class="usuario__menu vidro-janela" id="menu-usuario" hidden>
+          <div class="usuario__info">
+            <p class="seminegrito usuario__info-nome" id="menu-nome"></p>
+            <p class="t-nota texto-suave usuario__info-email" id="menu-email"></p>
+            <p class="t-nota texto-medio" id="menu-papel"></p>
+          </div>
+          <button type="button" class="usuario__item" id="btn-trocar-senha">Trocar senha</button>
+          <button type="button" class="usuario__item" id="btn-sair">Sair</button>
+        </div>
+      </div>
     </div>
   </header>
 
   <main id="conteudo" class="conteudo" tabindex="-1">
-    <!-- Login (modo com API): metade laranja com brilho e o logo, metade azul-escura com o campo -->
-    <section id="tela-login" class="login" hidden aria-labelledby="titulo-login">
+    <!-- Login (modo com API): metade laranja com brilho e o logo, metade azul-escura com os campos -->
+    <section id="tela-login" class="login" hidden aria-label="Acesso ao painel">
       <div class="login__laranja moldura-laranja">
         <img class="logo logo--grande" src="assets/icone.svg" alt="" width="44" height="44">
         <div class="login__chamada">
           <div class="login__frase">
             <p class="login__titulo">Seleção não é sorte, é leitura.</p>
-            <p class="login__apoio">O perfil de cada candidato calculado na hora, com um guia prático para quem vai liderar.</p>
+            <p class="login__apoio">O perfil de cada participante calculado na hora, com um guia prático para quem vai liderar.</p>
           </div>
           <ol class="login__passos" aria-label="Como funciona">
-            <li class="login__passo login__passo--noite"><span class="login__num">1</span><span>O candidato faz o teste</span></li>
+            <li class="login__passo login__passo--noite"><span class="login__num">1</span><span>O participante faz o teste</span></li>
             <li class="login__passo"><span class="login__num">2</span><span>O perfil DISC sai pronto</span></li>
             <li class="login__passo"><span class="login__num">3</span><span>Você decide com o guia</span></li>
           </ol>
@@ -42,14 +57,37 @@
       </div>
       <div class="login__noite moldura-noite">
         <form id="form-login" class="login__form" novalidate>
-          <h1 id="titulo-login" class="login__h">Acesso do recrutador</h1>
-          <p class="login__texto">Informe a chave de administrador configurada no Google Apps Script.</p>
-          <label class="login__rotulo" for="campo-chave">Chave de acesso</label>
-          <input id="campo-chave" class="entrada" type="password" autocomplete="current-password" placeholder="Sua chave" required>
+          <h1 id="titulo-login" class="login__h">Acesso ao painel</h1>
+          <p class="login__texto">Entre com seu e-mail e senha.</p>
+          <p class="login__sessao" id="aviso-sessao" role="status" hidden>Sua sessão expirou. Entre de novo.</p>
+          <label class="login__rotulo" for="campo-email">E-mail</label>
+          <input id="campo-email" class="entrada" type="email" autocomplete="username" inputmode="email" placeholder="voce@empresa.com" required>
+          <label class="login__rotulo login__rotulo--junto" for="campo-senha">Senha</label>
+          <input id="campo-senha" class="entrada" type="password" autocomplete="current-password" placeholder="Sua senha" required>
           <p class="login__erro" id="erro-login" role="alert" hidden></p>
           <button type="submit" class="botao botao--branco botao--grande botao--bloco login__botao" id="btn-entrar">Entrar</button>
-          <p class="login__nota">Não tem a chave? Fale com quem configurou o sistema.</p>
-          <p class="login__nota login__previa" id="dica-previa" hidden>Prévia: use a chave <span class="negrito">previa</span></p>
+          <button type="button" class="login__link" id="btn-ir-primeiro">Primeiro acesso</button>
+          <p class="login__nota">Esqueceu a senha? Peça ao administrador para redefinir.</p>
+          <p class="login__nota login__previa" id="dica-previa" hidden>Prévia: <span class="negrito">admin@previa.com</span> ou <span class="negrito">gestor@previa.com</span>, senha <span class="negrito">previa123</span></p>
+        </form>
+
+        <form id="form-primeiro" class="login__form" novalidate hidden>
+          <h1 class="login__h">Primeiro acesso</h1>
+          <p class="login__texto">Crie o acesso de administrador com a chave de instalação. Serve também para recuperar a senha de um administrador.</p>
+          <label class="login__rotulo" for="pa-chave">Chave de instalação</label>
+          <input id="pa-chave" class="entrada" type="password" autocomplete="off" placeholder="A chave configurada no sistema" required>
+          <label class="login__rotulo login__rotulo--junto" for="pa-nome">Seu nome</label>
+          <input id="pa-nome" class="entrada" type="text" autocomplete="name" required>
+          <label class="login__rotulo login__rotulo--junto" for="pa-email">E-mail</label>
+          <input id="pa-email" class="entrada" type="email" autocomplete="username" inputmode="email" required>
+          <label class="login__rotulo login__rotulo--junto" for="pa-senha">Senha (mínimo 8 caracteres)</label>
+          <input id="pa-senha" class="entrada" type="password" autocomplete="new-password" required>
+          <label class="login__rotulo login__rotulo--junto" for="pa-confirmar">Confirmar senha</label>
+          <input id="pa-confirmar" class="entrada" type="password" autocomplete="new-password" required>
+          <p class="login__erro" id="erro-primeiro" role="alert" hidden></p>
+          <button type="submit" class="botao botao--branco botao--grande botao--bloco login__botao" id="btn-criar-acesso">Criar acesso</button>
+          <button type="button" class="login__link" id="btn-voltar-login">Voltar para o login</button>
+          <p class="login__nota login__previa" id="dica-previa-chave" hidden>Prévia: a chave é <span class="negrito">previa</span></p>
         </form>
       </div>
     </section>
@@ -57,8 +95,11 @@
     <!-- Painel -->
     <section id="tela-painel" hidden>
       <nav class="abas nao-imprimir" aria-label="Seções do painel">
-        <button type="button" class="aba" data-aba="lista" aria-current="page">Candidatos</button>
-        <button type="button" class="aba" data-aba="comparativo">Comparativo dos aprovados</button>
+        <button type="button" class="aba" data-aba="lista" aria-current="page">Participantes</button>
+        <button type="button" class="aba" data-aba="avaliacoes" hidden>Avaliações</button>
+        <button type="button" class="aba" data-aba="empresas" hidden>Empresas</button>
+        <button type="button" class="aba" data-aba="usuarios" hidden>Usuários</button>
+        <button type="button" class="aba" data-aba="comparativo">Comparativo</button>
         <button type="button" class="aba" data-aba="importar" id="aba-importar" hidden>Importar códigos</button>
       </nav>
 
@@ -69,8 +110,8 @@
       <div id="vista-lista" class="vista nao-imprimir">
         <div class="cabecalho">
           <div class="cabecalho__texto-area">
-            <p class="sobretitulo">Processo seletivo</p>
-            <h2 class="cabecalho__titulo t-pagina seminegrito">Candidatos</h2>
+            <p class="sobretitulo" id="sobretitulo-lista">Processo seletivo</p>
+            <h2 class="cabecalho__titulo t-pagina seminegrito">Participantes</h2>
             <p class="cabecalho__texto" id="contagem" aria-live="polite"></p>
           </div>
           <div class="cabecalho__acoes">
@@ -86,7 +127,7 @@
           <label class="filtros__busca">
             <span class="visualmente-oculto">Buscar</span>
             <svg class="filtros__lupa" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-            <input id="filtro-busca" class="entrada" type="search" placeholder="Nome, código, telefone, empresa…">
+            <input id="filtro-busca" class="entrada" type="search" placeholder="Nome, código, telefone, avaliação…">
           </label>
           <div class="filtros__escolhas" id="filtros-escolhas"></div>
         </form>
@@ -97,6 +138,11 @@
       <!-- Detalhe -->
       <article id="vista-detalhe" class="vista detalhe" hidden></article>
 
+      <!-- Avaliações, empresas e usuários (só admin) -->
+      <div id="vista-avaliacoes" class="vista nao-imprimir" hidden></div>
+      <div id="vista-empresas" class="vista nao-imprimir" hidden></div>
+      <div id="vista-usuarios" class="vista nao-imprimir" hidden></div>
+
       <!-- Comparativo -->
       <div id="vista-comparativo" class="vista nao-imprimir" hidden></div>
 
@@ -104,9 +150,9 @@
       <div id="vista-importar" class="vista nao-imprimir" hidden>
         <div class="cabecalho">
           <div class="cabecalho__texto-area">
-            <p class="sobretitulo">Processo seletivo</p>
+            <p class="sobretitulo">Plano B</p>
             <h2 class="cabecalho__titulo t-pagina seminegrito">Importar códigos de resultado</h2>
-            <p class="cabecalho__texto">Cole aqui o código (ou a mensagem inteira do WhatsApp) que o candidato enviou. Pode colar vários de uma vez, um por linha. <span id="destino-importacao">Os dados ficam salvos somente neste navegador.</span></p>
+            <p class="cabecalho__texto">Cole aqui o código (ou a mensagem inteira do WhatsApp) que o participante enviou. Pode colar vários de uma vez, um por linha. <span id="destino-importacao">Os dados ficam salvos somente neste navegador.</span></p>
           </div>
         </div>
         <div class="caixa importar surgir">
@@ -130,6 +176,8 @@
   <script src="js/api.js"></script>
   <script src="js/api-simulada.js"></script>
   <script src="js/lideranca.js"></script>
+  <script src="js/validacao.js"></script>
+  <script src="js/confiabilidade.js"></script>
   <script src="js/admin.js"></script>
 </body>
 </html>

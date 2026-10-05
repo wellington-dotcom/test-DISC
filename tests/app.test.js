@@ -223,3 +223,116 @@ test('completarGruposDemonstracao: preenche o resto com permutações válidas s
   assert.equal(parcial.ordens[0], null, 'os N primeiros não são preenchidos');
   assert.equal(parcial.respondidos[0], false);
 });
+
+test('textosAvaliacao: sem link, seleção e equipe', () => {
+  const geral = A.textosAvaliacao(null, 'Loja X');
+  assert.equal(geral.comLink, false);
+  assert.equal(geral.contexto, 'Processo seletivo');
+  assert.equal(geral.empresa, 'Loja X');
+  assert.equal(geral.escopo, 'apenas neste processo seletivo da Loja X');
+  assert.equal(geral.mostrarVaga, true);
+  assert.equal(A.textosAvaliacao(null, '').escopo, 'apenas neste processo seletivo');
+
+  const sel = A.textosAvaliacao({ codigo: 'SEL1', tipo: 'selecao', empresaNome: 'Clínica Exemplo' }, 'Ignorada');
+  assert.equal(sel.empresa, 'Clínica Exemplo');
+  assert.equal(sel.pessoa, 'candidato');
+  assert.equal(sel.mostrarVaga, true);
+  assert.equal(sel.mostrarEmpresaAtual, true);
+  assert.equal(sel.rotuloFuncao, 'Função atual ou última');
+  assert.equal(sel.escopo, 'apenas nesta avaliação da Clínica Exemplo, conduzida pela Notus');
+
+  const eq = A.textosAvaliacao({ codigo: 'EQP1', tipo: 'equipe', empresaNome: 'Clínica Exemplo' });
+  assert.equal(eq.tipo, 'equipe');
+  assert.equal(eq.contexto, 'Avaliação de equipe');
+  assert.equal(eq.pessoa, 'colaborador');
+  assert.equal(eq.mostrarVaga, false);
+  assert.equal(eq.mostrarEmpresaAtual, false);
+  assert.equal(eq.rotuloFuncao, 'Seu cargo/função');
+  assert.match(eq.enviado, /avaliação da equipe/);
+});
+
+function ordensFixas(ordem) {
+  const o = [];
+  for (let i = 0; i < 25; i++) o.push(ordem.slice());
+  return o;
+}
+
+test('resultadoDasOrdens: null com grupo faltando', () => {
+  const o = ordensFixas(['D', 'I', 'S', 'C']);
+  assert.deepEqual(A.resultadoDasOrdens(o).ordem, ['D', 'I', 'S', 'C']);
+  o[7] = null;
+  assert.equal(A.resultadoDasOrdens(o), null);
+  assert.equal(A.resultadoDasOrdens(null), null);
+});
+
+test('novaValidacao / precisaMontarValidacao / telas completas', () => {
+  const res = A.resultadoDasOrdens(ordensFixas(['S', 'C', 'I', 'D']));
+  const v = A.novaValidacao(res, prng(5));
+  assert.equal(v.montagem.ordem, 'SCID');
+  assert.equal(v.montagem.pares.length, 3);
+  assert.equal(v.montagem.itens.length, 4);
+  assert.deepEqual(v.escolhas, [null, null, null]);
+  assert.equal(A.precisaMontarValidacao(v, res), false);
+  assert.equal(A.precisaMontarValidacao(null, res), true);
+  assert.equal(A.precisaMontarValidacao(v, A.resultadoDasOrdens(ordensFixas(['D', 'I', 'S', 'C']))), true, 'resultado mudou');
+  // Mesma semente => mesma montagem
+  assert.deepEqual(A.novaValidacao(res, prng(5)).montagem, v.montagem);
+
+  assert.equal(A.telaValidacaoCompleta(v, 1), false);
+  v.escolhas = v.montagem.pares.map((p) => p[0]);
+  assert.equal(A.telaValidacaoCompleta(v, 1), true);
+  v.escolhas[2] = 'X';
+  assert.equal(A.telaValidacaoCompleta(v, 1), false, 'letra fora do par');
+  v.escolhas[2] = v.montagem.pares[2][1];
+  assert.equal(A.telaValidacaoCompleta(v, 2), false);
+  v.montagem.itens.forEach((it, k) => { v.notas[it.id] = k + 1; });
+  assert.equal(A.telaValidacaoCompleta(v, 2), true);
+  assert.equal(A.validacaoCompleta(v), true);
+  v.notas[v.montagem.itens[0].id] = 6;
+  assert.equal(A.validacaoCompleta(v), false, 'nota fora de 1..5');
+});
+
+test('somarTempo acumula por grupo, em décimos de segundo', () => {
+  let s = A.somarTempo([], 0, 1234);
+  assert.equal(s.length, 25);
+  assert.equal(s[0], 1.2);
+  s = A.somarTempo(s, 0, 900);
+  assert.equal(s[0], 2.1, 'voltar ao grupo soma');
+  s = A.somarTempo(s, 3, -5);
+  assert.equal(s[3], 0, 'tempo negativo ignorado');
+  assert.equal(A.somarTempo(['x', -2, null], -1, 0).slice(0, 3).join(), '0,0,0');
+});
+
+test('montarValidacao e montarPayload levam avaliacao e validacao', () => {
+  const ordens = ordensFixas(['C', 'S', 'I', 'D']);
+  const res = A.resultadoDasOrdens(ordens);
+  const v = A.novaValidacao(res, prng(9));
+  const dados = { id: 'abc123-z', nome: 'Ana Lima', telefone: '11999998888', idade: 30, consentimento: true,
+    avaliacaoCodigo: ' sel1 ', validacao: v, gruposSeg: [4.5, 2], aceitos: [true, false, true], demonstracao: false };
+  assert.equal(A.montarValidacao(dados), null, 'etapa incompleta');
+  let p = A.montarPayload(dados, ordens);
+  assert.equal(p.avaliacao, 'SEL1');
+  assert.equal(p.validacao, null);
+
+  v.escolhas = v.montagem.pares.map((par) => par[1]);
+  v.montagem.itens.forEach((it) => { v.notas[it.id] = 4; });
+  p = A.montarPayload(dados, ordens);
+  const val = p.validacao;
+  assert.equal(val.versao, 1);
+  assert.deepEqual(val.pares, v.montagem.pares);
+  assert.deepEqual(val.escolhas, v.escolhas);
+  assert.deepEqual(val.itens.map((it) => Object.keys(it).sort().join()), Array(4).fill('id,letra,nota,tipo'));
+  assert.ok(val.itens.every((it) => it.nota === 4));
+  assert.equal(val.gruposSeg.length, 25);
+  assert.equal(val.gruposSeg[0], 4.5);
+  assert.equal(val.gruposSeg[5], 0);
+  assert.equal(val.semMexer, 2);
+  assert.equal(val.demonstracao, false);
+  assert.equal(A.montarValidacao(Object.assign({}, dados, { demonstracao: true })).demonstracao, true);
+
+  // A confiabilidade (painel) consegue avaliar
+  const C = require('../js/confiabilidade.js');
+  const r = C.avaliar(p.respostas, val);
+  assert.ok(['alta', 'media', 'baixa'].includes(r.nivel));
+  assert.equal(A.montarPayload({ id: 'abc123-q', nome: 'Ana Lima', telefone: '11999998888', idade: 30 }, ordens).avaliacao, '');
+});

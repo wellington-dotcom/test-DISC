@@ -24,8 +24,10 @@ Contrato compartilhado entre todos os módulos. Se algo aqui conflitar com o có
 | `js/scoring.js` | **Pronto.** `DISC_SCORING = { LETRAS, TOTAL_GRUPOS, validarGrupo, validarRespostas, calcular, compactar, descompactar }` |
 | `js/config.js` | `CONFIG = { API_URL: '', WHATSAPP_RECRUTADOR: '', EMPRESA: '', MOSTRAR_RESULTADO_AO_CANDIDATO: false, GRUPOS_DEMONSTRACAO: 0 }`. `API_URL: 'simulada'` liga a API simulada (prévia). |
 | `js/codec.js` | `DISC_CODEC = { encode(payload) -> string, decode(string) -> payload }` (base64url de JSON UTF-8, prefixo `DISC1.`) |
-| `js/api.js` | `DISC_API = { enviar(payload), listar(chave), atualizar(chave, id, campos), excluir(chave, id), excluirTodos(chave), protocoloValido(v), normalizarProtocolo(v) }` |
-| `js/api-simulada.js` | Só age com `CONFIG.API_URL === 'simulada'`: troca `DISC_API` por um backend falso em `localStorage` (`disc_planilha_simulada`) que imita o `Code.gs` (protocolo único, chave admin `previa`, ~400 ms de latência). |
+| `js/api.js` | `DISC_API`: públicas `enviar(payload)`, `avaliacaoPublica(codigo)`, `login(email, senha)`, `primeiroAcesso(chave, nome, email, senha)`; com sessão (token sempre o 1º argumento) `eu`, `sair`, `trocarSenha`, `listar`, `atualizar(token, id, campos)`, `excluir`, `excluirTodos(token, avaliacao?)`, `listarEmpresas`, `salvarEmpresa`, `excluirEmpresa`, `listarAvaliacoes`, `salvarAvaliacao`, `excluirAvaliacao`, `listarUsuarios`, `salvarUsuario(token, usuario, senhaTemporaria?)`, `excluirUsuario`, `redefinirSenha(token, id, senhaTemporaria)`; utilitários `protocoloValido`, `normalizarProtocolo`, `normalizarCodigoAvaliacao`, `codigoAvaliacaoDaUrl(search, hash)`. Erros têm `sessaoExpirada` e `resposta`. |
+| `js/api-simulada.js` | Só age com `CONFIG.API_URL === 'simulada'`: troca `DISC_API` por um backend falso em `localStorage` que imita o `Code.gs` ação por ação, com as mesmas mensagens (teste de paridade em `tests/api-simulada.test.js`). Semente da prévia: `admin@previa.com` / `gestor@previa.com` (senha `previa123`), empresa "Clínica Exemplo", avaliações `SEL1` (seleção) e `EQP1` (equipe, mostra resultado), 4 respostas de exemplo. Chave de primeiro acesso: `previa`. |
+| `js/validacao.js` | `DISC_VALIDACAO = { retratos, afirmacoes, ESCALA, montarEtapa(resultado, rnd?) }` — etapa de confirmação do participante (texto neutro, sem termos DISC). |
+| `js/confiabilidade.js` | `DISC_CONFIABILIDADE = { avaliar(respostas, validacao) -> {nivel, pontos, motivos, detalhes}, NIVEIS }` — usado só no painel. |
 | `js/dicas.js` | **Pronto.** `DISC_DICAS = { dicaPergunta(grupo), dicaPalavra(grupo, letra) -> {palavra, sentido, exemplo} }` (botão "i") |
 | `index.html`, `js/app.js`, `assets/styles.css` | Fluxo do candidato |
 | `admin.html`, `js/admin.js`, `assets/admin.css` | Painel do recrutador |
@@ -35,7 +37,9 @@ Contrato compartilhado entre todos os módulos. Se algo aqui conflitar com o có
 | `README.md` | Guia de uso para o recrutador (pt-BR, leigo) |
 
 Todos os módulos JS usam o padrão UMD já usado em `scoring.js` (global no navegador, `module.exports` no Node) para serem testáveis com `node --test`.
-Ordem de scripts nas páginas: `config.js`, `disc-data.js`, `scoring.js`, `codec.js`, `api.js`, `api-simulada.js`, (`dicas.js` no candidato | `lideranca.js` no painel), `app.js`/`admin.js`.
+Ordem de scripts nas páginas: `config.js`, `disc-data.js`, `scoring.js`, `codec.js`, `api.js`, `api-simulada.js`, depois
+- candidato (`index.html`): `dicas.js`, `validacao.js`, `app.js`;
+- painel (`admin.html`): `lideranca.js`, `validacao.js`, `confiabilidade.js`, `admin.js`.
 
 ## Payload de resultado (candidato → backend / código)
 
@@ -54,9 +58,22 @@ Ordem de scripts nas páginas: `config.js`, `disc-data.js`, `scoring.js`, `codec
   "fim": "ISO-8601",
   "duracaoSeg": 512,
   "respostas": "100 dígitos — DISC_SCORING.compactar()",
-  "resultado": { "percentuais": {"D":0,"I":0,"S":0,"C":0}, "codigo": "DI" }
+  "resultado": { "percentuais": {"D":0,"I":0,"S":0,"C":0}, "codigo": "DI" },
+  "avaliacao": "SEL1",
+  "validacao": {
+    "versao": 1,
+    "pares": [["D","C"],["I","S"],["D","S"]],
+    "escolhas": ["D","I","D"],
+    "itens": [{"id":"D-f1","letra":"D","tipo":"forca","nota":5}, "... 4 itens (forca|sombra|contraste, nota 1..5)"],
+    "gruposSeg": [12.4, "... 25 números (0 = não medido / preenchido na demonstração)"],
+    "semMexer": 2,
+    "demonstracao": false
+  }
 }
 ```
+
+- `avaliacao`: código do link (`?a=SEL1` ou `#a-SEL1`); `''`/ausente = processo seletivo geral. O servidor recusa código inexistente ou desativado ("Este link de avaliação não está mais ativo.") e grava o `empresaId` da avaliação na linha.
+- `validacao`: respostas da etapa de confirmação (ver abaixo). Opcional (payloads antigos não têm); o servidor só confere o formato (tipos, tamanhos, até 4.000 caracteres em JSON), guarda dentro de `payloadJson` e devolve no `listar`. Formato errado → "Dados da etapa de validação inválidos.".
 
 - `idade`: número inteiro de 14 a 99 (obrigatório no envio ao servidor).
 - `funcao` / `empresa`: função e empresa **atual ou última** (texto, até 80 caracteres; `''` quando não informadas). Não confundir com `vaga`, que é a vaga **pretendida** neste processo.
@@ -96,29 +113,66 @@ O payload **não** leva protocolo: ele é gerado pelo servidor e volta só na re
 - **Sem servidor / falha**: "Código de segurança" — "Não conseguimos enviar suas respostas. Envie este código ao recrutador pelo WhatsApp."
 - **Modo demonstração** (`CONFIG.GRUPOS_DEMONSTRACAO = N > 0`, nunca no site real): a pessoa responde só N grupos ("Grupo X de N", faixa de aviso no grupo e na revisão); os demais são preenchidos ao acaso (`preenchidosAoAcaso` no estado) e o payload segue com os 100 dígitos.
 
+## Etapa de confirmação e confiabilidade
+
+Depois do último grupo e antes da revisão ("Confirmação 1 de 2" e "2 de 2"; também no modo demonstração). Textos neutros: nada de DISC, letras ou nomes de perfil na tela do participante.
+
+- **Tela 1 – retratos:** 3 rodadas de 2 retratos em 1ª pessoa (`DISC_VALIDACAO.retratos`); a pessoa escolhe o que mais parece com ela. Pares: (primário × último), (secundário × terceiro), (primário × terceiro), em ordem embaralhada.
+- **Tela 2 – frases:** 4 frases com escala de 5 pontos (`ESCALA`, notas 1..5): força do primário, a **sombra** correspondente (o excesso daquela força), força do secundário e força do último (contraste). Índices sorteados.
+- A montagem fica salva no progresso; só é refeita se o resultado mudar. O app mede também o tempo por grupo (`gruposSeg`, pausa com a aba escondida) e quantos grupos foram aceitos em "Esta ordem está certa" sem mexer (`semMexer`).
+- **Confiabilidade** (`DISC_CONFIABILIDADE.avaliar`, calculada no painel a partir das respostas recalculadas):
+  - acertos dos retratos (esperado = letra de maior total no par; empate conta como acerto);
+  - força do primário e do secundário ≥ 4 = coerente; sombra do primário ≤ 2 com a força ≥ 4 = "só reconheceu o lado positivo" (alerta leve); contraste ≥ 4 com força do primário ≤ 2 = incoerente (alerta forte);
+  - mais de 30% dos grupos respondidos em menos de 3 s = alerta forte; `semMexer` > 50% = alerta leve; amplitude (maior% − menor%) < 8 = "perfil pouco definido" (leve);
+  - nível: **baixa** se acertos ≤ 1 ou 2+ alertas fortes; **alta** se acertos ≥ 2, nenhum forte e no máx. 1 leve; senão **média**. Sem `validacao` = `indisponivel`. Demonstração acrescenta o motivo "modo demonstração".
+- O participante **nunca** vê a confiabilidade. No painel: selo no card, bloco "Confiabilidade do resultado" e "Respostas da confirmação" no detalhe, aviso no topo do Guia quando é baixa.
+
+## Logins, papéis, empresas e avaliações
+
+- **Papéis:** `admin` (tudo) e `gestor` (só a própria `empresaId`: lista participantes e avaliações da empresa e muda status/observações; não exclui nem cria nada). O servidor confere o papel e a empresa em **toda** ação; campos extras no corpo (ex. `empresaId`) são ignorados.
+- **Senha:** 8 a 100 caracteres. `hash = x`, com `x = sal + senha` e 2.000 rodadas de `x = hex(SHA-256(x))`; sal aleatório de 16 bytes. Hash e sal nunca saem do servidor.
+- **Login:** mensagem genérica "E-mail ou senha incorretos."; 5 erros seguidos → "Muitas tentativas. Tente de novo em 15 minutos." (bloqueio de 15 min). E-mail inexistente recebe **as mesmas** mensagens e o mesmo bloqueio (contado só no `CacheService`), para não revelar quem tem cadastro.
+- **Sessão:** token de 64 hex (2 UUIDs) no `CacheService` (`sessao_<token>` → `{usuarioId, marca da senha}`), 6 h de validade renovadas a cada uso. Usuário desativado, senha trocada/redefinida ou "sair" derrubam a sessão. Resposta: `{ok:false, erro:'Sessão expirada. Entre de novo.', sessaoExpirada:true}`. O painel guarda o token em `sessionStorage` (`disc_admin_token`).
+- **Primeiro acesso / recuperação:** a `ADMIN_KEY` (Script Properties, criada por `setup()`) cria um admin; se o e-mail já for de um admin, redefine a senha dele.
+- **Empresas** e **avaliações** são criadas pelo admin. Cada avaliação tem código único de 4 caracteres (`ABCDEFGHJKLMNPQRSTUVWXYZ23456789`), tipo `selecao` ou `equipe`, `mostrarResultado` e `ativa`. Link: `index.html?a=CODIGO` (ou `#a-CODIGO`).
+- **Personalização no participante:** `selecao` → "Processo seletivo · <empresa>", "candidato", campo "Vaga pretendida"; `equipe` → "Avaliação de equipe · <empresa>", "colaborador", sem vaga nem empresa anterior, "Seu cargo/função". Consentimento: "…apenas nesta avaliação da <empresa>, conduzida pela Notus…". Código inválido/inativo → "Link inválido ou avaliação encerrada. Fale com quem enviou o link.". Com `mostrarResultado`, a tela final mostra o resumo do perfil (retrato + pontos fortes; nunca o Guia nem a confiabilidade). Sem código vale o fluxo geral e `CONFIG.MOSTRAR_RESULTADO_AO_CANDIDATO`. A conclusão guardada na aba é ligada ao código do link: abrir outro link começa do zero.
+
 ## API do Apps Script
 
 Todas as requisições usam `Content-Type: text/plain;charset=utf-8` (evita preflight CORS). Respostas JSON `{ ok: boolean, ... , erro?: string }`.
 
-- `POST API_URL` corpo `{"acao":"enviar","payload":{...}}` → grava linha e responde `{ok:true, id, protocolo}`. Pública (candidato). Rejeita payload inválido. Id já gravado → `{ok:true, duplicado:true, id, protocolo}` com o **mesmo** protocolo (linha antiga sem protocolo ganha um nesse momento).
-- `POST API_URL` corpo `{"acao":"listar","chave":"..."}` → `{ok, itens:[payload + status + observacoes + recebidoEm + protocolo]}` (`protocolo` = `''` quando não há; `idade` = `null` e `funcao`/`empresa` = `''` em linhas antigas).
-- `POST API_URL` corpo `{"acao":"atualizar","chave":"...","id":"...","campos":{"status":"aprovado|reprovado|em_analise","observacoes":"..."}}`.
-- `POST API_URL` corpo `{"acao":"excluir","chave":"...","id":"..."}` e `{"acao":"excluirTodos","chave":"..."}`.
-- A chave admin fica nas Script Properties (`ADMIN_KEY`). Comparação em tempo constante não é necessária, mas nunca retornar a chave.
+Ações públicas:
+- `enviar {payload}` → `{ok, id, protocolo}`. Id já gravado → `{ok, duplicado:true, id, protocolo}` com o **mesmo** protocolo. Limite global de envios por janela e de linhas na planilha.
+- `avaliacaoPublica {codigo}` → `{ok, avaliacao:{codigo, nome, tipo, empresaNome, mostrarResultado}}` (só avaliações ativas).
+- `login {email, senha}` → `{ok, token, usuario:{id, nome, email, papel, empresaId, empresaNome}}`.
+- `primeiroAcesso {chave, nome, email, senha}` → igual ao login (+ `redefinida`).
 
-Colunas da aba `Respostas`: `id, recebidoEm, nome, telefone, vaga, inicio, fim, duracaoSeg, respostas, D, I, S, C, perfil, status, observacoes, payloadJson, protocolo, idade, funcao, empresa`. As colunas novas ficam sempre **no fim**: planilhas antigas sem `protocolo` / `idade` / `funcao` / `empresa` ganham as colunas automaticamente no primeiro acesso (`funcao` e `empresa` em formato texto; `idade` é número); se a aba tiver menos colunas físicas, elas são inseridas. As linhas antigas ficam com essas células vazias.
+Com sessão (`token` no corpo):
+- `eu`, `sair`, `trocarSenha {senhaAtual, novaSenha}` (a sessão atual continua; as outras caem).
+- `listar` → `{ok, itens:[payload + status, observacoes, recebidoEm, protocolo, avaliacao, empresaId, empresaNome, avaliacaoNome, avaliacaoTipo, validacao]}` (admin: tudo; gestor: só a empresa dele; respostas sem código só o admin vê).
+- `atualizar {id, campos:{status?, observacoes?}}` (gestor só na própria empresa).
+- Só admin: `excluir {id}`, `excluirTodos {avaliacao?}`, `empresas.listar|salvar {empresa:{id?, nome}}|excluir {id}` (recusa com avaliações ou gestores), `avaliacoes.salvar {avaliacao:{id?, empresaId, nome, tipo, mostrarResultado, ativa}}`, `avaliacoes.excluir {id}` (recusa com respostas: sugere desativar), `usuarios.listar|salvar {usuario, senhaTemporaria?}|excluir {id}|redefinirSenha {id, senhaTemporaria}` (ninguém exclui/desativa/rebaixa a si mesmo; sempre sobra 1 admin ativo).
+- `avaliacoes.listar`: admin e gestor (filtrado), com a contagem de `respostas`.
+- Gestor em ação de admin → "Sem permissão.".
 
-Prévia: com `API_URL: 'simulada'` a mesma API roda em `js/api-simulada.js` (chave `previa`).
+Abas (criadas sozinhas na primeira requisição; `setup()` também cria): `Usuarios (id, email, nome, papel, empresaId, hash, sal, ativo, tentativas, bloqueadoAte, criadoEm)`, `Empresas (id, nome, criadaEm)`, `Avaliacoes (id, codigo, empresaId, nome, tipo, mostrarResultado, ativa, criadaEm)`. Todo texto gravado passa por proteção contra fórmula (`= + - @` e dígitos iniciais recebem apóstrofo). Escritas sob `LockService` (liberado em `finally`).
+
+Colunas da aba `Respostas`: `id, recebidoEm, nome, telefone, vaga, inicio, fim, duracaoSeg, respostas, D, I, S, C, perfil, status, observacoes, payloadJson, protocolo, idade, funcao, empresa, avaliacao, empresaId`. As colunas novas ficam sempre **no fim**: planilhas antigas sem `protocolo` / `idade` / `funcao` / `empresa` / `avaliacao` / `empresaId` ganham as colunas automaticamente no primeiro acesso (`funcao` e `empresa` em formato texto; `idade` é número); se a aba tiver menos colunas físicas, elas são inseridas. As linhas antigas ficam com essas células vazias.
+
+Prévia: com `API_URL: 'simulada'` a mesma API roda em `js/api-simulada.js` (logins da prévia acima; chave de primeiro acesso `previa`).
 
 ## Painel admin
 
-- Login pela chave admin (guardada em `sessionStorage`). Se `API_URL` vazio, funciona só em modo "importar código" (salvo em `localStorage`).
+- Login por e-mail e senha (token em `sessionStorage`; a senha nunca é guardada), com "Primeiro acesso", "Trocar senha" e "Sair" no menu do cabeçalho. Sessão expirada volta ao login com aviso. Se `API_URL` vazio, funciona só em modo "importar código" (salvo em `localStorage`).
+- Abas: admin vê Participantes, Avaliações, Empresas, Usuários, Comparativo e Importar códigos; gestor só Participantes (da empresa dele) e Comparativo, sem botões de excluir/criar.
+- Avaliações: card com código, link, "Copiar link", "Copiar mensagem" (WhatsApp), Editar, Ativar/Desativar e Excluir (só com 0 respostas). Empresas: criar, renomear, excluir. Usuários: criar/editar (empresa só para gestor), gerar senha temporária, redefinir senha, desativar, excluir.
+- Todo texto vindo do servidor (nomes de participante, empresa, avaliação, usuário) entra no DOM por `textContent` (teste E2E de XSS em `tests/e2e/seguranca.spec.js`).
 - Lista: nome, telefone (link `https://wa.me/55...`), vaga, data, uma linha discreta "Função · Empresa" (só se houver), perfil (badge colorido), barras D/I/S/C, status.
 - **Idade só no detalhe** do candidato (bloco "Dados do candidato", com "—" quando não há). Ela **não** aparece na lista/cards, nos cards de resumo, no comparativo, na busca nem como filtro. Motivo: evitar discriminação por idade na seleção (Lei 9.029/95); a idade é dado cadastral. Fica também no CSV (coluna `idade`), que é a exportação completa do cadastro.
 - Protocolo em cada card ("Código 47K", ou `—`), no detalhe abaixo do nome, no CSV (coluna `protocolo`) e no "Copiar guia".
-- Filtros: busca por nome, vaga, função, empresa, código (ignora maiúsculas e espaços) ou telefone (nunca pela idade), perfil primário, status.
+- Filtros: busca por nome, vaga, função, empresa, código (ignora maiúsculas e espaços) ou telefone (nunca pela idade); pílulas de Empresa (só admin), Avaliação, Perfil e Status. Card mostra "Avaliação · Empresa" (ou "Link geral") e o selo de confiabilidade.
 - Detalhe mostra também Idade, Vaga pretendida, Função atual/última e Empresa atual/última.
-- CSV: colunas `idade`, `funcao`, `empresa` logo após `vaga` (vazias para registros antigos).
+- CSV (`participantes-disc-AAAA-MM-DD.csv`): colunas `idade`, `funcao`, `empresa` logo após `vaga` (vazias para registros antigos) e, no fim, avaliação, empresa da avaliação e confiabilidade.
 - Detalhe do candidato: gráfico de barras DISC (SVG/CSS, sem libs), características do perfil (de `DISC_DATA.perfis`), e o **Guia para a Liderança** de `DISC_LIDERANCA.gerarGuia`. Botão imprimir/salvar PDF (CSS `@media print`) e "copiar guia" (texto).
 - Ações: marcar aprovado/reprovado/em análise, observações, excluir, excluir todos (com confirmação digitando EXCLUIR), exportar CSV.
 - Comparativo: tabela com distribuição dos perfis dos aprovados (útil para montar equipe).

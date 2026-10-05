@@ -3,30 +3,41 @@
  *
  * Como usar (resumo — o passo a passo completo está em docs/BACKEND.md):
  *   1. Na planilha: Extensões > Apps Script, cole este arquivo como Code.gs.
- *   2. Execute a função setup() uma vez e copie a chave de administrador do registro de execução.
+ *   2. Execute a função setup() uma vez e copie a chave de primeiro acesso do registro de execução.
  *   3. Implantar > Nova implantação > App da Web (Executar como: Eu; Quem pode acessar: Qualquer pessoa).
  *   4. Cole a URL (termina em /exec) em js/config.js -> API_URL.
+ *   5. No painel (admin.html), em "Primeiro acesso", use a chave uma única vez para criar o seu login.
  *
- * API (POST, corpo JSON em text/plain):
- *   {"acao":"enviar","payload":{...}}                         público (candidato)
- *   {"acao":"listar","chave":"..."}                           admin
- *   {"acao":"atualizar","chave":"...","id":"...","campos":{"status":"...","observacoes":"..."}}
- *   {"acao":"excluir","chave":"...","id":"..."}
- *   {"acao":"excluirTodos","chave":"..."}
+ * API (POST, corpo JSON em text/plain: {"acao": "...", ...}). Resposta {ok:true, ...} ou {ok:false, erro}.
+ *   Públicas:
+ *     enviar {payload}                         candidato (payload.avaliacao = código do link, opcional)
+ *     avaliacaoPublica {codigo}                dados da avaliação para personalizar o teste
+ *     login {email, senha}                     -> {token, usuario}
+ *     primeiroAcesso {chave, nome, email, senha}  cria (ou recupera) um login de administrador
+ *   Com sessão ({token}; token inválido/expirado -> {ok:false, sessaoExpirada:true}):
+ *     eu, sair, trocarSenha {senhaAtual, novaSenha}
+ *     listar, atualizar {id, campos}, excluir {id}, excluirTodos {avaliacao?}
+ *     empresas.listar | empresas.salvar {empresa} | empresas.excluir {id}            (só admin)
+ *     avaliacoes.listar (gestor: só a empresa dele) | avaliacoes.salvar | avaliacoes.excluir (só admin)
+ *     usuarios.listar | usuarios.salvar {usuario, senhaTemporaria?} | usuarios.excluir {id}
+ *       | usuarios.redefinirSenha {id, senhaTemporaria}                                (só admin)
  * GET -> {"ok":true,"servico":"DISC"} (teste de saúde).
  *
+ * Papéis: "admin" faz tudo; "gestor" só vê os participantes e as avaliações da própria empresa e só
+ * muda status/observações (não exclui nem cria nada).
+ *
  * O resultado DISC é SEMPRE recalculado aqui a partir de "respostas" (o campo "resultado"
- * enviado pelo navegador é ignorado).
+ * enviado pelo navegador é ignorado). O campo "validacao" do payload só é conferido e guardado:
+ * a confiabilidade é calculada no painel.
  *
  * Código do candidato (protocolo): ao gravar um envio, o servidor gera um código curto e único
  * (2 algarismos + 1 letra maiúscula sem I e O, ex.: "47K") e devolve {ok, id, protocolo}.
- * O candidato informa esse código ao recrutador, que o encontra pela busca do painel.
  */
 
 var NOME_ABA = 'Respostas';
 var CABECALHO = ['id', 'recebidoEm', 'nome', 'telefone', 'vaga', 'inicio', 'fim', 'duracaoSeg',
   'respostas', 'D', 'I', 'S', 'C', 'perfil', 'status', 'observacoes', 'payloadJson', 'protocolo',
-  'idade', 'funcao', 'empresa'];
+  'idade', 'funcao', 'empresa', 'avaliacao', 'empresaId'];
 var COL = {}; // nome da coluna -> índice (0-based)
 CABECALHO.forEach(function (nome, i) { COL[nome] = i; });
 
@@ -39,15 +50,56 @@ var JANELA_ENVIOS_SEG = 600;   // janela de 10 minutos
 var STATUS_VALIDOS = ['em_analise', 'aprovado', 'reprovado'];
 var STATUS_PADRAO = 'em_analise';
 var COLUNAS_TEXTO = ['id', 'recebidoEm', 'nome', 'telefone', 'vaga', 'inicio', 'fim',
-  'respostas', 'perfil', 'status', 'observacoes', 'payloadJson', 'protocolo', 'funcao', 'empresa'];
+  'respostas', 'perfil', 'status', 'observacoes', 'payloadJson', 'protocolo', 'funcao', 'empresa',
+  'avaliacao', 'empresaId'];
 var IDADE_MIN = 14;
 var IDADE_MAX = 99;
 var LIMITE_FUNCAO_EMPRESA = 80;
+var LIMITE_VALIDACAO = 4000;   // tamanho máximo (JSON) do objeto "validacao" do payload
 
 // Protocolo: 2 algarismos + 1 letra (sem I e O, que se confundem com 1 e 0) -> 100 × 24 = 2.400 códigos.
 var LETRAS_PROTOCOLO = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 var TOTAL_PROTOCOLOS = 100 * LETRAS_PROTOCOLO.length;
 var TENTATIVAS_SORTEIO = 40;
+
+// Logins, empresas e avaliações (abas criadas automaticamente).
+var TABELAS = {
+  Usuarios: {
+    cabecalho: ['id', 'email', 'nome', 'papel', 'empresaId', 'hash', 'sal', 'ativo', 'tentativas', 'bloqueadoAte', 'criadoEm'],
+    booleanas: ['ativo'],
+    numericas: ['tentativas', 'bloqueadoAte']
+  },
+  Empresas: {
+    cabecalho: ['id', 'nome', 'criadaEm'],
+    booleanas: [],
+    numericas: []
+  },
+  Avaliacoes: {
+    cabecalho: ['id', 'codigo', 'empresaId', 'nome', 'tipo', 'mostrarResultado', 'ativa', 'criadaEm'],
+    booleanas: ['mostrarResultado', 'ativa'],
+    numericas: []
+  }
+};
+var PAPEIS = ['admin', 'gestor'];
+var TIPOS_AVALIACAO = ['selecao', 'equipe'];
+var ALFABETO_CODIGO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // código do link de avaliação (4 caracteres)
+var TAMANHO_CODIGO = 4;
+var SENHA_MIN = 8;
+var SENHA_MAX = 100;
+var ITERACOES_HASH = 2000;
+var MAX_TENTATIVAS_LOGIN = 5;
+var BLOQUEIO_MS = 15 * 60 * 1000;
+var VALIDADE_SESSAO_SEG = 6 * 60 * 60; // 6 h (máximo do CacheService); renova a cada uso
+
+var MSG_LOGIN_INVALIDO = 'E-mail ou senha incorretos.';
+var MSG_BLOQUEIO = 'Muitas tentativas. Tente de novo em 15 minutos.';
+var MSG_SESSAO = 'Sessão expirada. Entre de novo.';
+var MSG_SEM_PERMISSAO = 'Sem permissão.';
+var MSG_LINK_INATIVO = 'Este link de avaliação não está mais ativo.';
+var MSG_LINK_INVALIDO = 'Link inválido ou avaliação encerrada. Fale com quem enviou o link.';
+
+/** Relógio do servidor (substituível nos testes). */
+function agora_() { return Date.now(); }
 
 // ---------------------------------------------------------------------------
 // Pontos de entrada do Web App
@@ -72,6 +124,30 @@ function responder_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
 
+/**
+ * Ações que exigem sessão. soAdmin: gestor recebe "Sem permissão.".
+ * Cada função recebe (usuario, corpo, token) — usuario já validado (ativo, papel e empresa conferidos).
+ */
+var ACOES_COM_SESSAO = {
+  'eu': { fn: function (u) { return { ok: true, usuario: usuarioPublico_(u, mapaEmpresas_()) }; } },
+  'sair': { fn: function (u, c, token) { encerrarSessao_(token); return { ok: true }; } },
+  'trocarSenha': { fn: function (u, c, token) { return acaoTrocarSenha_(u, c, token); } },
+  'listar': { fn: function (u) { return acaoListar_(u); } },
+  'atualizar': { fn: function (u, c) { return acaoAtualizar_(c.id, c.campos, u); } },
+  'excluir': { soAdmin: true, fn: function (u, c) { return acaoExcluir_(c.id); } },
+  'excluirTodos': { soAdmin: true, fn: function (u, c) { return acaoExcluirTodos_(c.avaliacao); } },
+  'empresas.listar': { soAdmin: true, fn: function () { return acaoEmpresasListar_(); } },
+  'empresas.salvar': { soAdmin: true, fn: function (u, c) { return acaoEmpresasSalvar_(c.empresa); } },
+  'empresas.excluir': { soAdmin: true, fn: function (u, c) { return acaoEmpresasExcluir_(c.id); } },
+  'avaliacoes.listar': { fn: function (u) { return acaoAvaliacoesListar_(u); } },
+  'avaliacoes.salvar': { soAdmin: true, fn: function (u, c) { return acaoAvaliacoesSalvar_(c.avaliacao); } },
+  'avaliacoes.excluir': { soAdmin: true, fn: function (u, c) { return acaoAvaliacoesExcluir_(c.id); } },
+  'usuarios.listar': { soAdmin: true, fn: function () { return acaoUsuariosListar_(); } },
+  'usuarios.salvar': { soAdmin: true, fn: function (u, c) { return acaoUsuariosSalvar_(u, c.usuario, c.senhaTemporaria); } },
+  'usuarios.excluir': { soAdmin: true, fn: function (u, c) { return acaoUsuariosExcluir_(u, c.id); } },
+  'usuarios.redefinirSenha': { soAdmin: true, fn: function (u, c) { return acaoUsuariosRedefinirSenha_(c.id, c.senhaTemporaria); } }
+};
+
 /** Lê o corpo bruto, valida e despacha para a ação. Retorna sempre um objeto {ok, ...}. */
 function processarRequisicao_(conteudo) {
   conteudo = typeof conteudo === 'string' ? conteudo : '';
@@ -84,16 +160,18 @@ function processarRequisicao_(conteudo) {
 
   var acao = corpo.acao;
   if (acao === 'enviar') return acaoEnviar_(corpo.payload);
+  if (acao === 'avaliacaoPublica') return acaoAvaliacaoPublica_(corpo.codigo);
+  if (acao === 'login') return acaoLogin_(corpo.email, corpo.senha);
+  if (acao === 'primeiroAcesso') return acaoPrimeiroAcesso_(corpo);
 
-  if (acao === 'listar' || acao === 'atualizar' || acao === 'excluir' || acao === 'excluirTodos') {
-    var auth = verificarChave_(corpo.chave);
-    if (!auth.ok) return auth;
-    if (acao === 'listar') return acaoListar_();
-    if (acao === 'atualizar') return acaoAtualizar_(corpo.id, corpo.campos);
-    if (acao === 'excluir') return acaoExcluir_(corpo.id);
-    return acaoExcluirTodos_();
+  if (typeof acao !== 'string' || !Object.prototype.hasOwnProperty.call(ACOES_COM_SESSAO, acao)) {
+    return erro_('Ação desconhecida.');
   }
-  return erro_('Ação desconhecida.');
+  var sessao = validarSessao_(corpo.token);
+  if (!sessao.ok) return sessao;
+  var regra = ACOES_COM_SESSAO[acao];
+  if (regra.soAdmin && sessao.usuario.papel !== 'admin') return erro_(MSG_SEM_PERMISSAO);
+  return regra.fn(sessao.usuario, corpo, sessao.token);
 }
 
 function erro_(mensagem, extra) {
@@ -103,21 +181,205 @@ function erro_(mensagem, extra) {
 }
 
 // ---------------------------------------------------------------------------
-// Autenticação do administrador
+// Senhas e sessões
 // ---------------------------------------------------------------------------
 
-function verificarChave_(chave) {
-  var esperada = PropertiesService.getScriptProperties().getProperty('ADMIN_KEY');
-  if (!esperada) {
-    return erro_('A chave de administrador ainda não foi configurada. No editor do Apps Script, ' +
-      'selecione a função "setup" e clique em Executar; depois copie a chave exibida no registro de execução.');
+/** Bytes (com sinal, como devolve o Apps Script) -> texto hexadecimal minúsculo. */
+function hexDeBytes_(bytes) {
+  var s = '';
+  for (var i = 0; i < bytes.length; i++) {
+    var b = (bytes[i] + 256) % 256;
+    s += (b < 16 ? '0' : '') + b.toString(16);
   }
-  if (typeof chave !== 'string' || !chave || chave.trim() !== esperada) {
-    Utilities.sleep(400); // dificulta tentativas em massa
-    return erro_('Chave de administrador inválida.', { naoAutorizado: true });
-  }
+  return s;
+}
+
+function sha256Hex_(texto) {
+  return hexDeBytes_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, texto, Utilities.Charset.UTF_8));
+}
+
+/**
+ * Hash da senha: SHA-256 iterado ITERACOES_HASH vezes.
+ *   x = sal + senha;  repita 2000×: x = hex(SHA-256(x));  hash = x
+ * (O js/api-simulada.js usa exatamente a mesma conta, para a prévia.)
+ */
+function hashSenha(senha, sal) {
+  var x = String(sal) + String(senha);
+  for (var i = 0; i < ITERACOES_HASH; i++) x = sha256Hex_(x);
+  return x;
+}
+
+/** Sal aleatório de 16 bytes (32 caracteres hexadecimais). */
+function gerarSal_() {
+  return sha256Hex_(Utilities.getUuid() + Utilities.getUuid() + agora_()).substring(0, 32);
+}
+
+/** Comparação que não para no primeiro caractere diferente. */
+function iguaisSeguro_(a, b) {
+  a = String(a); b = String(b);
+  var dif = a.length ^ b.length;
+  for (var i = 0; i < Math.max(a.length, b.length); i++) dif |= (a.charCodeAt(i) || 0) ^ (b.charCodeAt(i) || 0);
+  return dif === 0;
+}
+
+function senhaConfere_(senha, usuario) {
+  if (typeof senha !== 'string' || !senha || senha.length > SENHA_MAX || !usuario.sal || !usuario.hash) return false;
+  return iguaisSeguro_(hashSenha(senha, usuario.sal), usuario.hash);
+}
+
+/** Regra da senha: de 8 a 100 caracteres. Retorna {ok} ou {ok:false, erro}. */
+function validarSenhaNova(senha) {
+  if (typeof senha !== 'string' || senha.length < SENHA_MIN) return erro_('A senha precisa ter pelo menos ' + SENHA_MIN + ' caracteres.');
+  if (senha.length > SENHA_MAX) return erro_('A senha pode ter no máximo ' + SENHA_MAX + ' caracteres.');
   return { ok: true };
 }
+
+function definirSenha_(usuario, senha) {
+  usuario.sal = gerarSal_();
+  usuario.hash = hashSenha(senha, usuario.sal);
+  usuario.tentativas = 0;
+  usuario.bloqueadoAte = 0;
+}
+
+function normalizarEmail(v) {
+  return limparTexto(v, 120).toLowerCase();
+}
+
+function emailValido(email) {
+  return typeof email === 'string' && email.length <= 120 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
+
+function cacheScript_() { return CacheService.getScriptCache(); }
+
+/** Marca da senha guardada na sessão: trocar ou redefinir a senha derruba as sessões antigas. */
+function marcaSenha_(usuario) { return String(usuario.hash || '').substring(0, 16); }
+
+function criarSessao_(usuario) {
+  var token = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '').toLowerCase();
+  gravarSessao_(token, usuario);
+  return token;
+}
+
+function gravarSessao_(token, usuario) {
+  cacheScript_().put('sessao_' + token, JSON.stringify({ usuarioId: usuario.id, h: marcaSenha_(usuario) }), VALIDADE_SESSAO_SEG);
+}
+
+function encerrarSessao_(token) {
+  if (typeof token === 'string' && token) cacheScript_().remove('sessao_' + token);
+}
+
+/** Confere o token e devolve {ok, usuario, token} ou o erro de sessão expirada. Renova a validade. */
+function validarSessao_(token) {
+  var expirada = erro_(MSG_SESSAO, { sessaoExpirada: true });
+  if (typeof token !== 'string' || !/^[0-9a-f]{64}$/.test(token)) return expirada;
+  var cache = cacheScript_();
+  var bruto = cache.get('sessao_' + token);
+  if (!bruto) return expirada;
+  var sessao;
+  try { sessao = JSON.parse(bruto); } catch (err) { return expirada; }
+  var usuario = sessao && buscarPor_(lerTabela_('Usuarios').registros, 'id', sessao.usuarioId);
+  if (!usuario || !usuario.ativo || PAPEIS.indexOf(usuario.papel) === -1 || sessao.h !== marcaSenha_(usuario)) {
+    cache.remove('sessao_' + token);
+    return expirada;
+  }
+  cache.put('sessao_' + token, bruto, VALIDADE_SESSAO_SEG);
+  return { ok: true, usuario: usuario, token: token };
+}
+
+function usuarioPublico_(u, empresas) {
+  return {
+    id: u.id, nome: u.nome, email: u.email, papel: u.papel,
+    empresaId: u.papel === 'gestor' ? u.empresaId : '',
+    empresaNome: u.papel === 'gestor' ? (empresas[u.empresaId] || '') : ''
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Abas de cadastro (Usuarios, Empresas, Avaliacoes) — leitura e gravação genéricas
+// ---------------------------------------------------------------------------
+
+function abaTabela_(nome) {
+  var def = TABELAS[nome];
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) throw new Error('Script não está vinculado a uma planilha.');
+  var aba = ss.getSheetByName(nome);
+  if (!aba) aba = ss.insertSheet(nome);
+  var textos = def.cabecalho.filter(function (c) { return def.booleanas.indexOf(c) === -1 && def.numericas.indexOf(c) === -1; });
+  if (aba.getLastRow() === 0) escreverCabecalho_(aba, def.cabecalho, textos);
+  else completarCabecalho_(aba, nome, def.cabecalho, textos);
+  return aba;
+}
+
+function celulaTexto_(v) {
+  if (v instanceof Date) return v.toISOString();
+  v = v === null || v === undefined ? '' : String(v);
+  return v.charAt(0) === "'" ? v.substring(1) : v;
+}
+
+function celulaBooleana_(v) {
+  return v === true || /^(true|verdadeiro|sim|1)$/i.test(String(v === null || v === undefined ? '' : v).trim());
+}
+
+/** Lê uma aba de cadastro: {aba, def, registros:[{_linha, campo: valor}]} (linhas sem id são ignoradas). */
+function lerTabela_(nome) {
+  var def = TABELAS[nome];
+  var aba = abaTabela_(nome);
+  var registros = [];
+  var ultima = aba.getLastRow();
+  if (ultima >= 2) {
+    var valores = aba.getRange(2, 1, ultima - 1, def.cabecalho.length).getValues();
+    valores.forEach(function (linha, i) {
+      var r = { _linha: i + 2 };
+      def.cabecalho.forEach(function (campo, c) {
+        if (def.booleanas.indexOf(campo) >= 0) r[campo] = celulaBooleana_(linha[c]);
+        else if (def.numericas.indexOf(campo) >= 0) r[campo] = Number(linha[c]) || 0;
+        else r[campo] = celulaTexto_(linha[c]);
+      });
+      if (String(r.id).trim()) registros.push(r);
+    });
+  }
+  return { nome: nome, aba: aba, def: def, registros: registros };
+}
+
+/** Grava o registro (na linha dele, ou no fim se for novo), protegido contra fórmulas. */
+function gravarRegistro_(tabela, reg) {
+  var def = tabela.def;
+  var linha = def.cabecalho.map(function (campo) {
+    var v = reg[campo];
+    if (def.booleanas.indexOf(campo) >= 0) return v === true;
+    if (def.numericas.indexOf(campo) >= 0) return Number(v) || 0;
+    return forcarTexto(v === null || v === undefined ? '' : String(v));
+  });
+  if (reg._linha) {
+    tabela.aba.getRange(reg._linha, 1, 1, linha.length).setValues([linha]);
+  } else {
+    tabela.aba.appendRow(linha);
+    reg._linha = tabela.aba.getLastRow();
+    tabela.registros.push(reg);
+  }
+  return reg;
+}
+
+function excluirRegistro_(tabela, reg) {
+  tabela.aba.deleteRow(reg._linha);
+}
+
+function buscarPor_(registros, campo, valor) {
+  for (var i = 0; i < registros.length; i++) if (registros[i][campo] === valor) return registros[i];
+  return null;
+}
+
+function novoId_(prefixo) {
+  return prefixo + '_' + Utilities.getUuid().replace(/-/g, '').substring(0, 12).toLowerCase();
+}
+
+function mapaEmpresas_() {
+  var mapa = {};
+  lerTabela_('Empresas').registros.forEach(function (e) { mapa[e.id] = e.nome; });
+  return mapa;
+}
+
+function letrasContadas_(texto) { return (String(texto).match(/\p{L}/gu) || []).length; }
 
 // ---------------------------------------------------------------------------
 // Regras de negócio puras (sem serviços do Google) — testáveis no Node
@@ -249,6 +511,17 @@ function validarPayload(p) {
   var respostas = typeof p.respostas === 'string' ? p.respostas.trim() : '';
   if (!validarRespostasCompactas(respostas)) return erro_('Respostas do teste inválidas ou incompletas.');
 
+  // Código do link de avaliação (opcional). Se vier, precisa ter o formato certo; a existência e se
+  // está ativa são conferidas na hora de gravar.
+  var avaliacao = '';
+  if (p.avaliacao !== undefined && p.avaliacao !== null && String(p.avaliacao).trim() !== '') {
+    avaliacao = normalizarCodigoAvaliacao(p.avaliacao);
+    if (!avaliacao) return erro_(MSG_LINK_INATIVO);
+  }
+
+  var validacao = validarValidacao(p.validacao);
+  if (!validacao.ok) return validacao;
+
   var resultado = calcularDisc(respostas);
   var inicio = dataIsoOuVazio(p.inicio);
   var fim = dataIsoOuVazio(p.fim);
@@ -273,7 +546,9 @@ function validarPayload(p) {
       fim: fim,
       duracaoSeg: Math.round(duracao),
       respostas: respostas,
-      resultado: { percentuais: resultado.percentuais, codigo: resultado.codigo }
+      resultado: { percentuais: resultado.percentuais, codigo: resultado.codigo },
+      avaliacao: avaliacao,
+      validacao: validacao.validacao
     }
   };
 }
@@ -325,6 +600,80 @@ function gerarProtocolo(usados, aleatorio) {
   return livres[sorteio(livres.length)];
 }
 
+/**
+ * Confere o formato básico do objeto "validacao" (etapa de confirmação do participante) e devolve
+ * uma cópia limpa só com os campos conhecidos. Não recalcula nada: a confiabilidade sai no painel.
+ * Ausente (payload antigo) -> {ok:true, validacao:null}.
+ */
+function validarValidacao(v) {
+  if (v === undefined || v === null) return { ok: true, validacao: null };
+  var falha = erro_('Dados da etapa de validação inválidos.');
+  if (typeof v !== 'object' || Array.isArray(v)) return falha;
+  var json;
+  try { json = JSON.stringify(v); } catch (err) { return falha; }
+  if (!json || json.length > LIMITE_VALIDACAO) return falha;
+
+  function letra(x) { return typeof x === 'string' && LETRAS.indexOf(x) >= 0; }
+  function inteiro(x, min, max) { return typeof x === 'number' && isFinite(x) && Math.floor(x) === x && x >= min && x <= max; }
+  function lista(x, max) { return Array.isArray(x) && x.length <= max; }
+
+  if (!inteiro(v.versao, 1, 99)) return falha;
+  if (!lista(v.pares, 3) || !lista(v.escolhas, 3) || !lista(v.itens, 8) || !lista(v.gruposSeg, TOTAL_GRUPOS)) return falha;
+  for (var i = 0; i < v.pares.length; i++) {
+    var par = v.pares[i];
+    if (!Array.isArray(par) || par.length !== 2 || !letra(par[0]) || !letra(par[1])) return falha;
+  }
+  for (i = 0; i < v.escolhas.length; i++) if (!letra(v.escolhas[i])) return falha;
+  var itens = [];
+  for (i = 0; i < v.itens.length; i++) {
+    var it = v.itens[i];
+    if (!it || typeof it !== 'object' || Array.isArray(it)) return falha;
+    if (typeof it.id !== 'string' || !/^[A-Za-z0-9_-]{1,40}$/.test(it.id)) return falha;
+    if (!letra(it.letra) || ['forca', 'sombra', 'contraste'].indexOf(it.tipo) === -1 || !inteiro(it.nota, 1, 5)) return falha;
+    itens.push({ id: it.id, letra: it.letra, tipo: it.tipo, nota: it.nota });
+  }
+  for (i = 0; i < v.gruposSeg.length; i++) {
+    var s = v.gruposSeg[i];
+    if (typeof s !== 'number' || !isFinite(s) || s < 0 || s > 86400) return falha;
+  }
+  if (!inteiro(v.semMexer, 0, TOTAL_GRUPOS)) return falha;
+  if (v.demonstracao !== undefined && typeof v.demonstracao !== 'boolean') return falha;
+
+  return {
+    ok: true,
+    validacao: {
+      versao: v.versao,
+      pares: v.pares.map(function (p) { return [p[0], p[1]]; }),
+      escolhas: v.escolhas.slice(),
+      itens: itens,
+      gruposSeg: v.gruposSeg.map(function (n) { return Math.round(n * 10) / 10; }),
+      semMexer: v.semMexer,
+      demonstracao: v.demonstracao === true
+    }
+  };
+}
+
+/**
+ * Código do link de avaliação: 4 letras/algarismos (A-Z, 0-9). Os códigos novos são sorteados só de
+ * ALFABETO_CODIGO (sem I, O, 0 e 1), mas qualquer A-Z/0-9 é aceito. Aceita minúsculas/espaços. '' se inválido.
+ */
+function normalizarCodigoAvaliacao(v) {
+  if (v === null || v === undefined) return '';
+  var s = String(v).replace(/^'/, '').replace(/\s+/g, '').toUpperCase();
+  return /^[A-Z0-9]{4}$/.test(s) ? s : '';
+}
+
+/** Sorteia um código de avaliação que não está em "usados" ({codigo:true}). */
+function gerarCodigoAvaliacao(usados, aleatorio) {
+  var rnd = typeof aleatorio === 'function' ? aleatorio : Math.random;
+  for (var t = 0; t < 200; t++) {
+    var c = '';
+    for (var i = 0; i < TAMANHO_CODIGO; i++) c += ALFABETO_CODIGO.charAt(Math.min(ALFABETO_CODIGO.length - 1, Math.floor(rnd() * ALFABETO_CODIGO.length)));
+    if (!usados || !usados[c]) return c;
+  }
+  throw new Error('Não foi possível gerar um código novo. Tente de novo.');
+}
+
 /** Monta a linha da planilha (na ordem de CABECALHO), já protegida contra fórmulas. */
 function montarLinha(payload, recebidoEm, protocolo) {
   var r = calcularDisc(payload.respostas);
@@ -350,6 +699,8 @@ function montarLinha(payload, recebidoEm, protocolo) {
   linha[COL.idade] = payload.idade;
   linha[COL.funcao] = payload.funcao || '';
   linha[COL.empresa] = payload.empresa || '';
+  linha[COL.avaliacao] = payload.avaliacao || '';
+  linha[COL.empresaId] = payload.empresaId || '';
   return linha.map(function (v, i) {
     return COLUNAS_TEXTO.indexOf(CABECALHO[i]) >= 0 ? forcarTexto(v) : protegerCelula(v);
   });
@@ -366,12 +717,7 @@ function forcarTexto(v) {
 
 /** Converte uma linha lida da planilha no item retornado por "listar". */
 function linhaParaItem(linha) {
-  function txt(nome) {
-    var v = linha[COL[nome]];
-    if (v instanceof Date) return v.toISOString();
-    v = v === null || v === undefined ? '' : String(v);
-    return v.charAt(0) === "'" ? v.substring(1) : v;
-  }
+  function txt(nome) { return celulaTexto_(linha[COL[nome]]); }
   var base = {};
   try { base = JSON.parse(txt('payloadJson')) || {}; } catch (err) { base = {}; }
 
@@ -394,7 +740,10 @@ function linhaParaItem(linha) {
     protocolo: normalizarProtocolo(txt('protocolo')),
     idade: idadeDaCelula(linha[COL.idade]),   // null em linhas antigas (sem a coluna)
     funcao: txt('funcao'),
-    empresa: txt('empresa')
+    empresa: txt('empresa'),
+    avaliacao: normalizarCodigoAvaliacao(txt('avaliacao')),
+    empresaId: txt('empresaId'),
+    validacao: (base.validacao && typeof base.validacao === 'object' && !Array.isArray(base.validacao)) ? base.validacao : null
   };
   if (validarRespostasCompactas(respostas)) {
     var r = calcularDisc(respostas);
@@ -404,7 +753,7 @@ function linhaParaItem(linha) {
 }
 
 // ---------------------------------------------------------------------------
-// Acesso à planilha
+// Acesso à planilha (aba Respostas)
 // ---------------------------------------------------------------------------
 
 function obterAba_() {
@@ -423,61 +772,83 @@ function obterAba_() {
 }
 
 /**
- * Planilhas criadas antes de uma coluna existir (ex.: "protocolo", "idade", "funcao", "empresa"): escreve o nome que falta no
- * cabeçalho e deixa a coluna em formato texto. As linhas antigas ficam com a célula vazia.
+ * Planilhas criadas antes de uma coluna existir (ex.: "protocolo", "idade", "avaliacao"): escreve o nome
+ * que falta no cabeçalho e deixa a coluna em formato texto. As linhas antigas ficam com a célula vazia.
  */
 function garantirColunas_(aba) {
-  garantirLargura_(aba);
-  var cab = aba.getRange(1, 1, 1, CABECALHO.length).getValues()[0];
-  CABECALHO.forEach(function (nome, i) {
+  completarCabecalho_(aba, NOME_ABA, CABECALHO, COLUNAS_TEXTO);
+}
+
+function prepararAba_(aba) {
+  escreverCabecalho_(aba, CABECALHO, COLUNAS_TEXTO);
+}
+
+/** Aba vazia: escreve o cabeçalho, congela a linha 1 e põe as colunas de texto em "texto simples". */
+function escreverCabecalho_(aba, cabecalho, textos) {
+  garantirLargura_(aba, cabecalho.length);
+  aba.getRange(1, 1, 1, cabecalho.length).setValues([cabecalho]).setFontWeight('bold');
+  aba.setFrozenRows(1);
+  // Formato "texto simples" para o Sheets não converter telefone, respostas (100 dígitos) e datas ISO.
+  cabecalho.forEach(function (nome, i) {
+    if (textos.indexOf(nome) >= 0) aba.getRange(1, i + 1, aba.getMaxRows(), 1).setNumberFormat('@');
+  });
+}
+
+/** Aba com dados: acrescenta no fim as colunas que faltam; recusa cabeçalho diferente do esperado. */
+function completarCabecalho_(aba, nomeAba, cabecalho, textos) {
+  garantirLargura_(aba, cabecalho.length);
+  var cab = aba.getRange(1, 1, 1, cabecalho.length).getValues()[0];
+  cabecalho.forEach(function (nome, i) {
     var atual = String(cab[i] === undefined || cab[i] === null ? '' : cab[i]).trim();
     if (atual === nome) return;
     if (atual !== '') {
-      throw new Error('Cabeçalho da aba "' + NOME_ABA + '" diferente do esperado na coluna ' + (i + 1) +
+      throw new Error('Cabeçalho da aba "' + nomeAba + '" diferente do esperado na coluna ' + (i + 1) +
         ' ("' + cab[i] + '" em vez de "' + nome + '").');
     }
     aba.getRange(1, i + 1).setValue(nome).setFontWeight('bold');
-    if (COLUNAS_TEXTO.indexOf(nome) >= 0) aba.getRange(1, i + 1, aba.getMaxRows(), 1).setNumberFormat('@');
+    if (textos.indexOf(nome) >= 0) aba.getRange(1, i + 1, aba.getMaxRows(), 1).setNumberFormat('@');
   });
 }
 
 /** Garante que a aba tem colunas físicas suficientes (getRange fora da aba lança erro no Apps Script). */
-function garantirLargura_(aba) {
+function garantirLargura_(aba, total) {
+  total = total || CABECALHO.length;
   var max = aba.getMaxColumns();
-  if (max < CABECALHO.length) aba.insertColumnsAfter(max, CABECALHO.length - max);
+  if (max < total) aba.insertColumnsAfter(max, total - max);
+}
+
+/** Valores de uma coluna da aba Respostas (sem o cabeçalho). */
+function colunaRespostas_(aba, nome) {
+  var ultima = aba.getLastRow();
+  if (ultima < 2) return [];
+  return aba.getRange(2, COL[nome] + 1, ultima - 1, 1).getValues().map(function (l) { return l[0]; });
 }
 
 /** Protocolos já gravados na planilha, como mapa {codigo: true}. */
 function protocolosUsados_(aba) {
   var usados = {};
-  var ultima = aba.getLastRow();
-  if (ultima < 2) return usados;
-  var valores = aba.getRange(2, COL.protocolo + 1, ultima - 1, 1).getValues();
-  for (var i = 0; i < valores.length; i++) {
-    var p = normalizarProtocolo(valores[i][0]);
+  colunaRespostas_(aba, 'protocolo').forEach(function (v) {
+    var p = normalizarProtocolo(v);
     if (p) usados[p] = true;
-  }
+  });
   return usados;
 }
 
-function prepararAba_(aba) {
-  garantirLargura_(aba);
-  aba.getRange(1, 1, 1, CABECALHO.length).setValues([CABECALHO]).setFontWeight('bold');
-  aba.setFrozenRows(1);
-  // Colunas de texto em formato "texto simples" para o Sheets não converter telefone,
-  // respostas (100 dígitos) e datas ISO em número/data.
-  COLUNAS_TEXTO.forEach(function (nome) {
-    aba.getRange(1, COL[nome] + 1, aba.getMaxRows(), 1).setNumberFormat('@');
+/** Quantidade de respostas por código de avaliação: {SEL1: 3, ...}. */
+function respostasPorAvaliacao_() {
+  var mapa = {};
+  colunaRespostas_(obterAba_(), 'avaliacao').forEach(function (v) {
+    var c = normalizarCodigoAvaliacao(celulaTexto_(v));
+    if (c) mapa[c] = (mapa[c] || 0) + 1;
   });
+  return mapa;
 }
 
 /** Índice da linha (1-based na planilha) do id, ou -1. */
 function localizarLinha_(aba, id) {
-  var ultima = aba.getLastRow();
-  if (ultima < 2) return -1;
-  var ids = aba.getRange(2, COL.id + 1, ultima - 1, 1).getValues();
+  var ids = colunaRespostas_(aba, 'id');
   for (var i = 0; i < ids.length; i++) {
-    if (String(ids[i][0]) === id) return i + 2;
+    if (String(ids[i]) === id) return i + 2;
   }
   return -1;
 }
@@ -505,7 +876,7 @@ function comTrava_(fn) {
 }
 
 // ---------------------------------------------------------------------------
-// Ações
+// Ações públicas
 // ---------------------------------------------------------------------------
 
 function acaoEnviar_(payloadBruto) {
@@ -527,6 +898,12 @@ function acaoEnviar_(payloadBruto) {
       }
       return { ok: true, duplicado: true, id: payload.id, protocolo: gravado };
     }
+    payload.empresaId = '';
+    if (payload.avaliacao) {
+      var av = buscarPor_(lerTabela_('Avaliacoes').registros, 'codigo', payload.avaliacao);
+      if (!av || !av.ativa) return erro_(MSG_LINK_INATIVO);
+      payload.empresaId = av.empresaId;
+    }
     if (aba.getLastRow() - 1 >= LIMITE_LINHAS) {
       return erro_('Limite de respostas atingido. Avise o recrutador.');
     }
@@ -540,19 +917,170 @@ function acaoEnviar_(payloadBruto) {
   });
 }
 
-function acaoListar_() {
+function acaoAvaliacaoPublica_(codigoBruto) {
+  var codigo = normalizarCodigoAvaliacao(codigoBruto);
+  if (!codigo) return erro_(MSG_LINK_INVALIDO);
+  var av = buscarPor_(lerTabela_('Avaliacoes').registros, 'codigo', codigo);
+  if (!av || !av.ativa) return erro_(MSG_LINK_INVALIDO);
+  return {
+    ok: true,
+    avaliacao: {
+      codigo: av.codigo, nome: av.nome, tipo: av.tipo,
+      empresaNome: mapaEmpresas_()[av.empresaId] || '',
+      mostrarResultado: av.mostrarResultado === true
+    }
+  };
+}
+
+function acaoLogin_(emailBruto, senha) {
+  var email = normalizarEmail(emailBruto);
+  if (!email || typeof senha !== 'string' || !senha) return erro_('Informe o e-mail e a senha.');
+  var r = comTrava_(function () {
+    var tabela = lerTabela_('Usuarios');
+    var u = buscarPor_(tabela.registros, 'email', email);
+    if (!u || !u.ativo) {
+      hashSenha(senha.substring(0, SENHA_MAX), 'sal-falso-para-gastar-o-mesmo-tempo'); // mesmo custo: não revela se o e-mail existe
+      return falhaEmailDesconhecido_(email);
+    }
+    var agora = agora_();
+    if (u.bloqueadoAte && u.bloqueadoAte > agora) return erro_(MSG_BLOQUEIO, { bloqueado: true });
+    if (!senhaConfere_(senha, u)) {
+      u.tentativas = (u.tentativas || 0) + 1;
+      if (u.tentativas >= MAX_TENTATIVAS_LOGIN) {
+        u.tentativas = 0;
+        u.bloqueadoAte = agora + BLOQUEIO_MS;
+        gravarRegistro_(tabela, u);
+        return erro_(MSG_BLOQUEIO, { bloqueado: true });
+      }
+      gravarRegistro_(tabela, u);
+      return erro_(MSG_LOGIN_INVALIDO);
+    }
+    if (u.tentativas || u.bloqueadoAte) {
+      u.tentativas = 0;
+      u.bloqueadoAte = 0;
+      gravarRegistro_(tabela, u);
+    }
+    return { ok: true, token: criarSessao_(u), usuario: usuarioPublico_(u, mapaEmpresas_()) };
+  });
+  if (!r.ok && r.erro === MSG_LOGIN_INVALIDO) Utilities.sleep(400); // dificulta tentativas em massa
+  return r;
+}
+
+/**
+ * E-mail inexistente (ou de usuário desativado): conta as tentativas como se a conta existisse e,
+ * na 5ª, responde com a mesma mensagem de bloqueio por 15 minutos. Assim nem a mensagem nem o
+ * bloqueio revelam se o e-mail está cadastrado. Fica só no CacheService (nada é gravado na planilha).
+ */
+function falhaEmailDesconhecido_(email) {
+  var cache = cacheScript_();
+  var chave = 'login_falha_' + sha256Hex_('falha:' + email).substring(0, 40);
+  var reg;
+  try { reg = JSON.parse(cache.get(chave) || '{}') || {}; } catch (err) { reg = {}; }
+  var agora = agora_();
+  if (reg.ate && reg.ate > agora) return erro_(MSG_BLOQUEIO, { bloqueado: true });
+  if (reg.ate) { reg.n = 0; reg.ate = 0; }
+  reg.n = (Number(reg.n) || 0) + 1;
+  var resposta = erro_(MSG_LOGIN_INVALIDO);
+  if (reg.n >= MAX_TENTATIVAS_LOGIN) {
+    reg.n = 0;
+    reg.ate = agora + BLOQUEIO_MS;
+    resposta = erro_(MSG_BLOQUEIO, { bloqueado: true });
+  }
+  cache.put(chave, JSON.stringify(reg), VALIDADE_SESSAO_SEG);
+  return resposta;
+}
+
+/**
+ * Primeiro acesso / recuperação: com a ADMIN_KEY (Script Properties) cria um login de administrador.
+ * Se o e-mail já for de um administrador, redefine a senha dele (e reativa/desbloqueia).
+ */
+function acaoPrimeiroAcesso_(corpo) {
+  var esperada = PropertiesService.getScriptProperties().getProperty('ADMIN_KEY');
+  if (!esperada) {
+    return erro_('A chave de primeiro acesso ainda não foi configurada. No editor do Apps Script, ' +
+      'selecione a função "setup" e clique em Executar; depois copie a chave exibida no registro de execução.');
+  }
+  var chave = corpo.chave;
+  if (typeof chave !== 'string' || !chave || !iguaisSeguro_(chave.trim(), esperada)) {
+    Utilities.sleep(400);
+    return erro_('Chave de primeiro acesso inválida.', { naoAutorizado: true });
+  }
+  var nome = limparTexto(corpo.nome, 80);
+  if (letrasContadas_(nome) < 2) return erro_('Informe o seu nome.');
+  var email = normalizarEmail(corpo.email);
+  if (!emailValido(email)) return erro_('E-mail inválido.');
+  var s = validarSenhaNova(corpo.senha);
+  if (!s.ok) return s;
+
+  return comTrava_(function () {
+    var tabela = lerTabela_('Usuarios');
+    var u = buscarPor_(tabela.registros, 'email', email);
+    var redefinida = false;
+    if (u) {
+      if (u.papel !== 'admin') return erro_('Este e-mail já é usado por um gestor. Use outro e-mail.');
+      redefinida = true;
+      u.nome = nome;
+      u.ativo = true;
+    } else {
+      u = { id: novoId_('usr'), email: email, nome: nome, papel: 'admin', empresaId: '', ativo: true, criadoEm: new Date(agora_()).toISOString() };
+    }
+    definirSenha_(u, corpo.senha);
+    gravarRegistro_(tabela, u);
+    return { ok: true, redefinida: redefinida, token: criarSessao_(u), usuario: usuarioPublico_(u, mapaEmpresas_()) };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Ações com sessão — conta
+// ---------------------------------------------------------------------------
+
+function acaoTrocarSenha_(usuario, corpo, token) {
+  var s = validarSenhaNova(corpo.novaSenha);
+  if (!s.ok) return s;
+  return comTrava_(function () {
+    var tabela = lerTabela_('Usuarios');
+    var u = buscarPor_(tabela.registros, 'id', usuario.id);
+    if (!u) return erro_(MSG_SESSAO, { sessaoExpirada: true });
+    if (!senhaConfere_(corpo.senhaAtual, u)) return erro_('Senha atual incorreta.');
+    definirSenha_(u, corpo.novaSenha);
+    gravarRegistro_(tabela, u);
+    gravarSessao_(token, u); // esta sessão continua valendo; as outras caem
+    return { ok: true };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Ações com sessão — participantes (aba Respostas)
+// ---------------------------------------------------------------------------
+
+function podeVerEmpresa_(usuario, empresaId) {
+  if (usuario.papel === 'admin') return true;
+  return !!usuario.empresaId && empresaId === usuario.empresaId;
+}
+
+function acaoListar_(usuario) {
   var aba = obterAba_();
   var ultima = aba.getLastRow();
   if (ultima < 2) return { ok: true, itens: [] };
   var linhas = aba.getRange(2, 1, ultima - 1, CABECALHO.length).getValues();
+  var empresas = mapaEmpresas_();
+  var avaliacoes = {};
+  lerTabela_('Avaliacoes').registros.forEach(function (a) { avaliacoes[a.codigo] = a; });
   var itens = [];
   linhas.forEach(function (linha) {
-    if (String(linha[COL.id] || '').trim()) itens.push(linhaParaItem(linha));
+    if (!String(linha[COL.id] || '').trim()) return;
+    var item = linhaParaItem(linha);
+    if (!podeVerEmpresa_(usuario, item.empresaId)) return;
+    var av = avaliacoes[item.avaliacao];
+    item.empresaNome = empresas[item.empresaId] || '';
+    item.avaliacaoNome = av ? av.nome : '';
+    item.avaliacaoTipo = av ? av.tipo : 'selecao'; // sem código = processo seletivo geral
+    itens.push(item);
   });
   return { ok: true, itens: itens };
 }
 
-function acaoAtualizar_(idBruto, campos) {
+function acaoAtualizar_(idBruto, campos, usuario) {
   var id = limparTexto(idBruto, 80);
   if (!id) return erro_('Informe o id do candidato.');
   if (!campos || typeof campos !== 'object') return erro_('Nada para atualizar.');
@@ -569,6 +1097,10 @@ function acaoAtualizar_(idBruto, campos) {
     var aba = obterAba_();
     var linha = localizarLinha_(aba, id);
     if (linha === -1) return erro_('Candidato não encontrado.');
+    if (usuario && usuario.papel !== 'admin') {
+      var empresaId = celulaTexto_(aba.getRange(linha, COL.empresaId + 1).getValues()[0][0]);
+      if (!podeVerEmpresa_(usuario, empresaId)) return erro_(MSG_SEM_PERMISSAO);
+    }
     if (novoStatus !== null) aba.getRange(linha, COL.status + 1).setValue(novoStatus);
     if (novasObs !== null) aba.getRange(linha, COL.observacoes + 1).setValue(protegerCelula(novasObs));
     return { ok: true, id: id };
@@ -587,13 +1119,237 @@ function acaoExcluir_(idBruto) {
   });
 }
 
-function acaoExcluirTodos_() {
+/** Sem "avaliacao": apaga todas as respostas. Com "avaliacao" (código): só as daquela avaliação. */
+function acaoExcluirTodos_(avaliacaoBruta) {
+  var filtrar = avaliacaoBruta !== undefined && avaliacaoBruta !== null && String(avaliacaoBruta).trim() !== '';
+  var codigo = filtrar ? normalizarCodigoAvaliacao(avaliacaoBruta) : '';
+  if (filtrar && !codigo) return erro_('Código de avaliação inválido.');
   return comTrava_(function () {
     var aba = obterAba_();
     var ultima = aba.getLastRow();
     var total = Math.max(0, ultima - 1);
-    if (total > 0) aba.deleteRows(2, total);
-    return { ok: true, excluidos: total };
+    if (!filtrar) {
+      if (total > 0) aba.deleteRows(2, total);
+      return { ok: true, excluidos: total };
+    }
+    var codigos = colunaRespostas_(aba, 'avaliacao');
+    var excluidos = 0;
+    for (var i = codigos.length - 1; i >= 0; i--) { // de baixo para cima: as linhas de cima não mudam
+      if (normalizarCodigoAvaliacao(celulaTexto_(codigos[i])) === codigo) {
+        aba.deleteRow(i + 2);
+        excluidos++;
+      }
+    }
+    return { ok: true, excluidos: excluidos, avaliacao: codigo };
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Ações com sessão — empresas, avaliações e usuários
+// ---------------------------------------------------------------------------
+
+function empresaPublica_(e) { return { id: e.id, nome: e.nome, criadaEm: e.criadaEm }; }
+
+function acaoEmpresasListar_() {
+  return { ok: true, empresas: lerTabela_('Empresas').registros.map(empresaPublica_) };
+}
+
+function acaoEmpresasSalvar_(dados) {
+  if (!dados || typeof dados !== 'object') return erro_('Dados da empresa ausentes.');
+  var nome = limparTexto(dados.nome, 80);
+  if (letrasContadas_(nome) < 2) return erro_('Informe o nome da empresa.');
+  var id = limparTexto(dados.id, 40);
+  return comTrava_(function () {
+    var tabela = lerTabela_('Empresas');
+    var repetida = tabela.registros.filter(function (e) { return e.id !== id && e.nome.toLowerCase() === nome.toLowerCase(); });
+    if (repetida.length) return erro_('Já existe uma empresa com esse nome.');
+    var e;
+    if (id) {
+      e = buscarPor_(tabela.registros, 'id', id);
+      if (!e) return erro_('Empresa não encontrada.');
+      e.nome = nome;
+    } else {
+      e = { id: novoId_('emp'), nome: nome, criadaEm: new Date(agora_()).toISOString() };
+    }
+    gravarRegistro_(tabela, e);
+    return { ok: true, empresa: empresaPublica_(e) };
+  });
+}
+
+function acaoEmpresasExcluir_(idBruto) {
+  var id = limparTexto(idBruto, 40);
+  return comTrava_(function () {
+    var tabela = lerTabela_('Empresas');
+    var e = id && buscarPor_(tabela.registros, 'id', id);
+    if (!e) return erro_('Empresa não encontrada.');
+    if (buscarPor_(lerTabela_('Avaliacoes').registros, 'empresaId', id)) {
+      return erro_('Esta empresa tem avaliações. Exclua as avaliações dela antes.');
+    }
+    if (buscarPor_(lerTabela_('Usuarios').registros, 'empresaId', id)) {
+      return erro_('Esta empresa tem gestores ligados a ela. Exclua ou mude esses gestores antes.');
+    }
+    excluirRegistro_(tabela, e);
+    return { ok: true, id: id };
+  });
+}
+
+function avaliacaoPublica_(a, empresas, contagem) {
+  return {
+    id: a.id, codigo: a.codigo, empresaId: a.empresaId, empresaNome: empresas[a.empresaId] || '',
+    nome: a.nome, tipo: a.tipo, mostrarResultado: a.mostrarResultado === true, ativa: a.ativa === true,
+    criadaEm: a.criadaEm, respostas: contagem[a.codigo] || 0
+  };
+}
+
+function acaoAvaliacoesListar_(usuario) {
+  var empresas = mapaEmpresas_();
+  var contagem = respostasPorAvaliacao_();
+  var lista = lerTabela_('Avaliacoes').registros
+    .filter(function (a) { return podeVerEmpresa_(usuario, a.empresaId); })
+    .map(function (a) { return avaliacaoPublica_(a, empresas, contagem); });
+  return { ok: true, avaliacoes: lista };
+}
+
+function acaoAvaliacoesSalvar_(dados) {
+  if (!dados || typeof dados !== 'object') return erro_('Dados da avaliação ausentes.');
+  var id = limparTexto(dados.id, 40);
+  var nome = limparTexto(dados.nome, 80);
+  if (letrasContadas_(nome) < 2) return erro_('Informe o nome da avaliação.');
+  var tipo = limparTexto(dados.tipo, 20);
+  if (TIPOS_AVALIACAO.indexOf(tipo) === -1) return erro_('Tipo inválido. Use: selecao ou equipe.');
+  var empresaId = limparTexto(dados.empresaId, 40);
+  return comTrava_(function () {
+    var empresas = mapaEmpresas_();
+    if (!empresaId || !Object.prototype.hasOwnProperty.call(empresas, empresaId)) return erro_('Escolha uma empresa válida.');
+    var tabela = lerTabela_('Avaliacoes');
+    var contagem = respostasPorAvaliacao_();
+    var a;
+    if (id) {
+      a = buscarPor_(tabela.registros, 'id', id);
+      if (!a) return erro_('Avaliação não encontrada.');
+      if (a.empresaId !== empresaId && contagem[a.codigo]) {
+        return erro_('Esta avaliação já tem respostas: não dá para trocar a empresa dela.');
+      }
+      if (dados.ativa !== undefined) a.ativa = dados.ativa === true;
+    } else {
+      var usados = {};
+      tabela.registros.forEach(function (r) { usados[r.codigo] = true; });
+      a = { id: novoId_('ava'), codigo: gerarCodigoAvaliacao(usados), criadaEm: new Date(agora_()).toISOString(), ativa: dados.ativa !== false };
+    }
+    a.empresaId = empresaId;
+    a.nome = nome;
+    a.tipo = tipo;
+    a.mostrarResultado = dados.mostrarResultado === true;
+    gravarRegistro_(tabela, a);
+    return { ok: true, avaliacao: avaliacaoPublica_(a, empresas, contagem) };
+  });
+}
+
+function acaoAvaliacoesExcluir_(idBruto) {
+  var id = limparTexto(idBruto, 40);
+  return comTrava_(function () {
+    var tabela = lerTabela_('Avaliacoes');
+    var a = id && buscarPor_(tabela.registros, 'id', id);
+    if (!a) return erro_('Avaliação não encontrada.');
+    if (respostasPorAvaliacao_()[a.codigo]) {
+      return erro_('Esta avaliação já tem respostas. Desative a avaliação em vez de excluir (ou exclua as respostas dela antes).');
+    }
+    excluirRegistro_(tabela, a);
+    return { ok: true, id: id };
+  });
+}
+
+function usuarioLista_(u, empresas, agora) {
+  var p = usuarioPublico_(u, empresas);
+  p.ativo = u.ativo === true;
+  p.criadoEm = u.criadoEm;
+  p.bloqueado = !!(u.bloqueadoAte && u.bloqueadoAte > agora);
+  return p;
+}
+
+function acaoUsuariosListar_() {
+  var empresas = mapaEmpresas_();
+  var agora = agora_();
+  return { ok: true, usuarios: lerTabela_('Usuarios').registros.map(function (u) { return usuarioLista_(u, empresas, agora); }) };
+}
+
+function adminsAtivos_(registros, excetoId) {
+  return registros.filter(function (u) { return u.papel === 'admin' && u.ativo && u.id !== excetoId; }).length;
+}
+
+function acaoUsuariosSalvar_(atual, dados, senhaTemporaria) {
+  if (!dados || typeof dados !== 'object') return erro_('Dados do usuário ausentes.');
+  var id = limparTexto(dados.id, 40);
+  var nome = limparTexto(dados.nome, 80);
+  if (letrasContadas_(nome) < 2) return erro_('Informe o nome do usuário.');
+  var email = normalizarEmail(dados.email);
+  if (!emailValido(email)) return erro_('E-mail inválido.');
+  var papel = limparTexto(dados.papel, 20);
+  if (PAPEIS.indexOf(papel) === -1) return erro_('Papel inválido. Use: admin ou gestor.');
+  var empresaId = papel === 'gestor' ? limparTexto(dados.empresaId, 40) : '';
+  var ativo = dados.ativo !== false;
+  var temSenha = senhaTemporaria !== undefined && senhaTemporaria !== null && senhaTemporaria !== '';
+  if (!id && !temSenha) return erro_('Defina uma senha temporária para o novo usuário.');
+  if (temSenha) { var s = validarSenhaNova(senhaTemporaria); if (!s.ok) return s; }
+
+  return comTrava_(function () {
+    var empresas = mapaEmpresas_();
+    if (papel === 'gestor' && (!empresaId || !Object.prototype.hasOwnProperty.call(empresas, empresaId))) {
+      return erro_('Escolha a empresa do gestor.');
+    }
+    var tabela = lerTabela_('Usuarios');
+    var outro = buscarPor_(tabela.registros, 'email', email);
+    if (outro && outro.id !== id) return erro_('Já existe um usuário com este e-mail.');
+    var u;
+    if (id) {
+      u = buscarPor_(tabela.registros, 'id', id);
+      if (!u) return erro_('Usuário não encontrado.');
+      if (u.id === atual.id && (!ativo || papel !== 'admin')) {
+        return erro_('Você não pode desativar o seu próprio acesso nem tirar o seu papel de administrador.');
+      }
+      if (u.papel === 'admin' && u.ativo && (papel !== 'admin' || !ativo) && adminsAtivos_(tabela.registros, u.id) === 0) {
+        return erro_('Precisa existir pelo menos um administrador ativo.');
+      }
+    } else {
+      u = { id: novoId_('usr'), criadoEm: new Date(agora_()).toISOString() };
+    }
+    u.nome = nome;
+    u.email = email;
+    u.papel = papel;
+    u.empresaId = empresaId;
+    u.ativo = ativo;
+    if (temSenha) definirSenha_(u, senhaTemporaria);
+    gravarRegistro_(tabela, u);
+    return { ok: true, usuario: usuarioLista_(u, empresas, agora_()) };
+  });
+}
+
+function acaoUsuariosExcluir_(atual, idBruto) {
+  var id = limparTexto(idBruto, 40);
+  return comTrava_(function () {
+    var tabela = lerTabela_('Usuarios');
+    var u = id && buscarPor_(tabela.registros, 'id', id);
+    if (!u) return erro_('Usuário não encontrado.');
+    if (u.id === atual.id) return erro_('Você não pode excluir o seu próprio acesso.');
+    if (u.papel === 'admin' && u.ativo && adminsAtivos_(tabela.registros, u.id) === 0) {
+      return erro_('Precisa existir pelo menos um administrador ativo.');
+    }
+    excluirRegistro_(tabela, u);
+    return { ok: true, id: id };
+  });
+}
+
+function acaoUsuariosRedefinirSenha_(idBruto, senhaTemporaria) {
+  var id = limparTexto(idBruto, 40);
+  var s = validarSenhaNova(senhaTemporaria);
+  if (!s.ok) return s;
+  return comTrava_(function () {
+    var tabela = lerTabela_('Usuarios');
+    var u = id && buscarPor_(tabela.registros, 'id', id);
+    if (!u) return erro_('Usuário não encontrado.');
+    definirSenha_(u, senhaTemporaria);
+    gravarRegistro_(tabela, u);
+    return { ok: true, id: id };
   });
 }
 
@@ -601,32 +1357,34 @@ function acaoExcluirTodos_() {
 // Funções para executar manualmente no editor do Apps Script
 // ---------------------------------------------------------------------------
 
-/** Cria a aba "Respostas" e gera a chave de administrador (se ainda não existir). */
+/** Cria as abas (Respostas, Usuarios, Empresas, Avaliacoes) e a chave de primeiro acesso (se ainda não existir). */
 function setup() {
   obterAba_();
+  Object.keys(TABELAS).forEach(function (nome) { abaTabela_(nome); });
   var props = PropertiesService.getScriptProperties();
   var chave = props.getProperty('ADMIN_KEY');
   if (!chave) {
     chave = gerarChave_();
     props.setProperty('ADMIN_KEY', chave);
-    Logger.log('Chave de administrador criada. Copie e guarde em local seguro:');
+    Logger.log('Chave de primeiro acesso criada. Copie e guarde em local seguro:');
   } else {
-    Logger.log('A chave de administrador já existia (use gerarNovaChave() para trocar):');
+    Logger.log('A chave de primeiro acesso já existia (use gerarNovaChave() para trocar):');
   }
   Logger.log(chave);
-  Logger.log('Aba "' + NOME_ABA + '" pronta. Agora faça Implantar > Nova implantação > App da Web.');
+  Logger.log("Use esta chave uma única vez no painel, em 'Primeiro acesso', para criar o seu login de administrador.");
+  Logger.log('Abas prontas. Agora faça Implantar > Nova implantação > App da Web (ou, se já publicou, Gerenciar implantações > Nova versão).');
 }
 
-/** Troca a chave de administrador (a anterior deixa de funcionar). */
+/** Troca a chave de primeiro acesso (a anterior deixa de funcionar). Logins já criados continuam valendo. */
 function gerarNovaChave() {
   var chave = gerarChave_();
   PropertiesService.getScriptProperties().setProperty('ADMIN_KEY', chave);
-  Logger.log('Nova chave de administrador:');
+  Logger.log('Nova chave de primeiro acesso:');
   Logger.log(chave);
 }
 
 /**
- * Apaga todas as linhas da aba (mantém o cabeçalho).
+ * Apaga todas as linhas da aba Respostas (mantém o cabeçalho).
  * ATENÇÃO: o Histórico de versões da planilha continua guardando os dados apagados.
  * Para excluir de verdade ao fim do processo, exclua o arquivo da planilha do Drive e
  * esvazie a lixeira (veja docs/BACKEND.md, seção 7).
@@ -648,6 +1406,8 @@ if (typeof module !== 'undefined' && module.exports) {
     validarPayload: validarPayload, validarIdadeServidor: validarIdadeServidor, protegerCelula: protegerCelula, forcarTexto: forcarTexto, normalizarTelefone: normalizarTelefone,
     montarLinha: montarLinha, linhaParaItem: linhaParaItem, CABECALHO: CABECALHO,
     protocoloValido: protocoloValido, normalizarProtocolo: normalizarProtocolo, gerarProtocolo: gerarProtocolo,
-    LETRAS_PROTOCOLO: LETRAS_PROTOCOLO, TOTAL_PROTOCOLOS: TOTAL_PROTOCOLOS
+    LETRAS_PROTOCOLO: LETRAS_PROTOCOLO, TOTAL_PROTOCOLOS: TOTAL_PROTOCOLOS,
+    hashSenha: hashSenha, validarValidacao: validarValidacao, normalizarCodigoAvaliacao: normalizarCodigoAvaliacao,
+    gerarCodigoAvaliacao: gerarCodigoAvaliacao
   };
 }

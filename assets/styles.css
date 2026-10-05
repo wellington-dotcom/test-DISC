@@ -258,7 +258,66 @@ body[data-etapa="boasvindas"] .conteudo { max-width: 1120px; }
 }
 .barra-botoes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
 .barra-botoes .botao { width: 100%; min-width: 0; padding-left: 12px; padding-right: 12px; }
-body[data-etapa="teste"] .conteudo { padding-bottom: calc(132px + env(safe-area-inset-bottom)); }
+body[data-etapa="teste"] .conteudo,
+body[data-etapa="confirmacao"] .conteudo { padding-bottom: calc(132px + env(safe-area-inset-bottom)); }
+
+/* ---------- Confirmação (depois dos grupos): retratos e frases ---------- */
+/* Seleção = contorno laranja (borda + sombra interna, sem mudar o tamanho): nada pula de lugar. */
+.rodada { margin-top: 20px; }
+.rodada + .rodada { margin-top: 24px; }
+.rodada-titulo { font-size: var(--t-rotulo); color: var(--suave); margin-bottom: 8px; font-variant-numeric: tabular-nums; }
+.retratos { display: grid; gap: 10px; }
+.retrato {
+  display: flex; align-items: flex-start; gap: 12px;
+  width: 100%; margin: 0; padding: 16px;
+  background: var(--branco); color: var(--tinta);
+  border: 1px solid var(--linha); border-radius: 18px;
+  font: inherit; font-size: var(--t-corpo); line-height: 1.5; text-align: left;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: border-color .15s, box-shadow .15s;
+}
+.retrato:hover { border-color: color-mix(in srgb, var(--tinta) 22%, transparent); }
+.retrato[aria-pressed="true"] { border-color: var(--notus); box-shadow: inset 0 0 0 1px var(--notus); }
+.retrato-texto { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.escolha-marca {
+  flex: none; width: 22px; height: 22px; margin-top: 1px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1.5px solid var(--ardosia-clara); background: var(--branco); color: transparent;
+  transition: background-color .15s, border-color .15s, color .15s;
+}
+.retrato[aria-pressed="true"] .escolha-marca { background: var(--notus); border-color: var(--notus); color: var(--sobre-notus); }
+.escolha-marca svg { display: block; }
+
+.frases { list-style: none; margin: 8px 0 0; padding: 0; }
+.frase { padding: 18px 0; border-bottom: 1px solid var(--linha); }
+.frase:last-child { border-bottom: 0; padding-bottom: 4px; }
+.frase-texto { font-size: var(--t-corpo); font-weight: 600; line-height: 1.4; letter-spacing: -0.01em; }
+.escala-legenda {
+  display: flex; justify-content: space-between; gap: 12px; margin-top: 10px;
+  font-size: var(--t-eixo); color: var(--suave);
+}
+.escala { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; margin-top: 6px; }
+.escala-opcao {
+  display: flex; align-items: center; justify-content: center;
+  min-width: 0; min-height: 44px; margin: 0; padding: 6px 4px;
+  background: var(--branco); color: var(--tinta);
+  border: 1px solid var(--linha); border-radius: var(--raio-pilula);
+  font: inherit; font-size: var(--t-corpo); font-weight: 600; line-height: 1.2; text-align: center;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  transition: border-color .15s, box-shadow .15s, background-color .15s;
+}
+.escala-opcao:hover { border-color: color-mix(in srgb, var(--tinta) 22%, transparent); }
+.escala-opcao[aria-pressed="true"] {
+  border-color: var(--notus); box-shadow: inset 0 0 0 1px var(--notus);
+  background: color-mix(in srgb, var(--notus) 6%, var(--branco)); color: var(--notus-forte);
+}
+.escala-rotulo { display: none; }
+
+/* ---------- Link de avaliação ---------- */
+.link-invalido .subtitulo { margin-top: 10px; }
+
+/* Resumo do perfil ao participante (link com resultado) */
+.perfil-retrato { margin-top: 16px; padding: 14px 16px; border-radius: 16px; background: var(--nevoa); color: var(--medio); font-size: var(--t-corpo); line-height: 1.55; }
 
 /* ---------- Revisão ---------- */
 .resumo-dados {
@@ -381,7 +440,17 @@ body[data-etapa="teste"] .conteudo { padding-bottom: calc(132px + env(safe-area-
   .barra-dica { flex: 1; min-width: 0; text-align: left; margin: 0; }
   .barra-botoes { display: flex; flex: none; }
   .barra-botoes .botao { width: 176px; }
-  body[data-etapa="teste"] .conteudo { padding-bottom: 64px; }
+  body[data-etapa="teste"] .conteudo,
+  body[data-etapa="confirmacao"] .conteudo { padding-bottom: 64px; }
+
+  /* Confirmação: 2 cartões lado a lado; escala com os rótulos completos */
+  .retratos { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+  .retrato { padding: 18px; }
+  .escala-legenda { display: none; }
+  .escala { margin-top: 12px; gap: 8px; }
+  .escala-opcao { min-height: 48px; padding: 6px 10px; font-size: var(--t-rotulo); }
+  .escala-num { display: none; }
+  .escala-rotulo { display: inline; }
 }
 
 @media (min-width: 900px) {
@@ -409,7 +478,7 @@ body[data-etapa="teste"] .conteudo { padding-bottom: calc(132px + env(safe-area-
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .progresso-feito, .progresso-ponto, .cartao { transition: none; }
+  .progresso-feito, .progresso-ponto, .cartao, .retrato, .escala-opcao, .escolha-marca { transition: none; }
   .dica-janela:not([hidden]) { animation: none; }
 }
 

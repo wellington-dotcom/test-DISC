@@ -9,6 +9,22 @@
  * enviar(payload) resolve com { ok, id, protocolo } — o protocolo (ex.: "47K") é gerado pelo servidor.
  * Reenvio do mesmo id: { ok, duplicado: true, id, protocolo } com o mesmo protocolo já gravado.
  * CONFIG.API_URL === 'simulada' liga a API de demonstração de js/api-simulada.js (carregado depois deste).
+ *
+ * Painel: login(email, senha) resolve com { token, usuario }. O token é passado EXPLICITAMENTE em cada
+ * chamada (o painel guarda onde quiser). Quando o servidor responde sessão expirada, a Promise rejeita
+ * com um Error que tem erro.sessaoExpirada === true (o painel volta para a tela de login).
+ * Todo Error de recusa do servidor traz erro.resposta com o JSON recebido.
+ *
+ *   Públicas:  enviar(payload) · avaliacaoPublica(codigo) · login(email, senha)
+ *              primeiroAcesso(chave, nome, email, senha)
+ *   Sessão:    eu(token) · sair(token) · trocarSenha(token, senhaAtual, novaSenha)
+ *              listar(token) · atualizar(token, id, campos) · excluir(token, id) · excluirTodos(token, avaliacao?)
+ *   Só admin:  listarEmpresas(token) · salvarEmpresa(token, {id?, nome}) · excluirEmpresa(token, id)
+ *              listarAvaliacoes(token) (gestor também) · salvarAvaliacao(token, {id?, empresaId, nome, tipo,
+ *              mostrarResultado, ativa}) · excluirAvaliacao(token, id)
+ *              listarUsuarios(token) · salvarUsuario(token, {id?, nome, email, papel, empresaId, ativo}, senhaTemporaria?)
+ *              excluirUsuario(token, id) · redefinirSenha(token, id, senhaTemporaria)
+ *   Utilitários: protocoloValido, normalizarProtocolo, normalizarCodigoAvaliacao, codigoAvaliacaoDaUrl.
  */
 (function (root) {
   var TIMEOUT_MS = 20000;
@@ -62,14 +78,43 @@
         try { json = JSON.parse(texto); } catch (e) {
           throw new Error('Resposta inesperada do servidor. Confira se a URL do Apps Script está correta e publicada para "Qualquer pessoa".');
         }
-        if (!json || json.ok !== true) throw new Error((json && json.erro) ? String(json.erro) : 'O servidor recusou a solicitação.');
+        if (!json || json.ok !== true) throw erroDaResposta(json);
         return json;
       })
       .then(function (json) { clearTimeout(timer); return json; }, function (erro) { clearTimeout(timer); throw erro; });
   }
 
+  // Error em pt-BR a partir de uma resposta {ok:false, erro, sessaoExpirada?} do servidor.
+  function erroDaResposta(json) {
+    var e = new Error((json && json.erro) ? String(json.erro) : 'O servidor recusou a solicitação.');
+    e.sessaoExpirada = !!(json && json.sessaoExpirada);
+    e.resposta = json || null;
+    return e;
+  }
+
   function exigir(valor, mensagem) {
     if (valor === undefined || valor === null || valor === '') throw new Error(mensagem);
+  }
+
+  function exigirToken(token) {
+    if (typeof token !== 'string' || !token) throw erroDaResposta({ ok: false, erro: 'Sessão expirada. Entre de novo.', sessaoExpirada: true });
+  }
+
+  // Código do link de avaliação: 4 letras/algarismos (o servidor sorteia só de ALFABETO_CODIGO, sem I, O, 0 e 1,
+  // mas aceita qualquer A-Z/0-9 — as avaliações da prévia são "SEL1" e "EQP1"). '' se inválido.
+  var ALFABETO_CODIGO = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  function normalizarCodigoAvaliacao(v) {
+    if (v === null || v === undefined) return '';
+    var s = String(v).replace(/\s+/g, '').toUpperCase();
+    return /^[A-Z0-9]{4}$/.test(s) ? s : '';
+  }
+  // Lê o código de "?a=SEL1" ou "#a-SEL1" (a prévia em artefato só repassa o #). '' se não houver.
+  function codigoAvaliacaoDaUrl(search, hash) {
+    var m = /[?&]a=([^&#]*)/.exec(String(search || ''));
+    var bruto = m ? m[1] : '';
+    if (!bruto) { var h = /^#?a-([^&?#\/]*)/.exec(String(hash || '')); bruto = h ? h[1] : ''; }
+    try { bruto = decodeURIComponent(bruto); } catch (e) { /* mantém */ }
+    return normalizarCodigoAvaliacao(bruto);
   }
 
   // Código do candidato (protocolo) gerado pelo servidor: 2 algarismos + 1 letra maiúscula sem I e O.
@@ -89,35 +134,89 @@
     };
   }
 
+  // Ação com sessão: { acao, token, ...dados }.
+  function comSessao(acao, token, dados) {
+    exigirToken(token);
+    var corpo = { acao: acao, token: token };
+    if (dados) for (var k in dados) if (Object.prototype.hasOwnProperty.call(dados, k)) corpo[k] = dados[k];
+    return chamar(corpo);
+  }
+
   var DISC_API = {
     TIMEOUT_MS: TIMEOUT_MS,
+    ALFABETO_CODIGO: ALFABETO_CODIGO,
     definirUrl: definirUrl,
     configurado: configurado,
     protocoloValido: protocoloValido,
     normalizarProtocolo: normalizarProtocolo,
+    normalizarCodigoAvaliacao: normalizarCodigoAvaliacao,
+    codigoAvaliacaoDaUrl: codigoAvaliacaoDaUrl,
+    erroDaResposta: erroDaResposta,
+
+    // --- públicas ---
     enviar: seguro(function (payload) {
       exigir(payload, 'Nenhum resultado para enviar.');
       return chamar({ acao: 'enviar', payload: payload });
     }),
-    listar: seguro(function (chave) {
-      exigir(chave, 'Informe a chave de acesso.');
-      return chamar({ acao: 'listar', chave: chave });
+    avaliacaoPublica: seguro(function (codigo) {
+      exigir(codigo, 'Link inválido ou avaliação encerrada. Fale com quem enviou o link.');
+      return chamar({ acao: 'avaliacaoPublica', codigo: codigo });
     }),
-    atualizar: seguro(function (chave, id, campos) {
-      exigir(chave, 'Informe a chave de acesso.');
+    login: seguro(function (email, senha) {
+      exigir(email, 'Informe o e-mail e a senha.');
+      exigir(senha, 'Informe o e-mail e a senha.');
+      return chamar({ acao: 'login', email: email, senha: senha });
+    }),
+    primeiroAcesso: seguro(function (chave, nome, email, senha) {
+      exigir(chave, 'Informe a chave de primeiro acesso.');
+      return chamar({ acao: 'primeiroAcesso', chave: chave, nome: nome, email: email, senha: senha });
+    }),
+
+    // --- com sessão ---
+    eu: seguro(function (token) { return comSessao('eu', token); }),
+    sair: seguro(function (token) { return comSessao('sair', token); }),
+    trocarSenha: seguro(function (token, senhaAtual, novaSenha) {
+      return comSessao('trocarSenha', token, { senhaAtual: senhaAtual, novaSenha: novaSenha });
+    }),
+    listar: seguro(function (token) { return comSessao('listar', token); }),
+    atualizar: seguro(function (token, id, campos) {
+      exigirToken(token);
       exigir(id, 'Candidato não informado.');
-      return chamar({ acao: 'atualizar', chave: chave, id: id, campos: campos || {} });
+      return comSessao('atualizar', token, { id: id, campos: campos || {} });
     }),
-    excluir: seguro(function (chave, id) {
-      exigir(chave, 'Informe a chave de acesso.');
+    excluir: seguro(function (token, id) {
+      exigirToken(token);
       exigir(id, 'Candidato não informado.');
-      return chamar({ acao: 'excluir', chave: chave, id: id });
+      return comSessao('excluir', token, { id: id });
     }),
-    excluirTodos: seguro(function (chave) {
-      exigir(chave, 'Informe a chave de acesso.');
-      return chamar({ acao: 'excluirTodos', chave: chave });
+    excluirTodos: seguro(function (token, avaliacao) {
+      return comSessao('excluirTodos', token, avaliacao ? { avaliacao: avaliacao } : null);
+    }),
+
+    // --- só admin (avaliações: gestor também lista) ---
+    listarEmpresas: seguro(function (token) { return comSessao('empresas.listar', token); }),
+    salvarEmpresa: seguro(function (token, empresa) { return comSessao('empresas.salvar', token, { empresa: empresa || {} }); }),
+    excluirEmpresa: seguro(function (token, id) { return comSessao('empresas.excluir', token, { id: id }); }),
+    listarAvaliacoes: seguro(function (token) { return comSessao('avaliacoes.listar', token); }),
+    salvarAvaliacao: seguro(function (token, avaliacao) { return comSessao('avaliacoes.salvar', token, { avaliacao: avaliacao || {} }); }),
+    excluirAvaliacao: seguro(function (token, id) { return comSessao('avaliacoes.excluir', token, { id: id }); }),
+    listarUsuarios: seguro(function (token) { return comSessao('usuarios.listar', token); }),
+    salvarUsuario: seguro(function (token, usuario, senhaTemporaria) {
+      var dados = { usuario: usuario || {} };
+      if (senhaTemporaria) dados.senhaTemporaria = senhaTemporaria;
+      return comSessao('usuarios.salvar', token, dados);
+    }),
+    excluirUsuario: seguro(function (token, id) { return comSessao('usuarios.excluir', token, { id: id }); }),
+    redefinirSenha: seguro(function (token, id, senhaTemporaria) {
+      return comSessao('usuarios.redefinirSenha', token, { id: id, senhaTemporaria: senhaTemporaria });
     })
   };
+
+  // Nomes de todos os métodos que falam com o servidor (a API simulada troca exatamente estes).
+  DISC_API.METODOS = ['enviar', 'avaliacaoPublica', 'login', 'primeiroAcesso', 'eu', 'sair', 'trocarSenha',
+    'listar', 'atualizar', 'excluir', 'excluirTodos', 'listarEmpresas', 'salvarEmpresa', 'excluirEmpresa',
+    'listarAvaliacoes', 'salvarAvaliacao', 'excluirAvaliacao', 'listarUsuarios', 'salvarUsuario',
+    'excluirUsuario', 'redefinirSenha'];
 
   if (typeof module !== 'undefined' && module.exports) module.exports = DISC_API;
   else root.DISC_API = DISC_API;

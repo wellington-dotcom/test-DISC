@@ -217,7 +217,7 @@
 
   function montarPayload(dados, ordens, agora) {
     var respostas = ordens.map(ordemParaGrupo);
-    var scoring = root.DISC_SCORING || (typeof require === 'function' ? require('./scoring.js') : null);
+    var scoring = modScoring();
     var res = scoring.calcular(respostas);
     var fim = agora || new Date();
     var inicio = dados.inicio ? new Date(dados.inicio) : fim;
@@ -235,7 +235,9 @@
       fim: fim.toISOString(),
       duracaoSeg: Math.max(0, Math.round((fim.getTime() - inicio.getTime()) / 1000)),
       respostas: scoring.compactar(respostas),
-      resultado: { percentuais: res.percentuais, codigo: res.codigo }
+      resultado: { percentuais: res.percentuais, codigo: res.codigo },
+      avaliacao: String(dados.avaliacaoCodigo || '').replace(/\s+/g, '').toUpperCase(),
+      validacao: montarValidacao(dados)
     };
   }
 
@@ -249,7 +251,7 @@
   // erros técnicos (configuração, servidor) viram uma orientação genérica.
   function mensagemErroEnvio(msg) {
     msg = String(msg || '');
-    if (/conex|conectar|internet|demorou|ocupado|Muitos envios/i.test(msg)) return msg;
+    if (/conex|conectar|internet|demorou|ocupado|Muitos envios|link de avalia/i.test(msg)) return msg;
     return 'Não conseguimos enviar agora. Toque em "Gerar código de segurança" e envie o código ao recrutador.';
   }
 
@@ -290,6 +292,126 @@
     return { ordens: o, respondidos: r, preenchidos: preenchidos };
   }
 
+  /* ---------- Link de avaliação (?a=SEL1 ou #a-SEL1) ---------- */
+
+  // Textos que mudam conforme a avaliação do link. avaliacao: {codigo, nome, tipo, empresaNome, mostrarResultado} ou null
+  // (sem link = processo seletivo geral, com o nome de CONFIG.EMPRESA). Só texto puro: escape ao exibir.
+  function textosAvaliacao(avaliacao, empresaConfig) {
+    var av = avaliacao && typeof avaliacao === 'object' ? avaliacao : null;
+    var equipe = !!(av && av.tipo === 'equipe');
+    var empresa = av ? String(av.empresaNome || '') : String(empresaConfig || '');
+    var daEmpresa = empresa ? ' da ' + empresa : '';
+    return {
+      comLink: !!av,
+      tipo: equipe ? 'equipe' : 'selecao',
+      empresa: empresa,
+      contexto: equipe ? 'Avaliação de equipe' : 'Processo seletivo',
+      pessoa: equipe ? 'colaborador' : 'candidato',
+      mostrarVaga: !equipe,
+      mostrarEmpresaAtual: !equipe,
+      rotuloFuncao: equipe ? 'Seu cargo/função' : 'Função atual ou última',
+      ajudaFuncao: equipe ? 'Ex.: Recepcionista, Supervisor de vendas' : 'Ex.: Recepcionista, Vendedor',
+      finalidade: equipe
+        ? 'Precisamos destes dados para vincular o resultado à avaliação da equipe.'
+        : 'Precisamos destes dados para vincular o resultado à sua candidatura.',
+      escopo: av ? 'apenas nesta avaliação' + daEmpresa + ', conduzida pela Notus' : 'apenas neste processo seletivo' + daEmpresa,
+      fimDados: av ? 'excluídos ao final da avaliação' : 'excluídos ao final do processo',
+      usoDados: av
+        ? 'Seus dados serão usados apenas nesta avaliação e excluídos ao final.'
+        : 'Seus dados serão usados apenas neste processo seletivo e excluídos ao final.',
+      enviado: equipe
+        ? 'Suas respostas foram enviadas com sucesso. Obrigado por participar da avaliação da equipe.'
+        : 'Suas respostas foram enviadas com sucesso. O recrutador entrará em contato pelo telefone informado.',
+      guardarCodigo: equipe ? 'Guarde este código. Se pedirem, é só informar.' : 'Guarde este código. Se o recrutador pedir, é só informar.',
+      aoResponsavel: equipe ? 'à pessoa responsável pela avaliação' : 'ao recrutador'
+    };
+  }
+
+  /* ---------- Etapa de confirmação (js/validacao.js) ---------- */
+
+  function modValidacao() {
+    return root.DISC_VALIDACAO || (typeof require === 'function' ? require('./validacao.js') : null);
+  }
+  function modScoring() {
+    return root.DISC_SCORING || (typeof require === 'function' ? require('./scoring.js') : null);
+  }
+
+  // Resultado das ordens atuais (null se faltar algum grupo).
+  function resultadoDasOrdens(ordens) {
+    if (!Array.isArray(ordens) || ordens.length < TOTAL) return null;
+    var respostas = [];
+    for (var i = 0; i < TOTAL; i++) {
+      var g = ordemParaGrupo(ordens[i]);
+      if (!g) return null;
+      respostas.push(g);
+    }
+    try { return modScoring().calcular(respostas); } catch (e) { return null; }
+  }
+
+  // Monta a etapa uma vez (fica no progresso). `ordem` guarda o resultado de quando foi montada:
+  // se a pessoa alterar grupos e o resultado mudar, a etapa é montada de novo.
+  function novaValidacao(resultado, aleatorio) {
+    var m = modValidacao().montarEtapa(resultado, aleatorio);
+    return {
+      montagem: { ordem: resultado.ordem.join(''), pares: m.pares, itens: m.itens },
+      escolhas: [null, null, null],
+      notas: {}
+    };
+  }
+
+  function precisaMontarValidacao(v, resultado) {
+    return !v || !v.montagem || !resultado || v.montagem.ordem !== resultado.ordem.join('');
+  }
+
+  function notaValida(n) { return typeof n === 'number' && Math.floor(n) === n && n >= 1 && n <= 5; }
+
+  // Telas da etapa: 1 = retratos (3 rodadas), 2 = frases (4 notas).
+  function telaValidacaoCompleta(v, tela) {
+    if (!v || !v.montagem) return false;
+    if (tela === 1) {
+      return v.montagem.pares.length === 3 && v.montagem.pares.every(function (par, r) {
+        return Array.isArray(v.escolhas) && par.indexOf(v.escolhas[r]) !== -1;
+      });
+    }
+    return v.montagem.itens.length === 4 && v.montagem.itens.every(function (it) {
+      return !!(v.notas && notaValida(v.notas[it.id]));
+    });
+  }
+
+  function validacaoCompleta(v) {
+    return telaValidacaoCompleta(v, 1) && telaValidacaoCompleta(v, 2);
+  }
+
+  // Soma o tempo (ms) passado num grupo. Não altera a lista original.
+  function somarTempo(lista, i, ms) {
+    var a = [];
+    for (var k = 0; k < TOTAL; k++) {
+      var n = Number(Array.isArray(lista) ? lista[k] : 0);
+      a.push(isFinite(n) && n > 0 ? n : 0);
+    }
+    if (i >= 0 && i < TOTAL && ms > 0 && isFinite(ms)) a[i] = Math.min(86400, Math.round((a[i] + ms / 1000) * 10) / 10);
+    return a;
+  }
+
+  // Objeto `validacao` do payload (null se a etapa não foi respondida).
+  function montarValidacao(dados) {
+    var v = dados && dados.validacao;
+    if (!validacaoCompleta(v)) return null;
+    var seg = somarTempo(dados.gruposSeg, -1, 0);
+    var aceitos = Array.isArray(dados.aceitos) ? dados.aceitos : [];
+    var semMexer = 0;
+    for (var i = 0; i < TOTAL; i++) if (aceitos[i] === true) semMexer++;
+    return {
+      versao: 1,
+      pares: v.montagem.pares.map(function (p) { return [p[0], p[1]]; }),
+      escolhas: v.escolhas.slice(0, 3),
+      itens: v.montagem.itens.map(function (it) { return { id: it.id, letra: it.letra, tipo: it.tipo, nota: v.notas[it.id] }; }),
+      gruposSeg: seg,
+      semMexer: semMexer,
+      demonstracao: !!dados.demonstracao
+    };
+  }
+
   // Progresso salvo há mais de 7 dias (ou sem data) é considerado vencido.
   function progressoExpirado(p, agora) {
     if (!p || typeof p !== 'object') return true;
@@ -326,6 +448,14 @@
     normalizarProtocolo: normalizarProtocolo,
     gruposDoTeste: gruposDoTeste,
     completarGruposDemonstracao: completarGruposDemonstracao,
+    textosAvaliacao: textosAvaliacao,
+    resultadoDasOrdens: resultadoDasOrdens,
+    novaValidacao: novaValidacao,
+    precisaMontarValidacao: precisaMontarValidacao,
+    telaValidacaoCompleta: telaValidacaoCompleta,
+    validacaoCompleta: validacaoCompleta,
+    somarTempo: somarTempo,
+    montarValidacao: montarValidacao,
     PERGUNTAS: PERGUNTAS,
     ROTULOS: ROTULOS
   };
@@ -350,6 +480,12 @@
   var estado;
   var envio = { carregando: false, erro: '' };
   var arraste = null;   // arraste em andamento na lista de palavras
+  // Avaliação do link (?a= / #a-): {codigo, nome, tipo, empresaNome, mostrarResultado} ou null (fluxo geral).
+  var AVAL = null;
+  var CODIGO_LINK = '';
+  var telaLink = '';    // '', 'carregando', 'invalido' ou 'erro' (enquanto não dá para começar)
+  var erroLink = '';
+  var crono = null;     // tempo no grupo atual: { estado, grupo, t0 }
 
   function estadoInicial() {
     return {
@@ -368,8 +504,38 @@
       respondidos: [],
       grupo: 0,
       voltarParaRevisao: false,
-      preenchidosAoAcaso: []   // modo demonstração: grupos completados automaticamente
+      preenchidosAoAcaso: [],  // modo demonstração: grupos completados automaticamente
+      avaliacaoCodigo: AVAL ? AVAL.codigo : '',
+      gruposSeg: [],           // segundos em cada grupo (acumula se voltar)
+      aceitos: [],             // grupos confirmados em "Esta ordem está certa" sem mexer
+      validacao: null,         // etapa de confirmação: { montagem, escolhas, notas }
+      confTela: 1,
+      demonstracao: DEMO
     };
+  }
+
+  // Progresso antigo (sem os campos novos) continua valendo.
+  function garantirCampos(e) {
+    if (!Array.isArray(e.gruposSeg)) e.gruposSeg = [];
+    if (!Array.isArray(e.aceitos)) e.aceitos = [];
+    if (e.validacao && (typeof e.validacao !== 'object' || !e.validacao.montagem)) e.validacao = null;
+    if (e.confTela !== 2) e.confTela = 1;
+    e.demonstracao = DEMO;
+    return e;
+  }
+
+  function T() { return textosAvaliacao(AVAL, CONFIG.EMPRESA); }
+
+  /* ---- Tempo por grupo: do desenho do grupo até sair dele (acumula se voltar) ---- */
+  function iniciarCronometro() {
+    if (crono || telaLink || !estado || estado.etapa !== 'teste') return;
+    crono = { estado: estado, grupo: estado.grupo, t0: Date.now() };
+  }
+  function pararCronometro() {
+    var c = crono;
+    crono = null;
+    if (!c || c.estado !== estado) return;
+    estado.gruposSeg = somarTempo(estado.gruposSeg, c.grupo, Date.now() - c.t0);
   }
 
   function lerStorage(chave) {
@@ -402,6 +568,7 @@
     if (estado.etapa === 'boasvindas' && !estado.id) return;
     var copia = {};
     for (var k in estado) if (k !== 'concluido' && Object.prototype.hasOwnProperty.call(estado, k)) copia[k] = estado[k];
+    if (crono && crono.estado === estado) copia.gruposSeg = somarTempo(estado.gruposSeg, crono.grupo, Date.now() - crono.t0);
     copia.salvoEm = new Date().toISOString();
     gravarStorage(CHAVE_PROGRESSO, copia);
   }
@@ -413,6 +580,8 @@
 
   function temProgresso(p) {
     if (!progressoValido(p)) return false;
+    // Progresso de outro link (ou do fluxo geral) não é oferecido aqui.
+    if (String(p.avaliacaoCodigo || '') !== (AVAL ? AVAL.codigo : '')) return false;
     var m = migrarProgresso(p);
     return !!(m.nome || m.respondidos.some(Boolean));
   }
@@ -424,13 +593,14 @@
   }
 
   function irPara(etapa) {
+    pararCronometro();
     estado.etapa = etapa;
     salvar();
     render(true);
   }
 
   function nomeEmpresa() {
-    return CONFIG.EMPRESA ? String(CONFIG.EMPRESA) : '';
+    return T().empresa;
   }
 
   // Ordem atual das palavras do grupo (a salva ou, se ainda não mexeu, o embaralhamento do candidato).
@@ -468,6 +638,28 @@
     estado.preenchidosAoAcaso = marcados;
   }
 
+  // Depois do último grupo: monta (ou remonta, se o resultado mudou) a etapa de confirmação e decide o destino.
+  function destinoAposGrupos() {
+    if (!modValidacao()) return 'revisao';
+    var res = resultadoDasOrdens(estado.ordens);
+    if (!res) return 'confirmacao';   // ainda falta grupo (ou o modo demonstração ainda vai completar)
+    if (precisaMontarValidacao(estado.validacao, res)) return 'confirmacao';
+    return validacaoCompleta(estado.validacao) ? 'revisao' : 'confirmacao';
+  }
+
+  function irDepoisDosGrupos() {
+    completarDemonstracao();
+    if (destinoAposGrupos() === 'revisao') { irPara('revisao'); return; }
+    var res = resultadoDasOrdens(estado.ordens);
+    if (precisaMontarValidacao(estado.validacao, res)) {
+      estado.validacao = novaValidacao(res);
+      estado.confTela = 1;
+    } else {
+      estado.confTela = telaValidacaoCompleta(estado.validacao, 1) ? 2 : 1;
+    }
+    irPara('confirmacao');
+  }
+
   function faixaDemonstracao() {
     if (!DEMO) return '';
     return '<p class="faixa-demo">Modo demonstração: só ' + N + ' grupos; os outros são preenchidos ao acaso. O resultado não vale como avaliação.</p>';
@@ -477,11 +669,14 @@
 
   function render(focar) {
     var html;
+    pararCronometro();
     arraste = null;
     fecharDica(false);
-    switch (estado.etapa) {
+    if (telaLink) html = telaDoLink();
+    else switch (estado.etapa) {
       case 'identificacao': html = telaIdentificacao(); break;
       case 'teste': html = telaGrupo(); break;
+      case 'confirmacao': html = telaConfirmacao(); break;
       case 'revisao': html = telaRevisao(); break;
       case 'enviando': html = telaEnvio(); break;
       case 'concluido': html = telaConclusao(); break;
@@ -489,8 +684,9 @@
     }
     app.innerHTML = html;
     // Layout da página depende da tela (boas-vindas é mais larga, como o login do BI).
-    try { document.body.setAttribute('data-etapa', estado.etapa || 'boasvindas'); } catch (e) { /* ignora */ }
+    try { document.body.setAttribute('data-etapa', telaLink ? 'link' : (estado.etapa || 'boasvindas')); } catch (e) { /* ignora */ }
     ligarEventos();
+    iniciarCronometro();
     if (focar) {
       var titulo = app.querySelector('h1');
       if (titulo) {
@@ -512,7 +708,8 @@
   function telaBoasVindas() {
     var salvo = lerStorage(CHAVE_PROGRESSO);
     var continuar = temProgresso(salvo);
-    var empresa = nomeEmpresa();
+    var t = T();
+    var empresa = t.empresa;
     var passos = PASSOS.map(function (t, k) {
       if (k === 1) t = 'Ordene ' + N + ' grupos de palavras';
       return '<li class="passo' + (k === 0 ? ' passo--noite' : '') + '"><span class="passo-num" aria-hidden="true">' + (k + 1) + '</span><span class="passo-texto">' + t + '</span></li>';
@@ -522,7 +719,7 @@
         '<div class="boasvindas-laranja moldura-laranja">' +
           logo('logo--grande') +
           '<div class="boasvindas-corpo">' +
-            '<p class="boasvindas-sobre">' + (empresa ? 'Processo seletivo · ' + escapar(empresa) : 'Processo seletivo') + '</p>' +
+            '<p class="boasvindas-sobre">' + escapar(t.contexto) + (empresa ? ' · ' + escapar(empresa) : '') + '</p>' +
             '<h1 id="titulo" class="boasvindas-titulo">Teste de Perfil Comportamental DISC</h1>' +
             '<p class="frase-impacto">Conhecer seu jeito de trabalhar é o primeiro passo.</p>' +
             '<ol class="passos" aria-label="Como funciona">' + passos + '</ol>' +
@@ -535,6 +732,7 @@
             '<li><strong>São ' + N + ' grupos de 4 palavras.</strong> Em cada grupo, arraste as palavras para colocar no topo a que <em>mais</em> combina com você e embaixo a que <em>menos</em> combina.</li>' +
             '<li><strong>Não entendeu uma palavra?</strong> Toque no i ao lado dela.</li>' +
             '<li><strong>Não há respostas certas ou erradas.</strong> Responda pensando em como você realmente é, e não em como gostaria de ser.</li>' +
+            '<li><strong>No fim, uma confirmação rápida.</strong> Você diz o quanto o resultado combina com você.</li>' +
             '<li>Seu progresso fica salvo neste aparelho por até 7 dias caso a página seja fechada, e é apagado ao concluir.</li>' +
           '</ul>' +
           (continuar
@@ -548,11 +746,31 @@
   }
 
   function telaIdentificacao() {
+    var t = T();
+    var campoVaga = t.mostrarVaga
+      ? '<div class="campo">' +
+          '<label class="campo__rotulo" for="vaga">Vaga pretendida neste processo <span class="texto-suave">(opcional)</span></label>' +
+          '<input class="entrada" id="vaga" name="vaga" type="text" autocomplete="off" maxlength="80" aria-describedby="dica-vaga" value="' + escapar(estado.vaga) + '">' +
+          '<p class="campo__ajuda" id="dica-vaga">A vaga a que você está se candidatando.</p>' +
+        '</div>'
+      : '';
+    var campoFuncao = '' +
+      '<div class="campo">' +
+        '<label class="campo__rotulo" for="funcao">' + escapar(t.rotuloFuncao) + ' <span class="texto-suave">(opcional)</span></label>' +
+        '<input class="entrada" id="funcao" name="funcao" type="text" autocomplete="organization-title" maxlength="80" aria-describedby="dica-funcao" value="' + escapar(estado.funcao) + '">' +
+        '<p class="campo__ajuda" id="dica-funcao">' + escapar(t.ajudaFuncao) + '</p>' +
+      '</div>';
+    var campoEmpresa = t.mostrarEmpresaAtual
+      ? '<div class="campo">' +
+          '<label class="campo__rotulo" for="empresa">Empresa atual ou última <span class="texto-suave">(opcional)</span></label>' +
+          '<input class="entrada" id="empresa" name="empresa" type="text" autocomplete="organization" maxlength="80" value="' + escapar(estado.empresa) + '">' +
+        '</div>'
+      : '';
     return '' +
       '<section class="caixa surgir" aria-labelledby="titulo">' +
         '<p class="sobretitulo etapa">Etapa 1 de 3</p>' +
         '<h1 id="titulo" class="titulo-pagina">Sua identificação</h1>' +
-        '<p class="subtitulo">Precisamos destes dados para vincular o resultado à sua candidatura.</p>' +
+        '<p class="subtitulo">' + escapar(t.finalidade) + '</p>' +
         '<form id="form-identificacao" class="formulario" novalidate>' +
           '<div class="campo">' +
             '<label class="campo__rotulo" for="nome">Nome completo <span class="obrigatorio" aria-hidden="true">*</span></label>' +
@@ -576,28 +794,13 @@
               '<p class="campo__erro erro" id="erro-idade" role="alert"></p>' +
             '</div>' +
           '</div>' +
-          '<div class="campo">' +
-            '<label class="campo__rotulo" for="vaga">Vaga pretendida neste processo <span class="texto-suave">(opcional)</span></label>' +
-            '<input class="entrada" id="vaga" name="vaga" type="text" autocomplete="off" maxlength="80" aria-describedby="dica-vaga" value="' + escapar(estado.vaga) + '">' +
-            '<p class="campo__ajuda" id="dica-vaga">A vaga a que você está se candidatando.</p>' +
-          '</div>' +
-          '<div class="campos-dupla">' +
-            '<div class="campo">' +
-              '<label class="campo__rotulo" for="funcao">Função atual ou última <span class="texto-suave">(opcional)</span></label>' +
-              '<input class="entrada" id="funcao" name="funcao" type="text" autocomplete="organization-title" maxlength="80" aria-describedby="dica-funcao" value="' + escapar(estado.funcao) + '">' +
-              '<p class="campo__ajuda" id="dica-funcao">Ex.: Recepcionista, Vendedor</p>' +
-            '</div>' +
-            '<div class="campo">' +
-              '<label class="campo__rotulo" for="empresa">Empresa atual ou última <span class="texto-suave">(opcional)</span></label>' +
-              '<input class="entrada" id="empresa" name="empresa" type="text" autocomplete="organization" maxlength="80" value="' + escapar(estado.empresa) + '">' +
-            '</div>' +
-          '</div>' +
+          campoVaga +
+          (campoEmpresa ? '<div class="campos-dupla">' + campoFuncao + campoEmpresa + '</div>' : campoFuncao) +
           '<div class="campo consentimento">' +
             '<label class="marcar" for="consentimento">' +
               '<input id="consentimento" name="consentimento" type="checkbox" required aria-describedby="erro-consentimento"' + (estado.consentimento ? ' checked' : '') + '>' +
-              '<span>Autorizo o uso dos meus dados (nome, telefone, idade, experiência e respostas) <strong>apenas neste processo seletivo</strong>' +
-                (nomeEmpresa() ? ' da ' + escapar(nomeEmpresa()) : '') +
-                '; a idade é usada só para fins cadastrais. Sei que eles serão <strong>excluídos ao final do processo</strong>, conforme a LGPD.</span>' +
+              '<span>Autorizo o uso dos meus dados (nome, telefone, idade, experiência e respostas) <strong>' + escapar(t.escopo) + '</strong>' +
+                '; a idade é usada só para fins cadastrais. Sei que eles serão <strong>' + escapar(t.fimDados) + '</strong>, conforme a LGPD.</span>' +
             '</label>' +
             '<p class="campo__erro erro" id="erro-consentimento" role="alert"></p>' +
           '</div>' +
@@ -612,17 +815,25 @@
   function textoRotulo(n) { return ROTULOS[n] || ''; }
 
   // Barra de progresso no padrão BarraMeta do BI: feito em azul-escuro, trilho liso, bolinha de vidro.
+  // A barra conta os N grupos + as 2 telas da confirmação.
+  var TELAS_CONFIRMACAO = 2;
+  function passosTotais() { return N + TELAS_CONFIRMACAO; }
+
   function progressoHtml(i, completo) {
-    var feitos = i + (completo ? 1 : 0);
-    var pct = Math.round((feitos / N) * 100);
+    return barraProgressoHtml('Grupo', i + 1, N, i + (completo ? 1 : 0));
+  }
+
+  function barraProgressoHtml(nome, atual, de, feitos) {
+    var total = passosTotais();
+    var pct = Math.round((feitos / total) * 100);
     var visivel = Math.max(pct, 8);
     return '' +
       '<div class="progresso">' +
         '<div class="progresso-topo">' +
-          '<span class="progresso-texto">Grupo <strong class="progresso-num">' + (i + 1) + '</strong> de ' + N + '</span>' +
+          '<span class="progresso-texto">' + nome + ' <strong class="progresso-num">' + atual + '</strong> de ' + de + '</span>' +
           '<span class="progresso-pct texto-suave">' + pct + '%</span>' +
         '</div>' +
-        '<div class="progresso-barra" role="progressbar" aria-label="Progresso do teste" aria-valuemin="0" aria-valuemax="' + N + '" aria-valuenow="' + feitos + '" aria-valuetext="Grupo ' + (i + 1) + ' de ' + N + '">' +
+        '<div class="progresso-barra" role="progressbar" aria-label="Progresso do teste" aria-valuemin="0" aria-valuemax="' + total + '" aria-valuenow="' + feitos + '" aria-valuetext="' + nome + ' ' + atual + ' de ' + de + '">' +
           '<span class="progresso-trilho trilho"></span>' +
           '<span class="progresso-feito" style="width:' + visivel + '%"></span>' +
           '<span class="progresso-ponto vidro-claro" style="left:clamp(22px, ' + (visivel - 0.5) + '%, calc(100% - 22px))"></span>' +
@@ -709,11 +920,125 @@
           '<div class="barra-botoes">' +
             '<button type="button" class="botao botao--claro botao--grande" data-acao="anterior">Voltar</button>' +
             '<button type="button" class="botao botao--principal botao--grande" data-acao="proximo" aria-describedby="dica-avancar"' + (completo ? '' : ' disabled') + '>' +
-              (estado.voltarParaRevisao || ultimo ? 'Revisar respostas' : 'Avançar') +
+              rotuloProximo(ultimo) +
             '</button>' +
           '</div>' +
         '</div>' +
       '</section>';
+  }
+
+  // "Revisar respostas" só quando o próximo passo é mesmo a revisão; antes da confirmação é "Avançar".
+  function rotuloProximo(ultimo) {
+    if (!estado.voltarParaRevisao && !ultimo) return 'Avançar';
+    for (var i = 0; i < N; i++) {
+      if (i !== estado.grupo && !grupoCompleto(i)) return i > estado.grupo ? 'Avançar' : 'Revisar respostas';
+    }
+    return destinoAposGrupos() === 'revisao' ? 'Revisar respostas' : 'Avançar';
+  }
+
+  /* -------------------- Confirmação (depois dos grupos) -------------------- */
+
+  var ICONE_MARCA = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="3" ' +
+    'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+
+  function textoRetrato(letra) {
+    var V = modValidacao();
+    return V && V.retratos ? V.retratos[letra] || '' : '';
+  }
+
+  function dicaConfirmacao(tela, completo) {
+    if (completo) return 'Tudo certo. Toque em Avançar quando quiser.';
+    return tela === 1 ? 'Escolha um jeito em cada rodada' : 'Marque uma opção em cada frase';
+  }
+
+  function telaConfirmacao() {
+    var v = estado.validacao;
+    if (!v || !v.montagem) {
+      var res = resultadoDasOrdens(estado.ordens);
+      if (!res || !modValidacao()) { estado.etapa = 'revisao'; return telaRevisao(); }
+      v = estado.validacao = novaValidacao(res);
+      estado.confTela = 1;
+      salvar();
+    }
+    var tela = estado.confTela === 2 ? 2 : 1;
+    var completo = telaValidacaoCompleta(v, tela);
+    var corpo, titulo;
+    if (tela === 1) {
+      titulo = 'Qual destes jeitos parece mais com você?';
+      corpo = v.montagem.pares.map(function (par, r) {
+        var cartoes = par.map(function (letra) {
+          var marcado = v.escolhas[r] === letra;
+          return '' +
+            '<button type="button" class="retrato" data-acao="escolher-retrato" data-rodada="' + r + '" data-letra="' + letra + '" aria-pressed="' + marcado + '">' +
+              '<span class="escolha-marca" aria-hidden="true">' + ICONE_MARCA + '</span>' +
+              '<span class="retrato-texto">' + escapar(textoRetrato(letra)) + '</span>' +
+            '</button>';
+        }).join('');
+        return '' +
+          '<div class="rodada" role="group" aria-labelledby="rodada-' + r + '">' +
+            '<p class="rodada-titulo" id="rodada-' + r + '">Rodada ' + (r + 1) + ' de 3</p>' +
+            '<div class="retratos">' + cartoes + '</div>' +
+          '</div>';
+      }).join('');
+    } else {
+      titulo = 'Quanto cada frase combina com você?';
+      var ESCALA = modValidacao().ESCALA;
+      corpo = '<ol class="frases">' + v.montagem.itens.map(function (it, k) {
+        var opcoes = ESCALA.map(function (rot, n) {
+          var nota = n + 1;
+          var marcado = v.notas[it.id] === nota;
+          return '<button type="button" class="escala-opcao" data-acao="marcar-nota" data-item="' + k + '" data-nota="' + nota + '" aria-pressed="' + marcado + '" aria-label="' + nota + ': ' + escapar(rot) + '">' +
+            '<span class="escala-num" aria-hidden="true">' + nota + '</span><span class="escala-rotulo" aria-hidden="true">' + escapar(rot) + '</span></button>';
+        }).join('');
+        return '' +
+          '<li class="frase" role="group" aria-labelledby="frase-' + k + '">' +
+            '<p class="frase-texto" id="frase-' + k + '">' + escapar(it.texto) + '</p>' +
+            '<p class="escala-legenda" aria-hidden="true"><span>1 · ' + escapar(ESCALA[0]) + '</span><span>5 · ' + escapar(ESCALA[4]) + '</span></p>' +
+            '<div class="escala">' + opcoes + '</div>' +
+          '</li>';
+      }).join('') + '</ol>';
+    }
+    var feitos = N + (tela - 1) + (completo ? 1 : 0);
+    return '' +
+      '<section class="caixa tela-confirmacao" aria-labelledby="titulo">' +
+        faixaDemonstracao() +
+        barraProgressoHtml('Confirmação', tela, TELAS_CONFIRMACAO, feitos) +
+        '<h1 id="titulo" class="titulo-grupo">' + titulo + '</h1>' +
+        '<p class="instrucao">Para confirmar seu resultado, responda com sinceridade. <strong>Não existe resposta certa.</strong></p>' +
+        corpo +
+        '<div class="barra-nav">' +
+          '<p class="barra-dica" id="dica-avancar">' + dicaConfirmacao(tela, completo) + '</p>' +
+          '<div class="barra-botoes">' +
+            '<button type="button" class="botao botao--claro botao--grande" data-acao="conf-anterior">Voltar</button>' +
+            '<button type="button" class="botao botao--principal botao--grande" data-acao="conf-proximo" aria-describedby="dica-avancar"' + (completo ? '' : ' disabled') + '>' +
+              (tela === 1 ? 'Avançar' : 'Revisar respostas') +
+            '</button>' +
+          '</div>' +
+        '</div>' +
+      '</section>';
+  }
+
+  // Marca a escolha sem redesenhar a tela (nada pula de lugar).
+  function atualizarConfirmacao() {
+    var v = estado.validacao;
+    var tela = estado.confTela === 2 ? 2 : 1;
+    var completo = telaValidacaoCompleta(v, tela);
+    if (tela === 1) {
+      Array.prototype.forEach.call(app.querySelectorAll('.retrato'), function (b) {
+        var r = Number(b.getAttribute('data-rodada'));
+        b.setAttribute('aria-pressed', String(v.escolhas[r] === b.getAttribute('data-letra')));
+      });
+    } else {
+      Array.prototype.forEach.call(app.querySelectorAll('.escala-opcao'), function (b) {
+        var it = v.montagem.itens[Number(b.getAttribute('data-item'))];
+        b.setAttribute('aria-pressed', String(!!it && v.notas[it.id] === Number(b.getAttribute('data-nota'))));
+      });
+    }
+    var prox = app.querySelector('[data-acao="conf-proximo"]');
+    if (prox) prox.disabled = !completo;
+    var dica = app.querySelector('#dica-avancar');
+    if (dica) dica.textContent = dicaConfirmacao(tela, completo);
+    atualizarBarra(N + (tela - 1) + (completo ? 1 : 0));
   }
 
   function telaRevisao() {
@@ -746,9 +1071,9 @@
             '<div><dt>Nome</dt><dd>' + escapar(normalizarNome(estado.nome)) + '</dd></div>' +
             '<div><dt>Telefone</dt><dd>' + escapar(formatarTelefone(estado.telefone)) + '</dd></div>' +
             '<div><dt>Idade</dt><dd>' + escapar(limparIdade(estado.idade)) + ' anos</dd></div>' +
-            (estado.vaga ? '<div><dt>Vaga pretendida</dt><dd>' + escapar(estado.vaga) + '</dd></div>' : '') +
-            (estado.funcao ? '<div><dt>Função atual ou última</dt><dd>' + escapar(estado.funcao) + '</dd></div>' : '') +
-            (estado.empresa ? '<div><dt>Empresa atual ou última</dt><dd>' + escapar(estado.empresa) + '</dd></div>' : '') +
+            (estado.vaga && T().mostrarVaga ? '<div><dt>Vaga pretendida</dt><dd>' + escapar(estado.vaga) + '</dd></div>' : '') +
+            (estado.funcao ? '<div><dt>' + escapar(T().rotuloFuncao) + '</dt><dd>' + escapar(estado.funcao) + '</dd></div>' : '') +
+            (estado.empresa && T().mostrarEmpresaAtual ? '<div><dt>Empresa atual ou última</dt><dd>' + escapar(estado.empresa) + '</dd></div>' : '') +
           '</dl>' +
           '<button type="button" class="botao botao--link botao--pequeno" data-acao="editar-dados">Alterar dados</button>' +
         '</div>' +
@@ -776,7 +1101,7 @@
       '<section class="caixa surgir" aria-labelledby="titulo">' +
         '<h1 id="titulo" class="titulo-pagina">Não foi possível enviar</h1>' +
         '<div class="aviso aviso--erro alerta" role="alert">' + escapar(envio.erro) + '</div>' +
-        '<p class="subtitulo">Suas respostas continuam salvas neste aparelho. Você pode tentar de novo ou gerar um código de segurança para enviar ao recrutador.</p>' +
+        '<p class="subtitulo">Suas respostas continuam salvas neste aparelho. Você pode tentar de novo ou gerar um código de segurança para enviar ' + escapar(T().aoResponsavel) + '.</p>' +
         '<div class="acoes acoes-coluna">' +
           '<button type="button" class="botao botao--principal botao--grande" data-acao="retentar">Tentar novamente</button>' +
           '<button type="button" class="botao botao--claro botao--grande" data-acao="usar-codigo">Gerar código de segurança</button>' +
@@ -810,6 +1135,41 @@
         '<ul class="barras">' + barras + '</ul>' +
         (pontos ? '<h3 class="perfil-h3">Pontos fortes</h3><ul class="tags">' + pontos + '</ul>' : '') +
       '</section>';
+  }
+
+  // Primário e secundário a partir das respostas (para o resumo ao participante).
+  function resumoDoPayload(payload) {
+    try {
+      var r = root.DISC_SCORING.calcular(root.DISC_SCORING.descompactar(payload.respostas));
+      return { primario: r.primario, secundario: r.secundario };
+    } catch (e) { return null; }
+  }
+
+  // Resumo para o participante (link com "mostrar resultado"): retrato do perfil e pontos fortes.
+  // Nunca mostra o Guia para a Liderança nem a confiabilidade.
+  function blocoResumo(resumo) {
+    if (!resumo || !DATA.perfis[resumo.primario]) return '';
+    var p = DATA.perfis[resumo.primario];
+    var s = DATA.perfis[resumo.secundario];
+    var retrato = textoRetrato(resumo.primario);
+    var pontos = (p.positivos || []).slice(0, 6).map(function (t) { return '<li class="selo">' + escapar(t) + '</li>'; }).join('');
+    return '' +
+      '<section class="caixa perfil resumo-perfil surgir" aria-labelledby="titulo-perfil">' +
+        '<h2 id="titulo-perfil" class="caixa__titulo">Seu perfil predominante</h2>' +
+        '<p class="perfil-titulo"><span class="letra-disc disc-' + resumo.primario + '">' + resumo.primario + '</span> ' +
+          '<span>' + escapar(p.rotulo) + (s ? ' <span class="perfil-sub">com traços de ' + escapar(s.rotulo) + '</span>' : '') + '</span></p>' +
+        (retrato ? '<p class="perfil-retrato">' + escapar(retrato) + '</p>' : '') +
+        (pontos ? '<h3 class="perfil-h3">Pontos fortes</h3><ul class="tags">' + pontos + '</ul>' : '') +
+      '</section>';
+  }
+
+  // Bloco de resultado da conclusão: com link, vale a configuração da avaliação; sem link, a do CONFIG.
+  function blocoResultado(payload, dados) {
+    if (AVAL) {
+      if (!AVAL.mostrarResultado) return '';
+      return blocoResumo((dados && dados.resumo) || (payload ? resumoDoPayload(payload) : null));
+    }
+    return CONFIG.MOSTRAR_RESULTADO_AO_CANDIDATO && payload ? blocoPerfil(payload) : '';
   }
 
   function numeroWhatsApp() {
@@ -846,9 +1206,11 @@
     var protocolo = enviado ? normalizarProtocolo(dados.protocolo) : '';
     var primeiroNome = payload ? normalizarNome(payload.nome).split(' ')[0] : String(dados.primeiroNome || '');
     var titulo = primeiroNome ? 'Obrigado, ' + escapar(primeiroNome) + '!' : 'Obrigado!';
+    var t = T();
+    var resultado = blocoResultado(payload, dados);
     var rodape = '' +
       '<div class="rodape">' +
-        '<p class="rodape-nota">Seus dados serão usados apenas neste processo seletivo e excluídos ao final.</p>' +
+        '<p class="rodape-nota">' + escapar(t.usoDados) + '</p>' +
         '<button type="button" class="botao botao--link" data-acao="novo-teste">Iniciar um novo teste neste aparelho</button>' +
       '</div>';
     // O único card "vidro" da tela.
@@ -869,7 +1231,7 @@
         '<div class="protocolo-bloco">' +
           '<p class="protocolo-rotulo" id="rotulo-protocolo">Seu código</p>' +
           '<p class="protocolo t-numero-grande" id="protocolo" aria-describedby="rotulo-protocolo" data-protocolo="' + escapar(protocolo) + '">' + protocoloHtml(protocolo) + '</p>' +
-          '<p class="protocolo-dica">Guarde este código. Se o recrutador pedir, é só informar.</p>' +
+          '<p class="protocolo-dica">' + escapar(t.guardarCodigo) + '</p>' +
           '<div class="acoes acoes-coluna protocolo-acoes">' +
             (waP ? '<a class="botao botao--laranja botao--grande btn-whatsapp" href="' + escapar(waP) + '" target="_blank" rel="noopener noreferrer">Enviar pelo WhatsApp</a>' : '') +
             '<button type="button" class="botao botao--claro botao--grande" data-acao="copiar-protocolo">Copiar código</button>' +
@@ -878,8 +1240,8 @@
         '</div>';
       return '' +
         '<div class="pilha-telas">' +
-          agradecimento('Suas respostas foram enviadas com sucesso. O recrutador entrará em contato pelo telefone informado.', blocoProtocolo) +
-          (CONFIG.MOSTRAR_RESULTADO_AO_CANDIDATO && payload ? blocoPerfil(payload) : '') +
+          agradecimento(escapar(t.enviado), blocoProtocolo) +
+          resultado +
           rodape +
         '</div>';
     }
@@ -888,8 +1250,8 @@
       // Enviado com sucesso (servidor antigo, sem protocolo): nenhum dado pessoal fica guardado nem é exibido.
       return '' +
         '<div class="pilha-telas">' +
-          agradecimento('Suas respostas foram enviadas com sucesso. O recrutador entrará em contato pelo telefone informado.') +
-          (CONFIG.MOSTRAR_RESULTADO_AO_CANDIDATO && payload ? blocoPerfil(payload) : '') +
+          agradecimento(escapar(t.enviado)) +
+          resultado +
           rodape +
         '</div>';
     }
@@ -899,11 +1261,11 @@
     var wa = linkWhatsApp(codigo, payload);
     return '' +
       '<div class="pilha-telas">' +
-        agradecimento('Você concluiu o teste. Falta só um passo: enviar o código abaixo ao recrutador.') +
-        (CONFIG.MOSTRAR_RESULTADO_AO_CANDIDATO ? blocoPerfil(payload) : '') +
+        agradecimento('Você concluiu o teste. Falta só um passo: enviar o código abaixo ' + escapar(t.aoResponsavel) + '.') +
+        resultado +
         '<section class="caixa codigo-bloco surgir" aria-label="Código de segurança">' +
           '<label class="caixa__titulo" for="codigo">Código de segurança</label>' +
-          '<p class="codigo-texto" id="texto-codigo">Não conseguimos enviar suas respostas. Envie este código ao recrutador pelo WhatsApp.</p>' +
+          '<p class="codigo-texto" id="texto-codigo">Não conseguimos enviar suas respostas. Envie este código ' + escapar(t.aoResponsavel) + ' pelo WhatsApp.</p>' +
           '<p class="campo__ajuda dica" id="dica-codigo">' +
             'Copie o código' + (wa ? ' ou use o botão do WhatsApp' : '') + '.' +
             ' Por segurança, ele deixa de aparecer quando esta aba for fechada.</p>' +
@@ -916,6 +1278,64 @@
         '</section>' +
         rodape +
       '</div>';
+  }
+
+  // Link de avaliação: abrindo, inválido/encerrado ou sem conexão.
+  function telaDoLink() {
+    if (telaLink === 'carregando') {
+      return '' +
+        '<section class="caixa centro" aria-labelledby="titulo" aria-busy="true">' +
+          '<div class="giro giro--grande" aria-hidden="true"></div>' +
+          '<h1 id="titulo" class="subtitulo">Abrindo a avaliação…</h1>' +
+        '</section>';
+    }
+    if (telaLink === 'invalido') {
+      return '' +
+        '<section class="caixa surgir link-invalido" aria-labelledby="titulo">' +
+          '<h1 id="titulo" class="titulo-pagina">Link inválido ou avaliação encerrada</h1>' +
+          '<p class="subtitulo">Fale com quem enviou o link.</p>' +
+        '</section>';
+    }
+    return '' +
+      '<section class="caixa surgir" aria-labelledby="titulo">' +
+        '<h1 id="titulo" class="titulo-pagina">Não foi possível abrir a avaliação</h1>' +
+        '<div class="aviso aviso--erro alerta" role="alert">' + escapar(erroLink || 'Verifique sua conexão com a internet e tente novamente.') + '</div>' +
+        '<div class="acoes"><button type="button" class="botao botao--principal botao--grande" data-acao="link-retentar">Tentar de novo</button></div>' +
+      '</section>';
+  }
+
+  // Busca a avaliação do link no servidor e personaliza as telas.
+  function carregarAvaliacao() {
+    telaLink = 'carregando';
+    render(false);
+    root.DISC_API.avaliacaoPublica(CODIGO_LINK).then(function (resp) {
+      var av = resp && resp.avaliacao;
+      if (!av || !av.codigo) { telaLink = 'invalido'; render(true); return; }
+      AVAL = {
+        codigo: String(av.codigo),
+        nome: String(av.nome || ''),
+        tipo: av.tipo === 'equipe' ? 'equipe' : 'selecao',
+        empresaNome: String(av.empresaNome || ''),
+        mostrarResultado: av.mostrarResultado === true
+      };
+      telaLink = '';
+      if (estado.etapa === 'boasvindas') estado.avaliacaoCodigo = AVAL.codigo;
+      aplicarMarca();
+      render(false);
+    }, function (erro) {
+      // Servidor respondeu "não" (código inexistente ou desativado) => link inválido; senão, falha de conexão.
+      if (erro && erro.resposta) { telaLink = 'invalido'; }
+      else { telaLink = 'erro'; erroLink = (erro && erro.message) || ''; }
+      render(true);
+    });
+  }
+
+  // Nome da empresa no cabeçalho e no título da aba.
+  function aplicarMarca() {
+    var empresa = nomeEmpresa();
+    var selo = document.getElementById('topo-empresa');
+    if (selo) { selo.textContent = empresa; selo.hidden = !empresa; }
+    document.title = empresa ? 'Teste DISC · ' + empresa : 'Teste DISC';
   }
 
   /* -------------------------- Eventos ------------------------------ */
@@ -942,7 +1362,9 @@
         enviarIdentificacao(form);
       });
       ['nome', 'telefone', 'idade', 'funcao', 'empresa', 'vaga'].forEach(function (campo) {
-        form.querySelector('#' + campo).addEventListener('change', function () {
+        var el = form.querySelector('#' + campo);
+        if (!el) return;   // na avaliação de equipe, vaga e empresa não aparecem
+        el.addEventListener('change', function () {
           estado[campo] = campo === 'telefone' ? limparTelefone(this.value) : campo === 'idade' ? limparIdade(this.value) : this.value;
           salvar();
         });
@@ -966,11 +1388,17 @@
     return !msg;
   }
 
+  // Valor de um campo do formulário ('' se ele não existir nesta avaliação).
+  function valorCampo(form, id) {
+    var el = form.querySelector('#' + id);
+    return el ? el.value : '';
+  }
+
   function enviarIdentificacao(form) {
     var nome = form.querySelector('#nome').value;
     var tel = form.querySelector('#telefone').value;
     var idade = form.querySelector('#idade').value;
-    var vaga = form.querySelector('#vaga').value;
+    var vaga = valorCampo(form, 'vaga');
     var cons = form.querySelector('#consentimento').checked;
     var okNome = mostrarErro(form, 'nome', validarNome(nome));
     var okTel = mostrarErro(form, 'telefone', validarTelefone(tel));
@@ -984,8 +1412,8 @@
     estado.nome = normalizarNome(nome);
     estado.telefone = limparTelefone(tel);
     estado.idade = limparIdade(idade);
-    estado.funcao = limparTextoCurto(form.querySelector('#funcao').value);
-    estado.empresa = limparTextoCurto(form.querySelector('#empresa').value);
+    estado.funcao = limparTextoCurto(valorCampo(form, 'funcao'));
+    estado.empresa = limparTextoCurto(valorCampo(form, 'empresa'));
     estado.vaga = String(vaga || '').trim();
     estado.consentimento = true;
     if (!estado.id) estado.id = gerarId();
@@ -1014,13 +1442,15 @@
 
     switch (acao) {
       case 'comecar':
-        if (estado.etapa === 'concluido') estado = estadoInicial();
+        // Concluído ou dados de outro link: começa do zero.
+        if (estado.etapa === 'concluido' || String(estado.avaliacaoCodigo || '') !== (AVAL ? AVAL.codigo : '')) estado = estadoInicial();
         irPara('identificacao');
         break;
       case 'continuar':
         var salvo = lerStorage(CHAVE_PROGRESSO);
-        estado = progressoValido(salvo) ? migrarProgresso(salvo) : estadoInicial();
+        estado = garantirCampos(progressoValido(salvo) ? migrarProgresso(salvo) : estadoInicial());
         if (estado.etapa === 'boasvindas' || estado.etapa === 'concluido') estado.etapa = 'identificacao';
+        if (estado.etapa === 'confirmacao' && primeiroIncompleto() !== -1) estado.etapa = 'teste';
         if (estado.etapa === 'enviando') estado.etapa = 'revisao';
         if (estado.etapa === 'teste' && !estado.permutacoes) estado.etapa = 'identificacao';
         // Progresso de antes do campo idade: pede a idade antes de seguir.
@@ -1041,7 +1471,7 @@
         irPara('boasvindas');
         break;
       case 'confirmar-ordem':
-        marcarRespondido(ordemNaTela(), true);
+        marcarRespondido(ordemNaTela(), true, true);
         var prox = app.querySelector('[data-acao="proximo"]');
         if (prox) prox.focus();
         anunciar('Ordem registrada. Você já pode avançar.');
@@ -1057,7 +1487,8 @@
           estado.voltarParaRevisao = false;
           var falta = primeiroIncompleto();
           if (falta !== -1 && falta > estado.grupo) { estado.grupo = falta; irPara('teste'); }
-          else { if (falta === -1) completarDemonstracao(); irPara('revisao'); }
+          else if (falta === -1) irDepoisDosGrupos();
+          else irPara('revisao');
         } else {
           estado.grupo++;
           irPara('teste');
@@ -1075,8 +1506,34 @@
       case 'voltar-teste':
         envio = { carregando: false, erro: '' };
         var inc = primeiroIncompleto();
+        if (inc === -1 && estado.validacao && modValidacao()) { estado.confTela = 2; irPara('confirmacao'); break; }
         estado.grupo = inc === -1 ? N - 1 : inc;
         irPara('teste');
+        break;
+      case 'escolher-retrato':
+        if (!estado.validacao) return;
+        estado.validacao.escolhas[Number(alvo.getAttribute('data-rodada'))] = alvo.getAttribute('data-letra');
+        salvar();
+        atualizarConfirmacao();
+        break;
+      case 'marcar-nota':
+        var item = estado.validacao && estado.validacao.montagem.itens[Number(alvo.getAttribute('data-item'))];
+        if (!item) return;
+        estado.validacao.notas[item.id] = Number(alvo.getAttribute('data-nota'));
+        salvar();
+        atualizarConfirmacao();
+        break;
+      case 'conf-anterior':
+        if (estado.confTela === 2) { estado.confTela = 1; irPara('confirmacao'); }
+        else { estado.grupo = N - 1; irPara('teste'); }
+        break;
+      case 'conf-proximo':
+        if (!telaValidacaoCompleta(estado.validacao, estado.confTela === 2 ? 2 : 1)) return;
+        if (estado.confTela !== 2) { estado.confTela = 2; irPara('confirmacao'); }
+        else irPara('revisao');
+        break;
+      case 'link-retentar':
+        carregarAvaliacao();
         break;
       case 'enviar':
       case 'retentar':
@@ -1084,6 +1541,7 @@
         break;
       case 'usar-codigo':
         completarDemonstracao();
+        estado.avaliacaoCodigo = AVAL ? AVAL.codigo : '';
         finalizar(montarPayload(estado, estado.ordens), false);
         break;
       case 'voltar-revisao':
@@ -1119,9 +1577,9 @@
     estado.nome = form.querySelector('#nome').value;
     estado.telefone = limparTelefone(form.querySelector('#telefone').value);
     estado.idade = limparIdade(form.querySelector('#idade').value);
-    estado.funcao = form.querySelector('#funcao').value;
-    estado.empresa = form.querySelector('#empresa').value;
-    estado.vaga = form.querySelector('#vaga').value;
+    estado.funcao = valorCampo(form, 'funcao');
+    estado.empresa = valorCampo(form, 'empresa');
+    estado.vaga = valorCampo(form, 'vaga');
     estado.consentimento = form.querySelector('#consentimento').checked;
   }
 
@@ -1233,10 +1691,12 @@
   }
 
   // Grava a ordem, marca o grupo como respondido e atualiza só o que muda (nada é redesenhado).
-  function marcarRespondido(ordem, respondido) {
+  // aceito: true quando a pessoa tocou em "Esta ordem está certa" sem mexer; mexer depois desfaz.
+  function marcarRespondido(ordem, respondido, aceito) {
     var i = estado.grupo;
     estado.ordens[i] = ordem.slice();
     if (respondido) estado.respondidos[i] = true;
+    estado.aceitos[i] = !!aceito;
     salvar();
     atualizarControles();
   }
@@ -1251,9 +1711,16 @@
     var conf = app.querySelector('#confirmar');
     var querConfirmado = completo ? '.confirmado' : '[data-acao="confirmar-ordem"]';
     if (conf && !conf.querySelector(querConfirmado)) conf.innerHTML = confirmarHtml(completo);
-    // Barra de progresso (anima a largura; não redesenha a tela)
-    var feitos = i + (completo ? 1 : 0);
-    var pct = Math.round((feitos / N) * 100);
+    if (prox) {
+      var rotulo = rotuloProximo(i === N - 1);
+      if (prox.textContent !== rotulo) prox.textContent = rotulo;
+    }
+    atualizarBarra(i + (completo ? 1 : 0));
+  }
+
+  // Barra de progresso (anima a largura; não redesenha a tela)
+  function atualizarBarra(feitos) {
+    var pct = Math.round((feitos / passosTotais()) * 100);
     var visivel = Math.max(pct, 8);
     var barra = app.querySelector('.progresso-barra');
     if (barra) {
@@ -1425,9 +1892,17 @@
     // Só o necessário, só nesta aba: com envio confirmado guarda só o primeiro nome e o protocolo
     // (nada de telefone nem respostas); sem envio guarda o payload para o código continuar visível ao recarregar.
     var primeiroNome = normalizarNome(payload.nome).split(' ')[0];
-    gravarSessao(CHAVE_CONCLUIDO, enviado
+    var sessao = enviado
       ? (protocolo ? { enviado: true, primeiroNome: primeiroNome, protocolo: protocolo } : { enviado: true, primeiroNome: primeiroNome })
-      : { enviado: false, payload: payload });
+      : { enviado: false, payload: payload };
+    // De qual link veio: ao abrir outro link (ou o link geral) nesta aba, a conclusão antiga não aparece.
+    if (AVAL) sessao.avaliacao = AVAL.codigo;
+    // Avaliação que mostra o resultado: guarda só o perfil (letras), para o resumo continuar ao recarregar.
+    if (enviado && AVAL && AVAL.mostrarResultado) {
+      var resumo = resumoDoPayload(payload);
+      if (resumo) { sessao.resumo = resumo; concluido.resumo = resumo; }
+    }
+    gravarSessao(CHAVE_CONCLUIDO, sessao);
     apagarStorage(CHAVE_CONCLUIDO);
     apagarStorage(CHAVE_PROGRESSO);
     estado.concluido = concluido;
@@ -1441,6 +1916,8 @@
     if (primeiroIncompleto() !== -1) { irPara('revisao'); return; }
     if (validarIdade(estado.idade)) { estado.voltarParaRevisao = true; irPara('identificacao'); return; }
     completarDemonstracao();
+    if (destinoAposGrupos() === 'confirmacao') { irDepoisDosGrupos(); return; }
+    estado.avaliacaoCodigo = AVAL ? AVAL.codigo : '';
     var payload;
     try {
       payload = montarPayload(estado, estado.ordens);
@@ -1513,10 +1990,16 @@
       app.innerHTML = '<section class="caixa"><h1 class="titulo-pagina">Não foi possível carregar o teste</h1><p class="subtitulo">Atualize a página. Se o problema continuar, avise o recrutador.</p></section>';
       return;
     }
-    var empresa = nomeEmpresa();
-    var selo = document.getElementById('topo-empresa');
-    if (selo && empresa) { selo.textContent = empresa; selo.hidden = false; }
-    if (empresa) document.title = 'Teste DISC · ' + empresa;
+    // Link de avaliação (?a=SEL1 ou #a-SEL1). Sem servidor configurado o código é ignorado (fluxo geral).
+    var api = root.DISC_API;
+    try {
+      CODIGO_LINK = api && api.codigoAvaliacaoDaUrl ? api.codigoAvaliacaoDaUrl(root.location.search, root.location.hash) : '';
+    } catch (e) { CODIGO_LINK = ''; }
+    var temApi = !!(CONFIG.API_URL && String(CONFIG.API_URL).trim() && api && api.avaliacaoPublica);
+    if (!temApi) CODIGO_LINK = '';
+    // Algo em ?a= ou #a- que não é um código válido: link inválido, sem chamar o servidor.
+    var linkMalFormado = temApi && !CODIGO_LINK && /[?&]a=|^#a-/.test(String(root.location.search || '') + String(root.location.hash || ''));
+    if (!CODIGO_LINK) aplicarMarca();
 
     estado = estadoInicial();
     // Versões antigas guardavam a conclusão (com dados pessoais) no localStorage: remove.
@@ -1524,12 +2007,22 @@
     var salvo = lerStorage(CHAVE_PROGRESSO);
     if (salvo && (!progressoValido(salvo) || progressoExpirado(salvo))) apagarStorage(CHAVE_PROGRESSO);
     var concluido = lerSessao(CHAVE_CONCLUIDO);
+    // Conclusão de outro link (ex.: terminou SEL1 e abriu EQP1 na mesma aba): começa do zero.
+    if (concluido && String(concluido.avaliacao || '') !== CODIGO_LINK) { apagarSessao(CHAVE_CONCLUIDO); concluido = null; }
     if (concluido && (concluido.payload || concluido.enviado)) {
       estado.concluido = concluido;
       estado.etapa = 'concluido';
     }
     app.addEventListener('click', aoClicar);
     ligarDicasGlobais();
+    // Tempo por grupo: pausa com a aba escondida e grava o que já passou.
+    document.addEventListener('visibilitychange', function () {
+      if (!estado) return;
+      if (document.hidden) { if (crono) { pararCronometro(); salvar(); } }
+      else iniciarCronometro();
+    });
+    if (linkMalFormado) { telaLink = 'invalido'; render(false); return; }
+    if (CODIGO_LINK) { carregarAvaliacao(); return; }
     render(false);
   }
 

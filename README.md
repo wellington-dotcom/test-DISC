@@ -33,7 +33,7 @@ Não precisa instalar nada e não tem mensalidade. O site é estático (GitHub P
 
 Para mudar algo depois (por exemplo o `js/config.js`), abra o arquivo no GitHub, clique no lápis, edite e clique em **Commit changes**.
 
-> Nenhum arquivo do site é secreto. A chave de administrador fica **só** no Google, nunca nos arquivos do site.
+> Nenhum arquivo do site é secreto. A chave de primeiro acesso e as senhas ficam **só** no Google, nunca nos arquivos do site.
 
 ---
 
@@ -56,7 +56,7 @@ Os resultados chegam sozinhos na sua planilha e aparecem no painel. O passo a pa
 
 1. Crie uma planilha no Google Planilhas.
 2. **Extensões > Apps Script**: cole o conteúdo de `apps-script/Code.gs`.
-3. Execute a função **setup** uma vez e **copie a chave de administrador** que aparece no registro de execução. Guarde-a em local seguro: é a senha do painel.
+3. Execute a função **setup** uma vez e **copie a chave de primeiro acesso** que aparece no registro de execução. Guarde-a em local seguro: ela cria o seu login no painel (veja "Logins e avaliações").
 4. **Implantar > Nova implantação > App da Web** (Executar como: **Eu**; Quem pode acessar: **Qualquer pessoa**).
 5. Copie a URL que termina em `/exec` e cole em `API_URL` no `js/config.js`.
 
@@ -86,7 +86,7 @@ Cada candidato informa **nome completo** e **telefone com DDD**, que é como voc
 
 Abra `admin.html` (ex.: `https://seu-usuario.github.io/teste-disc/admin.html`).
 
-1. **Entrar:** com servidor, digite a chave de administrador (passo 3 da configuração). Ela fica guardada só até você fechar a aba. Sem servidor, o painel abre direto.
+1. **Entrar:** com servidor, entre com o seu **e-mail e senha** (veja "Logins e avaliações"). A sessão vale até 6 horas sem uso. Sem servidor, o painel abre direto.
 2. **Importar códigos** (quando o candidato mandar um código): cole a mensagem ou o código e clique em **Importar**. Pode colar vários de uma vez.
 3. **Lista:** mostra nome, telefone (clique para abrir o WhatsApp), vaga, data, função e empresa (atual ou última), perfil e as barras D/I/S/C. Use a busca (nome, telefone, função ou empresa) e os filtros de perfil e de status. A **idade** do candidato aparece só nos **Detalhes**, de propósito: para não influenciar a triagem (a lei proíbe discriminar por idade).
 4. **Detalhes:** clique em **Ver detalhes** para ver o gráfico, as características do perfil e o **Guia para a Liderança**.
@@ -96,6 +96,15 @@ Abra `admin.html` (ex.: `https://seu-usuario.github.io/teste-disc/admin.html`).
    - **Copiar guia:** copia o texto pronto para colar no WhatsApp ou no e-mail.
 7. **Comparativo:** mostra a distribuição dos perfis dos aprovados. Ajuda a montar uma equipe equilibrada.
 8. **Exportar CSV:** baixa a lista para abrir no Excel ou no Google Planilhas.
+
+### Logins e avaliações
+
+- **Primeiro acesso:** no painel, toque em **Primeiro acesso**, cole a chave do passo 3 e escolha nome, e-mail e senha (mínimo 8 caracteres). Você vira **administrador**. Esqueceu a senha? Faça o primeiro acesso de novo com a mesma chave e o mesmo e-mail: a senha é redefinida.
+- **Papéis:** o **administrador** vê e faz tudo. O **gestor** de uma empresa vê só os participantes dela, pode mudar o status e escrever observações, mas não exclui nem cria nada.
+- **Empresas e avaliações:** na aba **Empresas**, cadastre o cliente. Na aba **Avaliações**, crie uma avaliação para ele: **Processo seletivo** (candidatos a uma vaga) ou **Avaliação de equipe** (quem já trabalha lá). Cada avaliação ganha um link próprio, como `.../index.html?a=K7QX`. Use **Copiar mensagem** para mandar pelo WhatsApp. Marque **Mostrar resultado** se a pessoa deve ver o próprio perfil no final. Para encerrar, toque em **Desativar**: o link para de funcionar.
+- **Usuários:** na aba **Usuários**, crie o login do gestor, escolha a empresa dele e gere uma senha temporária. Mande a senha por um canal seguro e peça para ele trocá-la em **Trocar senha**.
+- **Confiabilidade:** no fim do teste, o participante passa por uma confirmação rápida. Ele escolhe entre descrições e diz o quanto concorda com algumas frases, inclusive o lado "sombra" dos pontos fortes. O painel mostra se o resultado é de confiabilidade **alta**, **média** ou **baixa** e explica o motivo. O participante nunca vê essa informação.
+- **Prévia:** com `API_URL: 'simulada'`, entre com `admin@previa.com` ou `gestor@previa.com` e a senha `previa123`. Os links de exemplo são `index.html#a-SEL1` e `index.html#a-EQP1`.
 
 ---
 

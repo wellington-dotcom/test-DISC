@@ -1,6 +1,6 @@
 'use strict';
 const { test, expect } = require('@playwright/test');
-const { API_FALSA, coletarErros, configurar, simularApi, ordemNaTela, responderGrupo, preencherIdentificacao, fazerTesteCompleto } = require('./util.js');
+const { API_FALSA, coletarErros, configurar, simularApi, ordemNaTela, responderGrupo, preencherIdentificacao, responderConfirmacao, fazerTesteCompleto } = require('./util.js');
 
 const DADOS = { nome: 'Maria Conceição Ávila', telefone: '11987654321', vaga: 'Atendimento' };
 
@@ -89,6 +89,7 @@ test.describe('Candidato (celular, sem API)', () => {
       await responderGrupo(page, ordem);
       await page.locator('[data-acao="proximo"]').click();
     }
+    await responderConfirmacao(page);
 
     // Revisão
     await expect(page.locator('h1')).toHaveText('Revise suas respostas');
@@ -415,7 +416,7 @@ test.describe('Candidato: lista ordenável dos grupos', () => {
       await responderGrupo(page, ordem);
       await page.locator('[data-acao="proximo"]').click();
     }
-    await expect(page.locator('h1')).toHaveText('Revise suas respostas');
+    await responderConfirmacao(page);
     // Revisão mostra 4 → 1 e "Alterar" volta ao grupo
     await expect(page.locator('.revisao-item').first().locator('.revisao-ordem li')).toHaveCount(4);
     await expect(page.locator('.revisao-item').first().locator('.mini-nota')).toHaveText(['4', '3', '2', '1']);
@@ -556,10 +557,12 @@ test.describe('Candidato: modo demonstração', () => {
       await expect(page.locator('.progresso-topo')).toContainText('Grupo ' + (i + 1) + ' de 3');
       await expect(page.locator('.faixa-demo')).toHaveText(faixa);
       await responderGrupo(page, ordem);
-      if (i === 2) await expect(page.locator('[data-acao="proximo"]')).toHaveText('Revisar respostas');
+      // Depois do último grupo vem a confirmação (também no modo demonstração).
+      if (i === 2) await expect(page.locator('[data-acao="proximo"]')).toHaveText('Avançar');
       await page.locator('[data-acao="proximo"]').click();
     }
-    await expect(page.locator('h1')).toHaveText('Revise suas respostas');
+    await expect(page.locator('.faixa-demo')).toHaveText(faixa);
+    await responderConfirmacao(page);
     await expect(page.locator('.faixa-demo')).toHaveText(faixa);
     await expect(page.locator('.revisao-item')).toHaveCount(3);
     await expect(page.locator('.revisao-item.incompleto')).toHaveCount(0);
@@ -585,5 +588,264 @@ test.describe('Candidato: modo demonstração', () => {
     await page.locator('#form-identificacao button[type="submit"]').click();
     await expect(page.locator('.progresso-topo')).toContainText('Grupo 1 de 25');
     await expect(page.locator('.faixa-demo')).toHaveCount(0);
+  });
+});
+
+// Linha gravada pela API simulada (prévia) para um nome.
+async function linhaSimulada(page, nome) {
+  return page.evaluate((n) => (JSON.parse(localStorage.getItem('disc_planilha_simulada') || '[]')).find((l) => l.nome === n) || null, nome);
+}
+
+test.describe('Candidato: link de avaliação (API simulada)', () => {
+  test('?a=SEL1 personaliza os textos de processo seletivo e envia com o código e a confirmação', async ({ page }) => {
+    const erros = coletarErros(page);
+    await configurar(page, { API_URL: 'simulada' });
+    await page.goto('/index.html?a=SEL1');
+    await expect(page.locator('.boasvindas-sobre')).toHaveText('Processo seletivo · Clínica Exemplo');
+    await expect(page.locator('#topo-empresa')).toHaveText('Clínica Exemplo');
+    await expect(page.locator('.lista-info')).toContainText('No fim, uma confirmação rápida.');
+    await page.locator('[data-acao="comecar"]').click();
+    await expect(page.locator('.subtitulo').first()).toContainText('sua candidatura');
+    await expect(page.locator('#vaga')).toBeVisible();
+    await expect(page.locator('label[for="funcao"]')).toContainText('Função atual ou última');
+    await expect(page.locator('#empresa')).toBeVisible();
+    await expect(page.locator('.consentimento')).toContainText('apenas nesta avaliação da Clínica Exemplo, conduzida pela Notus');
+    await preencherIdentificacao(page, { nome: 'Rita Exemplo Seleção', telefone: '11987654321', vaga: 'Recepção' });
+    await page.locator('#form-identificacao button[type="submit"]').click();
+    const ordem = ['D', 'I', 'S', 'C'];
+    for (let i = 0; i < 25; i++) {
+      await expect(page.locator('.progresso-topo')).toContainText('Grupo ' + (i + 1) + ' de 25');
+      if (i === 0) await page.waitForTimeout(1200);   // tempo medido no grupo 1
+      await responderGrupo(page, ordem);
+      await page.locator('[data-acao="proximo"]').click();
+    }
+    // Retratos: escolhe sempre o de maior total (D > I > S > C); frases: tudo 4, menos a 2ª (2)
+    await responderConfirmacao(page, { escolher: (letras) => letras.slice().sort((a, b) => ordem.indexOf(a) - ordem.indexOf(b))[0], nota: (it, k) => (k === 1 ? 2 : 4) });
+    await expect(page.locator('.resumo-dados')).toContainText('Recepção');
+    await page.locator('[data-acao="enviar"]').click();
+    await expect(page.locator('h1')).toHaveText('Obrigado, Rita!');
+    await expect(page.locator('.agradecimento')).toContainText('O recrutador entrará em contato');
+    await expect(page.locator('#protocolo')).toBeVisible();
+    // SEL1 não mostra o resultado
+    await expect(page.locator('.resumo-perfil, .perfil')).toHaveCount(0);
+
+    const linha = await linhaSimulada(page, 'Rita Exemplo Seleção');
+    expect(linha).not.toBeNull();
+    expect(linha.avaliacao).toBe('SEL1');
+    const v = linha.validacao;
+    expect(v.versao).toBe(1);
+    expect(v.pares).toHaveLength(3);
+    expect(v.escolhas).toHaveLength(3);
+    v.pares.forEach((par, r) => expect(par).toContain(v.escolhas[r]));
+    // Escolheu sempre a letra mais forte do par
+    v.pares.forEach((par, r) => expect(v.escolhas[r]).toBe(par.slice().sort((a, b) => ordem.indexOf(a) - ordem.indexOf(b))[0]));
+    expect(v.itens).toHaveLength(4);
+    expect(v.itens.map((it) => it.tipo).sort()).toEqual(['contraste', 'forca', 'forca', 'sombra']);
+    v.itens.forEach((it) => expect([2, 4]).toContain(it.nota));
+    expect(v.gruposSeg).toHaveLength(25);
+    expect(v.gruposSeg[0]).toBeGreaterThanOrEqual(1);
+    v.gruposSeg.forEach((s) => expect(s).toBeGreaterThan(0));
+    // Grupos em que a ordem inicial já era D,I,S,C foram aceitos sem mexer
+    expect(v.semMexer).toBeGreaterThanOrEqual(0);
+    expect(v.semMexer).toBeLessThanOrEqual(25);
+    expect(v.demonstracao).toBe(false);
+    expect(erros).toEqual([]);
+  });
+
+  test('#a-EQP1 (avaliação de equipe) esconde vaga e empresa e mostra o resumo do perfil no final', async ({ page }) => {
+    const erros = coletarErros(page);
+    await configurar(page, { API_URL: 'simulada' });
+    await fazerTesteCompleto(page, { nome: 'Caio Exemplo Equipe', telefone: '11987654321', funcao: 'Vendedor' }, ['I', 'S', 'D', 'C'], {
+      caminho: '/index.html#a-EQP1',
+      confirmacao: {}
+    });
+    await expect(page.locator('.resumo-dados')).toContainText('Seu cargo/função');
+    await expect(page.locator('.resumo-dados')).not.toContainText('Vaga pretendida');
+    await page.locator('[data-acao="enviar"]').click();
+    await expect(page.locator('h1')).toHaveText('Obrigado, Caio!');
+    await expect(page.locator('.agradecimento')).toContainText('Obrigado por participar da avaliação da equipe.');
+    const resumo = page.locator('.resumo-perfil');
+    await expect(resumo).toBeVisible();
+    const retrato = await page.evaluate(() => window.DISC_VALIDACAO.retratos.I);
+    await expect(resumo.locator('.perfil-retrato')).toHaveText(retrato);
+    await expect(resumo.locator('.tags li').first()).toBeVisible();
+    // Nunca o guia de liderança nem a confiabilidade
+    await expect(resumo).not.toContainText(/lideran|confiabilidade/i);
+    await expect(page.locator('.rodape-nota')).toHaveText('Seus dados serão usados apenas nesta avaliação e excluídos ao final.');
+    await page.reload();
+    await expect(page.locator('.resumo-perfil .perfil-retrato')).toHaveText(retrato);
+    const linha = await linhaSimulada(page, 'Caio Exemplo Equipe');
+    expect(linha.avaliacao).toBe('EQP1');
+    expect(linha.empresa).toBe('');
+    expect(linha.vaga).toBe('');
+    expect(linha.funcao).toBe('Vendedor');
+    // Outro link (ou o link geral) na mesma aba: começa do zero, sem a conclusão (nem o resumo) do EQP1
+    await page.goto('about:blank');
+    await page.goto('/index.html#a-SEL1');
+    await expect(page.locator('.boasvindas-sobre')).toHaveText('Processo seletivo · Clínica Exemplo');
+    await expect(page.locator('.resumo-perfil')).toHaveCount(0);
+    await page.goto('about:blank');
+    await page.goto('/index.html#a-EQP1');
+    await expect(page.locator('.boasvindas-sobre')).toHaveText('Avaliação de equipe · Clínica Exemplo');
+    expect(erros).toEqual([]);
+  });
+
+  test('textos da avaliação de equipe na identificação', async ({ page }) => {
+    await configurar(page, { API_URL: 'simulada' });
+    await page.goto('/index.html#a-EQP1');
+    await expect(page.locator('.boasvindas-sobre')).toHaveText('Avaliação de equipe · Clínica Exemplo');
+    await page.locator('[data-acao="comecar"]').click();
+    await expect(page.locator('#vaga')).toHaveCount(0);
+    await expect(page.locator('#empresa')).toHaveCount(0);
+    await expect(page.locator('label[for="funcao"]')).toContainText('Seu cargo/função');
+    await expect(page.locator('.subtitulo').first()).toHaveText('Precisamos destes dados para vincular o resultado à avaliação da equipe.');
+    await expect(page.locator('.consentimento')).toContainText('apenas nesta avaliação da Clínica Exemplo, conduzida pela Notus');
+  });
+
+  test('código inexistente, desativado ou mal escrito mostra a tela de link inválido', async ({ page }) => {
+    const erros = coletarErros(page);
+    await configurar(page, { API_URL: 'simulada' });
+    for (const caminho of ['/index.html?a=ZZZZ', '/index.html#a-QQ9Q', '/index.html?a=!!']) {
+      await page.goto(caminho);
+      await expect(page.locator('h1')).toHaveText('Link inválido ou avaliação encerrada');
+      await expect(page.locator('main')).toContainText('Fale com quem enviou o link.');
+      await expect(page.locator('[data-acao="comecar"]')).toHaveCount(0);
+    }
+    // Avaliação desativada pelo admin
+    await page.evaluate(() => {
+      const avs = JSON.parse(localStorage.getItem('disc_simulada_avaliacoes'));
+      avs.forEach((a) => { if (a.codigo === 'SEL1') a.ativa = false; });
+      localStorage.setItem('disc_simulada_avaliacoes', JSON.stringify(avs));
+    });
+    await page.goto('/index.html?a=SEL1');
+    await expect(page.locator('h1')).toHaveText('Link inválido ou avaliação encerrada');
+    expect(erros).toEqual([]);
+  });
+});
+
+test.describe('Candidato: etapa de confirmação', () => {
+  test('obrigatória, nada pula de lugar, sobrevive ao recarregar e vai no payload', async ({ page }) => {
+    const erros = coletarErros(page);
+    await page.goto('/index.html');
+    await page.locator('[data-acao="comecar"]').click();
+    await preencherIdentificacao(page, DADOS);
+    await page.locator('#form-identificacao button[type="submit"]').click();
+    const ordem = ['C', 'S', 'I', 'D'];
+    for (let i = 0; i < 25; i++) {
+      await expect(page.locator('.progresso-topo')).toContainText('Grupo ' + (i + 1) + ' de 25');
+      await responderGrupo(page, ordem);
+      if (i === 24) await expect(page.locator('[data-acao="proximo"]')).toHaveText('Avançar');
+      await page.locator('[data-acao="proximo"]').click();
+    }
+    // Tela 1: retratos
+    await expect(page.locator('.progresso-topo')).toContainText('Confirmação 1 de 2');
+    await expect(page.locator('h1')).toHaveText('Qual destes jeitos parece mais com você?');
+    await expect(page.locator('.tela-confirmacao')).toContainText('Para confirmar seu resultado, responda com sinceridade. Não existe resposta certa.');
+    await expect(page.locator('.retrato')).toHaveCount(6);
+    // Texto neutro: sem letras nem nomes de perfil
+    await expect(page.locator('.tela-confirmacao')).not.toContainText(/DISC|Dominante|Influente|Estável|Cauteloso/);
+    const proximo = page.locator('[data-acao="conf-proximo"]');
+    await expect(proximo).toBeDisabled();
+    // Cartões: posição relativa ao card da tela (a página pode rolar ao tocar); botões: barra fixa no celular.
+    const caixas = () => page.locator('.retrato, [data-acao="conf-anterior"], [data-acao="conf-proximo"]').evaluateAll((els) => els.map((e) => {
+      const r = e.getBoundingClientRect();
+      const base = e.closest('.barra-nav') ? { x: 0, y: 0 } : document.querySelector('.tela-confirmacao').getBoundingClientRect();
+      return [Math.round(r.x - base.x), Math.round(r.y - base.y), Math.round(r.width), Math.round(r.height)];
+    }));
+    const antes = await caixas();
+    const rodadas = page.locator('.rodada');
+    for (let r = 0; r < 3; r++) {
+      await rodadas.nth(r).locator('.retrato').nth(1).click();
+      await expect(rodadas.nth(r).locator('.retrato').nth(1)).toHaveAttribute('aria-pressed', 'true');
+      await expect(rodadas.nth(r).locator('.retrato').nth(0)).toHaveAttribute('aria-pressed', 'false');
+      if (r < 2) await expect(proximo).toBeDisabled();
+    }
+    // Troca de ideia na rodada 1
+    await rodadas.nth(0).locator('.retrato').nth(0).click();
+    await expect(rodadas.nth(0).locator('.retrato').nth(0)).toHaveAttribute('aria-pressed', 'true');
+    await page.waitForTimeout(250);
+    expect(await caixas()).toEqual(antes);
+    await expect(proximo).toBeEnabled();
+
+    // Recarregar mantém a montagem e as escolhas
+    const salvo1 = await page.evaluate(() => JSON.parse(localStorage.getItem('disc_progresso_v1')).validacao);
+    await page.reload();
+    await page.locator('[data-acao="continuar"]').click();
+    await expect(page.locator('.progresso-topo')).toContainText('Confirmação 1 de 2');
+    const salvo2 = await page.evaluate(() => JSON.parse(localStorage.getItem('disc_progresso_v1')).validacao);
+    expect(salvo2.montagem).toEqual(salvo1.montagem);
+    await expect(page.locator('.retrato[aria-pressed="true"]')).toHaveCount(3);
+    await proximo.click();
+
+    // Tela 2: frases com escala
+    await expect(page.locator('.progresso-topo')).toContainText('Confirmação 2 de 2');
+    await expect(page.locator('.frase')).toHaveCount(4);
+    await expect(page.locator('.frase').first().locator('.escala-opcao')).toHaveCount(5);
+    await expect(page.locator('.escala-legenda').first()).toBeVisible();   // celular: legenda acima das pílulas 1..5
+    await expect(page.locator('.escala-opcao').first()).toHaveText('1Discordo totalmente');
+    await expect(page.locator('.escala-opcao').first()).toHaveAttribute('aria-label', '1: Discordo totalmente');
+    await expect(proximo).toBeDisabled();
+    const caixas2 = () => page.locator('.escala-opcao, [data-acao="conf-proximo"]').evaluateAll((els) => els.map((e) => {
+      const r = e.getBoundingClientRect();
+      const base = e.closest('.barra-nav') ? { x: 0, y: 0 } : document.querySelector('.tela-confirmacao').getBoundingClientRect();
+      return [Math.round(r.x - base.x), Math.round(r.y - base.y), Math.round(r.width), Math.round(r.height)];
+    }));
+    const antes2 = await caixas2();
+    for (let k = 0; k < 4; k++) {
+      await page.locator('.escala-opcao[data-item="' + k + '"][data-nota="' + (k + 2) + '"]').click();
+      if (k < 3) await expect(proximo).toBeDisabled();
+    }
+    await page.waitForTimeout(250);
+    const depois2 = await caixas2();
+    expect(depois2).toEqual(antes2);
+    await expect(page.locator('.escala-opcao[aria-pressed="true"]')).toHaveCount(4);
+    // Voltar à tela 1 mantém tudo
+    await page.locator('[data-acao="conf-anterior"]').click();
+    await expect(page.locator('.retrato[aria-pressed="true"]')).toHaveCount(3);
+    await proximo.click();
+    await expect(page.locator('.escala-opcao[aria-pressed="true"]')).toHaveCount(4);
+    await expect(proximo).toHaveText('Revisar respostas');
+    await proximo.click();
+    await expect(page.locator('h1')).toHaveText('Revise suas respostas');
+    // Voltar da revisão leva à confirmação
+    await page.locator('[data-acao="voltar-teste"]').click();
+    await expect(page.locator('.progresso-topo')).toContainText('Confirmação 2 de 2');
+    await proximo.click();
+
+    await page.locator('[data-acao="enviar"]').click();
+    const codigo = await page.locator('textarea#codigo').inputValue();
+    const payload = await page.evaluate((c) => window.DISC_CODEC.decode(c), codigo);
+    expect(payload.avaliacao).toBe('');
+    const v = payload.validacao;
+    expect(v.versao).toBe(1);
+    expect(v.escolhas).toEqual(salvo1.montagem.pares.map((p, r) => (r === 0 ? p[0] : p[1])));
+    expect(v.itens.map((it) => it.nota)).toEqual([2, 3, 4, 5]);
+    expect(v.itens.map((it) => it.id)).toEqual(salvo1.montagem.itens.map((it) => it.id));
+    expect(v.gruposSeg).toHaveLength(25);
+    v.gruposSeg.forEach((s) => expect(s).toBeGreaterThan(0));
+    expect(Number.isInteger(v.semMexer)).toBe(true);
+    expect(v.demonstracao).toBe(false);
+    // O painel consegue avaliar
+    const conf = await page.evaluate(async (p) => {
+      await new Promise((ok, erro) => { const s = document.createElement('script'); s.src = 'js/confiabilidade.js'; s.onload = ok; s.onerror = erro; document.head.appendChild(s); });
+      return window.DISC_CONFIABILIDADE.avaliar(p.respostas, p.validacao);
+    }, payload);
+    expect(['alta', 'media', 'baixa']).toContain(conf.nivel);
+    expect(erros).toEqual([]);
+  });
+
+  test('"Esta ordem está certa" conta como aceito sem mexer; mexer depois desfaz', async ({ page }) => {
+    await page.goto('/index.html');
+    await page.locator('[data-acao="comecar"]').click();
+    await preencherIdentificacao(page, DADOS);
+    await page.locator('#form-identificacao button[type="submit"]').click();
+    await page.locator('[data-acao="confirmar-ordem"]').click();
+    let salvo = await page.evaluate(() => JSON.parse(localStorage.getItem('disc_progresso_v1')));
+    expect(salvo.aceitos[0]).toBe(true);
+    const inicial = await ordemNaTela(page);
+    await page.locator('.cartao[data-letra="' + inicial[3] + '"]').focus();
+    await page.keyboard.press('ArrowUp');
+    salvo = await page.evaluate(() => JSON.parse(localStorage.getItem('disc_progresso_v1')));
+    expect(salvo.aceitos[0]).toBe(false);
   });
 });

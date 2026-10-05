@@ -197,3 +197,142 @@ test('idade só no detalhe: o card da lista, os resumos e os filtros não usam r
   });
   assert.ok(/textoIdade\(r\.idade\)/.test(corpo('renderizarDetalhe')), 'detalhe mostra a idade');
 });
+
+/* ---------- Logins, papéis, avaliações e confiabilidade ---------- */
+
+// Validação coerente com o perfil D > I > S > C das respostas '4321' x25 (payloadValido).
+function validacaoDI(extra) {
+  return Object.assign({
+    versao: 1,
+    pares: [['D', 'C'], ['I', 'S'], ['D', 'S']],
+    escolhas: ['D', 'I', 'D'],
+    itens: [
+      { id: 'D-f1', letra: 'D', tipo: 'forca', nota: 5 },
+      { id: 'D-s1', letra: 'D', tipo: 'sombra', nota: 4 },
+      { id: 'I-f2', letra: 'I', tipo: 'forca', nota: 4 },
+      { id: 'C-f3', letra: 'C', tipo: 'contraste', nota: 2 }
+    ],
+    gruposSeg: Array(25).fill(8),
+    semMexer: 0,
+    demonstracao: false
+  }, extra || {});
+}
+
+test('recalcular calcula a confiabilidade (objeto ou texto JSON) e o selo do card segue o nível', () => {
+  const alta = AD.recalcular(payloadValido({ validacao: validacaoDI() }));
+  assert.equal(alta.conf.nivel, 'alta');
+  assert.deepEqual(AD.seloConfiabilidade(alta.conf), { texto: 'Confiabilidade alta', classe: 'selo--verde', nivel: 'alta' });
+
+  const comoTexto = AD.recalcular(payloadValido({ validacao: JSON.stringify(validacaoDI()) }));
+  assert.equal(comoTexto.conf.nivel, 'alta', 'código importado guarda a validação como texto');
+
+  const baixa = AD.recalcular(payloadValido({ validacao: validacaoDI({ escolhas: ['C', 'S', 'S'], gruposSeg: Array(25).fill(1.2) }) }));
+  assert.equal(baixa.conf.nivel, 'baixa');
+  assert.equal(AD.seloConfiabilidade(baixa.conf).classe, 'selo--vermelho');
+  assert.equal(AD.seloConfiabilidade(baixa.conf).texto, 'Confiabilidade baixa');
+
+  const media = AD.seloConfiabilidade({ nivel: 'media' });
+  assert.equal(media.classe, '');
+  assert.equal(media.texto, 'Confiabilidade média');
+
+  const antigo = AD.recalcular(payloadValido());
+  assert.equal(antigo.conf.nivel, 'indisponivel');
+  assert.equal(AD.seloConfiabilidade(antigo.conf), null, 'sem dados = sem selo');
+  assert.equal(AD.seloConfiabilidade(null), null);
+});
+
+test('abas e permissões por papel', () => {
+  assert.deepEqual(AD.abasDoPapel('admin', true), ['lista', 'avaliacoes', 'empresas', 'usuarios', 'comparativo', 'importar']);
+  assert.deepEqual(AD.abasDoPapel('gestor', true), ['lista', 'comparativo']);
+  assert.deepEqual(AD.abasDoPapel('', true), []);
+  assert.deepEqual(AD.abasDoPapel('', false), ['lista', 'comparativo', 'importar'], 'modo local, sem login');
+  const g = AD.permissoes('gestor', true);
+  assert.equal(g.excluir, false);
+  assert.equal(g.criar, false);
+  assert.equal(g.importar, false);
+  assert.equal(g.filtrarEmpresa, false);
+  assert.equal(g.statusObservacoes, true);
+  const a = AD.permissoes('admin', true);
+  assert.ok(a.excluir && a.criar && a.importar && a.filtrarEmpresa && a.statusObservacoes);
+  assert.equal(AD.permissoes('', false).excluir, true, 'modo local continua podendo excluir');
+});
+
+test('gerarSenhaTemporaria: 10 caracteres fáceis de ditar', () => {
+  const { prng } = require('./helpers/fixtures.js');
+  const rnd = prng(7);
+  for (let i = 0; i < 50; i++) {
+    const s = AD.gerarSenhaTemporaria(rnd);
+    assert.match(s, /^[a-hjkmnp-z2-9]{10}$/);
+  }
+  assert.match(AD.gerarSenhaTemporaria(), /^[a-hjkmnp-z2-9]{10}$/, 'sem rnd usa crypto');
+  assert.notEqual(AD.gerarSenhaTemporaria(), AD.gerarSenhaTemporaria());
+});
+
+test('link e mensagem da avaliação', () => {
+  assert.equal(AD.linkAvaliacao('https://site.com/disc/admin.html?x=1#topo', 'SEL1'), 'https://site.com/disc/index.html?a=SEL1');
+  assert.equal(AD.linkAvaliacao('http://localhost:4173/admin.html', 'K7QZ'), 'http://localhost:4173/index.html?a=K7QZ');
+  const link = 'https://site.com/index.html?a=SEL1';
+  const sel = AD.mensagemConvite({ nome: 'Recepcionista 2026', empresaNome: 'Clínica Exemplo', tipo: 'selecao' }, link);
+  assert.match(sel, /processo seletivo de Recepcionista 2026 da Clínica Exemplo/);
+  assert.ok(sel.indexOf(link) !== -1);
+  const eqp = AD.mensagemConvite({ nome: 'Equipe comercial', empresaNome: 'Clínica Exemplo', tipo: 'equipe' }, link);
+  assert.match(eqp, /A Clínica Exemplo está fazendo uma avaliação de perfil da equipe \(Equipe comercial\)/);
+  assert.ok(eqp.indexOf(link) !== -1);
+});
+
+test('textoOrigem: avaliação e empresa no card; "Link geral" sem código', () => {
+  assert.equal(AD.textoOrigem({ avaliacaoNome: 'Recepcionista 2026', empresaNome: 'Clínica Exemplo', avaliacao: 'SEL1' }), 'Recepcionista 2026 · Clínica Exemplo');
+  assert.equal(AD.textoOrigem({ avaliacao: 'ABCD' }), 'Avaliação ABCD');
+  assert.equal(AD.textoOrigem({}), 'Link geral');
+  const r = AD.recalcular(payloadValido({ avaliacaoNome: 'Equipe comercial', empresaNome: 'Clínica Exemplo' }));
+  assert.equal(AD.correspondeBusca(r, 'comercial'), true, 'busca encontra pela avaliação');
+  assert.equal(AD.correspondeBusca(r, 'clínica'), true);
+});
+
+test('resumoValidacao: retratos escolhidos e frases com nota, nomeando os perfis', () => {
+  const reg = AD.recalcular(payloadValido({ validacao: validacaoDI({ escolhas: ['D', 'S', 'D'] }) }));
+  const res = AD.resumoValidacao(reg.validacao, reg.calc);
+  assert.equal(res.retratos.length, 3);
+  assert.deepEqual(res.retratos.map((p) => [p.escolha, p.outra, p.acertou]), [['D', 'C', true], ['S', 'I', false], ['D', 'S', true]]);
+  assert.equal(res.frases.length, 4);
+  const forca = res.frases.find((f) => f.id === 'D-f1');
+  assert.equal(forca.texto, require('../js/validacao.js').afirmacoes.D.forcas[0].texto);
+  assert.equal(forca.notaTexto, 'Concordo totalmente (5/5)');
+  assert.match(forca.rotulo, /traço principal — D Dominância/);
+  assert.match(res.frases.find((f) => f.tipo === 'contraste').rotulo, /contraste/);
+  assert.match(res.frases.find((f) => f.tipo === 'sombra').rotulo, /Excesso/);
+  assert.match(res.frases.find((f) => f.id === 'I-f2').rotulo, /2º traço — I Influência/);
+  assert.equal(AD.resumoValidacao(null, reg.calc), null);
+  assert.equal(AD.resumoValidacao(validacaoDI(), null), null);
+});
+
+test('CSV ganha avaliação, empresa da avaliação e confiabilidade no fim', () => {
+  const csv = AD.gerarCsv([AD.recalcular(payloadValido({ avaliacao: 'SEL1', avaliacaoNome: 'Recepcionista 2026', empresaNome: 'Clínica Exemplo', validacao: validacaoDI() }))]);
+  const linhas = csv.slice(1).split('\r\n').map((l) => l.split(';'));
+  const fim = linhas[0].slice(-3);
+  assert.deepEqual(fim, ['avaliação', 'empresa da avaliação', 'confiabilidade']);
+  assert.deepEqual(linhas[1].slice(-3), ['Recepcionista 2026', 'Clínica Exemplo', 'Alta']);
+});
+
+test('guia copiado leva o aviso quando a confiabilidade é baixa', () => {
+  const reg = AD.recalcular(payloadValido({ validacao: validacaoDI({ escolhas: ['C', 'S', 'S'] }) }));
+  assert.equal(reg.conf.nivel, 'baixa');
+  assert.ok(AD.guiaComoTexto(L.gerarGuia(reg.calc, reg.nome), reg).indexOf(AD.AVISO_GUIA_BAIXA) !== -1);
+  assert.equal(AD.AVISO_GUIA_BAIXA, 'Atenção: a confiabilidade deste resultado é baixa. Use o guia com cautela e confirme em entrevista.');
+});
+
+test('admin.html: login por e-mail e senha, sem a tela de chave, e carrega validacao/confiabilidade antes do admin.js', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const html = fs.readFileSync(path.join(__dirname, '..', 'admin.html'), 'utf8');
+  const scripts = [...html.matchAll(/<script src="([^"]+)"/g)].map((m) => m[1]);
+  const iAdmin = scripts.indexOf('js/admin.js');
+  assert.ok(scripts.indexOf('js/validacao.js') !== -1 && scripts.indexOf('js/validacao.js') < iAdmin);
+  assert.ok(scripts.indexOf('js/confiabilidade.js') !== -1 && scripts.indexOf('js/confiabilidade.js') < iAdmin);
+  assert.ok(scripts.indexOf('js/scoring.js') < scripts.indexOf('js/confiabilidade.js'));
+  assert.match(html, /id="campo-email"/);
+  assert.match(html, /id="campo-senha"/);
+  assert.match(html, /id="form-primeiro"/);
+  assert.doesNotMatch(html, /campo-chave/);
+  assert.match(html, /Prévia: <span class="negrito">admin@previa\.com<\/span> ou <span class="negrito">gestor@previa\.com<\/span>, senha <span class="negrito">previa123<\/span>/);
+});

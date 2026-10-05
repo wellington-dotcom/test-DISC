@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
+const crypto = require('node:crypto');
 
 const CODIGO = fs.readFileSync(path.join(__dirname, '..', '..', 'apps-script', 'Code.gs'), 'utf8');
 
@@ -67,8 +68,11 @@ function carregarGas(opcoes) {
   };
   const logs = [];
   const sleeps = [];
-  const cache = {};
+  const cache = {};            // chave -> { valor, expira (ms no relógio do cache) }
+  const relogio = { deslocamentoMs: 0 };   // avançar para simular o tempo passando (cache e agora_)
+  const agoraCache = () => Date.now() + relogio.deslocamentoMs;
   let uuid = 0;
+  let digests = 0;
   const contexto = {
     console: { log() {}, error() {}, warn() {} },
     JSON, Math, Date, Number, String, Object, Array, RegExp, Error, isNaN, isFinite, parseInt,
@@ -92,18 +96,37 @@ function carregarGas(opcoes) {
         uuid++;
         const h = (uuid * 2654435761 >>> 0).toString(16).padStart(8, '0');
         return h + '-abcd-4ef0-9123-' + h + 'cafe';
+      },
+      DigestAlgorithm: { SHA_256: 'SHA_256' },
+      Charset: { UTF_8: 'UTF_8' },
+      // Igual ao Apps Script: devolve os bytes COM sinal (-128..127).
+      computeDigest: (alg, texto, charset) => {
+        if (alg !== 'SHA_256' || charset !== 'UTF_8') throw new Error('computeDigest: uso inesperado');
+        digests++;
+        return Array.from(crypto.createHash('sha256').update(String(texto), 'utf8').digest(), (b) => (b > 127 ? b - 256 : b));
       }
     },
     Logger: { log: (m) => { logs.push(String(m)); } },
     CacheService: {
       getScriptCache: () => ({
-        get: (k) => (Object.prototype.hasOwnProperty.call(cache, k) ? cache[k] : null),
-        put: (k, v) => { cache[k] = String(v); }
+        get: (k) => {
+          if (!Object.prototype.hasOwnProperty.call(cache, k)) return null;
+          if (cache[k].expira <= agoraCache()) { delete cache[k]; return null; }
+          return cache[k].valor;
+        },
+        put: (k, v, seg) => {
+          if (seg !== undefined && seg > 21600) throw new Error('CacheService: validade máxima é 21600 s');
+          cache[k] = { valor: String(v), expira: agoraCache() + (seg === undefined ? 600 : seg) * 1000 };
+        },
+        remove: (k) => { delete cache[k]; }
       })
     }
   };
   vm.createContext(contexto);
   vm.runInContext(CODIGO, contexto, { filename: 'Code.gs' });
+  // O relógio do servidor (agora_) acompanha o do cache, para testar bloqueio e sessão expirada.
+  contexto.agora_ = () => Date.now() + relogio.deslocamentoMs;
+  function avancar(ms) { relogio.deslocamentoMs += ms; }
 
   function post(corpo) {
     const conteudo = typeof corpo === 'string' ? corpo : JSON.stringify(corpo);
@@ -114,7 +137,11 @@ function carregarGas(opcoes) {
   function assertJson(saida) {
     if (!saida || saida.mime !== 'application/json') throw new Error('resposta sem MimeType JSON');
   }
-  return { g: contexto, props, abas, logs, sleeps, cache, post, aba: () => abas.Respostas };
+  return {
+    g: contexto, props, abas, logs, sleeps, cache, post, avancar,
+    aba: () => abas.Respostas,
+    digests: () => digests
+  };
 }
 
 module.exports = { carregarGas };
