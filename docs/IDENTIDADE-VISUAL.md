@@ -31,7 +31,8 @@ Tons funcionais permitidos:
 
 ## Regras (seguir à risca)
 
-1. **Celular primeiro (375px):** sem rolagem lateral, nenhum texto pode estourar a caixa e os campos de digitação ficam com **16px** no celular.
+1. **Onde vale o celular primeiro (375px):** só no que o participante usa — responder o teste/pesquisa/avaliação (`index.html`) e ler o relatório (`relatorio.html`). Ali: sem rolagem lateral, nenhum texto pode estourar a caixa e os campos de digitação ficam com **16px** no celular.
+   **Painel (`admin.html`) é feito para o computador** (decisão do dono, out/2026): edição, cadastros, organograma, geração de relatórios e configurações são pensados para tela de computador (a partir de ~1024px). No celular o painel não precisa ser otimizado; basta não quebrar (nada de investir em gestos de toque ou layouts móveis para tarefas de edição).
 2. **Minimalista:** nada de bloco de cor sólida em card ou área de informação. Os fundos de card permitidos são:
    - **branco**;
    - **suave**: `--nevoa`;

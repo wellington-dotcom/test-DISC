@@ -6,6 +6,10 @@ Site estático (HTML/CSS/JS puro, sem build) + backend Google Apps Script. Contr
 Siga `docs/IDENTIDADE-VISUAL.md` à risca (identidade nova out/2026: laranja `#F34405` + azul-escuro `#13283F`, logo da estrela) e use as peças de `assets/notus.css` e `assets/icone.svg` (não crie cores/estilos fora dos tokens). A identidade antiga amarelo+preto foi substituída.
 Referência viva: `theROCCO-data/bi-isabella-eleuterio` (cópia: `wellington-dotcom/bi-isabella-eleuterio`, branch `ajuste/reestruturacao-visual`).
 
+## Celular × computador
+- Celular é prioridade só para quem RESPONDE (teste, pesquisa, avaliação) e para quem LÊ o relatório.
+- O painel (edição, cadastros, organograma, relatórios, configuração) é para computador; não gaste esforço com versão móvel dele.
+
 ## Fluxo de trabalho com o dono do projeto
 - Mudanças visuais: publicar primeiro uma **prévia (artefato)** para ele ver; **só fazer push depois que ele aprovar**.
 - Testes: `npm test` (unidade) e `npm run test:e2e` (Playwright). Não quebre os seletores usados em `tests/e2e`.
