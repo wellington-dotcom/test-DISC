@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="color-scheme" content="light"><title>Seu link de acesso</title></head>
+<body style="margin:0;padding:0;background:#F4F2EF;font-family:'Plus Jakarta Sans',Arial,Helvetica,sans-serif">
+<span style="display:none;max-height:0;overflow:hidden;opacity:0">Seu link para entrar no painel.</span>
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F4F2EF;padding:32px 12px">
+<tr><td align="center">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#FFFFFF;border-radius:16px;overflow:hidden">
+<tr><td style="height:6px;background:#F34405;font-size:0;line-height:0">&nbsp;</td></tr>
+<tr><td style="padding:32px 32px 8px"><img src="https://disc.gestaosemcaos.com.br/assets/marca/gsc-logo-email.png" width="200" alt="Gestão sem Caos" style="display:block;width:200px;max-width:100%;height:auto;border:0"></td></tr>
+<tr><td style="padding:16px 32px 8px">
+<h1 style="margin:0 0 16px;font-size:24px;line-height:1.25;color:#13283F;font-weight:700">Seu link de acesso</h1>
+<p style="margin:0 0 16px;font-size:16px;line-height:1.6;color:#13283F">Olá!</p><p style="margin:0 0 16px;font-size:16px;line-height:1.6;color:#13283F">Use o botão abaixo para entrar no painel do Mapa DISC sem digitar a senha.</p>
+<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 24px"><tr><td style="border-radius:999px;background:#F34405">
+<a href="{{ .ConfirmationURL }}" style="display:inline-block;padding:14px 28px;font-size:16px;font-weight:700;color:#FFFFFF;text-decoration:none;border-radius:999px">Entrar no painel</a>
+</td></tr></table>
+<p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#5B6878">O link vale por 1 hora e só pode ser usado uma vez.</p>
+<p style="margin:0 0 8px;font-size:13px;line-height:1.6;color:#5B6878">Se o botão não funcionar, copie este endereço no navegador:<br><a href="{{ .ConfirmationURL }}" style="color:#F34405;word-break:break-all">{{ .ConfirmationURL }}</a></p>
+</td></tr>
+<tr><td style="padding:24px 32px 32px;border-top:1px solid #E7E2DC">
+<p style="margin:0;font-size:12px;line-height:1.6;color:#8A94A2">Gestão sem Caos · Mapa DISC<br>Você recebeu este e-mail porque ele foi pedido para {{ .Email }}. Se não foi você, pode ignorar: nada muda na sua conta.</p>
+</td></tr>
+</table>
+</td></tr></table>
+</body></html>
