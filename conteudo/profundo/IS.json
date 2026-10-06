@@ -1,0 +1,287 @@
+{
+  "codigo": "IS",
+  "retrato": [
+    "No trabalho, você tende a ser a pessoa com quem todo mundo gosta de conversar. Não necessariamente a mais barulhenta da sala, mas aquela que lembra do aniversário do colega, percebe quando alguém voltou diferente das férias e faz o estagiário se sentir parte do time na primeira semana. Você costuma trabalhar bem em grupo, gosta de ajudar e se sente melhor quando o ambiente está em paz. Para você, um bom dia de trabalho é aquele em que as coisas andaram e ninguém saiu magoado.",
+    "Sua Influência vem na frente e a Estabilidade dá a ela profundidade e constância. A Influência traz a abertura, o bom humor e a vontade de se conectar; a Estabilidade traz a paciência, a escuta e a lealdade de longo prazo. Juntas, criam um calor humano que não é de festa, é de casa. A tensão interna é clara: você quer agradar e quer evitar atrito, e as duas vontades se reforçam. O resultado é que conversas difíceis costumam ser adiadas e pedidos que você deveria recusar acabam virando mais um sim.",
+    "Quem convive com você costuma descrever alguém acessível, gentil e confiável, a pessoa que escuta de verdade. Colegas tendem a procurar você para desabafar, pedir conselho ou entender o que está acontecendo no time. Clientes costumam permanecer por causa da relação que você constrói. Do outro lado, pessoas mais diretas podem achar que você enrola para dizer o que pensa ou que suaviza demais as críticas. Gestores às vezes não percebem o tamanho da sua sobrecarga, porque você raramente reclama.",
+    "Você costuma chegar ao seu melhor em ambientes colaborativos, com relações de longo prazo e espaço para cuidar das pessoas. Integrar quem chega, acompanhar clientes ao longo do tempo, manter a equipe unida numa fase difícil, mediar uma tensão entre áreas: nessas cenas sua mistura é rara e valiosa. O que transforma bondade em força profissional é aprender a usar a mesma gentileza para dizer não, dar uma notícia ruim ou defender a sua posição. Quando isso acontece, sua opinião passa a pesar tanto quanto a sua simpatia."
+  ],
+  "manual": {
+    "como_falar_comigo": [
+      "Comece perguntando como eu estou; para mim isso não é perda de tempo.",
+      "Explique o motivo do pedido e como ele afeta as pessoas envolvidas.",
+      "Avise mudanças com antecedência e me dê tempo para me organizar.",
+      "Se eu fizer algo errado, fale em particular, com calma e com exemplo.",
+      "Pergunte minha opinião diretamente; nem sempre vou oferecê-la sem convite.",
+      "Mostre que você conta comigo e diga o que espero receber de volta."
+    ],
+    "evite": [
+      "Gritar, ironizar ou expor alguém na frente do grupo.",
+      "Mudar tudo de uma hora para outra sem explicação.",
+      "Interpretar meu silêncio como concordância.",
+      "Me pressionar por uma resposta imediata em decisões que afetam pessoas."
+    ],
+    "me_energiza": [
+      "Ver uma pessoa que eu ajudei crescer ou superar uma dificuldade.",
+      "Trabalhar num time unido, em que todo mundo se apoia.",
+      "Relações de longo prazo com clientes e colegas.",
+      "Agradecimentos sinceros, mesmo pequenos.",
+      "Um ambiente previsível em que dá para planejar a semana."
+    ],
+    "me_desgasta": [
+      "Clima de disputa, fofoca ou hostilidade entre colegas.",
+      "Ter que dar notícias duras ou demitir alguém.",
+      "Mudanças constantes de prioridade sem motivo claro.",
+      "Pressão agressiva por resultado a qualquer custo.",
+      "Sentir que alguém do time ficou para trás e ninguém se importou."
+    ]
+  },
+  "dimensoes": {
+    "dia_a_dia": {
+      "texto": "Seu dia de trabalho tende a ter um ritmo constante e muito relacional. Você costuma cuidar das suas tarefas e, ao mesmo tempo, ficar disponível para quem precisa: tira uma dúvida, ajuda numa planilha, acolhe um desabafo. Essa disponibilidade é parte do seu valor, mas também é o que mais consome sua agenda. É comum que você termine o dia tendo ajudado cinco pessoas e com a sua própria entrega atrasada, e que resolva isso ficando até mais tarde em vez de dizer 'agora não consigo'.",
+      "itens": [
+        { "titulo": "Horário de ajuda", "texto": "Defina duas janelas no dia para atender colegas. Fora delas, responda: 'Consigo te ajudar às 15h, pode ser?'." },
+        { "titulo": "Sua entrega primeiro", "texto": "Comece o dia pela sua tarefa mais importante por pelo menos uma hora antes de abrir espaço para pedidos dos outros." },
+        { "titulo": "Registro das ajudas", "texto": "Por duas semanas, anote quanto tempo você dedicou a ajudar outras pessoas. O número costuma surpreender e orienta a conversa com o gestor." },
+        { "titulo": "Rotina que protege", "texto": "Mantenha uma sequência fixa para as tarefas recorrentes. Previsibilidade libera sua energia para as pessoas." }
+      ]
+    },
+    "decisao": {
+      "texto": "Você tende a decidir pensando no impacto sobre as pessoas. Antes de escolher, costuma considerar quem vai ficar desconfortável, quem vai precisar se adaptar e como manter o grupo junto. Essa sensibilidade evita muitas decisões frias e mal recebidas. A armadilha é que, em escolhas que inevitavelmente desagradam alguém, você pode adiar indefinidamente, buscar um consenso que não vai chegar ou escolher a opção que gera menos atrito, e não a melhor. Também é comum pedir muitas opiniões para não carregar a decisão por conta própria.",
+      "itens": [
+        { "titulo": "Prazo para decidir", "texto": "Quando uma decisão estiver parada, defina em voz alta a data em que vai bater o martelo. Isso tira você do ciclo de consultas." },
+        { "titulo": "Separe impacto de critério", "texto": "Escreva primeiro qual opção é melhor para o resultado. Depois, planeje como cuidar das pessoas afetadas. Não inverta a ordem." },
+        { "titulo": "Desconforto não é erro", "texto": "Lembre que uma decisão certa pode deixar alguém chateado. O cuidado está em como você comunica, não em evitar a escolha." }
+      ]
+    },
+    "aprendizado": {
+      "texto": "Você costuma aprender melhor num ambiente seguro, com tempo para assimilar e com alguém por perto para tirar dúvidas. Exemplos práticos, explicações passo a passo e a chance de praticar antes de passar por avaliação tendem a funcionar muito bem. Grupos pequenos e mentorias com alguém de confiança rendem mais do que treinamentos competitivos ou expostos. O ponto de atenção é que você pode deixar de perguntar por receio de incomodar, e seguir com uma dúvida importante por mais tempo do que deveria.",
+      "itens": [
+        { "titulo": "Pergunta sem culpa", "texto": "Em todo treinamento, faça pelo menos uma pergunta, mesmo que pareça simples. Quase sempre outra pessoa tinha a mesma dúvida." },
+        { "titulo": "Parceiro de estudo", "texto": "Estude com um colega com quem você tem afinidade. A troca mantém a constância e torna o processo mais leve." },
+        { "titulo": "Pratique antes do palco", "texto": "Antes de aplicar algo novo diante de clientes ou do gestor, ensaie com alguém de confiança. Você ganha firmeza." }
+      ]
+    },
+    "mudanca": {
+      "texto": "Aqui suas duas forças puxam em sentidos diferentes. A Influência gosta de novidade e de gente nova; a Estabilidade prefere o que já é conhecido e funciona. Na prática, você tende a aceitar bem as mudanças quando elas são explicadas, preparadas e respeitam as pessoas, e a sofrer quando chegam de surpresa ou atropelam colegas. Um sistema novo, um chefe novo ou uma reestruturação costumam despertar primeiro uma preocupação com quem vai ser afetado, e só depois o entusiasmo.",
+      "itens": [
+        { "titulo": "Peça o mapa", "texto": "Quando uma mudança for anunciada, pergunte: o que muda, quando e o que se espera de você. Clareza reduz a resistência interna." },
+        { "titulo": "Aliado da transição", "texto": "Use sua proximidade com as pessoas para ajudá-las a se adaptar. Você tende a ser um apoio natural em fases de mudança." },
+        { "titulo": "Diga o que preocupa", "texto": "Se a mudança incomoda, fale com o gestor em vez de resistir em silêncio. Sua preocupação pode revelar um risco real." }
+      ]
+    },
+    "tempo_organizacao": {
+      "texto": "Você costuma ser uma pessoa constante, que cumpre a rotina e não deixa as coisas desandarem. O problema raramente é organização; é proteção do tempo. Como você tem dificuldade de recusar pedidos, sua agenda tende a ser preenchida pelas prioridades dos outros. Também é comum que você aceite prazos que não cabem só para não criar desconforto, e depois compense com esforço extra. A sua lista não está bagunçada: está cheia de coisas que não deveriam estar nela.",
+      "itens": [
+        { "titulo": "Pergunta da prioridade", "texto": "Quando receber um pedido novo, pergunte: 'Isso entra no lugar de quê?'. Assim a escolha deixa de ser só sua." },
+        { "titulo": "Não com alternativa", "texto": "Treine recusar oferecendo outra opção: 'Esta semana não consigo, mas na próxima terça posso'." },
+        { "titulo": "Bloco intocável", "texto": "Reserve três manhãs por semana para o seu trabalho principal e marque na agenda como compromisso." },
+        { "titulo": "Revisão quinzenal", "texto": "A cada duas semanas, olhe sua lista e devolva ou renegocie pelo menos uma tarefa que não é sua." }
+      ]
+    },
+    "comunicacao": {
+      "texto": "Sua comunicação tende a ser calorosa, paciente e acolhedora. Você costuma ouvir mais do que fala, faz perguntas sobre a pessoa e adapta o tom para não ferir. Em conversas um a um, isso cria confiança rápido. O ponto de atenção é a clareza: na vontade de ser gentil, você pode dar tantas voltas que a mensagem principal se perde, ou suavizar tanto uma crítica que a outra pessoa nem percebe que precisa mudar. Na escrita, é comum pedir desculpas demais e diluir pedidos legítimos.",
+      "itens": [
+        { "titulo": "Mensagem principal em uma frase", "texto": "Antes de uma conversa importante, escreva em uma frase o que a pessoa precisa entender. Garanta que essa frase seja dita." },
+        { "titulo": "Menos desculpas", "texto": "Revise suas mensagens e retire os 'desculpa incomodar' desnecessários. Pedir algo do trabalho não é incômodo." },
+        { "titulo": "Gentil e claro", "texto": "Use a estrutura: reconheço o esforço, este ponto precisa mudar, conto com você para isso. As três partes, sempre." },
+        { "titulo": "Fale nas reuniões grandes", "texto": "Você se expressa bem em grupos pequenos. Em reuniões grandes, prepare uma contribuição e diga nos primeiros 15 minutos." }
+      ]
+    },
+    "conflito": {
+      "texto": "Conflito costuma ser o seu ponto mais sensível. Você tende a evitá-lo, a ceder para manter a paz e a fazer o papel de mediação quando outras pessoas brigam. Como mediação, você é excelente. Como parte do conflito, é comum engolir o incômodo, concordar na hora e ficar remoendo depois. Quando o acúmulo é grande, pode aparecer uma resistência silenciosa: você não discute, mas também não colabora com o mesmo empenho. Quem convive pode não entender a mudança, porque o motivo nunca foi dito.",
+      "itens": [
+        { "titulo": "Regra das 72 horas", "texto": "Se algo incomodou e ainda incomoda três dias depois, merece uma conversa. Marque e use um roteiro curto." },
+        { "titulo": "Roteiro gentil", "texto": "'Quando aconteceu tal coisa, fiquei em situação difícil com tal tarefa. Podemos combinar diferente?'. Fato, efeito, pedido." },
+        { "titulo": "Discordar não é romper", "texto": "Lembre que uma relação boa sobrevive a uma discordância. Muitas vezes, fica até mais forte depois dela." },
+        { "titulo": "Use sua mediação", "texto": "Quando duas pessoas brigarem, convide as duas a dizer o que precisam, não o que o outro fez. Você conduz isso bem." }
+      ]
+    },
+    "motivadores": {
+      "texto": "Você tende a se motivar quando sente que pertence e que faz diferença na vida de alguém. Ver um cliente satisfeito há anos, um colega que você ajudou a crescer ou uma equipe que atravessou junto uma fase difícil costuma dar sentido ao seu trabalho. Reconhecimento importa, mas de um jeito particular: um agradecimento sincero e pessoal vale mais do que um prêmio público. Estabilidade, clima amigável e a confiança de que seu esforço é notado formam a base da sua dedicação.",
+      "itens": [
+        { "titulo": "Impacto em pessoas", "texto": "Peça para conhecer o efeito do seu trabalho em quem é atendido: um retorno de cliente, uma história real." },
+        { "titulo": "Time unido", "texto": "Ambientes de cooperação multiplicam sua energia. Proponha rituais simples de integração, como um café mensal." },
+        { "titulo": "Agradecimento pessoal", "texto": "Diga ao seu gestor que um retorno individual, mesmo curto, motiva você mais do que métricas no painel." }
+      ]
+    },
+    "desmotivadores": {
+      "texto": "Sua motivação tende a cair em ambientes competitivos demais, em que colegas disputam espaço e o clima fica tenso. Lideranças agressivas, cobranças em público e mudanças constantes sem explicação costumam desgastar você profundamente, mesmo que você não demonstre. Também pesa ver injustiça com alguém do time, ou sentir que o seu cuidado com as pessoas é visto como algo menor do que entregar números. Quando a motivação cai, você raramente reclama: tende a se retrair e a fazer só o necessário.",
+      "itens": [
+        { "titulo": "Clima de disputa", "texto": "Se o ambiente estiver competitivo, crie alianças de colaboração com colegas próximos e proponha metas compartilhadas." },
+        { "titulo": "Cobrança pública", "texto": "Converse com seu gestor sobre preferir retornos em particular. Muitas lideranças ajustam quando sabem disso." },
+        { "titulo": "Desânimo silencioso", "texto": "Se perceber que está fazendo só o mínimo, procure alguém de confiança e diga o que está pesando, antes que vire distância." }
+      ]
+    },
+    "necessidades": {
+      "texto": "Você tende a precisar de um ambiente acolhedor, previsível e colaborativo. Segurança para errar, clareza sobre o que se espera de você e lideranças acessíveis fazem muita diferença no seu rendimento. Também precisa de tempo para se adaptar a mudanças e de espaço para cuidar das relações, que são parte central da forma como você trabalha. O que nem sempre aparece, mas é essencial, é permissão para dizer não: um combinado explícito com o gestor sobre limites e prioridades protege você de assumir mais do que cabe.",
+      "itens": [
+        { "titulo": "Previsibilidade", "texto": "Combine com a liderança um ritual de alinhamento semanal. Saber o que vem pela frente libera sua melhor energia." },
+        { "titulo": "Segurança para opinar", "texto": "Você contribui mais quando sente que discordar não vai afetar a relação. Peça esse acordo de forma explícita." },
+        { "titulo": "Limite combinado", "texto": "Alinhe com o gestor o que é prioridade e quem pode passar tarefas para você. Isso facilita recusar o resto." }
+      ]
+    },
+    "como_lidera": {
+      "texto": "Quando lidera, mesmo sem cargo, você tende a liderar pelo cuidado. Conhece cada pessoa, sabe o que ela está vivendo, apoia e cria um ambiente de confiança em que as pessoas gostam de trabalhar. Equipes lideradas por você costumam ter baixa rotatividade e alta lealdade. O desafio é a firmeza: cobrar desempenho, dar retorno negativo, tomar decisões impopulares ou desligar alguém costumam custar muito para você. Quando isso é adiado, o time sente o peso, e quem entrega mais acaba carregando quem entrega menos.",
+      "itens": [
+        { "titulo": "Combinados claros desde o início", "texto": "Defina com cada pessoa metas e critérios de pronto por escrito. Cobrar fica mais fácil quando o combinado é explícito." },
+        { "titulo": "Retorno quinzenal", "texto": "Tenha conversas individuais a cada duas semanas com um ponto positivo e um ponto de ajuste, sempre os dois." },
+        { "titulo": "Justiça com quem entrega", "texto": "Pergunte-se: quem está carregando o time? Proteger quem rende pouco pode ser injusto com quem rende muito." },
+        { "titulo": "Decisão com cuidado", "texto": "Tome a decisão difícil no prazo e invista seu talento no como comunicar. As duas coisas cabem juntas." }
+      ]
+    },
+    "como_prefere_ser_liderado": {
+      "texto": "Você tende a render mais com lideranças próximas, respeitosas e consistentes, que explicam o contexto, avisam com antecedência e reconhecem o esforço de forma pessoal. Gestores que gritam, mudam de ideia toda semana ou só aparecem para cobrar costumam fazer você se fechar. O que talvez você precise, embora não peça, é de alguém que pergunte ativamente sua opinião, porque você raramente vai disputar espaço para dá-la, e que perceba quando você está assumindo demais.",
+      "itens": [
+        { "titulo": "Peça para entrar na consulta", "texto": "Diga ao seu gestor que você contribui mais quando recebe convite para opinar. Isso ajuda quem lidera a acessar suas ideias." },
+        { "titulo": "Sinalize sobrecarga", "texto": "Combine um sinal simples para avisar que a carga passou do limite, como uma mensagem padrão. Use quando acontecer." },
+        { "titulo": "Peça retorno direto", "texto": "Diga ao gestor que prefere retornos claros, ditos com respeito, a críticas suavizadas demais." }
+      ]
+    },
+    "papel_na_equipe": {
+      "texto": "Na equipe, você tende a ser a cola. É quem mantém o grupo unido, acolhe quem chega, percebe quem está mal e suaviza as tensões. Em projetos, costuma ser a pessoa confiável que faz o trabalho de bastidor sem buscar holofote e que lembra de incluir quem ficou de fora. Muitas vezes, você só percebe o tamanho do seu papel quando sai de férias e o clima muda. O cuidado é não se transformar no depósito de tarefas e desabafos de todo mundo, sem espaço para as suas próprias entregas e opiniões.",
+      "itens": [
+        { "titulo": "Integração de novatos", "texto": "Ofereça-se para receber quem chega. Você tende a encurtar muito o tempo de adaptação de uma pessoa nova." },
+        { "titulo": "Termômetro do time", "texto": "Use sua percepção para avisar a liderança quando o clima estiver piorando, antes que vire conflito aberto." },
+        { "titulo": "Sua voz também conta", "texto": "Em cada projeto, registre ao menos uma opinião sua sobre o rumo do trabalho, além de apoiar a dos outros." }
+      ]
+    },
+    "persuasao_negociacao": {
+      "texto": "Você tende a convencer pela confiança, não pela pressão. As pessoas compram de você porque sentem que você está do lado delas, e isso costuma gerar relações comerciais e internas muito duradouras. Seu estilo funciona especialmente bem em negociações longas, com clientes recorrentes e em situações que pedem empatia. O risco é ceder demais: dar desconto antes de ser pedido, aceitar prazo apertado para não decepcionar ou não insistir no fechamento por receio de invadir o espaço do outro. A relação fica ótima e a margem, nem tanto.",
+      "itens": [
+        { "titulo": "Limite escrito antes", "texto": "Antes de negociar, anote o mínimo aceitável e leve no papel. Se chegar perto, diga que precisa consultar alguém." },
+        { "titulo": "Peça o fechamento", "texto": "No fim de cada conversa comercial, faça uma pergunta direta: 'Podemos seguir com isso?'. Não espere o outro propor." },
+        { "titulo": "Cuide dos dois lados", "texto": "Lembre que defender sua empresa também é cuidar de pessoas: do seu time, que precisa de um acordo viável." },
+        { "titulo": "Use a escuta", "texto": "Seu ponto forte é descobrir o que o outro realmente precisa. Pergunte bastante e construa a proposta sobre isso." }
+      ]
+    },
+    "ambientes": {
+      "texto": "Você tende a render mais em contextos colaborativos, com relações de longo prazo, ritmo constante e propósito claro de cuidar de pessoas: acompanhamento de clientes, integração de equipes, suporte, desenvolvimento de gente e mediação entre áreas. Ambientes estáveis, com liderança próxima e clima respeitoso, costumam potencializar seu estilo. Por outro lado, contextos de competição agressiva, mudanças constantes, cobrança pública e decisões frias tendem a drenar sua energia, mesmo quando você continua entregando por fora.",
+      "itens": [
+        { "titulo": "Onde tende a fluir", "texto": "Tarefas de relacionamento contínuo, acolhimento, suporte, ensino e mediação, em equipes com espírito de cooperação." },
+        { "titulo": "Onde tende a pesar", "texto": "Negociações duras e frequentes, ambientes de disputa interna, metas agressivas sem preocupação com as pessoas e mudança contínua." },
+        { "titulo": "Como se proteger", "texto": "Em ambientes mais duros, mantenha um pequeno grupo de colegas de confiança e conversas regulares com a liderança." }
+      ]
+    },
+    "pontos_cegos": {
+      "texto": "Seus pontos cegos tendem a nascer da generosidade. Você pode achar que está ajudando quando, na verdade, está fazendo pelo outro algo que ele precisava aprender. Pode acreditar que evitou um conflito quando apenas o adiou e o tornou maior. Pode confundir lealdade com aceitar tudo de um gestor ou colega. E pode não perceber o quanto sua opinião faz falta nas decisões, porque você deixa os mais falantes conduzirem. O efeito acumulado é muito afeto e pouca influência nos momentos em que mais importa.",
+      "itens": [
+        { "titulo": "Ajuda que vicia", "texto": "Se alguém volta sempre com o mesmo pedido, ensine em vez de fazer. É mais generoso a longo prazo." },
+        { "titulo": "Paz de fachada", "texto": "Clima tranquilo nem sempre é clima saudável. Pergunte ao time o que ninguém está dizendo." },
+        { "titulo": "Sim automático", "texto": "Observe por uma semana quantas vezes disse sim quando queria dizer não. Escolha uma situação para mudar." },
+        { "titulo": "Opinião guardada", "texto": "Você costuma ter uma leitura valiosa das pessoas e não compartilhar. Diga, mesmo que não te perguntem." }
+      ]
+    },
+    "valoriza_nos_outros": {
+      "texto": "Você tende a valorizar pessoas gentis, leais, colaborativas e que tratam todos com respeito, do estagiário ao diretor. Admira quem escuta, quem pede desculpas quando erra e quem divide o mérito. Costuma se afastar de pessoas agressivas, competitivas demais ou que expõem os outros. Vale perceber que algumas pessoas mais duras no estilo, diretas e exigentes, podem ser exatamente quem ajuda você a sair da zona de conforto e a ganhar firmeza. Nem toda franqueza é falta de cuidado.",
+      "itens": [
+        { "titulo": "Respeito", "texto": "Você tende a confiar em quem trata bem todas as pessoas, não só as importantes. Isso diz muito para você." },
+        { "titulo": "Lealdade", "texto": "Quem cumpre a palavra e fica do lado do time em momentos difíceis costuma ganhar sua dedicação por anos." },
+        { "titulo": "Aprenda com a franqueza", "texto": "Escolha uma pessoa direta que você respeita e observe como ela diz não. Copie uma frase dela." }
+      ]
+    }
+  },
+  "pressao": {
+    "primeira_reacao": "Quando a pressão começa, você tende a acomodar: aceitar mais tarefas, tranquilizar os colegas, mediar tensões e tentar manter o clima bom a qualquer custo. É comum trabalhar mais horas em silêncio para dar conta de tudo, sem dizer a ninguém que está pesado. Por fora, tudo parece sob controle e com um sorriso.",
+    "se_continua": "Se a pressão continua, a Estabilidade tende a falar mais alto. Você se recolhe, fala bem menos do que costuma e passa a resistir de forma passiva: concorda na reunião, mas não age; adia tarefas; evita certas pessoas. Também é comum guardar mágoas que depois aparecem de uma vez. Quem convive percebe que a sua leveza sumiu.",
+    "como_volta": "Você costuma recuperar o equilíbrio quando consegue conversar com alguém de confiança, sem julgamento, e quando sente que o ambiente voltou a ser seguro. Ter clareza sobre as prioridades, receber um gesto de reconhecimento e retomar uma rotina previsível ajudam muito. Tempo com pessoas queridas, fora do trabalho, também recompõe sua energia.",
+    "sinais": [
+      "Você diz sim para tudo e trabalha até mais tarde sem comentar.",
+      "Fala menos em reuniões e evita dar opinião.",
+      "Começa a adiar conversas e mensagens que antes respondia rápido.",
+      "Concorda com uma decisão e, depois, não consegue se engajar nela.",
+      "Comenta o incômodo com terceiros, mas não com a pessoa envolvida."
+    ],
+    "o_que_ajuda": [
+      "Dizer ao gestor, com uma frase simples, que a carga passou do limite.",
+      "Escolher uma tarefa para recusar ou renegociar esta semana.",
+      "Ter uma conversa franca com a pessoa envolvida, usando fato, efeito e pedido.",
+      "Retomar uma rotina previsível, com horários claros para começar e parar.",
+      "Reservar tempo para pessoas e atividades que recarregam você fora do trabalho."
+    ]
+  },
+  "relacoes": {
+    "D": {
+      "texto": "Com pessoas de Dominância alta, a relação tende a ser a mais desafiadora. A franqueza e a pressa delas podem soar duras para você, e é comum ceder para evitar atrito. Elas, por sua vez, podem achar que você demora a ir ao ponto. Mas há complementaridade: elas trazem decisão, você traz o cuidado com as pessoas. Quando você aprende a falar com franqueza com elas, a parceria tende a funcionar e ganhar respeito.",
+      "dicas": [
+        "Comece pelo assunto principal e deixe a conversa pessoal para o fim.",
+        "Lembre que a objetividade dela raramente é ataque pessoal.",
+        "Diga não com clareza e uma alternativa; ela costuma respeitar isso."
+      ]
+    },
+    "I": {
+      "texto": "Com pessoas de Influência alta, a afinidade costuma ser natural: conversa leve, bom humor, valorização das pessoas. Você tende a ser o lado mais calmo e constante da dupla, e a outra pessoa, o lado mais acelerado e expansivo. O risco é você virar plateia ou acabar com a parte silenciosa do trabalho, enquanto a outra pessoa fica com o palco. Combinados claros sobre papéis evitam esse desequilíbrio.",
+      "dicas": [
+        "Dividam as tarefas visíveis e as de bastidor de forma equilibrada.",
+        "Peça para ela confirmar por escrito o que foi combinado na conversa.",
+        "Mostre suas ideias também; não fique só apoiando as dela."
+      ]
+    },
+    "S": {
+      "texto": "Com pessoas de Estabilidade alta, você tende a encontrar um ambiente seguro e respeitoso: ritmo parecido, paciência e lealdade mútua. É provável que surja uma parceria de longo prazo. O risco é a dupla evitar demais as conversas difíceis e deixar problemas crescerem porque nenhum dos dois quer incomodar. Também é comum que adiem decisões esperando que o outro tome a iniciativa.",
+      "dicas": [
+        "Combinem que vão falar dos problemas cedo, mesmo os pequenos.",
+        "Definam quem decide em cada assunto para não esperar o outro.",
+        "Tragam alguém mais direto quando a decisão estiver parada."
+      ]
+    },
+    "C": {
+      "texto": "Com pessoas de Conformidade alta, a relação costuma ser respeitosa, mas pode ser um pouco distante. Elas valorizam precisão e lógica; você valoriza a conexão e o clima. Podem achar suas explicações pouco objetivas, e você pode senti-las frias. A boa notícia é que vocês dois evitam conflito aberto e trabalham com cuidado. Com clareza nos dados e respeito ao tempo delas, a parceria tende a ser sólida.",
+      "dicas": [
+        "Leve informações organizadas e por escrito para as conversas.",
+        "Não interprete a reserva dela como desinteresse por você.",
+        "Pergunte quais critérios ela usa e responda com base neles."
+      ]
+    }
+  },
+  "o_que_dizem": {
+    "elogios": [
+      "“Com você eu consigo falar de qualquer coisa.”",
+      "“Você faz todo mundo se sentir parte do time.”",
+      "“Sempre que precisei, você estava lá.”",
+      "“Os clientes adoram você, e ficam por sua causa.”",
+      "“Você acalma o time quando o clima pesa.”"
+    ],
+    "criticas": [
+      "“Eu nunca sei se você realmente concorda ou só não quer discutir.”",
+      "“Você assume coisa demais e depois não dá conta de tudo.”",
+      "“Seu retorno foi tão gentil que eu não entendi que precisava mudar.”",
+      "“Você demora para tomar decisões que vão desagradar alguém.”",
+      "“Queria ouvir mais a sua opinião nas reuniões.”"
+    ]
+  },
+  "pdi": {
+    "foco": "O seu foco número 1 é ganhar firmeza sem perder o calor humano: dizer não, dar retornos claros e defender a sua posição com a mesma gentileza com que você apoia os outros. Sua capacidade de criar confiança é rara. O que costuma limitar seu crescimento é a distância entre o que você pensa e o que você diz. Quando você fecha essa distância, sua opinião passa a pesar nas decisões, sua agenda passa a refletir suas prioridades e sua liderança ganha respeito, além de afeto.",
+    "habitos": [
+      { "nome": "Um não por semana", "como": "Escolha, toda semana, um pedido para recusar ou renegociar, usando a frase 'agora não consigo, mas posso tal dia'.", "sinal_de_progresso": "Sua agenda passa a ter mais horas para as suas próprias prioridades." },
+      { "nome": "Opinião nos 15 minutos", "como": "Em reuniões de grupo, dê sua opinião sobre o tema principal nos primeiros 15 minutos, antes que a discussão se feche.", "sinal_de_progresso": "Colegas e gestores começam a pedir sua opinião diretamente." },
+      { "nome": "Retorno em três partes", "como": "Sempre que precisar ajustar algo de alguém, use: reconheço, precisa mudar, conto com você. Diga as três partes, sem pular a do meio.", "sinal_de_progresso": "As pessoas mudam o comportamento depois da conversa, sem precisar de repetição." },
+      { "nome": "Conversa difícil com data", "como": "Quando perceber um incômodo que dura mais de três dias, marque a conversa na agenda em até uma semana.", "sinal_de_progresso": "Você percebe menos mágoas acumuladas e menos desabafos com terceiros." },
+      { "nome": "Ensinar em vez de fazer", "como": "Quando um colega pedir de novo a mesma ajuda, sente ao lado e mostre o passo a passo, em vez de fazer por ele.", "sinal_de_progresso": "Os pedidos repetidos diminuem ao longo do mês." }
+    ],
+    "perguntas": [
+      "Que conversa difícil eu estou adiando, e quem está pagando o preço desse adiamento?",
+      "Em que situação recente eu disse sim quando queria dizer não?",
+      "Minhas opiniões estão chegando às decisões ou ficam só nas conversas de corredor?",
+      "Quem eu estou protegendo de um retorno que essa pessoa precisava ouvir?",
+      "Quanto do meu tempo semanal vai para prioridades que não são minhas?",
+      "Que mudança recente eu resisti em silêncio? O que eu teria ganhado falando?",
+      "Como seria a minha liderança se as pessoas me respeitassem tanto quanto gostam de mim?"
+    ],
+    "dias_30": [
+      "Registre por duas semanas quanto tempo você dedica a ajudar outras pessoas e a suas próprias entregas.",
+      "Converse com seu gestor sobre prioridades e combine quem pode passar tarefas para você.",
+      "Pratique o hábito de um não por semana e anote como cada pessoa reagiu."
+    ],
+    "dias_60": [
+      "Tenha pelo menos duas conversas difíceis que vinha adiando, usando o roteiro fato, efeito e pedido.",
+      "Dê sua opinião em todas as reuniões importantes do período, mesmo quando ninguém perguntar.",
+      "Dê um retorno de ajuste claro a alguém do time, com as três partes do roteiro."
+    ],
+    "dias_90": [
+      "Peça a três colegas que comparem sua clareza e firmeza de hoje com a de três meses atrás.",
+      "Conduza uma decisão impopular necessária, no prazo, cuidando da forma de comunicar às pessoas afetadas.",
+      "Assuma a condução de uma reunião ou projeto em que seu papel seja decidir, e não só apoiar."
+    ]
+  }
+}

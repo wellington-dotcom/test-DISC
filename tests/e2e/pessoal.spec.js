@@ -145,7 +145,8 @@ test.describe('Venda B2C (celular, API simulada)', () => {
     await expect(rel.locator('[data-secao="intensidade"]')).toBeVisible();
     await expect(rel.locator('[data-secao="plano"]')).toBeVisible();
     await expect(rel.locator('.rel-combinacao-nome')).not.toBeEmpty();
-    await expect(rel.locator('[data-secao="mapa"], [data-secao="plano90"]')).toHaveCount(0);
+    // Sem a Parte 2: nada do trabalho (o relatório avançado mostra o mapa só com o ponto natural)
+    await expect(rel.locator('[data-secao="plano90"], [data-secao="esticando"], .mapa-ponto--trabalho')).toHaveCount(0);
     await expect(page.locator('[data-acao="imprimir"]')).toHaveText('Imprimir ou salvar em PDF');
     await expect(page.locator('#meu-link')).toHaveValue(link);
     await expect(page.locator('body')).not.toContainText('Notus');

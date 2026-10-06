@@ -787,6 +787,15 @@
 
   // "Onde você está se esticando" (Parte 2): índice de esforço, natural × trabalho por fator e os textos.
   function secaoEsticando(sec, d) {
+    var idT = 'rel-' + escapar(sec.id);
+    return '' +
+      '<section class="caixa rel-caixa rel-secao rel-esticando surgir" data-secao="esticando" data-faixa="' + escapar(sec.faixa || '') + '" aria-labelledby="' + idT + '">' +
+        '<h2 id="' + idT + '" class="caixa__titulo rel-secao-titulo">' + escapar(sec.titulo) + '</h2>' +
+        (sec.intro ? '<p class="rel-nota">' + escapar(sec.intro) + '</p>' : '') +
+        corpoEsticando(sec, d) +
+      '</section>';
+  }
+  function corpoEsticando(sec, d) {
     var natural = {};
     (d.fatores || []).forEach(function (f) { natural[f.letra] = Number(f.pct); });
     var ex = (sec.exigido && sec.exigido.percentuais) || {};
@@ -807,18 +816,13 @@
         '</li>';
     }).join('');
     var indice = Math.max(0, Math.min(100, Math.round(Number(sec.indice) || 0)));
-    var idT = 'rel-' + escapar(sec.id);
     return '' +
-      '<section class="caixa rel-caixa rel-secao rel-esticando surgir" data-secao="esticando" data-faixa="' + escapar(sec.faixa || '') + '" aria-labelledby="' + idT + '">' +
-        '<h2 id="' + idT + '" class="caixa__titulo rel-secao-titulo">' + escapar(sec.titulo) + '</h2>' +
-        (sec.intro ? '<p class="rel-nota">' + escapar(sec.intro) + '</p>' : '') +
         '<div class="estica-indice">' +
           '<p class="estica-indice-num"><span class="t-numero">' + indice + '</span><span class="estica-indice-de">de 100</span></p>' +
           '<p class="estica-indice-texto">Esforço de adaptação <span class="selo selo--noite estica-faixa">' + escapar(sec.rotulo || '') + '</span></p>' +
         '</div>' +
         (comparacao ? '<ul class="estica-fatores" aria-label="Seu jeito natural e o que o trabalho pede, por fator">' + comparacao + '</ul>' : '') +
-        listaItens(sec.itens) +
-      '</section>';
+        listaItens(sec.itens);
   }
 
   // Relatório "modelo pessoa" (dados de js/relatorio-pessoa.js) em cartões empilhados.
@@ -833,12 +837,20 @@
   // opcoes (venda B2C, meu-relatorio.html): { travas: true (seção "O que está te travando"), plano90: true (Completo + Parte 2),
   //   mapa: true (mapa ritmo × foco, com a Parte 2), botaoPdf: texto do botão (padrão "Salvar em PDF") }.
   // Sem opcoes: exatamente o relatório de antes (fluxo de processo/equipe).
+  // opcoes.avancado: true + dados de DISC_PROFUNDO.montar (variante 'avancado') -> relatorioAvancadoHtml (capa, sumário, capítulos).
   function relatorioPessoaHtml(d, foto, opcoes) {
     if (!d) return '';
     var op = opcoes || {};
+    if (op.avancado && d.variante === 'avancado') return relatorioAvancadoHtml(d, foto, op);
     var faixas = {};
     (d.intensidade || []).forEach(function (f) { if (f && f.letra) faixas[f.letra] = f; });
-    var barras = d.fatores.map(function (f) {
+    var barras = barrasFatores(d.fatores, faixas, true);
+    var titulo = (d.nome ? escapar(d.nome) + ', seu' : 'Seu') + ' estilo é ' + escapar(d.primario.rotulo) + ', com traços de ' + escapar(d.secundario.rotulo);
+    return relatorioPessoaCorpo(d, foto, op, barras, titulo);
+  }
+  // Barras dos 4 fatores (com a faixa de intensidade, se houver). descricao: inclui a frase de cada fator.
+  function barrasFatores(fatores, faixas, descricao) {
+    return (fatores || []).map(function (f) {
       var largura = larguraPct(f.pct);
       var fx = faixas[f.letra];
       return '' +
@@ -847,12 +859,13 @@
           '<span class="barra-nome"><span class="rel-fator-nome">' + escapar(f.nome) + '</span>' +
             '<span class="visualmente-oculto"> (' + escapar(f.letra) + ')</span>' +
             (fx && fx.rotulo ? '<span class="rel-fator-faixa">Intensidade ' + escapar(String(fx.rotulo).toLowerCase()) + '</span>' : '') +
-            '<span class="rel-fator-desc">' + escapar(f.descricao) + '</span></span>' +
+            (descricao ? '<span class="rel-fator-desc">' + escapar(f.descricao) + '</span>' : '') + '</span>' +
           '<span class="barra-trilho trilho" aria-hidden="true"><span class="barra-valor disc-' + escapar(f.letra) + '" style="width:' + largura + '%"></span></span>' +
           '<span class="barra-pct rel-pct">' + pctTexto(f.pct) + '</span>' +
         '</li>';
     }).join('');
-    var titulo = (d.nome ? escapar(d.nome) + ', seu' : 'Seu') + ' estilo é ' + escapar(d.primario.rotulo) + ', com traços de ' + escapar(d.secundario.rotulo);
+  }
+  function relatorioPessoaCorpo(d, foto, op, barras, titulo) {
     var cb = d.combinacao;
     var combinacao = cb && cb.nome
       ? '<p class="rel-combinacao"><span class="rel-combinacao-rotulo">Sua combinação</span><strong class="rel-combinacao-nome">' + escapar(cb.nome) + '</strong>' +
@@ -893,18 +906,21 @@
       '<section class="caixa rel-caixa rel-secao rel-travas surgir" data-secao="travas" aria-labelledby="rel-travas">' +
         '<h2 id="rel-travas" class="caixa__titulo rel-secao-titulo">' + escapar(sec.titulo) + '</h2>' +
         (sec.intro ? '<p class="rel-nota">' + escapar(sec.intro) + '</p>' : '') +
-        '<ol class="travas">' + sec.itens.map(function (it, k) {
-          return '<li class="trava" data-tipo="' + escapar(it.tipo || '') + '">' +
-            '<span class="trava-num" aria-hidden="true">' + (k + 1) + '</span>' +
-            '<div class="trava-corpo">' +
-              '<p class="trava-tipo">' + escapar(ROTULO_TRAVA[it.tipo] || '') + '</p>' +
-              '<p class="rel-item-titulo">' + escapar(it.titulo) + '</p>' +
-              '<p class="rel-item-texto">' + escapar(it.texto) + '</p>' +
-              (it.acao ? '<p class="trava-acao"><span class="trava-acao-rotulo">Para destravar</span>' + escapar(it.acao) + '</p>' : '') +
-            '</div>' +
-          '</li>';
-        }).join('') + '</ol>' +
+        listaTravas(sec.itens) +
       '</section>';
+  }
+  function listaTravas(itens) {
+    return '<ol class="travas">' + (itens || []).map(function (it, k) {
+      return '<li class="trava" data-tipo="' + escapar(it.tipo || '') + '">' +
+        '<span class="trava-num" aria-hidden="true">' + (k + 1) + '</span>' +
+        '<div class="trava-corpo">' +
+          '<p class="trava-tipo">' + escapar(ROTULO_TRAVA[it.tipo] || '') + '</p>' +
+          '<p class="rel-item-titulo">' + escapar(it.titulo) + '</p>' +
+          '<p class="rel-item-texto">' + escapar(it.texto) + '</p>' +
+          (it.acao ? '<p class="trava-acao"><span class="trava-acao-rotulo">Para destravar</span>' + escapar(it.acao) + '</p>' : '') +
+        '</div>' +
+      '</li>';
+    }).join('') + '</ol>';
   }
 
   // Ritmo = (D + I) − (S + C) (+ acelerado); foco = (D + C) − (I + S) (+ tarefas), como em js/disc-exigido.js.
@@ -922,16 +938,22 @@
     var nat = {};
     (d.fatores || []).forEach(function (f) { nat[f.letra] = Number(f.pct); });
     var ex = est && est.exigido && est.exigido.percentuais;
+    return '' +
+      '<section class="caixa rel-caixa rel-secao rel-mapa surgir" data-secao="mapa" aria-labelledby="rel-mapa">' +
+        '<h2 id="rel-mapa" class="caixa__titulo rel-secao-titulo">Mapa ritmo × foco</h2>' +
+        '<p class="rel-nota">Onde o seu jeito natural fica e para onde o seu trabalho puxa você. Quanto mais longe os dois pontos, mais energia a adaptação costuma pedir.</p>' +
+        mapaQuadro(nat, ex) +
+      '</section>';
+  }
+  // O quadro do mapa (natural e, se houver, o que o trabalho pede) com a legenda.
+  function mapaQuadro(nat, ex) {
     var pn = posicaoMapa(eixosDe(nat));
     var pe = ex ? posicaoMapa(eixosDe(ex)) : null;
     function ponto(p, classe, rotulo) {
       return '<span class="mapa-ponto ' + classe + '" style="left:' + p.x + '%;top:' + p.y + '%" data-rotulo="' + rotulo + '"></span>';
     }
     return '' +
-      '<section class="caixa rel-caixa rel-secao rel-mapa surgir" data-secao="mapa" aria-labelledby="rel-mapa">' +
-        '<h2 id="rel-mapa" class="caixa__titulo rel-secao-titulo">Mapa ritmo × foco</h2>' +
-        '<p class="rel-nota">Onde o seu jeito natural fica e para onde o seu trabalho puxa você. Quanto mais longe os dois pontos, mais energia a adaptação costuma pedir.</p>' +
-        '<div class="mapa" role="img" aria-label="Seu jeito natural e o que o trabalho pede, no mapa de ritmo (acelerado ou cauteloso) e foco (tarefas ou pessoas)">' +
+        '<div class="mapa" role="img" aria-label="' + (pe ? 'Seu jeito natural e o que o trabalho pede' : 'Seu jeito natural') + ', no mapa de ritmo (acelerado ou cauteloso) e foco (tarefas ou pessoas)">' +
           '<span class="mapa-eixo mapa-eixo--x" aria-hidden="true"></span><span class="mapa-eixo mapa-eixo--y" aria-hidden="true"></span>' +
           '<span class="mapa-canto mapa-canto--topo">Acelerado</span><span class="mapa-canto mapa-canto--base">Cauteloso</span>' +
           '<span class="mapa-canto mapa-canto--esq">Tarefas</span><span class="mapa-canto mapa-canto--dir">Pessoas</span>' +
@@ -939,8 +961,257 @@
           ponto(pn, 'mapa-ponto--voce', 'Você') +
         '</div>' +
         '<ul class="mapa-legenda"><li><span class="mapa-marca mapa-marca--voce" aria-hidden="true"></span>Você (natural)</li>' +
-          (pe ? '<li><span class="mapa-marca mapa-marca--trabalho" aria-hidden="true"></span>O que o trabalho pede</li>' : '') + '</ul>' +
+          (pe ? '<li><span class="mapa-marca mapa-marca--trabalho" aria-hidden="true"></span>O que o trabalho pede</li>' : '') + '</ul>';
+  }
+
+  /* ---------------- Relatório Completo Avançado (js/disc-profundo.js, variante 'avancado') ----------------
+   * Capa, sumário clicável e ~20 capítulos numerados. Celular primeiro (texto 16 px, linhas curtas, sem rolagem lateral);
+   * impressão A4 (capa própria, capítulo em página nova, cabeçalho/rodapé "Gestão sem Caos · Mapa DISC de <nome>").
+   * Links do sumário e "Voltar ao sumário" usam data-acao="ir-capitulo" (quem usa intercepta: o hash da página é do token).
+   * Caixinhas do plano: <input type="checkbox" data-plano="d30-0"> (o estado fica com quem usa, no localStorage). */
+  var MESES = ['janeiro', 'fevereiro', 'março', 'abril', 'maio', 'junho', 'julho', 'agosto', 'setembro', 'outubro', 'novembro', 'dezembro'];
+  function dataExtenso(iso) {
+    var d = new Date(iso);
+    if (!iso || isNaN(d.getTime())) return '';
+    return d.getDate() + ' de ' + MESES[d.getMonth()] + ' de ' + d.getFullYear();
+  }
+  function n2(k) { return (k < 10 ? '0' : '') + k; }
+  function semAspas(t) { return String(t == null ? '' : t).trim().replace(/^["“”']+|["“”']+$/g, '').trim(); }
+  function cssTexto(t) { return '"' + String(t).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/</g, '\\3c ').replace(/[\r\n]+/g, ' ') + '"'; }
+  function paragrafosHtml(texto, classe) {
+    return String(texto || '').split(/\n\s*\n/).map(function (t) { return t.trim(); }).filter(Boolean)
+      .map(function (t) { return '<p class="' + (classe || 'av-texto') + '">' + escapar(t) + '</p>'; }).join('');
+  }
+  function listaSimples(itens, classe) {
+    if (!itens || !itens.length) return '';
+    return '<ul class="' + (classe || 'av-lista') + '">' + itens.map(function (t) { return '<li>' + escapar(t) + '</li>'; }).join('') + '</ul>';
+  }
+  function linkCapitulo(alvo, html, classe) {
+    return '<a class="' + classe + '" href="#' + escapar(alvo) + '" data-acao="ir-capitulo" data-alvo="' + escapar(alvo) + '">' + html + '</a>';
+  }
+
+  // Uma dimensão: texto corrido + cartões { titulo, texto }. comTitulo: quando o capítulo junta mais de uma.
+  function dimensaoHtml(dm, comTitulo) {
+    if (!dm) return '';
+    return '<div class="av-dim" data-dimensao="' + escapar(dm.chave) + '">' +
+      (comTitulo ? '<h3 class="av-h3">' + escapar(dm.titulo) + '</h3>' : '') +
+      paragrafosHtml(dm.texto) +
+      (dm.itens && dm.itens.length ? '<ul class="av-itens">' + dm.itens.map(function (it) {
+        return '<li class="av-item"><p class="av-item-titulo">' + escapar(it.titulo) + '</p><p class="av-item-texto">' + escapar(it.texto) + '</p></li>';
+      }).join('') + '</ul>' : '') +
+    '</div>';
+  }
+  function dimensoesHtml(c) {
+    var l = (c.dimensoes || []).filter(Boolean);
+    return l.map(function (dm) { return dimensaoHtml(dm, l.length > 1); }).join('');
+  }
+
+  // Radar SVG das 16 tendências: números nos eixos (legíveis em 375 px) e a lista completa logo abaixo (também para leitor de tela).
+  function radarHtml(tend) {
+    var n = tend.length, cx = 170, cy = 170, R = 112, Rn = 146;
+    function pt(k, r) {
+      var a = -Math.PI / 2 + (2 * Math.PI * k) / n;
+      return { x: Math.round((cx + r * Math.cos(a)) * 10) / 10, y: Math.round((cy + r * Math.sin(a)) * 10) / 10 };
+    }
+    function poligono(raio) { return tend.map(function (x, k) { var p = pt(k, raio); return p.x + ',' + p.y; }).join(' '); }
+    var aneis = [0.25, 0.5, 0.75, 1].map(function (f) { return '<polygon class="radar-anel" points="' + poligono(R * f) + '"/>'; }).join('');
+    var raios = tend.map(function (x, k) { var p = pt(k, R); return '<line class="radar-raio" x1="' + cx + '" y1="' + cy + '" x2="' + p.x + '" y2="' + p.y + '"/>'; }).join('');
+    var dados = tend.map(function (x, k) { var p = pt(k, R * Math.max(0.04, x.valor / 100)); return p.x + ',' + p.y; }).join(' ');
+    var pontos = tend.map(function (x, k) { var p = pt(k, R * Math.max(0.04, x.valor / 100)); return '<circle class="radar-ponto" cx="' + p.x + '" cy="' + p.y + '" r="3.5"/>'; }).join('');
+    var nums = tend.map(function (x, k) {
+      var p = pt(k, Rn);
+      return '<g class="radar-num radar-num--' + escapar(x.fator) + '"><circle cx="' + p.x + '" cy="' + p.y + '" r="13"/>' +
+        '<text x="' + p.x + '" y="' + p.y + '" dy="0.35em" text-anchor="middle">' + (k + 1) + '</text></g>';
+    }).join('');
+    var alt = 'Radar das 16 tendências comportamentais, de 0 a 100. Os nomes e valores estão na lista a seguir.';
+    return '<figure class="av-radar"><svg viewBox="0 0 340 340" role="img" aria-label="' + escapar(alt) + '" focusable="false">' +
+      aneis + raios + '<polygon class="radar-area" points="' + dados + '"/>' + pontos + nums + '</svg>' +
+      '<figcaption class="av-legenda"><span class="av-legenda-item"><span class="letra-disc letra-disc--mini disc-D" aria-hidden="true">D</span>1 a 4</span>' +
+        '<span class="av-legenda-item"><span class="letra-disc letra-disc--mini disc-I" aria-hidden="true">I</span>5 a 8</span>' +
+        '<span class="av-legenda-item"><span class="letra-disc letra-disc--mini disc-S" aria-hidden="true">S</span>9 a 12</span>' +
+        '<span class="av-legenda-item"><span class="letra-disc letra-disc--mini disc-C" aria-hidden="true">C</span>13 a 16</span></figcaption>' +
+    '</figure>';
+  }
+  function tendenciasHtml(c) {
+    var tend = c.tendencias || [];
+    var nomes = {};
+    tend.forEach(function (x) { nomes[x.chave] = x.nome; });
+    function juntar(l) { return (l || []).map(function (k) { return nomes[k]; }).filter(Boolean).join(', '); }
+    return '<div class="av-tend">' + radarHtml(tend) +
+      '<ol class="av-tend-lista">' + tend.map(function (x, k) {
+        return '<li class="av-tend-item" data-chave="' + escapar(x.chave) + '" data-faixa="' + escapar(x.faixa) + '">' +
+          '<span class="av-tend-num av-tend-num--' + escapar(x.fator) + '" aria-hidden="true">' + (k + 1) + '</span>' +
+          '<span class="av-tend-corpo"><span class="av-tend-cab"><span class="av-tend-nome">' + escapar(x.nome) + '</span>' +
+            '<span class="av-tend-valor">' + x.valor + '<span class="visualmente-oculto"> de 100, faixa ' + escapar(String(x.rotulo).toLowerCase()) + '</span></span></span>' +
+            '<span class="trilho av-tend-trilho" aria-hidden="true"><span class="av-tend-barra" style="width:' + Math.max(2, x.valor) + '%"></span></span>' +
+            '<span class="av-tend-frase">' + escapar(x.frase) + '</span></span>' +
+        '</li>';
+      }).join('') + '</ol></div>' +
+      '<div class="av-duas">' +
+        '<div class="av-cartao"><p class="av-rotulo">Mais presentes</p><p class="av-cartao-texto">' + escapar(juntar(c.destaques)) + '</p></div>' +
+        '<div class="av-cartao"><p class="av-rotulo">Menos presentes</p><p class="av-cartao-texto">' + escapar(juntar(c.menores)) + '</p></div>' +
+      '</div>';
+  }
+
+  function intensidadeHtml(c, d) {
+    var faixas = {};
+    (d.intensidade || []).forEach(function (f) { if (f && f.letra) faixas[f.letra] = f; });
+    return '<ul class="barras rel-barras">' + barrasFatores(d.fatores, faixas, false) + '</ul>' +
+      '<p class="rel-nota av-nota-barras">Os quatro somam 100%. A barra cheia equivale a 40%, o máximo possível no teste.</p>' +
+      '<ul class="av-itens">' + (c.fatores || []).map(function (f) {
+        var extra = f.excesso || f.falta;
+        return '<li class="av-item" data-letra="' + escapar(f.letra) + '"><p class="av-item-titulo"><span class="letra-disc letra-disc--mini disc-' + escapar(f.letra) + '" aria-hidden="true">' + escapar(f.letra) + '</span>' +
+          escapar(f.nome) + ' <span class="av-faixa">' + escapar(f.rotulo) + '</span></p>' +
+          '<p class="av-item-texto">' + escapar(f.resumo + ' ' + f.comportamento + (extra ? ' ' + extra : '')) + '</p></li>';
+      }).join('') + '</ul>';
+  }
+
+  function manualHtml(m) {
+    if (!m) return '';
+    return '<div class="av-manual"><p class="av-manual-titulo">' + escapar(m.titulo) + '</p><div class="av-manual-colunas">' +
+      m.colunas.map(function (col) {
+        return '<div class="av-manual-col" data-coluna="' + escapar(col.chave) + '"><h4 class="av-manual-h">' + escapar(col.titulo) + '</h4>' + listaSimples(col.itens, 'av-lista') + '</div>';
+      }).join('') + '</div></div>';
+  }
+
+  function pressaoHtml(c) {
+    return '<ol class="av-linha-tempo">' + c.etapas.map(function (e, k) {
+      return '<li class="av-etapa"><span class="av-etapa-num" aria-hidden="true">' + (k + 1) + '</span><div class="av-etapa-corpo">' +
+        '<p class="av-etapa-titulo">' + escapar(e.titulo) + '</p>' + paragrafosHtml(e.texto) + '</div></li>';
+    }).join('') + '</ol>' +
+    '<div class="av-duas">' +
+      '<div class="av-cartao"><h3 class="av-rotulo">Sinais de que a pressão chegou</h3>' + listaSimples(c.sinais) + '</div>' +
+      '<div class="av-cartao"><h3 class="av-rotulo">O que ajuda</h3>' + listaSimples(c.ajuda) + '</div>' +
+    '</div>';
+  }
+
+  function relacoesHtml(c) {
+    return dimensoesHtml(c) +
+      '<h3 class="av-h3">Com pessoas de cada fator</h3>' +
+      '<ul class="av-perfis">' + c.perfis.map(function (pf) {
+        return '<li class="av-perfil" data-letra="' + escapar(pf.letra) + '">' +
+          '<p class="av-perfil-cab"><span class="letra-disc disc-' + escapar(pf.letra) + '" aria-hidden="true">' + escapar(pf.letra) + '</span>' +
+            '<span>Com quem tem ' + escapar(pf.nome) + ' alta</span></p>' +
+          paragrafosHtml(pf.texto) +
+          (pf.dicas.length ? '<p class="av-rotulo">Dicas</p>' + listaSimples(pf.dicas) : '') +
+        '</li>';
+      }).join('') + '</ul>';
+  }
+
+  function citacoesHtml(titulo, itens, tipo) {
+    if (!itens || !itens.length) return '';
+    return '<div class="av-citacoes" data-tipo="' + tipo + '"><h3 class="av-h3">' + escapar(titulo) + '</h3><ul class="av-citacoes-lista">' +
+      itens.map(function (t) { return '<li><blockquote class="av-citacao">“' + escapar(semAspas(t)) + '”</blockquote></li>'; }).join('') + '</ul></div>';
+  }
+
+  function planoHtml(c) {
+    return '<div class="av-foco"><p class="av-rotulo">Seu foco número 1</p>' + paragrafosHtml(c.foco) + '</div>' +
+      '<h3 class="av-h3">Cinco hábitos</h3>' +
+      '<ol class="av-habitos">' + c.habitos.map(function (h, k) {
+        return '<li class="av-habito"><span class="av-habito-num" aria-hidden="true">' + (k + 1) + '</span><div class="av-habito-corpo">' +
+          '<p class="av-item-titulo">' + escapar(h.nome) + '</p><p class="av-item-texto">' + escapar(h.como) + '</p>' +
+          (h.sinal ? '<p class="av-sinal"><span class="av-rotulo">Sinal de progresso</span>' + escapar(h.sinal) + '</p>' : '') +
+        '</div></li>';
+      }).join('') + '</ol>' +
+      '<h3 class="av-h3">30, 60 e 90 dias</h3>' +
+      '<p class="rel-nota av-nota-plano">Marque o que já fez. As marcas ficam guardadas só neste aparelho.</p>' +
+      '<div class="av-etapas-plano">' + c.etapas.map(function (e) {
+        return '<div class="av-etapa-plano" data-etapa="' + escapar(e.chave) + '"><p class="rel-prazo">' + escapar(e.prazo) + '</p><ul class="av-checklist">' +
+          e.acoes.map(function (a, k) {
+            var id = e.chave + '-' + k;
+            return '<li><label class="marcar av-marcar"><input type="checkbox" data-plano="' + escapar(id) + '"><span>' + escapar(a) + '</span></label></li>';
+          }).join('') + '</ul></div>';
+      }).join('') + '</div>' +
+      '<h3 class="av-h3">Perguntas para refletir</h3>' +
+      '<ol class="av-perguntas">' + c.perguntas.map(function (q) { return '<li>' + escapar(q) + '</li>'; }).join('') + '</ol>';
+  }
+
+  function capituloAvancado(c, d) {
+    var corpo = '', classe = '', extraAttr = '';
+    if (c.id === 'retrato') {
+      var cb = c.combinacao;
+      corpo = (cb ? '<p class="rel-combinacao av-combinacao"><span class="rel-combinacao-rotulo">Sua combinação · ' + escapar(cb.codigo) + '</span>' +
+          '<strong class="av-combinacao-nome">' + escapar(cb.nome) + '</strong><span class="rel-combinacao-frase">' + escapar(cb.frase) + '</span></p>' : '') +
+        (c.paragrafos || []).map(function (t, k) { return '<p class="' + (k === 0 ? 'av-texto av-lede' : 'av-texto') + '">' + escapar(t) + '</p>'; }).join('');
+    } else if (c.id === 'intensidade') corpo = intensidadeHtml(c, d);
+    else if (c.id === 'tendencias') corpo = tendenciasHtml(c);
+    else if (c.id === 'mapa') {
+      classe = ' rel-mapa';
+      var nat = {};
+      (d.fatores || []).forEach(function (f) { nat[f.letra] = Number(f.pct); });
+      corpo = mapaQuadro(nat, d.esticando && d.esticando.exigido ? d.esticando.exigido.percentuais : null) + '<p class="av-texto">' + escapar(c.texto) + '</p>';
+    } else if (c.id === 'travas') { classe = ' rel-travas'; corpo = listaTravas(c.itens); }
+    else if (c.id === 'comunicacao') corpo = dimensoesHtml(c) + manualHtml(c.manual);
+    else if (c.id === 'decisao') corpo = (c.ritmoTexto ? '<p class="av-destaque">' + escapar(c.ritmoTexto) + '</p>' : '') + dimensoesHtml(c);
+    else if (c.id === 'pressao') corpo = pressaoHtml(c);
+    else if (c.id === 'relacoes') corpo = relacoesHtml(c);
+    else if (c.id === 'pontos_cegos') corpo = dimensoesHtml(c) + '<div class="av-duas av-duas--citacoes">' + citacoesHtml('O que costumam elogiar', c.elogios, 'elogios') + citacoesHtml('O que costumam criticar', c.criticas, 'criticas') + '</div>';
+    else if (c.id === 'esticando') {
+      classe = ' rel-esticando';
+      extraAttr = ' data-faixa="' + escapar(c.faixa || '') + '"';
+      corpo = corpoEsticando(c, d);
+    } else if (c.id === 'plano') corpo = planoHtml(c);
+    else corpo = dimensoesHtml(c);
+    var idT = 'av-t-' + escapar(c.id);
+    var html = '' +
+      '<section class="caixa rel-caixa rel-secao av-cap' + classe + '" id="cap-' + escapar(c.id) + '" data-secao="' + escapar(c.id) + '"' + extraAttr + ' aria-labelledby="' + idT + '">' +
+        '<p class="av-cap-num" aria-hidden="true">Capítulo ' + n2(c.numero) + '</p>' +
+        '<h2 id="' + idT + '" class="av-cap-titulo rel-secao-titulo">' + escapar(c.titulo) + '</h2>' +
+        (c.intro ? '<p class="av-cap-intro">' + escapar(c.intro) + '</p>' : '') +
+        corpo +
+        '<p class="av-voltar-linha">' + linkCapitulo('av-sumario', 'Voltar ao sumário', 'av-voltar') + '</p>' +
       '</section>';
+    if (c.id === 'esticando' && c.plano90) {
+      html += '<section class="caixa rel-caixa rel-secao av-cap av-cap--anexo" data-secao="plano90" aria-labelledby="av-t-plano90">' +
+        '<h2 id="av-t-plano90" class="av-cap-titulo rel-secao-titulo">' + escapar(c.plano90.titulo) + '</h2>' +
+        (c.plano90.intro ? '<p class="av-cap-intro">' + escapar(c.plano90.intro) + '</p>' : '') +
+        listaItens(c.plano90.itens, true) + '</section>';
+    }
+    return html;
+  }
+
+  // opcoes: { botaoPdf } (texto do botão de imprimir). Sem DOM: só HTML (escape em tudo que vem dos dados).
+  function relatorioAvancadoHtml(d, foto, opcoes) {
+    var op = opcoes || {};
+    var caps = d.capitulos || [];
+    var nome = d.nome || '';
+    var cb = d.combinacao || {};
+    var titulo = 'Mapa DISC' + (nome ? ' de ' + nome : '');
+    var cabecalho = EMPRESA_B2C + ' · ' + titulo;
+    var capa = '' +
+      '<section class="av-capa moldura-noite surgir" data-secao="capa" aria-labelledby="av-titulo">' +
+        '<img class="logo-gsc av-capa-logo" src="assets/marca/gsc-logo-negativo.svg" alt="' + escapar(EMPRESA_B2C) + '" width="199" height="28">' +
+        '<div class="av-capa-centro">' +
+          '<div class="av-capa-pessoa">' + avatarHtml(foto, nome) + '<p class="av-capa-sobre">Relatório Completo Avançado</p></div>' +
+          '<h1 id="av-titulo" class="av-capa-titulo">' + escapar(titulo) + '</h1>' +
+          (cb.nome ? '<p class="rel-combinacao av-capa-comb"><span class="rel-combinacao-rotulo">Sua combinação · ' + escapar(cb.codigo) + '</span>' +
+            '<strong class="rel-combinacao-nome">' + escapar(cb.nome) + '</strong>' +
+            (cb.frase ? '<span class="rel-combinacao-frase">' + escapar(cb.frase) + '</span>' : '') + '</p>' : '') +
+          '<ul class="av-capa-fatores">' + (d.fatores || []).map(function (f) {
+            return '<li><span class="letra-disc letra-disc--mini disc-' + escapar(f.letra) + '" aria-hidden="true">' + escapar(f.letra) + '</span>' +
+              '<span class="av-capa-pct">' + pctTexto(f.pct) + '</span><span class="visualmente-oculto"> de ' + escapar(f.nome) + '</span></li>';
+          }).join('') + '</ul>' +
+        '</div>' +
+        '<p class="av-capa-data">' + (dataExtenso(d.emitidoEm) ? 'Emitido em ' + escapar(dataExtenso(d.emitidoEm)) + ' · ' : '') + escapar(caps.length) + ' capítulos</p>' +
+        '<div class="acoes av-capa-acoes"><button type="button" class="botao botao--branco" data-acao="imprimir">' + escapar(op.botaoPdf || 'Salvar em PDF') + '</button></div>' +
+      '</section>';
+    var sumario = '' +
+      '<nav class="caixa rel-caixa av-sumario surgir" id="av-sumario" aria-labelledby="av-sumario-titulo" tabindex="-1">' +
+        '<p class="sobretitulo">' + escapar(titulo) + '</p>' +
+        '<h2 id="av-sumario-titulo" class="av-cap-titulo">Sumário</h2>' +
+        '<ol class="av-sumario-lista">' + caps.map(function (c) {
+          return '<li>' + linkCapitulo('cap-' + c.id, '<span class="av-sumario-num">' + n2(c.numero) + '</span><span class="av-sumario-nome">' + escapar(c.titulo) + '</span>', 'av-sumario-link') + '</li>';
+        }).join('') + '</ol>' +
+      '</nav>';
+    return '' +
+      '<div class="relatorio-pessoa relatorio-avancado" data-codigo="' + escapar(d.codigo) + '" data-combinacao="' + escapar(cb.codigo || '') + '">' +
+        '<style>@media print { @page { @top-left { content: ' + cssTexto(cabecalho) + '; } } }</style>' +
+        capa + sumario +
+        caps.map(function (c) { return capituloAvancado(c, d); }).join('') +
+        '<p class="rel-aviso av-aviso">' + escapar(d.aviso) + '</p>' +
+        '<footer class="av-rodape"><img class="logo-gsc logo-gsc--pequeno" src="assets/marca/gsc-logo.svg" alt="' + escapar(EMPRESA_B2C) + '" width="171" height="24">' +
+          '<span>' + escapar(cabecalho) + '</span></footer>' +
+      '</div>';
   }
 
   /* ---------------- Modo pessoal (venda B2C, Gestão sem Caos) ---------------- */
@@ -1058,6 +1329,7 @@
     if (!d) return '';
     var tr = d.travas && d.travas.itens ? d.travas.itens : [];
     var outras = [
+      ['Mais de 20 capítulos escritos para a sua combinação', 'Retrato, 16 tendências em gráfico, manual de como falar com você, você e cada perfil, liderança e pontos cegos.'],
       ['Régua de intensidade', 'Em que faixa está cada fator e o que isso muda no seu dia a dia.'],
       ['Como você reage sob pressão', 'Os sinais de que o seu jeito passou do ponto e o que fazer nessas horas.'],
       ['Como você decide, aprende e se comunica', 'O seu jeito de escolher, de aprender e de falar com cada perfil.'],
@@ -1116,6 +1388,7 @@
     validarIdentificacaoPessoal: validarIdentificacaoPessoal,
     montarPayloadPessoal: montarPayloadPessoal,
     relatorioPessoaHtml: relatorioPessoaHtml,
+    relatorioAvancadoHtml: relatorioAvancadoHtml,
     secaoTravas: secaoTravas,
     mapaRitmoFoco: mapaRitmoFoco,
     posicaoMapa: posicaoMapa,

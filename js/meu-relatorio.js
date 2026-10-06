@@ -6,6 +6,9 @@
  * pacote, pacoteNome, precisaParte2 } e monta o texto aqui, com js/relatorio-pessoa.js (DISC_RELATORIO_PESSOA)
  * e a mesma renderização do relatório ao candidato (DISC_APP.relatorioPessoaHtml), mais "O que está te travando",
  * e, no Completo + Parte 2, "Onde você está se esticando", o mapa ritmo × foco e o plano de 90 dias.
+ * Relatório Completo Avançado: com js/disc-profundo.js + js/disc-profundo-dados.js carregados e o conteúdo da combinação,
+ * os pacotes completo e completo_plus mostram a versão por combinação (capa, sumário, ~20 capítulos; DISC_APP.relatorioPessoaHtml
+ * com avancado: true). Sem o conteúdo, cai no relatório acima. Caixinhas do plano: localStorage (disc_plano_<token>).
  * Completo + Parte 2 sem a Parte 2: pede a Parte 2 antes (index.html?modo=pessoal#p2-<token>, a mesma mecânica de arrastar).
  * Sem token (ou #recuperar): "Recuperar meu relatório" por e-mail (DISC_API.recuperarAcesso).
  *
@@ -15,6 +18,7 @@
   'use strict';
 
   var EMPRESA = 'Gestão sem Caos';
+  var PACOTES_AVANCADO = ['completo', 'completo_plus'];
 
   function tokenDaUrl(hash, search) {
     // Tolerância: parâmetros do retorno depois do token (#t-<token>?order_nsu=… ou #t-<token>&…).
@@ -193,14 +197,28 @@
       '</section>';
   }
 
+  // Relatório Completo Avançado (js/disc-profundo.js): pacotes completo e completo_plus (este com a Parte 2).
+  // Sem o conteúdo da combinação (ou sem o módulo), devolve null e a página usa o relatório de antes.
+  function montarAvancado(ex) {
+    var P = root.DISC_PROFUNDO;
+    if (!P || PACOTES_AVANCADO.indexOf(dados.pacote) === -1) return null;
+    try {
+      var op = { data: root.DISC_DATA };
+      if (ex && dados.pacote === 'completo_plus') op.exigido = ex;
+      return P.montar(dados.rel, dados.primeiroNome, op);
+    } catch (e) { return null; }
+  }
+
   function telaRelatorio() {
     var R = root.DISC_RELATORIO_PESSOA, A = root.DISC_APP;
-    var d = null;
+    var d = null, av = null;
     try {
       var ex = dados.exigido;
       if (ex && typeof ex === 'string' && root.DISC_EXIGIDO) ex = root.DISC_EXIGIDO.calcular(ex);
-      d = ex ? R.montar(dados.rel, dados.primeiroNome, root.DISC_DATA, { exigido: ex }) : R.montar(dados.rel, dados.primeiroNome, root.DISC_DATA);
+      av = montarAvancado(ex);
+      if (!av) d = ex ? R.montar(dados.rel, dados.primeiroNome, root.DISC_DATA, { exigido: ex }) : R.montar(dados.rel, dados.primeiroNome, root.DISC_DATA);
     } catch (e) { d = null; }
+    if (av && A) { telaAvancado(av); return; }
     if (!d || !A) { telaRecuperar('Não conseguimos montar o relatório. Atualize a página.'); return; }
     var plus = dados.pacote === 'completo_plus';
     el.innerHTML = '' +
@@ -221,6 +239,52 @@
     focar();
   }
 
+  function telaAvancado(av) {
+    var A = root.DISC_APP;
+    var plus = dados.pacote === 'completo_plus';
+    el.innerHTML = '' +
+      '<div class="pilha-telas">' +
+        (plus && dados.precisaParte2
+          ? '<div class="aviso meu-aviso-p2">Falta a Parte 2 para ver onde você está se esticando. <a href="index.html?modo=pessoal#p2-' + esc(encodeURIComponent(token)) + '">Responder agora (3 minutos)</a></div>'
+          : '') +
+        A.relatorioPessoaHtml(av, '', { avancado: true, botaoPdf: 'Imprimir ou salvar em PDF' }) +
+        blocoLink() +
+        '<p class="rodape-nota meu-rodape">' + esc(EMPRESA) + ' · Mapa de Perfil. O DISC descreve estilo de comportamento, não competência. ' +
+          'Garantia de 7 dias: se não gostar, peça o reembolso pelo suporte.</p>' +
+      '</div>';
+    document.title = (dados.primeiroNome ? dados.primeiroNome + ' · ' : '') + 'Meu Mapa de Perfil · ' + EMPRESA;
+    restaurarPlano();
+    focar();
+  }
+
+  // Caixinhas do plano 30/60/90: estado só neste aparelho (localStorage), por link de acesso.
+  function chavePlano() { return 'disc_plano_' + token; }
+  function lerPlano() {
+    try { var v = JSON.parse(root.localStorage.getItem(chavePlano()) || '{}'); return v && typeof v === 'object' ? v : {}; } catch (e) { return {}; }
+  }
+  function restaurarPlano() {
+    var marcados = lerPlano();
+    Array.prototype.forEach.call(el.querySelectorAll('input[data-plano]'), function (c) { c.checked = marcados[c.getAttribute('data-plano')] === true; });
+  }
+  function aoMarcar(ev) {
+    var c = ev.target;
+    if (!c || !c.matches || !c.matches('input[data-plano]')) return;
+    var marcados = lerPlano();
+    if (c.checked) marcados[c.getAttribute('data-plano')] = true; else delete marcados[c.getAttribute('data-plano')];
+    try { root.localStorage.setItem(chavePlano(), JSON.stringify(marcados)); } catch (e) { /* sem armazenamento: só não guarda */ }
+  }
+
+  // Sumário e "Voltar ao sumário": rola até o capítulo sem mexer no hash (o hash é o token de acesso).
+  function irPara(id) {
+    var alvo = id ? document.getElementById(id) : null;
+    if (!alvo) return;
+    var reduzir = false;
+    try { reduzir = root.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { reduzir = false; }
+    try { alvo.scrollIntoView({ behavior: reduzir ? 'auto' : 'smooth', block: 'start' }); } catch (e) { alvo.scrollIntoView(); }
+    var foco = alvo.matches('section') ? alvo.querySelector('h2') : alvo;
+    if (foco) { foco.setAttribute('tabindex', '-1'); try { foco.focus({ preventScroll: true }); } catch (e) { /* ignora */ } }
+  }
+
   function copiar(texto) {
     var st = el.querySelector('#copiado');
     function ok() { if (st) st.textContent = 'Link copiado!'; anunciar('Link copiado.'); }
@@ -239,6 +303,7 @@
     var alvo = ev.target.closest('[data-acao]');
     if (!alvo || !el.contains(alvo)) return;
     var acao = alvo.getAttribute('data-acao');
+    if (acao === 'ir-capitulo') { ev.preventDefault(); irPara(alvo.getAttribute('data-alvo')); return; }
     if (acao === 'imprimir') { try { root.print(); } catch (e) { /* sem impressão */ } }
     else if (acao === 'copiar-link') copiar(link());
     else if (acao === 'sem-parte2') { verSemParte2 = true; telaRelatorio(); }
@@ -342,6 +407,7 @@
     aviso = document.getElementById('aviso');
     if (!el) return;
     el.addEventListener('click', aoClicar);
+    el.addEventListener('change', aoMarcar);
     root.addEventListener('hashchange', function () { verSemParte2 = false; carregar(); });
     carregar();
   }

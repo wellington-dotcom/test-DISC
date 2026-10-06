@@ -1,0 +1,285 @@
+{
+  "codigo": "SC",
+  "retrato": [
+    "No trabalho, você tende a ser a pessoa que faz o processo funcionar todos os dias, do mesmo jeito, sem erro. Sabe onde está cada documento, conhece a regra por trás de cada etapa e percebe quando algo saiu do padrão antes que vire problema. Seu ritmo é constante e cuidadoso: você prefere fazer certo da primeira vez a correr e consertar depois. É comum que a sua mesa, a sua planilha ou a sua pasta compartilhada seja a referência que o time consulta quando ninguém lembra como era o procedimento.",
+    "Na sua combinação, a Estabilidade vem primeiro e a Conformidade modula. A base é paciente, leal e cooperativa; a Conformidade acrescenta rigor, atenção ao detalhe e respeito aos critérios. A tensão interna é delicada: você quer o trabalho certo e quer evitar atrito. Quando vê um erro de um colega, o impulso de corrigir esbarra na vontade de não criar desconforto. O resultado costuma ser corrigir em silêncio, refazer por conta própria ou recorrer à regra para não precisar dizer “eu discordo” com as próprias palavras.",
+    "Os outros costumam perceber você como uma presença de extrema confiança, discreta e meticulosa. Gestores dormem tranquilos sabendo que aquela rotina está nas suas mãos. Colegas novos aprendem com você o jeito certo de fazer. Por outro lado, quem é mais rápido ou mais criativo pode achar que você resiste demais a mudanças ou se apega demais ao procedimento. Sua reserva também pode ser lida como distância, quando, na verdade, é só o seu jeito de observar antes de se expor.",
+    "Você tende a chegar ao seu melhor quando tem instruções claras, tempo para fazer bem feito, um ambiente previsível e colegas que respeitam os combinados. Mudanças avisadas com antecedência e bem documentadas fazem enorme diferença. Seu crescimento passa por duas aberturas: aceitar que um trabalho pode estar bom o bastante antes de estar perfeito, e falar sobre os problemas que você enxerga, com a sua voz, e não só através da regra. Quem vê o que você vê e diz isso cedo evita muito retrabalho para o time inteiro."
+  ],
+  "manual": {
+    "como_falar_comigo": [
+      "Passe as orientações por escrito, com o passo a passo e o prazo.",
+      "Explique o motivo da mudança e o que muda exatamente no procedimento.",
+      "Me dê tempo para analisar antes de pedir uma posição.",
+      "Seja específico na crítica: aponte o item, a linha, o exemplo.",
+      "Traga dados e fontes; argumentos vagos me deixam com mais dúvidas.",
+      "Pergunte diretamente se eu vejo algum risco; eu costumo enxergar, mas nem sempre falo.",
+      "Respeite o combinado; se precisar mudar, avise com antecedência."
+    ],
+    "evite": [
+      "Pedir para eu improvisar sem nenhuma referência.",
+      "Mudar o processo de um dia para o outro sem registro nem explicação.",
+      "Me pressionar por uma resposta imediata sobre algo que não analisei.",
+      "Fazer críticas genéricas, como “isso não está bom”, sem dizer o que é.",
+      "Me expor em público por um erro, mesmo que pequeno."
+    ],
+    "me_energiza": [
+      "Um processo bem desenhado que funciona do início ao fim sem retrabalho.",
+      "Tempo e silêncio para fazer um trabalho minucioso com calma.",
+      "Ver uma entrega minha aprovada sem nenhuma correção.",
+      "Colegas que respeitam prazos, padrões e combinados.",
+      "Ser a referência de confiança quando alguém precisa saber como se faz."
+    ],
+    "me_desgasta": [
+      "Mudanças constantes de regra, sistema ou prioridade.",
+      "Ter que entregar com pressa algo que sei que ainda tem erro.",
+      "Ambientes barulhentos e com interrupções o tempo todo.",
+      "Discussões acaloradas e decisões tomadas no grito.",
+      "Corrigir repetidamente o mesmo erro de outras pessoas."
+    ]
+  },
+  "dimensoes": {
+    "dia_a_dia": {
+      "texto": "Seu dia costuma seguir um roteiro, e você tende a gostar que seja assim. Começa pelas tarefas de rotina que não podem falhar, confere o que ficou pendente, revisa antes de enviar. Trabalha melhor com foco, em ambiente mais silencioso e com poucas interrupções. É comum que você mantenha controles próprios, como listas, planilhas ou anotações, para garantir que nada escape. Essa disciplina sustenta a qualidade do time. O ponto de atenção é o tempo que a revisão consome: conferir pela terceira vez algo que já estava certo é segurança para você, mas custo para o prazo.",
+      "itens": [
+        { "titulo": "Revisão com limite", "texto": "Defina quantas vezes cada tipo de entrega precisa ser revisada. Rotina simples: uma revisão. Entrega crítica: duas. Mais que isso, só com motivo." },
+        { "titulo": "Controles compartilhados", "texto": "Coloque suas planilhas e listas de controle num lugar que o time acesse; seu método vira um recurso coletivo." },
+        { "titulo": "Bloco de concentração", "texto": "Reserve as horas em que você rende mais para as tarefas minuciosas e agrupe as interrupções em outro horário." }
+      ]
+    },
+    "decisao": {
+      "texto": "Você tende a decidir com base em dados, precedentes e regras, e a levar o tempo necessário para isso. Costuma reunir informações, comparar com o que já foi feito, consultar o procedimento e só então escolher. Essa cautela é valiosa: suas decisões raramente precisam ser refeitas. A armadilha é a busca por certeza total, que quase nunca existe. Diante de uma situação nova, sem regra nem precedente, você pode travar e preferir esperar a orientação de alguém. Outra armadilha é usar a norma como escudo: decidir “porque o procedimento manda” mesmo quando o bom senso pede uma exceção.",
+      "itens": [
+        { "titulo": "Informação suficiente", "texto": "Antes de pesquisar, defina quais três informações você precisa para decidir. Quando tiver as três, decida." },
+        { "titulo": "Prazo para a análise", "texto": "Coloque um limite de tempo para cada análise e comunique a decisão quando ele acabar, mesmo com alguma incerteza." },
+        { "titulo": "Regra com propósito", "texto": "Diante de uma exceção, pergunte qual é o objetivo da regra. Se a exceção atende melhor ao objetivo, ela pode ser a escolha certa." },
+        { "titulo": "Decisão registrada", "texto": "Anote o motivo da sua decisão em duas linhas; isso dá segurança para decidir sem esperar a certeza absoluta." }
+      ]
+    },
+    "aprendizado": {
+      "texto": "Você aprende melhor com estrutura: material organizado, passo a passo, exemplos e tempo para praticar sem pressão. Costuma preferir estudar por conta própria, no seu ritmo, e entender a lógica por trás antes de aplicar. Manuais, tutoriais e documentação tendem a funcionar bem para você. Depois que aprende, você domina a fundo e costuma virar a pessoa que conhece os detalhes que ninguém mais conhece. O ponto de atenção é o desconforto em aprender errando: em situações que pedem tentativa e erro, você pode demorar a começar enquanto busca a forma certa.",
+      "itens": [
+        { "titulo": "Material antes da prática", "texto": "Peça o material de um treinamento com antecedência; ler antes ajuda você a participar com mais segurança." },
+        { "titulo": "Ambiente de teste", "texto": "Quando aprender um sistema novo, peça um ambiente de teste em que errar não tenha consequência." },
+        { "titulo": "Escreva o seu manual", "texto": "Registre o que aprendeu em formato de passo a passo; você fixa melhor e ainda deixa um recurso para o time." }
+      ]
+    },
+    "mudanca": {
+      "texto": "Mudança tende a ser o maior desafio do seu estilo. Você investiu tempo para dominar o processo atual, conhece cada exceção e sabe que ele funciona. Uma mudança, para você, significa risco de erro, perda de controle e retrabalho. Quando chega sem explicação, você tende a resistir de forma discreta, apontando falhas na proposta ou mantendo o jeito antigo em paralelo. Quando chega com motivo claro, documentação e tempo de adaptação, a história muda: você pode se tornar quem testa o novo sistema com mais rigor e escreve o guia que todos vão usar.",
+      "itens": [
+        { "titulo": "Pergunte o objetivo", "texto": "Diante de uma mudança, peça o motivo e o resultado esperado; entender a lógica reduz muito a resistência." },
+        { "titulo": "Riscos por escrito", "texto": "Em vez de resistir em silêncio, liste os riscos que você enxerga e entregue a quem decidiu, com sugestões." },
+        { "titulo": "Seja quem testa", "texto": "Ofereça-se para testar a novidade antes da implantação; seu rigor encontra falhas que os outros não veem." },
+        { "titulo": "Período de convivência", "texto": "Combine um prazo para manter o processo antigo em paralelo e, terminado o prazo, desligue-o de fato." }
+      ]
+    },
+    "tempo_organizacao": {
+      "texto": "Você costuma ter muita organização com o tempo e com as tarefas. Planeja, segue cronogramas e cumpre prazos com regularidade. Prefere trabalhar com antecedência e se incomoda com tudo que é deixado para a última hora. O ponto de atenção aparece quando a demanda muda de repente: uma urgência que atropela o planejado pode desorganizar o seu dia mais do que o de outras pessoas. Também é comum que você subestime o tempo de revisão e acabe estendendo o expediente para entregar do jeito que considera certo.",
+      "itens": [
+        { "titulo": "Margem para o imprevisto", "texto": "Deixe 20% da agenda livre para urgências; assim, o imprevisto não desmonta o seu planejamento." },
+        { "titulo": "Padrão de pronto", "texto": "Antes de começar uma tarefa, escreva o que significa “pronto” para ela e entregue quando chegar lá." },
+        { "titulo": "Replanejar sem culpa", "texto": "Quando surgir uma urgência, refaça a lista do dia em cinco minutos em vez de tentar encaixar tudo no plano original." }
+      ]
+    },
+    "comunicacao": {
+      "texto": "Sua comunicação tende a ser precisa, educada e reservada. Você costuma preferir a escrita, onde pode pensar antes, organizar as ideias e conferir os detalhes. Mensagens suas costumam ser completas e corretas, às vezes longas e técnicas demais para quem só queria a resposta. Em reuniões, tende a falar pouco e só quando tem certeza, o que dá peso às suas falas, mas pode deixar riscos importantes sem ser ditos. Você costuma perguntar mais do que afirmar, e as perguntas que faz quase sempre tocam no ponto fraco da proposta.",
+      "itens": [
+        { "titulo": "Resposta primeiro", "texto": "Em e-mails e mensagens, coloque a resposta ou o pedido na primeira linha; os detalhes vêm abaixo, para quem quiser." },
+        { "titulo": "Risco dito na reunião", "texto": "Se perceber um risco durante a reunião, fale na hora, mesmo sem ter tudo comprovado: “vejo um possível problema em...”." },
+        { "titulo": "Resumo de três linhas", "texto": "Ao enviar uma análise, acrescente no topo um resumo de três linhas para quem não vai ler tudo." },
+        { "titulo": "Tom além do conteúdo", "texto": "Antes de enviar uma correção, acrescente uma frase reconhecendo o que está certo; seu texto preciso pode soar frio." }
+      ]
+    },
+    "conflito": {
+      "texto": "Você tende a evitar conflitos abertos, especialmente os emocionais. Quando discorda, costuma recorrer aos fatos, aos dados e às regras, porque isso tira a questão do campo pessoal. Essa é uma forma madura de discordar, mas pode virar uma forma de não se expor: em vez de dizer “eu acho que está errado”, você diz “o procedimento não permite”. Quando o conflito é inevitável e fica tenso, você pode se fechar, encerrar a conversa e voltar ao trabalho, deixando a questão sem solução. O incômodo, nesse caso, costuma ficar registrado por muito tempo.",
+      "itens": [
+        { "titulo": "Fale em primeira pessoa", "texto": "Junto com o fato, diga a sua posição: “pelo que eu vi, isso vai gerar retrabalho, e eu sugiro...”." },
+        { "titulo": "Conflito por escrito, conversa ao vivo", "texto": "Organize os argumentos por escrito antes e, depois, tenha a conversa pessoalmente; você ganha segurança sem perder a proximidade." },
+        { "titulo": "Feche o assunto", "texto": "Antes de encerrar uma conversa tensa, combine o próximo passo; evite sair com a questão em aberto." }
+      ]
+    },
+    "motivadores": {
+      "texto": "Você tende a se motivar com qualidade e segurança. Saber que o trabalho foi bem feito, sem erro, e que vai funcionar por muito tempo costuma dar uma satisfação profunda. Também se motiva com previsibilidade: processos claros, papéis definidos, regras que valem para todos. Reconhecimento importa quando é preciso e merecido, ligado ao cuidado técnico que você teve, e não um elogio genérico. Ser a referência de confiança, a quem o time recorre para saber o jeito certo, tende a ser uma fonte importante de orgulho.",
+      "itens": [
+        { "titulo": "Trabalho sem retrabalho", "texto": "Ver um processo seu rodar meses sem falha costuma ser uma das maiores satisfações do seu trabalho." },
+        { "titulo": "Regras claras e justas", "texto": "Saber o que se espera e que os critérios valem para todos tende a trazer a você mais segurança e produtividade." },
+        { "titulo": "Reconhecimento técnico", "texto": "Um comentário específico sobre a qualidade de uma entrega sua vale mais do que aplausos gerais." }
+      ]
+    },
+    "desmotivadores": {
+      "texto": "O que costuma desmotivar você é a sensação de improviso permanente: regras que mudam toda semana, prazos que atropelam a qualidade, decisões tomadas sem critério. Também desgasta ver colegas descumprirem combinados sem consequência, ou ter que consertar repetidamente os mesmos erros dos outros. Receber cobrança por velocidade quando você sabe que a pressa vai gerar falha tende a criar um conflito interno pesado. E críticas genéricas, sem apontar exatamente o que está errado, costumam deixar você sem saber como melhorar.",
+      "itens": [
+        { "titulo": "Pressa que gera erro", "texto": "Quando o prazo for incompatível com a qualidade, diga qual dos dois será sacrificado e peça que a liderança escolha." },
+        { "titulo": "Combinados descumpridos", "texto": "Ver regras ignoradas sem consequência tende a desanimar você. Leve isso à liderança com exemplos concretos." },
+        { "titulo": "Retrabalho dos outros", "texto": "Em vez de corrigir sempre em silêncio, mostre ao colega onde está o erro e como evitá-lo." }
+      ]
+    },
+    "necessidades": {
+      "texto": "Para render, você costuma precisar de clareza, tempo e um ambiente previsível. Clareza sobre o que se espera, com critérios de qualidade explícitos e instruções documentadas. Tempo para fazer bem feito, com prazos realistas. Previsibilidade para saber o que vem pela frente, com mudanças avisadas e explicadas. Também precisa de um ambiente de respeito, em que erros sejam tratados com objetividade e não com exposição. Quando tudo isso existe, você costuma entregar uma qualidade e uma constância difíceis de igualar.",
+      "itens": [
+        { "titulo": "Critério explícito", "texto": "Peça, no início de cada projeto, o que define uma entrega bem feita; isso evita revisões infinitas." },
+        { "titulo": "Prazo realista", "texto": "Ao receber um prazo, estime o tempo necessário e negocie na hora, com dados, se não couber." },
+        { "titulo": "Espaço de concentração", "texto": "Negocie períodos sem interrupções para as tarefas minuciosas; para você, é condição de qualidade." }
+      ]
+    },
+    "como_lidera": {
+      "texto": "Quando lidera, você tende a liderar pelo exemplo, pela organização e pela justiça. Costuma criar processos claros, definir padrões e garantir que todos saibam o que fazer. A equipe tende a se sentir segura, porque sabe as regras e sabe que elas valem para todos. O desafio aparece em três frentes: dar espaço para outras formas de fazer, tolerar o erro como parte do aprendizado e ter conversas difíceis cara a cara. É comum que você prefira corrigir o trabalho da equipe por conta própria a devolver com orientação, o que sobrecarrega você e limita o crescimento dos outros.",
+      "itens": [
+        { "titulo": "Devolva com orientação", "texto": "Quando encontrar um erro na entrega de alguém, aponte e devolva para a pessoa corrigir, em vez de refazer." },
+        { "titulo": "Espaço para outro método", "texto": "Defina o resultado e o padrão de qualidade e deixe a pessoa escolher o caminho; avalie pelo resultado." },
+        { "titulo": "Reconheça em voz alta", "texto": "Diga à equipe quando algo foi bem feito; seu silêncio pode ser lido como reprovação." }
+      ]
+    },
+    "como_prefere_ser_liderado": {
+      "texto": "Você tende a render mais com uma liderança organizada, coerente e respeitosa, que define bem as expectativas, explica o motivo das decisões e avisa as mudanças com antecedência. Costuma valorizar quem dá retorno específico e fundamentado e quem confia no seu trabalho sem precisar revisar tudo. Lideranças caóticas, que mudam de ideia sem explicar ou que cobram velocidade sem considerar a qualidade, tendem a gerar em você uma tensão constante. Você também se beneficia de uma liderança que, de vez em quando, empurre você para fora da zona do procedimento, com segurança.",
+      "itens": [
+        { "titulo": "Peça critérios", "texto": "Pergunte à liderança qual é o nível de qualidade esperado em cada entrega, para não exceder nem faltar." },
+        { "titulo": "Combine a forma de retorno", "texto": "Diga que você prefere retornos específicos e em particular; isso ajuda a liderança a falar do jeito que funciona." },
+        { "titulo": "Peça desafios novos", "texto": "Uma vez por semestre, peça à liderança uma tarefa fora da sua rotina, com prazo confortável para aprender." }
+      ]
+    },
+    "papel_na_equipe": {
+      "texto": "Na equipe, você costuma ser a garantia de qualidade e a memória dos processos. É quem confere, quem documenta, quem lembra da regra e da exceção, quem percebe o detalhe que ninguém viu. Também tende a ser um ponto de estabilidade: não se agita em crises, segue o protocolo e ajuda o time a não cometer erros por pressa. O cuidado é não virar o gargalo, a pessoa por quem tudo precisa passar antes de seguir, nem a revisão silenciosa que corrige o trabalho dos outros sem que eles aprendam.",
+      "itens": [
+        { "titulo": "Guardião da qualidade", "texto": "Assuma de forma explícita a revisão das entregas críticas, com critérios combinados, e não de todas as entregas." },
+        { "titulo": "Memória documentada", "texto": "Registre os processos e exceções que só você conhece; o time ganha autonomia e você deixa de ser a única fonte." },
+        { "titulo": "Evite o gargalo", "texto": "Se muitas coisas esperam a sua revisão, combine com o time quais podem seguir sem ela." }
+      ]
+    },
+    "persuasao_negociacao": {
+      "texto": "Você tende a convencer pela consistência dos argumentos. Costuma chegar com preparo, dados, histórico e documentação, e isso dá credibilidade às suas propostas. Em negociações, é comum que você conheça os detalhes do contrato melhor do que o outro lado e perceba as cláusulas arriscadas. Sua postura calma e respeitosa ajuda a manter a conversa civilizada. O risco está na falta de assertividade: você pode apresentar todos os fatos e esperar que eles falem por si, sem pedir claramente o que quer. Também pode ceder para encerrar uma negociação que ficou tensa.",
+      "itens": [
+        { "titulo": "Diga o que quer", "texto": "Depois de apresentar os dados, termine com um pedido claro: “por isso, proponho que...”." },
+        { "titulo": "Limite definido antes", "texto": "Antes da negociação, escreva sua posição mínima; assim, a tensão da conversa não decide por você." },
+        { "titulo": "Menos é mais", "texto": "Selecione os três argumentos mais fortes em vez de apresentar todos; excesso de detalhe dilui a mensagem." }
+      ]
+    },
+    "ambientes": {
+      "texto": "Você tende a render mais em contextos que valorizam precisão, continuidade e confiabilidade: rotinas que não podem falhar, processos com regras claras, controles, registros, conferências, trabalho em que a qualidade se mede pelo detalhe. Tarefas que pedem paciência, concentração e método costumam combinar muito com você. O que drena são ambientes de improviso permanente, mudanças diárias de rumo, exposição pública frequente e pressão por velocidade acima da qualidade. Você consegue atuar nesses contextos, mas com um gasto de energia muito maior.",
+      "itens": [
+        { "titulo": "Onde rende", "texto": "Contextos estruturados, com critérios claros de qualidade, ritmo previsível e espaço para trabalho concentrado." },
+        { "titulo": "Onde drena", "texto": "Improviso constante, prioridades que mudam todo dia, ambientes barulhentos e cobrança por velocidade sem critério." },
+        { "titulo": "Como se adaptar", "texto": "Em ambientes mais caóticos, crie seus próprios modelos e listas de verificação para reduzir o improviso nas tarefas que dependem de você." }
+      ]
+    },
+    "pontos_cegos": {
+      "texto": "Seus pontos cegos costumam vir do excesso de cuidado. A busca pela forma certa pode atrasar entregas que já estavam boas. O apego ao processo pode impedir você de ver quando ele deixou de fazer sentido. O hábito de corrigir em silêncio esconde problemas que a liderança precisaria conhecer e impede os colegas de aprender. E a reserva, somada à precisão, pode fazer com que suas correções soem frias, mesmo quando a intenção é ajudar. Os outros veem o resultado do seu cuidado, mas nem sempre veem o cuidado.",
+      "itens": [
+        { "titulo": "Bom o bastante", "texto": "Nem toda entrega precisa do mesmo nível de perfeição. Pergunte qual é o padrão necessário antes de refinar." },
+        { "titulo": "Regra como escudo", "texto": "Usar o procedimento para não se posicionar evita o conflito, mas tira de você a autoria das suas ideias." },
+        { "titulo": "Correção invisível", "texto": "Corrigir o erro do outro sem falar com ele resolve hoje e garante que o erro se repita amanhã." },
+        { "titulo": "Processo que envelheceu", "texto": "Uma vez por ano, revise os processos que você mantém e pergunte: isso ainda serve ao objetivo?" }
+      ]
+    },
+    "valoriza_nos_outros": {
+      "texto": "Você tende a valorizar nas pessoas a responsabilidade, a pontualidade e o cuidado com o trabalho. Costuma respeitar quem cumpre prazos, segue os combinados, confere antes de entregar e assume quando erra. Confia em quem é coerente e previsível. Pessoas que improvisam demais, que prometem sem planejar ou que tratam regras como sugestões tendem a perder sua confiança, ainda que você não diga nada. Vale lembrar que pessoas mais rápidas e criativas também entregam valor, muitas vezes justamente porque arriscam caminhos que o procedimento ainda não prevê.",
+      "itens": [
+        { "titulo": "Responsabilidade", "texto": "Você confia em quem faz o que disse que faria, no prazo combinado e com o cuidado necessário." },
+        { "titulo": "Honestidade sobre erros", "texto": "Valoriza quem assume um erro rapidamente e ajuda a corrigir, em vez de esconder." },
+        { "titulo": "Valor do improviso", "texto": "Observe o que pessoas mais criativas conseguem quando arriscam; às vezes, elas mostram o próximo processo que você vai documentar." }
+      ]
+    }
+  },
+  "pressao": {
+    "primeira_reacao": "Quando a pressão começa, você tende a se agarrar ao método. Confere mais, revisa mais, pede mais informação e segue o procedimento à risca, como forma de reduzir o risco de erro. Fala menos e mergulha na tarefa. Por fora, parece calma; por dentro, cresce a preocupação com o que pode dar errado e com o tempo que não vai ser suficiente.",
+    "se_continua": "Se a pressão dura, a rigidez aumenta. Você pode resistir a qualquer flexibilização, responder com “não está previsto” ou “não é assim que se faz”, e se fechar no seu trabalho sem compartilhar o que está acontecendo. O silêncio pode virar distância. Em alguns momentos, pode surgir uma recusa firme e inesperada, sustentada na regra, que surpreende quem estava acostumado com a sua cooperação.",
+    "como_volta": "Você tende a se reequilibrar quando recupera a clareza: um plano escrito, prioridades definidas, um prazo realista. Ter tempo e silêncio para organizar as tarefas e terminar algo do jeito certo costuma ajudar muito. Também ajuda conversar com alguém de confiança sobre o que está pesando, com fatos, e negociar com a liderança o que pode ser entregue com menos perfeição.",
+    "sinais": [
+      "Você revisa a mesma entrega várias vezes e ainda não sente segurança para enviar.",
+      "Passa a responder pedidos com referências a regras em vez de soluções.",
+      "Fala menos nas reuniões e evita conversas com o time.",
+      "Começa a fazer horas extras para manter o padrão de qualidade.",
+      "Corrige o trabalho dos outros sem comentar com eles.",
+      "Resiste até a pequenas mudanças que normalmente aceitaria."
+    ],
+    "o_que_ajuda": [
+      "Escreva todas as tarefas em aberto e peça à liderança para definir as três prioridades.",
+      "Defina para cada entrega o que é “pronto” e envie quando atingir esse ponto.",
+      "Reserve um bloco de tempo sem interrupções para organizar o que está pendente.",
+      "Converse com alguém de confiança sobre a pressão, levando fatos concretos.",
+      "Pergunte qual regra pode ser flexibilizada temporariamente e combine isso por escrito."
+    ]
+  },
+  "relacoes": {
+    "D": {
+      "texto": "Com pessoas de Dominância alta, a relação costuma exigir esforço dos dois lados. Elas querem velocidade, decisão e resultado; você quer cuidado, método e segurança. O ritmo delas pode parecer imprudente para você, e a sua cautela pode parecer lentidão para elas. Você tende a recuar diante do tom firme, e elas podem atropelar etapas que você considera essenciais. A relação melhora quando você apresenta riscos de forma curta e objetiva e quando combina com elas o que é inegociável e o que pode ser simplificado.",
+      "dicas": [
+        "Resuma os riscos em até três pontos e diga qual é o mais grave.",
+        "Comece pela conclusão; os detalhes, ofereça só se pedirem.",
+        "Não espere a certeza total para falar; diga “vejo um risco aqui” na hora."
+      ]
+    },
+    "I": {
+      "texto": "Com pessoas de Influência alta, a relação pode ser complementar ou desgastante. Elas trazem energia, ideias e contatos; você traz organização e cuidado com os detalhes. O atrito costuma aparecer quando o entusiasmo delas ignora prazos e procedimentos, e você fica com a parte de arrumar. Elas podem achar seu jeito formal demais; você pode achá-las dispersas. A dupla funciona quando você aproveita a capacidade delas de engajar pessoas e oferece a estrutura que transforma a ideia em entrega.",
+      "dicas": [
+        "Ofereça um modelo ou roteiro simples para organizar as ideias delas.",
+        "Aceite um pouco de conversa informal; para elas, isso constrói confiança.",
+        "Combine prazos por escrito depois de reuniões animadas."
+      ]
+    },
+    "S": {
+      "texto": "Com pessoas de Estabilidade alta, a convivência costuma ser tranquila e cooperativa. Vocês compartilham o ritmo cuidadoso, a lealdade e o gosto pela previsibilidade. Você tende a ser o lado mais técnico e exigente com os detalhes. O risco é a dupla resistir junta às mudanças necessárias e evitar conversas difíceis, criando um ambiente estável demais, que demora a se adaptar. A relação cresce quando um ajuda o outro a se posicionar.",
+      "dicas": [
+        "Combinem de testar juntos as mudanças, em vez de resistir juntos.",
+        "Ofereça seu cuidado técnico como apoio, e não como correção.",
+        "Pergunte a opinião delas diretamente; podem não falar espontaneamente."
+      ]
+    },
+    "C": {
+      "texto": "Com pessoas de Conformidade alta, a afinidade costuma ser grande. Ambos valorizam precisão, critério e trabalho bem feito. A diferença é que elas podem ser mais críticas e independentes, enquanto você tende a cooperar mais e a pensar no time. O risco da dupla é o excesso de análise: duas pessoas buscando a perfeição podem atrasar entregas e travar decisões. Também pode haver disputa silenciosa sobre qual é o jeito certo. A relação rende quando vocês definem juntos o padrão de pronto.",
+      "dicas": [
+        "Definam juntos o padrão de qualidade necessário antes de começar.",
+        "Coloquem prazo para as análises e cumpram.",
+        "Quando discordarem do método, comparem resultados com dados, e não preferências."
+      ]
+    }
+  },
+  "o_que_dizem": {
+    "elogios": [
+      "“Se passou por você, eu sei que está certo.”",
+      "“Você é a pessoa que mais conhece os processos aqui.”",
+      "“Nunca vi você perder um prazo.”",
+      "“Quando eu tenho dúvida de como fazer, é você que eu procuro.”"
+    ],
+    "criticas": [
+      "“Você demora muito para entregar porque revisa tudo várias vezes.”",
+      "“Qualquer mudança com você vira uma batalha.”",
+      "“Você só fala da regra, eu queria saber o que você acha.”",
+      "“Você corrigiu meu trabalho e não me falou nada.”"
+    ]
+  },
+  "pdi": {
+    "foco": "Seu foco número 1 é ganhar flexibilidade sem abrir mão da qualidade. Sua precisão e sua constância são forças que poucos têm, mas o apego ao método e à perfeição pode atrasar entregas, travar mudanças e esconder sua opinião atrás da regra. Desenvolver o critério de “bom o bastante” e a coragem de dizer o que pensa, com suas palavras, multiplica o valor do que você já faz bem.",
+    "habitos": [
+      { "nome": "Padrão de pronto", "como": "Antes de começar cada tarefa importante, escreva em uma linha o que significa “pronto” e entregue quando atingir esse ponto, sem revisão extra.", "sinal_de_progresso": "Suas entregas chegam antes do prazo e as correções pedidas continuam raras." },
+      { "nome": "Opinião em primeira pessoa", "como": "Em cada reunião, expresse ao menos uma vez a sua opinião com a frase “eu penso que...”, em vez de citar apenas regra ou dado.", "sinal_de_progresso": "Colegas passam a pedir sua opinião, e não só sua conferência." },
+      { "nome": "Devolver em vez de refazer", "como": "Quando encontrar um erro no trabalho de alguém, aponte o problema e devolva para a pessoa corrigir, explicando como evitar na próxima.", "sinal_de_progresso": "Os mesmos erros param de aparecer nas entregas do time." },
+      { "nome": "Teste da novidade", "como": "Diante de cada mudança de processo ou sistema, use a novidade por duas semanas antes de avaliá-la e registre o que funcionou.", "sinal_de_progresso": "Você passa a contribuir com melhorias na mudança em vez de apontar apenas os riscos." },
+      { "nome": "Revisão anual de processos", "como": "Uma vez por trimestre, escolha um processo que você mantém e pergunte se ele ainda atende ao objetivo; proponha uma simplificação.", "sinal_de_progresso": "Ao fim do ano, ao menos três processos ficaram mais simples sem perder qualidade." }
+    ],
+    "perguntas": [
+      "Que entrega eu estou segurando por buscar uma perfeição que ninguém pediu?",
+      "Em que situação recente eu usei a regra para não ter que dizer o que eu penso?",
+      "Qual processo que eu mantenho deixou de fazer sentido e eu continuo seguindo?",
+      "De quem eu corrijo o trabalho em silêncio, e o que essa pessoa deixa de aprender com isso?",
+      "Que mudança eu resisti no passado e que hoje reconheço como positiva?",
+      "Que risco eu enxerguei e não falei por não ter certeza absoluta?",
+      "O que eu faria diferente se errar não tivesse nenhuma consequência grave?"
+    ],
+    "dias_30": [
+      "Defina o padrão de pronto para todas as tarefas importantes do mês e entregue ao atingi-lo.",
+      "Em cada reunião deste mês, expresse ao menos uma opinião sua em primeira pessoa.",
+      "Identifique três pessoas cujo trabalho você costuma corrigir e converse com cada uma sobre os erros."
+    ],
+    "dias_60": [
+      "Escolha uma mudança em curso na empresa e ofereça-se para testá-la e escrever o guia de uso.",
+      "Documente dois processos que só você conhece e treine alguém para executá-los.",
+      "Reduza pela metade o número de revisões em um tipo de entrega rotineira e acompanhe o resultado."
+    ],
+    "dias_90": [
+      "Proponha à liderança a simplificação de um processo que você mantém, com dados de tempo economizado.",
+      "Peça a três colegas um retorno sobre a sua flexibilidade e compare com o que você imaginava.",
+      "Assuma uma tarefa fora da sua rotina, sem procedimento definido, e registre o que aprendeu ao improvisar."
+    ]
+  }
+}

@@ -19,6 +19,8 @@
  *
  *   pessoa({ pessoa: {nome, resultado}, consultor? }, opcoes?)
  *     -> { modelo: 'pessoa', versao, titulo, geradoEm, consultor, pessoa, frase, fatores, secoes, aviso }
+ *     Completo com DISC_PROFUNDO carregado (e conteúdo da combinação): secoes = capítulos do Relatório Completo Avançado
+ *     (DISC_PROFUNDO.secoesDocumento) e avancado: { combinacao, capitulos }.
  *
  * opcoes.geradoEm (ISO) fixa a data (testes); sem ele, agora.
  * Privacidade: nomes sempre "Primeiro nome + inicial" (no modelo pessoa, a saudação usa só o primeiro nome);
@@ -573,6 +575,16 @@
     };
     if (!simples) {
       base.secoes = copia(m.secoes);
+      // Relatório Completo Avançado (js/disc-profundo.js + js/disc-profundo-dados.js carregados e conteúdo da combinação):
+      // os capítulos por combinação entram como seções genéricas do documento. Sem eles, fica o completo de antes.
+      // Só quando a página carregou o módulo (admin.html) ou quem chama passa opcoes.profundo (testes no Node).
+      var PF = opcoes.profundo || (root && root.DISC_PROFUNDO) || null;
+      var av = null;
+      try { av = PF ? PF.montar(r, p.nome, ex ? { exigido: { percentuais: ex.percentuais, codigo: ex.codigo } } : {}) : null; } catch (e) { av = null; }
+      if (av) {
+        base.avancado = { combinacao: av.combinacao ? av.combinacao.codigo : null, capitulos: av.capitulos.length };
+        base.secoes = PF.secoesDocumento(av);
+      }
       return base;
     }
     // Versão simples (2 páginas): RP.montarSimples quando existir; senão, recorte do completo.

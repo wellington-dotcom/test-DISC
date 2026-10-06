@@ -1,0 +1,292 @@
+{
+  "codigo": "I",
+  "retrato": [
+    "No trabalho, você tende a ser a pessoa que muda a temperatura da sala. Chega numa reunião morna e, em poucos minutos, alguém já está rindo, outra pessoa já falou o que estava guardando e o grupo parece mais disposto. Seu jeito de trabalhar passa por gente: você pensa conversando, resolve conversando e costuma descobrir o que acha de um assunto enquanto fala sobre ele. Uma tarde inteira de planilha, sem ninguém por perto, tende a pesar mais em você do que dez reuniões seguidas.",
+    "No seu perfil a Influência aparece com folga sobre os outros fatores, e isso dá a ela uma força concentrada. Não há um segundo fator puxando com a mesma intensidade para o resultado a qualquer custo, para a calma ou para o detalhe. A consequência é um estilo muito nítido: otimismo, abertura e vontade de envolver. A tensão interna mora aí. Você quer o carinho do grupo e, ao mesmo tempo, quer liberdade para seguir a próxima ideia que acendeu. Quando as duas coisas se chocam, a novidade costuma ganhar e o compromisso antigo fica esperando.",
+    "Quem convive com você tende a descrever uma presença calorosa, acessível e generosa com elogios. Clientes costumam se lembrar do seu nome, colegas novos costumam procurar você primeiro e, em momentos tensos, é comum que peçam para você conduzir a conversa. Do outro lado, pessoas mais metódicas podem enxergar dispersão: muitas ideias, pouca anotação, retorno que demora. Quem é mais reservado pode sentir que você ocupa espaço demais na conversa. Nenhuma dessas leituras está inteira certa, mas vale saber que elas existem e de onde vêm.",
+    "Você costuma chegar ao seu melhor quando há uma causa para defender e pessoas para trazer junto. Lançar um projeto, receber alguém novo, apresentar uma ideia para quem ainda não acredita nela, reaproximar uma equipe depois de uma fase ruim: são situações em que sua energia vira resultado concreto. O que transforma esse brilho em entrega é um parceiro ou um método que segure a continuidade. Com alguém cuidando do cronograma ou com um hábito simples de fechar cada conversa com próximo passo e data, sua capacidade de mobilizar deixa de ser faísca e vira motor."
+  ],
+  "manual": {
+    "como_falar_comigo": [
+      "Comece com um minuto de conversa de verdade antes de entrar na pauta.",
+      "Conte a história por trás do pedido: quem ganha com isso e por que importa.",
+      "Me dê espaço para pensar em voz alta antes de exigir uma resposta fechada.",
+      "Reconheça em público o que deu certo; os ajustes, prefira tratar em particular.",
+      "No fim da conversa, combine comigo o próximo passo e a data por escrito.",
+      "Se o assunto for um problema, diga isso logo e com franqueza, mas sem frieza."
+    ],
+    "evite": [
+      "Responder minhas ideias só com uma lista de riscos, sem enxergar o que há de bom nelas.",
+      "Mandar uma crítica seca por mensagem e sumir sem conversar.",
+      "Me deixar semanas sem retorno sobre o trabalho que entreguei.",
+      "Me isolar de propósito em tarefas longas e sem contato com ninguém."
+    ],
+    "me_energiza": [
+      "Conhecer gente nova e criar pontes entre pessoas que ainda não se falam.",
+      "Apresentar uma ideia e ver o grupo comprar a proposta.",
+      "Começos: lançamentos, projetos novos, eventos, primeiras reuniões com cliente.",
+      "Reconhecimento sincero e visível pelo que fiz.",
+      "Ambientes leves, onde o humor convive com o trabalho sério."
+    ],
+    "me_desgasta": [
+      "Rotina repetitiva sem nenhum contato humano.",
+      "Clima pesado, silêncio hostil e conflitos que ninguém resolve.",
+      "Revisar detalhes minúsculos por muito tempo, sem ver para que servem.",
+      "Sentir que minha opinião não é levada em conta.",
+      "Regras rígidas impostas sem explicação."
+    ]
+  },
+  "dimensoes": {
+    "dia_a_dia": {
+      "texto": "Seu dia de trabalho tende a ser movido por interação. Você costuma começar pelo que envolve pessoas: responder mensagens, passar na mesa de alguém, puxar uma conversa rápida que resolve o que um e-mail levaria três dias. O trabalho individual acontece, mas rende mais quando tem alguém por perto ou um prazo conversado com outra pessoa. O risco é o dia terminar cheio de conversas boas e com a tarefa mais importante ainda aberta, porque as interrupções pareciam mais urgentes e, francamente, mais interessantes.",
+      "itens": [
+        { "titulo": "Bloco protegido", "texto": "Reserve duas janelas de 50 minutos por dia, sem notificações, para a tarefa que exige concentração. Avise o time que nesse horário você responde depois." },
+        { "titulo": "Trabalho em dupla", "texto": "Para tarefas que você costuma adiar, marque uma sessão com um colega, mesmo que cada um faça uma coisa diferente. A companhia ajuda você a começar." },
+        { "titulo": "Fechamento do dia", "texto": "Antes de sair, escreva três linhas: o que terminou, o que ficou aberto e o primeiro passo de amanhã. Leva cinco minutos e evita surpresas." },
+        { "titulo": "Conversa com destino", "texto": "Quando uma conversa render uma ideia, anote na hora quem faz o quê. Ideia sem dono costuma morrer no corredor." }
+      ]
+    },
+    "decisao": {
+      "texto": "Você tende a decidir rápido e com base em impressão: a conversa com o cliente, o clima da equipe, a sensação de que algo vai dar certo. Essa leitura costuma ser boa quando o assunto é gente. A armadilha aparece quando a decisão depende de números, contratos ou consequências de longo prazo, e o entusiasmo do momento fala mais alto do que os dados. Também é comum que você decida para agradar quem está na sua frente, e depois perceba que o combinado não cabe na agenda ou no orçamento.",
+      "itens": [
+        { "titulo": "Regra das 24 horas", "texto": "Para decisões que envolvem dinheiro, contrato ou contratação, durma uma noite antes de responder. Diga: 'Gostei, te confirmo amanhã até as 10h'." },
+        { "titulo": "Três perguntas frias", "texto": "Antes de dizer sim, pergunte a si mesmo: quanto custa, quanto tempo leva e o que deixo de fazer para encaixar isso." },
+        { "titulo": "Alguém do contra", "texto": "Peça a uma pessoa cuidadosa da equipe que aponte dois riscos da sua proposta. Ouça sem rebater por dois minutos." },
+        { "titulo": "Separe gosto de prova", "texto": "Escreva o que você sente sobre a opção e, ao lado, o que os números dizem. Se as colunas brigarem, investigue antes de decidir." }
+      ]
+    },
+    "aprendizado": {
+      "texto": "Você costuma aprender melhor conversando, testando e ensinando. Uma explicação em voz alta, um exemplo real e uma chance de praticar com outras pessoas fixam mais em você do que um manual de quarenta páginas. Treinamentos em grupo, mentorias e trocas informais com quem já fez tendem a render muito. O ponto de atenção é a etapa chata do aprendizado: a parte de repetição, de detalhe técnico e de estudo individual. É ali que você costuma abandonar o curso, mesmo tendo começado com muita vontade.",
+      "itens": [
+        { "titulo": "Ensine para fixar", "texto": "Depois de aprender algo, explique para um colega em dez minutos. Se travar em algum ponto, é ali que precisa voltar a estudar." },
+        { "titulo": "Grupo de estudo", "texto": "Junte duas ou três pessoas com o mesmo objetivo e marque encontros semanais. O compromisso com o grupo segura você nas semanas difíceis." },
+        { "titulo": "Meta pequena e visível", "texto": "Divida o curso em etapas de uma semana e conte para alguém o que vai concluir. Celebrar cada etapa mantém o ânimo." },
+        { "titulo": "Caderno de aplicação", "texto": "Para cada conteúdo novo, anote uma situação real do seu trabalho em que vai usá-lo nos próximos sete dias." }
+      ]
+    },
+    "mudanca": {
+      "texto": "Mudança costuma soar para você como oportunidade. Sistema novo, reorganização da equipe, chefe que chega com outra visão: você tende a ser das primeiras pessoas a enxergar o lado bom e a contagiar quem está com medo. Essa abertura é valiosa. O cuidado é com dois movimentos. O primeiro é abraçar a novidade antes de entender o que ela exige de verdade. O segundo é perder o interesse quando a mudança sai da fase empolgante e entra na fase de implantação, cheia de ajustes, treinamentos e retrabalho.",
+      "itens": [
+        { "titulo": "Porta-voz da transição", "texto": "Ofereça-se para explicar a mudança aos colegas mais resistentes. Sua leveza ajuda, mas leve as respostas certas, não só o ânimo." },
+        { "titulo": "Fique até a fase chata", "texto": "Escolha uma parte da implantação para acompanhar até o fim, como o treinamento de uma área, e não passe adiante." },
+        { "titulo": "Escute o medo alheio", "texto": "Quando alguém reclamar da mudança, pergunte o que preocupa antes de mostrar o lado positivo. Otimismo cedo demais soa como pouco caso." }
+      ]
+    },
+    "tempo_organizacao": {
+      "texto": "Tempo é, provavelmente, o seu terreno mais escorregadio. Você tende a subestimar quanto leva cada tarefa, a aceitar convites demais e a deixar o trabalho de bastidor para a última hora, quando a pressão finalmente traz foco. Agendas cheias de reuniões e listas espalhadas em papéis, aplicativos e conversas são comuns no seu estilo. Isso não significa falta de capacidade: significa que a estrutura precisa vir de fora, de um sistema simples o bastante para você usar todos os dias, sem transformar organização numa tarefa pesada.",
+      "itens": [
+        { "titulo": "Uma lista só", "texto": "Escolha um único lugar para anotar tarefas e use por 30 dias. Tudo o que surgir em conversa vai para lá no mesmo dia." },
+        { "titulo": "Prazo com folga", "texto": "Quando estimar um prazo, some 50% ao que você acha. Se terminar antes, ótimo; se não, você não quebra a palavra." },
+        { "titulo": "Limite de sim", "texto": "Defina quantos compromissos extras cabem na sua semana, por exemplo dois. Depois do segundo, a resposta padrão é 'agora não consigo'." },
+        { "titulo": "Revisão de sexta", "texto": "Toda sexta, 20 minutos para olhar a lista, riscar o que perdeu sentido e escolher as três prioridades da semana seguinte." }
+      ]
+    },
+    "comunicacao": {
+      "texto": "Falar é o seu ambiente natural. Seu tom costuma ser expressivo, você usa exemplos, histórias e humor, e tem facilidade para adaptar a mensagem a quem ouve. Em apresentações, tende a conquistar a sala. Na escrita, o mesmo estilo pode virar mensagens longas, cheias de contexto e com o pedido escondido no quarto parágrafo. Outro ponto comum é a escuta: na empolgação, você pode completar a frase do outro ou responder antes de entender a pergunta, e quem é mais quieto desiste de falar.",
+      "itens": [
+        { "titulo": "Pedido na primeira linha", "texto": "Em e-mails e mensagens de trabalho, escreva o que precisa logo no começo. O contexto vem depois, para quem quiser ler." },
+        { "titulo": "Pausa de três segundos", "texto": "Quando alguém terminar de falar, conte três segundos antes de responder. Muitas vezes a pessoa ainda ia completar algo importante." },
+        { "titulo": "Resuma o que ouviu", "texto": "Em conversas importantes, repita em uma frase o que entendeu antes de dar sua opinião. Isso mostra escuta e evita mal-entendidos." },
+        { "titulo": "Menos adjetivos, mais fatos", "texto": "Ao relatar um resultado, troque 'foi incrível' por um número ou um exemplo concreto. Gestores e clientes cuidadosos confiam mais assim." }
+      ]
+    },
+    "conflito": {
+      "texto": "Você tende a evitar conflito aberto, não por medo de discutir, mas porque valoriza o clima e quer continuar bem com todo mundo. É comum que tente resolver uma tensão com uma piada, um café ou uma conversa de bastidor, e isso às vezes funciona. Quando não funciona, o incômodo cresce em silêncio até sair de uma vez, com mais emoção do que você gostaria. Outro padrão é levar a crítica para o lado pessoal: um questionamento sobre o seu trabalho pode soar como rejeição a você.",
+      "itens": [
+        { "titulo": "Fale enquanto é pequeno", "texto": "Se algo incomodou, traga o assunto em até 48 horas, com calma. Problema pequeno conversado cedo não vira explosão." },
+        { "titulo": "Separe pessoa de trabalho", "texto": "Ao receber uma crítica, pergunte: 'O que exatamente você mudaria?'. Focar no ajuste concreto tira o peso pessoal da conversa." },
+        { "titulo": "Humor no lugar certo", "texto": "Use o humor depois que o problema foi dito, não no lugar dele. A piada alivia, mas não resolve." },
+        { "titulo": "Roteiro simples", "texto": "Para conversas difíceis, prepare três frases: o que aconteceu, como afetou o trabalho e o que você propõe daqui para frente." }
+      ]
+    },
+    "motivadores": {
+      "texto": "O que costuma acender você é ver pessoas reagindo ao que você fez. Um cliente que agradece, uma equipe que compra a ideia, uma apresentação que termina com perguntas animadas. Reconhecimento importa, e não precisa ser grandioso: uma menção na reunião ou uma mensagem sincera do gestor já fazem diferença. Variedade também move você, assim como liberdade para propor, experimentar e falar com quem quiser. Projetos com propósito claro, em que dá para explicar a qualquer pessoa por que aquilo importa, tendem a render o seu melhor.",
+      "itens": [
+        { "titulo": "Visibilidade", "texto": "Ter o seu trabalho apresentado, comentado e lembrado. Peça oportunidades de apresentar resultados em vez de esperar que alguém note." },
+        { "titulo": "Novidade constante", "texto": "Projetos novos, pessoas novas, desafios diferentes. Alterne tarefas repetitivas com uma atividade que traga algo de inédito na semana." },
+        { "titulo": "Pertencimento", "texto": "Fazer parte de um grupo que se gosta e se apoia. Ambientes acolhedores tendem a multiplicar a sua dedicação." }
+      ]
+    },
+    "desmotivadores": {
+      "texto": "Seu ânimo tende a cair rápido em ambientes frios, onde ninguém conversa e o trabalho parece mecânico. Rotina sem variedade, tarefas solitárias por longos períodos e controle excessivo sobre cada passo costumam drenar sua energia. Também pesa muito trabalhar sem retorno: entregar algo e não saber se ficou bom deixa você no escuro. Críticas frequentes e frias, sem reconhecimento do que funcionou, podem fazer você se fechar, o que é raro no seu estilo e costuma ser um sinal claro de desgaste.",
+      "itens": [
+        { "titulo": "Silêncio sobre o seu trabalho", "texto": "Se o retorno não vem, peça. Pergunte ao gestor, uma vez por quinzena: 'O que está funcionando e o que você ajustaria?'." },
+        { "titulo": "Isolamento prolongado", "texto": "Se a fase exige muito trabalho individual, combine contatos curtos com o time ao longo do dia para manter a conexão." },
+        { "titulo": "Microgestão", "texto": "Proponha um acordo: você manda um resumo curto do andamento duas vezes por semana em troca de autonomia no como fazer." }
+      ]
+    },
+    "necessidades": {
+      "texto": "Para render, você tende a precisar de um ambiente com contato humano frequente, abertura para dar opinião e algum espaço de criatividade. Também precisa, mais do que talvez admita, de estrutura: prazos claros, alguém que acompanhe o andamento sem sufocar e ferramentas simples para não perder compromissos. A combinação ideal é liberdade no como, clareza no quê e no quando. Sem essa clareza, sua energia se espalha em muitas frentes ao mesmo tempo e o resultado demora a aparecer.",
+      "itens": [
+        { "titulo": "Combinados explícitos", "texto": "Peça que toda tarefa venha com prazo e critério de pronto. Isso protege você da sensação de 'achei que estava bom'." },
+        { "titulo": "Gente por perto", "texto": "Reuniões rápidas, conversas de alinhamento e momentos de troca não são distração para você: são combustível. Inclua isso na rotina." },
+        { "titulo": "Retorno frequente", "texto": "Retornos curtos e constantes funcionam melhor do que uma avaliação grande no fim do semestre." }
+      ]
+    },
+    "como_lidera": {
+      "texto": "Quando lidera, mesmo sem cargo, você tende a liderar pelo entusiasmo. Mostra o porquê, cria clima de time, celebra conquistas e faz cada pessoa se sentir vista. Equipes costumam gostar de trabalhar com você e defender o grupo para fora. O ponto frágil é o acompanhamento: você pode delegar com empolgação e não voltar para conferir, ou evitar cobrar alguém de quem gosta. Com o tempo, quem entrega muito percebe que quem entrega pouco recebe o mesmo tratamento, e isso desgasta a confiança na sua liderança.",
+      "itens": [
+        { "titulo": "Ritual de acompanhamento", "texto": "Marque 15 minutos por semana com cada pessoa da equipe só para olhar entregas e prazos. Sem pauta, a conversa vira só papo." },
+        { "titulo": "Cobrar também é cuidar", "texto": "Quando alguém atrasar, fale no mesmo dia, com calma. Adiar a cobrança para preservar a relação costuma estragar a relação depois." },
+        { "titulo": "Reconheça com precisão", "texto": "Troque 'mandou bem' por 'o jeito que você organizou a reunião com o cliente salvou o prazo'. Elogio específico vale mais." },
+        { "titulo": "Tenha um braço direito metódico", "texto": "Busque alguém que goste de controle e processo para dividir a gestão do dia a dia. A dupla tende a funcionar muito bem." }
+      ]
+    },
+    "como_prefere_ser_liderado": {
+      "texto": "Você costuma render mais com lideranças próximas, acessíveis e que reconhecem esforço. Gestores que explicam o porquê das decisões, abrem espaço para ideias e dão retorno com frequência tendem a ganhar sua lealdade. Lideranças distantes, que só aparecem para corrigir, ou extremamente controladoras costumam apagar sua iniciativa. O que você talvez não peça, mas precise, é alguém que ajude a transformar entusiasmo em plano: que pergunte pelo prazo, pelo próximo passo e pelo que ficou pendente, sem tom de bronca.",
+      "itens": [
+        { "titulo": "Diga o que funciona", "texto": "Conte ao seu gestor, no primeiro mês, que retornos curtos e frequentes ajudam você mais do que avaliações longas e raras." },
+        { "titulo": "Peça o porquê", "texto": "Quando receber uma ordem sem contexto, pergunte com leveza qual é o objetivo. Entender o motivo muda o seu engajamento." },
+        { "titulo": "Aceite o acompanhamento", "texto": "Se o gestor quiser checar prazos, encare como apoio e não como desconfiança. Isso compensa justamente o seu ponto mais frágil." }
+      ]
+    },
+    "papel_na_equipe": {
+      "texto": "Na equipe, você tende a ocupar o papel de quem aproxima. Recebe quem chega, quebra o gelo, apresenta pessoas, puxa o grupo quando o ânimo cai e muitas vezes representa o time para fora. Em brainstorms, costuma trazer muitas ideias e animar as dos outros. É comum que você seja a pessoa que sabe o que está acontecendo em cada área, porque conversa com todo mundo. O cuidado é não ficar só com a parte visível do trabalho e deixar a parte pesada, silenciosa, para os colegas.",
+      "itens": [
+        { "titulo": "Ponte entre áreas", "texto": "Use sua rede para destravar problemas: quando um processo empacar entre duas áreas, você costuma saber com quem falar." },
+        { "titulo": "Assuma uma tarefa de bastidor", "texto": "Em cada projeto, pegue para si pelo menos uma entrega pouco visível e leve até o fim. Isso equilibra a percepção do time." },
+        { "titulo": "Guardião do clima", "texto": "Perceba quem está mais quieto que o normal e puxe uma conversa. Você tende a captar isso antes dos outros." }
+      ]
+    },
+    "persuasao_negociacao": {
+      "texto": "Convencer pessoas costuma ser um dos seus pontos mais fortes. Você cria afinidade rápido, lê o humor do outro e encontra a história que faz a proposta ganhar sentido. Em vendas, apresentações e negociações internas, tende a abrir portas que outros não abririam. O risco está no fechamento: na vontade de manter o clima bom, você pode ceder mais do que devia, prometer prazo que não controla ou sair da reunião sem o acordo registrado. A outra parte gosta de você, mas leva o melhor das condições.",
+      "itens": [
+        { "titulo": "Defina o limite antes", "texto": "Antes de negociar, escreva o mínimo que você aceita. Se a conversa chegar perto disso, peça um intervalo em vez de ceder na hora." },
+        { "titulo": "Traga um número", "texto": "Para cada argumento emocional, prepare um dado que o sustente. Isso convence também quem desconfia de entusiasmo." },
+        { "titulo": "Registre no mesmo dia", "texto": "Depois de qualquer acordo, mande uma mensagem com o que foi combinado, valores e prazos. Simpatia não substitui registro." },
+        { "titulo": "Deixe o outro falar", "texto": "Em negociações, faça pelo menos três perguntas antes de apresentar sua proposta. Você descobre o que realmente importa para a outra parte." }
+      ]
+    },
+    "ambientes": {
+      "texto": "Você tende a render mais em contextos com muita interação, variedade de tarefas e espaço para iniciativa: trabalho que envolve relacionamento com clientes, articulação entre áreas, apresentação de ideias, recepção de pessoas ou criação coletiva. Ambientes com clima colaborativo e reconhecimento aberto costumam potencializar seu estilo. Por outro lado, contextos de muito isolamento, alta repetição, controle minucioso e pouca troca tendem a drenar sua energia rápido. Não é que você não consiga fazer esse tipo de trabalho; é que ele custa mais e precisa de pausas sociais para ser sustentável.",
+      "itens": [
+        { "titulo": "Onde tende a fluir", "texto": "Tarefas de abertura, convencimento, recepção, mobilização de grupos e situações em que o resultado depende de criar confiança rápido." },
+        { "titulo": "Onde tende a pesar", "texto": "Trabalho de conferência longa, documentação extensa, tarefas solitárias sem prazo próximo e ambientes de pouca conversa." },
+        { "titulo": "Como equilibrar", "texto": "Se o seu trabalho tem muita parte pesada, intercale com contatos curtos e combine entregas parciais com alguém para manter o ritmo." }
+      ]
+    },
+    "pontos_cegos": {
+      "texto": "Seus pontos cegos costumam nascer do excesso das suas qualidades. O otimismo que anima o grupo pode fazer você não enxergar um risco óbvio. A facilidade de falar pode ocupar o espaço de quem pensa mais devagar. A vontade de agradar pode encher sua agenda de promessas. E a atenção à relação pode fazer você confundir 'as pessoas gostaram' com 'o trabalho ficou bom'. Esses pontos raramente aparecem para você no momento; aparecem semanas depois, na forma de prazos estourados ou de colegas que deixaram de contar com você.",
+      "itens": [
+        { "titulo": "Promessa sem agenda", "texto": "Você pode dizer 'deixa comigo' várias vezes na mesma semana. Antes de cada sim, olhe a agenda por dez segundos." },
+        { "titulo": "Ocupar a conversa", "texto": "Em reuniões, você pode falar bem mais do que imagina. Observe por uma semana quantas vezes interrompe alguém." },
+        { "titulo": "Simpatia como métrica", "texto": "A reação boa das pessoas não garante qualidade. Peça um critério objetivo de sucesso para cada entrega importante." },
+        { "titulo": "Detalhe que volta", "texto": "O que você pula por achar chato costuma voltar como retrabalho. Revise, ou peça que alguém revise, antes de enviar." }
+      ]
+    },
+    "valoriza_nos_outros": {
+      "texto": "Você tende a valorizar pessoas abertas, bem-humoradas e que dão retorno, que respondem à sua energia em vez de ficar na defensiva. Admira quem sabe trabalhar em grupo, reconhece o esforço dos colegas e topa experimentar. Costuma se incomodar com frieza, pessimismo constante e com quem responde toda ideia com 'isso não vai dar certo'. Vale perceber que muitas vezes as pessoas que mais complementam você são justamente as que menos se parecem com você: as caladas, as metódicas, as que perguntam 'e o prazo?'.",
+      "itens": [
+        { "titulo": "Abertura", "texto": "Você costuma confiar mais rápido em quem compartilha ideias, conta como está e fala com franqueza." },
+        { "titulo": "Reciprocidade", "texto": "Quem devolve o seu entusiasmo e reconhece o seu esforço tende a ganhar sua dedicação total." },
+        { "titulo": "Aprenda a ver o oposto", "texto": "Escolha um colega reservado e metódico e observe por um mês o que ele resolve que você não resolveria. Diga isso a ele." }
+      ]
+    }
+  },
+  "pressao": {
+    "primeira_reacao": "Quando a pressão começa, você tende a falar mais, buscar apoio e tentar resolver tudo pela conversa. É comum que aumente a quantidade de mensagens, chame reuniões extras, prometa soluções rápidas para acalmar os envolvidos e use o humor para aliviar o clima. Por fora, parece que está tudo sob controle; por dentro, a atenção já está espalhada em muitas frentes.",
+    "se_continua": "Se a pressão dura semanas, a leveza costuma ir embora. Como a Influência domina com folga, não há um segundo fator forte para segurar a situação, e a reação pode oscilar: ora suas reações ficam mais cortantes e emotivas do que o normal, ora se fecha e some das conversas, o que as pessoas notam imediatamente. Também é comum culpar as circunstâncias ou desorganizar ainda mais a agenda.",
+    "como_volta": "Você costuma voltar ao equilíbrio quando consegue conversar com alguém de confiança, colocar o problema para fora e transformar o caos em três ou quatro passos claros. Reconhecimento de que você está se esforçando ajuda muito. Um momento leve com o time, uma vitória pequena e visível e uma noite fora do assunto também costumam recolocar seu ânimo no lugar.",
+    "sinais": [
+      "Você começa a prometer prazos ainda mais curtos para tranquilizar as pessoas.",
+      "As mensagens ficam mais longas, mais frequentes e mais emotivas.",
+      "Você usa piadas para fugir de assuntos que precisam ser enfrentados.",
+      "Reclama mais do que de costume e fala do problema com várias pessoas, menos com quem pode resolver.",
+      "Some de reuniões ou fica em silêncio, o que destoa do seu jeito.",
+      "Tarefas pequenas e simples começam a se acumular sem resposta."
+    ],
+    "o_que_ajuda": [
+      "Escrever tudo o que está pendente numa lista só e escolher as três prioridades do dia.",
+      "Conversar com uma pessoa de confiança antes de responder no calor do momento.",
+      "Renegociar prazos de forma clara em vez de prometer o impossível.",
+      "Pedir a um colega metódico que revise o plano com você.",
+      "Garantir algum momento leve no dia, longe do problema, para recuperar energia."
+    ]
+  },
+  "relacoes": {
+    "D": {
+      "texto": "Com pessoas de Dominância alta, você costuma compartilhar a velocidade e o gosto por ação, o que facilita no começo. O atrito aparece no tom: a pessoa D tende a ser direta e pode achar sua conversa longa demais; você pode sentir que ela é seca e ignora o clima. Quando você entende que a objetividade dela não é falta de consideração, a parceria tende a ser produtiva: você mobiliza, ela empurra para o resultado.",
+      "dicas": [
+        "Comece pela conclusão e só depois conte a história, se ela pedir.",
+        "Não leve a franqueza dela para o lado pessoal; pergunte o que precisa mudar.",
+        "Mostre resultados com números, não só com reações das pessoas."
+      ]
+    },
+    "I": {
+      "texto": "Com outra pessoa de Influência alta, a afinidade costuma ser imediata: conversa fácil, ideias que se multiplicam, risadas. O risco é a dupla sair de uma reunião com dez ideias brilhantes e nenhum responsável. Também pode surgir uma disputa silenciosa pelo palco, quando as duas querem apresentar, conduzir ou receber o crédito. Juntas, vocês precisam de um acordo explícito sobre quem cuida do quê.",
+      "dicas": [
+        "No fim de cada encontro, definam quem faz o quê e até quando.",
+        "Combinem quem conduz cada apresentação para não disputar o espaço.",
+        "Convidem alguém metódico para os projetos que vocês criarem juntos."
+      ]
+    },
+    "S": {
+      "texto": "Pessoas de Estabilidade alta tendem a gostar do seu calor humano e você costuma apreciar a lealdade e a calma delas. O desencontro está no ritmo: você muda de assunto, de plano e de prioridade com facilidade, e isso pode deixar a pessoa S insegura. Ela pode não dizer nada e simplesmente se retrair. Com paciência e previsibilidade da sua parte, a relação tende a ser das mais sólidas.",
+      "dicas": [
+        "Avise as mudanças com antecedência e explique o motivo com calma.",
+        "Dê tempo para ela responder em vez de pedir opinião na hora.",
+        "Pergunte diretamente como ela está; ela raramente vai trazer o assunto sozinha."
+      ]
+    },
+    "C": {
+      "texto": "Com pessoas de Conformidade alta, a diferença costuma ser a maior. Ela quer dados, processo e precisão; você traz entusiasmo, intuição e improviso. É comum que ela desconfie das suas promessas e que você a perceba como fria ou travada. Mas é justamente essa pessoa que pode salvar seus projetos dos erros que você não vê. Quando há respeito mútuo, a dupla tende a unir alcance e qualidade.",
+      "dicas": [
+        "Mande por escrito, antes da reunião, os dados e a proposta.",
+        "Respeite o tempo de análise dela e não pressione por uma resposta imediata.",
+        "Peça que ela revise sua entrega e agradeça pelos erros encontrados."
+      ]
+    }
+  },
+  "o_que_dizem": {
+    "elogios": [
+      "“Com você na reunião, o clima muda.”",
+      "“Você conhece todo mundo e sempre sabe com quem falar.”",
+      "“Quando você apresenta, até eu fico com vontade de comprar a ideia.”",
+      "“Você faz quem chegou agora se sentir em casa.”",
+      "“Nunca vi alguém transformar um dia ruim em risada tão rápido.”"
+    ],
+    "criticas": [
+      "“Você começa muita coisa e eu fico sem saber o que vai terminar.”",
+      "“Às vezes você fala tanto que eu desisto de falar.”",
+      "“Você promete na hora e depois esquece de dar retorno.”",
+      "“Quando eu aponto um problema, parece que você leva para o lado pessoal.”",
+      "“Faltou detalhe: a ideia era ótima, mas a entrega veio incompleta.”"
+    ]
+  },
+  "pdi": {
+    "foco": "O seu foco número 1 é transformar conexão em compromisso cumprido. Você já tem a parte mais difícil de ensinar: a capacidade de envolver pessoas e criar confiança. O que costuma limitar sua carreira não é falta de talento, é a distância entre o que você combina e o que acompanha até o fim. Fechar esse espaço muda a forma como gestores, clientes e colegas percebem você: de uma pessoa muito querida para uma pessoa querida e confiável.",
+    "habitos": [
+      { "nome": "Fecho com dono e data", "como": "Ao fim de toda conversa de trabalho que gere uma ação, diga em voz alta quem faz, o quê e até quando, e registre numa lista única.", "sinal_de_progresso": "Em quatro semanas, ninguém precisa lembrar você de um combinado." },
+      { "nome": "Antes do sim", "como": "Diante de qualquer pedido novo, responda 'deixa eu ver minha agenda e te confirmo até amanhã' em vez de aceitar na hora.", "sinal_de_progresso": "Você termina o mês com menos compromissos atrasados do que começou." },
+      { "nome": "Escuta com contagem", "como": "Em três reuniões por semana, faça pelo menos duas perguntas antes de dar sua opinião e anote o que aprendeu com as respostas.", "sinal_de_progresso": "Colegas mais quietos passam a falar mais quando você está presente." },
+      { "nome": "Revisão antes de enviar", "como": "Antes de entregar um documento ou proposta, reserve 15 minutos para revisar números, nomes e prazos, ou peça a alguém que revise.", "sinal_de_progresso": "Diminuem as devoluções por erro ou falta de informação." },
+      { "nome": "Conversa difícil em 48 horas", "como": "Quando algo incomodar no trabalho, marque a conversa em até dois dias, usando o roteiro fato, efeito e proposta.", "sinal_de_progresso": "Você percebe menos desabafos com terceiros e menos explosões acumuladas." },
+      { "nome": "Retorno ativo", "como": "Toda segunda, mande uma mensagem curta a quem espera algo de você, com o andamento, mesmo que seja 'ainda não terminei, entrego quinta'.", "sinal_de_progresso": "As pessoas param de perguntar como está aquela tarefa." }
+    ],
+    "perguntas": [
+      "Quais promessas fiz no último mês só para agradar quem estava na minha frente?",
+      "Em quais reuniões eu falei mais do que ouvi, e o que deixei de aprender por isso?",
+      "Que tarefa importante eu venho adiando porque ela é chata, e não porque é difícil?",
+      "Quem da equipe faz o trabalho de bastidor que sustenta as minhas ideias? Eu reconheço isso?",
+      "Quando recebo uma crítica, o que sinto primeiro, e o que faço com isso?",
+      "Qual conversa difícil estou evitando agora, e o que ela custa se continuar esperando?",
+      "Se a cobrança fosse só pelo que terminei, e não pelo que comecei, como estaria meu último trimestre?",
+      "Que pessoa muito diferente de mim poderia ser minha melhor parceira de trabalho?"
+    ],
+    "dias_30": [
+      "Escolha uma única ferramenta de tarefas e registre nela tudo o que combinar durante 30 dias.",
+      "Liste todos os compromissos em aberto e renegocie com honestidade os que não vai conseguir cumprir.",
+      "Peça a dois colegas de confiança que digam, com franqueza, um ponto forte e um ponto a melhorar seu."
+    ],
+    "dias_60": [
+      "Leve um projeto pequeno do começo ao fim, incluindo a etapa de fechamento e documentação, sem passar adiante.",
+      "Tenha pelo menos duas conversas difíceis que vinha adiando, usando o roteiro fato, efeito e proposta.",
+      "Forme uma parceria fixa com alguém metódico para revisar suas entregas mais importantes toda semana."
+    ],
+    "dias_90": [
+      "Compare sua taxa de prazos cumpridos com a do início e compartilhe o resultado com seu gestor.",
+      "Conduza uma reunião inteira em que você fala menos de um terço do tempo e registre o que mudou.",
+      "Defina com seu gestor um desafio para os próximos seis meses que use sua capacidade de mobilizar pessoas com entrega mensurável."
+    ]
+  }
+}

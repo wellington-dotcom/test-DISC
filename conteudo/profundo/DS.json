@@ -1,0 +1,279 @@
+{
+  "codigo": "DS",
+  "retrato": [
+    "No trabalho, você tende a ser a pessoa que define o rumo e não larga o leme até chegar. Não costuma fazer barulho: fala pouco, decide com firmeza e aparece todos os dias com a mesma disposição, inclusive quando o projeto já perdeu o brilho para os outros. É comum que confiem em você justamente nas entregas longas, cheias de etapas, em que a maioria desanima no meio. Seu jeito de buscar resultado é menos de arrancada e mais de persistência: passo firme, sem pular etapas.",
+    "A Dominância é o seu fator principal e dá a você ambição e coragem para decidir. A Estabilidade, logo atrás, acrescenta constância, paciência e lealdade ao que foi combinado. A tensão interna da combinação é esta: você quer resultado e quer previsibilidade. Gosta de avançar, mas não gosta que mudem o caminho no meio. Isso pode gerar uma firmeza que, vista de fora, às vezes parece teimosia: uma vez que a rota está traçada, você tende a defendê-la mesmo quando surgem sinais de que vale ajustar.",
+    "Quem trabalha com você tende a perceber alguém sólido, confiável e de palavra, que cumpre o que promete sem precisar de plateia. Em equipes, sua presença costuma transmitir segurança, porque as pessoas sabem o que esperar. Ao mesmo tempo, alguns colegas podem achar sua postura fechada, difícil de convencer e pouco expressiva: não fica claro o que você pensa até o momento em que você decide. Quem traz ideias de mudança pode sentir que precisa vencer uma muralha antes de ter a ideia ouvida.",
+    "Você costuma chegar ao seu melhor em desafios de fôlego: metas claras de médio e longo prazo, responsabilidade de verdade e liberdade para conduzir no seu ritmo, que é firme e contínuo. Ter uma equipe estável e confiável ao redor tende a potencializar o seu estilo. O que leva você a um patamar acima é a abertura: ouvir com mais curiosidade as propostas de mudança de rota, dizer em voz alta o que pensa antes de decidir e aceitar que ajustar o caminho não é perder o rumo."
+  ],
+  "manual": {
+    "como_falar_comigo": [
+      "Seja objetivo e concreto: o que precisa, para quando e por quê.",
+      "Se quiser propor uma mudança de rota, traga o motivo e o impacto no resultado.",
+      "Me dê um tempo curto para pensar antes de cobrar uma posição definitiva.",
+      "Combine comigo uma vez e confie que eu vou cumprir.",
+      "Se algo mudou, me avise logo; surpresa de última hora me incomoda mais do que notícia ruim.",
+      "Pergunte o que eu penso: nem sempre eu falo sem um convite."
+    ],
+    "evite": [
+      "Mudar o combinado várias vezes sem explicar o porquê.",
+      "Confundir meu silêncio com concordância ou com falta de opinião.",
+      "Me cobrar entusiasmo em voz alta como prova de engajamento.",
+      "Prometer em meu nome um prazo que eu não validei."
+    ],
+    "me_energiza": [
+      "Metas claras que posso perseguir com constância até o fim.",
+      "Equipe estável, que cumpre o que combina.",
+      "Ver um projeto longo chegar inteiro à linha de chegada.",
+      "Ter autonomia para conduzir sem interferência a cada passo."
+    ],
+    "me_desgasta": [
+      "Mudanças de prioridade toda semana.",
+      "Pessoas que prometem e não cumprem.",
+      "Discussões longas que não chegam a nenhuma decisão.",
+      "Pressão para decidir na hora algo que pede reflexão."
+    ]
+  },
+  "dimensoes": {
+    "dia_a_dia": {
+      "texto": "Seu dia tende a ter uma espinha dorsal: você sabe o que precisa avançar e trabalha nisso com regularidade, sem grandes variações de humor ou de ritmo. É comum que você chegue, retome de onde parou e siga, resolvendo os imprevistos com firmeza, mas sem deixar que eles mudem o plano principal. Você costuma preferir menos tarefas bem conduzidas a muitas frentes abertas. O risco é que essa constância vire inércia: continuar fazendo do mesmo jeito porque funciona, sem perguntar se ainda é o melhor jeito.",
+      "itens": [
+        { "titulo": "Revisão do caminho", "texto": "Uma vez por mês, pergunte a si: o que eu faço toda semana que poderia ser feito de outro jeito? Teste uma alternativa." },
+        { "titulo": "Mostre o andamento", "texto": "Compartilhe com o time e a liderança um resumo curto do avanço semanal. Seu trabalho constante tende a ficar invisível." },
+        { "titulo": "Espaço para imprevisto", "texto": "Deixe uma pequena margem na agenda para urgências. Assim elas não parecem uma ameaça ao seu plano principal." }
+      ]
+    },
+    "decisao": {
+      "texto": "Você tende a decidir com firmeza, mas não por impulso: costuma pensar um pouco, considerar o impacto prático e então definir o rumo. Depois de decidido, é difícil voltar atrás, o que dá segurança ao grupo e evita idas e vindas. A armadilha da sua combinação está justamente aí: manter uma decisão por coerência quando as condições mudaram. Também é comum que você decida internamente sem compartilhar o raciocínio, e as pessoas só fiquem sabendo quando a decisão já está fechada.",
+      "itens": [
+        { "titulo": "Ponto de revisão", "texto": "Ao tomar uma decisão importante, defina com antecedência em que data e com quais sinais você vai reavaliá-la." },
+        { "titulo": "Pense em voz alta", "texto": "Antes de fechar uma decisão que afeta o time, compartilhe o raciocínio e peça uma objeção. Leva cinco minutos." },
+        { "titulo": "Mudar não é ceder", "texto": "Quando um novo dado aparecer, separe orgulho de argumento: a pergunta é o que leva ao resultado, não quem estava certo." }
+      ]
+    },
+    "aprendizado": {
+      "texto": "Você tende a aprender melhor com prática repetida e aplicação concreta. Costuma preferir dominar bem uma coisa antes de partir para a próxima, e aprende muito observando quem já faz bem e depois fazendo do seu jeito. Conteúdo com utilidade clara para os seus objetivos prende sua atenção; novidades da moda, sem aplicação evidente, tendem a não convencer. O risco é ficar tempo demais no método que já domina e adiar o aprendizado de ferramentas ou abordagens novas até que ele vire urgência.",
+      "itens": [
+        { "titulo": "Uma habilidade por trimestre", "texto": "Escolha uma ferramenta ou técnica nova por trimestre e pratique um pouco toda semana até usá-la com naturalidade." },
+        { "titulo": "Aprenda com os novos", "texto": "Peça a alguém que chegou recentemente à equipe para mostrar como faria uma tarefa que você faz há anos." },
+        { "titulo": "Do uso ao domínio", "texto": "Ao aprender algo, aplique em uma tarefa real na mesma semana. Isso transforma o conteúdo em rotina, que é como você retém." }
+      ]
+    },
+    "mudanca": {
+      "texto": "Mudança costuma ser o seu ponto mais delicado. Quando a mudança é sua, decidida por você, você tende a conduzi-la com firmeza e paciência admiráveis. Quando vem de fora, sobretudo se for brusca, frequente ou mal explicada, é comum que você resista: questiona, desacelera, mantém o jeito antigo até ter certeza de que o novo funciona. Essa cautela protege o time de modismos, mas pode atrasar ajustes necessários, como a adoção de um sistema novo ou a adaptação a um chefe com outro estilo.",
+      "itens": [
+        { "titulo": "Peça o motivo e o plano", "texto": "Diante de uma mudança imposta, peça o objetivo e as etapas. Entender o caminho tende a reduzir sua resistência." },
+        { "titulo": "Teste antes de julgar", "texto": "Comprometa-se a usar o novo jeito por duas semanas antes de dar sua opinião final sobre ele." },
+        { "titulo": "Assuma uma parte", "texto": "Ofereça-se para conduzir uma etapa da mudança. Ter algo para comandar costuma transformar resistência em compromisso." }
+      ]
+    },
+    "tempo_organizacao": {
+      "texto": "Você tende a ter boa gestão do próprio tempo: estabelece prioridades claras, mantém um ritmo regular e cumpre prazos sem depender de picos de esforço. Costuma planejar o suficiente para enxergar o caminho e confiar na própria disciplina para percorrê-lo. O ponto de atenção é a rigidez: quando aparece uma urgência legítima, você pode tratar a interrupção como ameaça ao plano e reagir com irritação. Também é comum que você assuma mais carga do que diz, sem pedir ajuda.",
+      "itens": [
+        { "titulo": "Diga a sua carga", "texto": "Quando a lista estiver pesada, avise a liderança antes de aceitar algo novo. Não espere o limite para falar." },
+        { "titulo": "Prioridade flexível", "texto": "Toda segunda-feira, reveja as prioridades considerando o que mudou na semana anterior, não só o plano original." },
+        { "titulo": "Delegue o rotineiro", "texto": "Identifique duas tarefas repetitivas que você faz por hábito e que outra pessoa poderia assumir com orientação." }
+      ]
+    },
+    "comunicacao": {
+      "texto": "Sua comunicação tende a ser objetiva, calma e econômica. Você costuma falar o necessário, sem floreios, e o que diz geralmente tem peso. Por escrito, é comum ser claro e direto, às vezes até demais. O desafio está no que fica de fora: você tende a guardar opiniões, preocupações e incômodos até ter certeza, e as pessoas podem não saber o que você pensa. Quando finalmente fala, pode soar como decisão encerrada, sem espaço para diálogo.",
+      "itens": [
+        { "titulo": "Compartilhe antes de decidir", "texto": "Diga o que está pensando quando ainda está pensando: “minha tendência é seguir por aqui; o que acham?”." },
+        { "titulo": "Fale do incômodo cedo", "texto": "Quando algo incomodar, diga em até dois dias, com calma. Esperar costuma deixar a conversa mais dura depois." },
+        { "titulo": "Mostre o reconhecimento", "texto": "Diga em voz alta quando gostar do trabalho de alguém. Seu silêncio de aprovação pode ser lido como indiferença." }
+      ]
+    },
+    "conflito": {
+      "texto": "Você tende a encarar conflitos com firmeza, mas sem procurá-los. Costuma tolerar bastante, guardar e seguir trabalhando, até que um limite seja ultrapassado. Aí a reação pode vir mais dura do que a situação pedia, porque carrega o acúmulo de semanas. Quando discute, é comum que se mantenha firme na posição, com argumentos práticos e pouca disposição para ceder. A outra pessoa pode sentir que está diante de uma parede, e não de uma conversa.",
+      "itens": [
+        { "titulo": "Não acumule", "texto": "Trate os pequenos incômodos enquanto são pequenos. Uma conversa curta hoje evita uma discussão pesada daqui a um mês." },
+        { "titulo": "Mostre onde pode ceder", "texto": "Em uma divergência, diga claramente o que é inegociável para você e onde há espaço para acordo." },
+        { "titulo": "Reconheça o ponto do outro", "texto": "Antes de defender sua posição, repita com suas palavras o argumento da outra pessoa. Isso abre a conversa." }
+      ]
+    },
+    "motivadores": {
+      "texto": "Você tende a se motivar com metas concretas, responsabilidade real e a satisfação de ver o trabalho concluído do jeito certo. Costuma valorizar estabilidade suficiente para planejar, autonomia para conduzir e reconhecimento pela consistência, não só pelos picos. Equipes leais e combinados cumpridos alimentam sua energia. É comum que o seu maior prêmio seja chegar ao fim de um projeto difícil e saber que ele aguenta o tempo, mais do que aplauso no momento da entrega.",
+      "itens": [
+        { "titulo": "Metas de fôlego", "texto": "Negocie com sua liderança metas de médio prazo, com marcos claros, em vez de apenas tarefas soltas." },
+        { "titulo": "Reconhecimento pela constância", "texto": "Diga à liderança que valoriza reconhecimento pela regularidade do resultado e não só pelos momentos de destaque." },
+        { "titulo": "Marque a chegada", "texto": "Ao concluir uma etapa longa, registre o que foi conquistado. Isso ajuda você e o time a enxergarem o caminho feito." }
+      ]
+    },
+    "desmotivadores": {
+      "texto": "O que tende a minar sua energia é a instabilidade sem propósito: prioridades que mudam toda semana, metas redefinidas no meio do caminho, combinados descumpridos e decisões tomadas por impulso por outras pessoas. Também desgasta ter a autonomia retirada sem explicação ou trabalhar com gente que promete e não entrega. É comum que, nessas situações, você não reclame muito: apenas se fecha, reduz o envolvimento e passa a fazer o mínimo combinado.",
+      "itens": [
+        { "titulo": "Fale antes de fechar", "texto": "Quando perceber que está se fechando, leve o motivo à liderança com um pedido concreto, em vez de apenas reduzir o envolvimento." },
+        { "titulo": "Separe ruído de mudança real", "texto": "Diante de uma nova prioridade, pergunte se ela é definitiva ou passageira. Isso ajuda a decidir quanta energia investir." },
+        { "titulo": "Combinados por escrito", "texto": "Registre os combinados importantes com quem costuma não cumprir. Isso reduz a frustração e facilita a cobrança." }
+      ]
+    },
+    "necessidades": {
+      "texto": "Para render, você tende a precisar de clareza de objetivo, estabilidade suficiente para planejar e autonomia para conduzir. Ambientes previsíveis, com regras do jogo conhecidas e liderança que cumpre o que diz, costumam combinar com você. Também é importante ter tempo para pensar antes de decisões grandes e receber aviso das mudanças com antecedência. Quando essas condições existem, você tende a sustentar resultados por muito tempo sem precisar de estímulo externo.",
+      "itens": [
+        { "titulo": "Peça antecedência", "texto": "Combine com sua liderança que mudanças relevantes sejam comunicadas com alguma antecedência, sempre que possível." },
+        { "titulo": "Defina seu território", "texto": "Combine com clareza as áreas em que você decide e conduz sem precisar consultar a cada passo." },
+        { "titulo": "Tempo de reflexão", "texto": "Quando pedirem uma decisão importante na hora, diga quanto tempo precisa e cumpra esse prazo à risca." }
+      ]
+    },
+    "como_lidera": {
+      "texto": "Com ou sem cargo, você tende a liderar pela constância e pelo exemplo: define a direção, sustenta o rumo e mostra, com o próprio trabalho, o padrão esperado. Equipes costumam se sentir seguras com você, porque sabem o que esperar e veem coerência entre o que você diz e o que faz. O ponto de atenção é a abertura: você pode resistir às ideias do time que mudam o plano, centralizar decisões por desconfiar de mudanças e comunicar pouco o porquê das escolhas.",
+      "itens": [
+        { "titulo": "Explique a direção", "texto": "Ao definir um rumo, explique o raciocínio em uma reunião curta. Pessoas que entendem o porquê tendem a sustentar melhor o caminho." },
+        { "titulo": "Abra uma porta para ideias", "texto": "Uma vez por mês, peça ao time uma sugestão de mudança e teste pelo menos uma delas de verdade." },
+        { "titulo": "Elogie em voz alta", "texto": "Reconheça publicamente o esforço de alguém por semana. Sua aprovação silenciosa nem sempre chega a quem precisa ouvir." },
+        { "titulo": "Prepare quem segue", "texto": "Escolha uma pessoa para dividir a condução de um projeto longo e transfira gradualmente as decisões." }
+      ]
+    },
+    "como_prefere_ser_liderado": {
+      "texto": "Você tende a render mais com uma liderança clara, coerente e confiável: que defina metas, explique mudanças e cumpra o que promete. Costuma valorizar autonomia dentro de limites bem definidos e respeito pelo seu tempo de reflexão. Lideranças que mudam de ideia a todo momento, que microgerenciam ou que cobram entusiasmo performático tendem a desgastar você. Ajuda muito quando a liderança pergunta sua opinião diretamente, porque nem sempre você a oferece sem um convite.",
+      "itens": [
+        { "titulo": "Combine as regras do jogo", "texto": "No início de um ciclo, combine com a liderança metas, limites de autonomia e a forma de acompanhamento." },
+        { "titulo": "Peça os porquês", "texto": "Quando a liderança mudar algo, pergunte o motivo de forma direta. Entender costuma tornar a mudança aceitável para você." },
+        { "titulo": "Ofereça opinião sem esperar", "texto": "Leve sua visão às conversas com a liderança mesmo sem que perguntem. Ela pode não saber o que você pensa." }
+      ]
+    },
+    "papel_na_equipe": {
+      "texto": "Na equipe, você tende a ser a âncora e o motor de longa distância: quem mantém o foco quando os outros se dispersam e quem garante que o projeto chegue ao fim. É comum que o grupo recorra a você nas fases mais longas e cansativas, em que a novidade acabou e só a persistência resolve. O desafio é não virar a pessoa que diz não a toda ideia nova. Quando você combina sua firmeza com abertura, o time ganha estabilidade sem perder capacidade de se adaptar.",
+      "itens": [
+        { "titulo": "Segure o rumo", "texto": "Em momentos de dispersão, lembre o grupo do objetivo principal e de onde o projeto está em relação a ele." },
+        { "titulo": "Ponte entre ideias e execução", "texto": "Quando alguém propuser algo novo, ajude a transformar a ideia em etapas viáveis em vez de apenas avaliar se é boa." },
+        { "titulo": "Apoie quem chega", "texto": "Ofereça-se para acompanhar pessoas novas no time. Sua constância tende a ser uma ótima referência para quem está começando." }
+      ]
+    },
+    "persuasao_negociacao": {
+      "texto": "Você tende a convencer pela consistência e pela credibilidade, não pelo carisma. Costuma apresentar argumentos práticos, sustentar a posição com calma e não se deixar pressionar. Em negociações longas, sua paciência e firmeza tendem a ser uma vantagem: você aguenta o tempo que for preciso. O risco é a rigidez: fixar-se em uma posição inicial e perder oportunidades de acordo melhor, ou parecer inflexível para quem precisa sentir que encontrou escuta.",
+      "itens": [
+        { "titulo": "Margem planejada", "texto": "Antes de negociar, defina três coisas: o ideal, o aceitável e o limite. Isso permite flexibilidade sem perder a firmeza." },
+        { "titulo": "Pergunte mais", "texto": "Faça perguntas sobre as necessidades da outra parte antes de apresentar sua posição. Pode haver soluções que atendam aos dois." },
+        { "titulo": "Use sua credibilidade", "texto": "Lembre o histórico de entregas cumpridas ao defender uma proposta. Sua consistência é um argumento forte." }
+      ]
+    },
+    "ambientes": {
+      "texto": "Você tende a render mais em contextos que pedem persistência com direção: projetos de longo prazo, implantação de processos, operação com metas claras, reestruturações que exigem firmeza e paciência ao mesmo tempo. Tarefas que juntam responsabilidade e continuidade costumam ser o seu ponto alto. O que tende a drenar você são ambientes de mudança constante e sem planejamento, decisões tomadas por impulso, prioridades voláteis e culturas que valorizam mais o barulho do que a entrega.",
+      "itens": [
+        { "titulo": "Assuma o longo prazo", "texto": "Ofereça-se para conduzir iniciativas de longa duração, que precisam de alguém que não perca o fôlego no meio." },
+        { "titulo": "Crie previsibilidade", "texto": "Em ambientes voláteis, crie pequenas rotinas para o seu time, como reuniões fixas e planos semanais, que tragam estabilidade." },
+        { "titulo": "Treine a adaptação", "texto": "Aceite de vez em quando um projeto curto e cheio de incertezas. Exercitar a adaptação amplia o seu repertório." }
+      ]
+    },
+    "pontos_cegos": {
+      "texto": "O ponto cego mais comum da sua combinação é confundir persistência com acerto. Você pode continuar no mesmo caminho por coerência quando os sinais já pedem ajuste. Outro é o efeito do seu silêncio: as pessoas podem não saber o que você pensa e interpretar sua quietude como desaprovação, desinteresse ou concordância. Um terceiro é o acúmulo: incômodos guardados por semanas tendem a sair de uma vez, com uma dureza que surpreende quem estava por perto.",
+      "itens": [
+        { "titulo": "Sinal de alerta", "texto": "Defina para cada projeto importante um indicador que, se piorar, obriga você a rever a rota." },
+        { "titulo": "Traduza o silêncio", "texto": "Quando ficar em silêncio numa reunião, diga brevemente o que está pensando, mesmo que não tenha conclusão." },
+        { "titulo": "Peça retorno sobre abertura", "texto": "Pergunte a dois colegas se eles se sentem à vontade para propor mudanças a você. Ouça sem se justificar." }
+      ]
+    },
+    "valoriza_nos_outros": {
+      "texto": "Você tende a valorizar nos outros responsabilidade, palavra cumprida, constância e capacidade de trabalhar sem precisar de supervisão. Pessoas confiáveis e objetivas costumam ganhar seu respeito com o tempo, mais do que pelo impacto da primeira impressão. O cuidado é não desvalorizar quem traz novidades, muda de ideia ou se expressa com mais emoção. Essas pessoas costumam enxergar oportunidades e riscos que a sua rota firme não mostra, e muitas vezes são elas que avisam, antes de todo mundo, que o terreno mudou.",
+      "itens": [
+        { "titulo": "Dê crédito à novidade", "texto": "Quando alguém trouxer uma ideia diferente, comece apontando o que há de útil nela antes das objeções." },
+        { "titulo": "Diga o que admira", "texto": "Conte a quem é constante e confiável que você percebe isso. Esse tipo de contribuição raramente é celebrado." },
+        { "titulo": "Paciência com a expressão", "texto": "Com colegas mais expressivos, procure a informação por trás da emoção antes de julgar a forma." }
+      ]
+    }
+  },
+  "pressao": {
+    "primeira_reacao": "Quando a pressão começa, você tende a apertar o controle e reforçar o plano: fala menos, decide com mais firmeza e se concentra em fazer o que precisa ser feito. Por fora, costuma transmitir calma e segurança. Por dentro, a tolerância diminui, e qualquer mudança de rota proposta nesse momento tende a ser recebida com resistência ainda maior.",
+    "se_continua": "Se a pressão se prolonga, é comum que a Estabilidade apareça de outro jeito: você se fecha, assume mais carga sem pedir ajuda e se agarra ao jeito conhecido de fazer, recusando alternativas. O silêncio aumenta e o acúmulo de incômodos também. Em algum momento, a irritação guardada pode sair de uma vez, com uma dureza que surpreende quem estava por perto.",
+    "como_volta": "Você tende a se reequilibrar quando recupera previsibilidade: um plano claro para os próximos dias, uma tarefa concluída, uma rotina retomada. Conversar com alguém de confiança sobre o que está pesando, em vez de carregar em silêncio, costuma encurtar a fase difícil. Também ajuda reconhecer que pedir apoio não diminui sua firmeza, apenas a distribui melhor.",
+    "sinais": [
+      "Você fala cada vez menos nas reuniões e responde com monossílabos.",
+      "Recusa qualquer sugestão de mudança, mesmo as pequenas.",
+      "Assume tarefas de outras pessoas sem comentar.",
+      "Fica mais tempo trabalhando, mas com menos troca com o time.",
+      "Reage com dureza inesperada a algo pequeno."
+    ],
+    "o_que_ajuda": [
+      "Montar um plano simples para os próximos três dias e segui-lo.",
+      "Dizer a uma pessoa de confiança o que está pesando, antes que acumule.",
+      "Entregar uma tarefa inteira a alguém do time, com objetivo e prazo.",
+      "Separar o que é inegociável do que pode ser ajustado no plano.",
+      "Retomar uma rotina pessoal que traga regularidade, como caminhada ou horário fixo de descanso."
+    ]
+  },
+  "relacoes": {
+    "D": {
+      "texto": "Com pessoas de Dominância alta, você tende a ter respeito mútuo pela firmeza e pelo foco em resultado. O atrito costuma surgir no ritmo: elas querem mudar rápido e decidir na hora, você prefere sustentar o plano e pensar antes. Pode virar uma disputa silenciosa, em que você resiste e elas pressionam.",
+      "dicas": [
+        "Diga claramente quanto tempo precisa para decidir e cumpra esse prazo.",
+        "Mostre o impacto prático de mudar o plano, com argumentos concretos.",
+        "Dividam responsabilidades para que cada um tenha seu território."
+      ]
+    },
+    "I": {
+      "texto": "Com pessoas de Influência alta, você tende a ganhar energia e conexão com outras áreas, coisas que não são o seu foco natural. O atrito vem da instabilidade: elas mudam de ideia, trazem novidades toda semana e podem achar seu jeito fechado ou frio. Você pode achar que elas falam muito e entregam pouco.",
+      "dicas": [
+        "Reserve tempo para ouvir as ideias delas antes de avaliar a viabilidade.",
+        "Ajude a transformar ideias em etapas concretas, em vez de descartá-las.",
+        "Demonstre reconhecimento em voz alta; para elas, isso conta muito."
+      ]
+    },
+    "S": {
+      "texto": "Com pessoas de Estabilidade alta, você tende a encontrar parceria tranquila e confiável: ritmo parecido, apreço por combinados cumpridos, pouco conflito. O risco é a dupla ficar confortável demais e resistir junta a mudanças necessárias. Como você tem mais Dominância, elas podem deixar todas as decisões com você e evitar discordar.",
+      "dicas": [
+        "Convide-as a dar opinião antes de você decidir.",
+        "Proponham juntos uma melhoria por mês para não estacionar.",
+        "Dê espaço para que elas conduzam algumas frentes."
+      ]
+    },
+    "C": {
+      "texto": "Com pessoas de Conformidade alta, você tende a combinar bem na seriedade e no compromisso com a entrega. Elas trazem análise e cuidado com detalhes que complementam sua firmeza. O atrito pode surgir quando elas questionam a qualidade do seu plano ou pedem mais tempo de análise e você já quer seguir.",
+      "dicas": [
+        "Peça a análise delas antes de fechar o plano, não depois.",
+        "Defina um prazo claro para o levantamento de dados.",
+        "Considere os riscos apontados como parte do caminho, não como crítica."
+      ]
+    }
+  },
+  "o_que_dizem": {
+    "elogios": [
+      "“Se essa pessoa disse que entrega, pode contar que entrega.”",
+      "“Não perde o foco, nem quando todo mundo já desistiu.”",
+      "“Transmite segurança: a gente sabe o que esperar.”",
+      "“Fala pouco, mas quando fala, vale a pena ouvir.”",
+      "“Segura o projeto até o final, sem fazer drama.”"
+    ],
+    "criticas": [
+      "“É difícil fazer mudar de ideia depois que decide.”",
+      "“Às vezes não dá para saber o que está pensando.”",
+      "“Toda sugestão nova parece que precisa passar por uma prova.”",
+      "“Guarda as coisas e, quando fala, já vem pesado.”",
+      "“Assume tudo e não pede ajuda, depois a sobrecarga cai toda em cima dessa pessoa.”"
+    ]
+  },
+  "pdi": {
+    "foco": "Seu foco número 1 é desenvolver flexibilidade sem perder firmeza. Sua combinação costuma ter uma força rara para manter o rumo e entregar; o que limita o seu alcance é a resistência a ajustar o caminho e o pouco que você compartilha do que pensa. Aprender a revisar decisões com base em sinais, falar antes de decidir e acolher ideias de mudança tende a transformar sua constância em liderança que adapta, e não só em liderança que resiste.",
+    "habitos": [
+      { "nome": "Revisão programada", "como": "Para cada decisão importante, marque na agenda uma data de revisão e os sinais que indicariam necessidade de mudar a rota.", "sinal_de_progresso": "Você ajusta planos antes que os problemas fiquem graves, e o time percebe." },
+      { "nome": "Pensar em voz alta", "como": "Antes de fechar decisões que afetam outras pessoas, compartilhe o raciocínio e peça uma objeção. Faça isso pelo menos duas vezes por semana.", "sinal_de_progresso": "Colegas passam a contribuir antes das suas decisões, e não a contestá-las depois." },
+      { "nome": "Incômodo em 48 horas", "como": "Quando algo incomodar, converse com a pessoa envolvida em até dois dias, em tom calmo e com um exemplo concreto.", "sinal_de_progresso": "Diminuem as reações duras e inesperadas, e as conversas difíceis ficam mais curtas." },
+      { "nome": "Uma ideia testada por mês", "como": "Peça mensalmente ao time uma proposta de mudança e teste pelo menos uma delas de forma real, com prazo de avaliação.", "sinal_de_progresso": "As pessoas trazem mais sugestões e comentam que você passou a ouvi-las com mais abertura." },
+      { "nome": "Pedir apoio cedo", "como": "Quando sua carga passar do normal, avise e peça ajuda antes de chegar ao limite. Defina com a liderança o que pode ser redistribuído.", "sinal_de_progresso": "Você termina os períodos intensos com menos desgaste e mais gente envolvida." }
+    ],
+    "perguntas": [
+      "Que decisão eu mantive no último ano por coerência quando os sinais já pediam mudança?",
+      "As pessoas da minha equipe sabem o que eu penso antes de eu decidir?",
+      "Que incômodo eu estou guardando agora e com quem preciso conversar?",
+      "Qual foi a última ideia de outra pessoa que eu adotei sem modificar?",
+      "Em que momentos minha firmeza ajuda o time e em quais ela trava a evolução?",
+      "O que eu faço do mesmo jeito há anos e nunca questionei?",
+      "Quem eu poderia preparar para dividir comigo a condução dos projetos longos?"
+    ],
+    "dias_30": [
+      "Peça a três colegas uma opinião franca sobre a sua abertura a mudanças.",
+      "Aplique o hábito de pensar em voz alta em todas as decisões que afetam a equipe.",
+      "Converse sobre um incômodo que você vem guardando há mais de duas semanas."
+    ],
+    "dias_60": [
+      "Teste uma mudança proposta por alguém do time e avalie o resultado com o grupo.",
+      "Delegue a condução de uma etapa de projeto longo a outra pessoa e acompanhe só nos marcos.",
+      "Revise uma decisão antiga com base em dados novos e comunique o ajuste ao time."
+    ],
+    "dias_90": [
+      "Repita a conversa de retorno com os mesmos colegas e compare a percepção sobre sua abertura.",
+      "Conduza uma mudança relevante do início ao fim, explicando o porquê em cada etapa.",
+      "Defina com a liderança um novo desafio que exija adaptação rápida e acompanhe seu aprendizado."
+    ]
+  }
+}

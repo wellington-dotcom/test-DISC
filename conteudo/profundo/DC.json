@@ -1,0 +1,279 @@
+{
+  "codigo": "DC",
+  "retrato": [
+    "No trabalho, você tende a ser a pessoa que quer chegar longe e quer chegar do jeito certo. Costuma enxergar rápido onde está o problema, montar uma estrutura para resolvê-lo e cobrar que todos sigam o padrão combinado. É comum que você seja quem revisa o relatório e encontra o número que não fecha, quem pergunta “qual é o critério?” numa decisão vaga e quem transforma uma meta ambiciosa em plano com etapas, indicadores e responsáveis. Para você, resultado sem qualidade é só meio resultado.",
+    "A Dominância é o seu fator principal e traz ambição, senso de urgência e disposição para decidir. A Conformidade, logo atrás, acrescenta rigor, lógica e um padrão de qualidade alto. A tensão interna da sua combinação é clara: você quer velocidade e quer perfeição. Quer decidir logo, mas quer decidir certo; quer entregar no prazo, mas não aceita entregar mal feito. Quando essas duas forças se chocam, é comum que você acelere a si e aos outros e, ao mesmo tempo, aumente o nível de exigência, o que pode gerar muita pressão ao redor.",
+    "Quem trabalha com você tende a perceber competência, seriedade e independência: alguém que resolve, que não aceita desculpa fraca e que sabe do que está falando. Em problemas técnicos ou situações que exigem decisão bem fundamentada, muita gente quer a sua opinião. Ao mesmo tempo, algumas pessoas podem achar seu jeito frio, crítico ou difícil de agradar. Quando você aponta erros com precisão e pouca suavidade, o outro pode ouvir uma avaliação da pessoa, e não do trabalho, mesmo que essa nunca tenha sido a sua intenção.",
+    "Você costuma chegar ao seu melhor diante de desafios complexos, com autonomia para estruturar a solução e critérios claros de sucesso. Problemas que exigem lógica, decisão e padrão ao mesmo tempo tendem a mostrar o melhor da sua combinação. O que eleva o seu nível é o lado humano da exigência: explicar o porquê do padrão, reconhecer o que já está bom antes de apontar o que falta e aceitar que nem toda entrega precisa da sua régua máxima. Quando você faz isso, sua exigência passa a puxar as pessoas para cima, em vez de afastá-las."
+  ],
+  "manual": {
+    "como_falar_comigo": [
+      "Traga fatos, dados e critérios; opinião sem base me convence pouco.",
+      "Seja objetivo: problema, causa provável, proposta de solução.",
+      "Se encontrar um erro no meu trabalho, me diga logo e com precisão.",
+      "Mostre que você pensou nos riscos antes de me apresentar a ideia.",
+      "Discorde de mim com argumento lógico: eu mudo de ideia diante de bons dados.",
+      "Quando o prazo apertar, diga claramente qual nível de acabamento é o necessário."
+    ],
+    "evite": [
+      "Respostas vagas como “acho que dá” ou “mais ou menos isso”.",
+      "Entregar algo incompleto sem avisar o que falta.",
+      "Tomar decisões importantes por impressão, sem olhar os números.",
+      "Levar para o lado pessoal uma crítica que é sobre o trabalho."
+    ],
+    "me_energiza": [
+      "Problemas complexos que exigem estrutura e decisão.",
+      "Autonomia para definir o método e o padrão de qualidade.",
+      "Ver um sistema ou processo que eu desenhei funcionando bem.",
+      "Trabalhar com pessoas competentes que cumprem critérios."
+    ],
+    "me_desgasta": [
+      "Retrabalho causado por descuido evitável.",
+      "Decisões tomadas por política ou simpatia, e não por mérito.",
+      "Reuniões sem pauta, sem dados e sem conclusão.",
+      "Ambientes em que “mais ou menos” é aceito como bom."
+    ]
+  },
+  "dimensoes": {
+    "dia_a_dia": {
+      "texto": "Seu dia tende a ser orientado por metas e por padrões. Você costuma planejar, priorizar com lógica e atacar os problemas mais críticos primeiro, sem perder o olho no detalhe. É comum que trabalhe com grande independência e prefira resolver por conta própria a depender de quem tem outro nível de cuidado. O lado bom é a qualidade e a velocidade com que você entrega. O lado custoso é que você pode acumular revisões, refazer o trabalho de outras pessoas e terminar o dia com a sensação de que, se não olhar tudo, algo vai dar errado.",
+      "itens": [
+        { "titulo": "Defina o nível de acabamento", "texto": "Antes de começar uma tarefa, decida se ela precisa de excelência, de bom ou de suficiente. Aplique a régua certa a cada uma." },
+        { "titulo": "Revise menos, ensine mais", "texto": "Em vez de corrigir o trabalho de alguém, aponte o critério que faltou e peça que a pessoa refaça." },
+        { "titulo": "Feche o dia com prioridades", "texto": "Antes de sair, liste as três entregas mais importantes do dia seguinte. Isso reduz a tentação de revisar tudo." }
+      ]
+    },
+    "decisao": {
+      "texto": "Você tende a decidir com rapidez, mas apoiado em lógica e critérios. Costuma reunir os dados essenciais, avaliar riscos e então bater o martelo com firmeza. Em geral, suas decisões são bem fundamentadas e resistem a questionamento. A armadilha da combinação é dupla: às vezes você confia tanto no próprio raciocínio que desconsidera fatores que não cabem numa planilha, como o clima da equipe ou o impacto em quem vai executar. Em outras, a busca pelo dado perfeito atrasa uma decisão que já poderia ter sido tomada.",
+      "itens": [
+        { "titulo": "Fator humano na conta", "texto": "Inclua em toda decisão importante uma pergunta: como isso afeta as pessoas que vão executar e conviver com ela?" },
+        { "titulo": "Prazo para a análise", "texto": "Defina quanto tempo vai dedicar a reunir dados. Quando o prazo acabar, decida com o que tem." },
+        { "titulo": "Teste com quem pensa diferente", "texto": "Apresente sua conclusão a alguém de perfil mais relacional e pergunte o que você pode ter deixado de considerar." }
+      ]
+    },
+    "aprendizado": {
+      "texto": "Você tende a aprender melhor entendendo a lógica por trás das coisas e aplicando em problemas reais. Costuma gostar de conteúdo técnico, estruturado e confiável, com fontes claras. Aprende rápido quando o assunto é útil para seus objetivos e tem pouca paciência com treinamentos superficiais ou motivacionais. É comum que você vá além do material e pesquise por conta própria até dominar o tema. O risco é desconsiderar aprendizados vindos de experiências menos formais, como conversas, histórias e retornos sobre o seu jeito de lidar com pessoas.",
+      "itens": [
+        { "titulo": "Aprenda sobre pessoas também", "texto": "Inclua no seu plano de estudo algo sobre comunicação ou liderança, com a mesma seriedade que você dá aos temas técnicos." },
+        { "titulo": "Compartilhe o que domina", "texto": "Prepare um material curto sobre algo que você domina e ensine ao time. Isso multiplica sua competência." },
+        { "titulo": "Ouça o retorno informal", "texto": "Trate comentários de colegas sobre o seu jeito como dados. Anote e procure padrões ao longo de um mês." }
+      ]
+    },
+    "mudanca": {
+      "texto": "Você tende a aceitar bem mudanças que fazem sentido lógico e melhoram o resultado, e muitas vezes é quem as propõe. O que gera resistência é a mudança mal pensada: sem dados, sem plano ou que piora a qualidade. Diante de um sistema novo implantado às pressas ou de uma diretriz sem fundamento, é comum que você aponte todas as falhas com precisão, o que é útil, mas pode soar como oposição. Quando a mudança é sua, o risco é exigir que os outros se adaptem na sua velocidade e no seu padrão.",
+      "itens": [
+        { "titulo": "Crítica com proposta", "texto": "Ao apontar falhas em uma mudança, traga junto ao menos uma sugestão concreta de ajuste." },
+        { "titulo": "Aceite a versão inicial", "texto": "Em mudanças grandes, aceite uma primeira versão imperfeita e combine ciclos de melhoria em vez de exigir tudo pronto." },
+        { "titulo": "Explique o padrão novo", "texto": "Ao liderar uma mudança, escreva em uma página o que muda, por que muda e como saber se deu certo." }
+      ]
+    },
+    "tempo_organizacao": {
+      "texto": "Você tende a ter uma organização muito lógica e a ser exigente com prazos, tanto os seus quanto os dos outros. Costuma ter planos claros, prioridades bem definidas e pouca tolerância a atrasos sem justificativa. O ponto de atenção é o tempo que o perfeccionismo consome: tarefas que poderiam ser concluídas em uma hora podem levar três, porque você insiste em mais uma revisão. Também é comum centralizar etapas críticas por não confiar que outros vão manter o padrão, criando um gargalo em você.",
+      "itens": [
+        { "titulo": "Limite de revisões", "texto": "Defina um número máximo de revisões por tipo de entrega. Ao atingir o limite, entregue e registre o que melhoraria depois." },
+        { "titulo": "Saia do gargalo", "texto": "Liste as tarefas que só passam por você. Escolha uma e treine outra pessoa para assumi-la em um mês." },
+        { "titulo": "Bloco de foco", "texto": "Reserve períodos sem interrupção para os trabalhos que exigem profundidade, e deixe claro ao time quando eles acontecem." }
+      ]
+    },
+    "comunicacao": {
+      "texto": "Sua comunicação tende a ser objetiva, precisa e lógica. Você costuma ir direto ao ponto, embasar o que diz e escrever de forma estruturada, com tópicos, números e conclusões. Em contextos técnicos, isso é um trunfo. O desafio está no tom: frases curtas, críticas sem introdução e pouca expressão emocional podem soar duras ou distantes. É comum que você pule o reconhecimento e vá direto ao que precisa ser corrigido, porque para você o que está certo não precisa ser comentado.",
+      "itens": [
+        { "titulo": "Reconheça antes de corrigir", "texto": "Ao revisar o trabalho de alguém, comece apontando uma coisa que está boa e por quê. Depois traga os ajustes." },
+        { "titulo": "Explique o critério", "texto": "Ao pedir uma correção, diga qual critério não foi atendido. Isso transforma a crítica em aprendizado, e não em julgamento." },
+        { "titulo": "Ajuste ao ouvinte", "texto": "Antes de uma conversa importante, pense em quanto detalhe a pessoa precisa. Nem todos querem o raciocínio completo." }
+      ]
+    },
+    "conflito": {
+      "texto": "Você tende a encarar conflitos de frente, mas pelo caminho da lógica: apresenta argumentos, dados e critérios e espera que a razão decida. Isso costuma funcionar bem em divergências técnicas. Em conflitos que envolvem sentimentos, percepções ou relações, porém, sua abordagem pode parecer fria, como se você estivesse ganhando um debate em vez de resolver um problema entre pessoas. Também é comum que você tenha dificuldade de ceder quando tem convicção de que tem razão, mesmo quando ceder preservaria algo importante.",
+      "itens": [
+        { "titulo": "Reconheça o sentimento", "texto": "Antes de apresentar argumentos, diga algo como “entendo que isso incomodou você”. Leva uma frase e muda a conversa." },
+        { "titulo": "Escolha suas batalhas", "texto": "Antes de insistir em um ponto, pergunte a si: ter razão nisso vale o custo para a relação?" },
+        { "titulo": "Busque o critério comum", "texto": "Em uma divergência, proponha definir juntos o critério de decisão antes de discutir as soluções." }
+      ]
+    },
+    "motivadores": {
+      "texto": "Você tende a se motivar com desafios complexos, autonomia, competência e resultados mensuráveis de alta qualidade. Costuma valorizar ambientes onde mérito e lógica pesam mais do que política, e onde o padrão alto é compartilhado. Ter controle sobre o método e ver um sistema ou processo funcionando como você desenhou tende a gerar grande satisfação. Reconhecimento, para você, costuma ter mais valor quando vem de quem entende o trabalho e consegue avaliar a qualidade do que foi feito.",
+      "itens": [
+        { "titulo": "Peça problemas difíceis", "texto": "Diga à sua liderança que você rende mais diante de desafios complexos e peça um por ciclo." },
+        { "titulo": "Mostre o padrão alcançado", "texto": "Registre indicadores de qualidade das suas entregas, como erros evitados e retrabalho reduzido. Isso torna visível o seu valor." },
+        { "titulo": "Troque com pares exigentes", "texto": "Busque conversas com pessoas de alto nível técnico, dentro ou fora da empresa. Elas costumam alimentar sua motivação." }
+      ]
+    },
+    "desmotivadores": {
+      "texto": "O que tende a minar sua energia é trabalhar em meio a descuido e incoerência: retrabalho causado por erros evitáveis, decisões tomadas por simpatia ou política, metas sem critério e lideranças que mudam de ideia sem justificativa. Também desgasta ter de seguir um método que você considera ineficiente, sem poder questioná-lo. É comum que, nesses casos, você assuma tudo para garantir a qualidade, o que aumenta a carga e a frustração, ou se torne cada vez mais crítico e distante do grupo.",
+      "itens": [
+        { "titulo": "Proponha, não só aponte", "texto": "Ao identificar um processo ineficiente, leve à liderança uma proposta de melhoria com dados, em vez de apenas a crítica." },
+        { "titulo": "Não absorva tudo", "texto": "Quando perceber que está assumindo trabalho dos outros por causa da qualidade, pare e converse sobre o padrão esperado." },
+        { "titulo": "Aceite o que não controla", "texto": "Separe o que você pode mudar do que não pode. Gaste energia só no primeiro grupo." }
+      ]
+    },
+    "necessidades": {
+      "texto": "Para render, você tende a precisar de autonomia, critérios claros e acesso às informações. Ambientes que valorizam competência, decisões baseadas em dados e padrões de qualidade bem definidos costumam combinar com você. Também ajuda trabalhar com pessoas que cumprem o que combinam e uma liderança que respeite a sua independência. Quando essas condições faltam, é comum que você gaste energia lutando contra a falta de lógica do ambiente, refazendo o que outros deixaram pela metade e endurecendo o tom, em vez de investir essa energia no resultado que só a sua combinação consegue construir.",
+      "itens": [
+        { "titulo": "Combine os critérios", "texto": "No início de cada projeto, combine com a liderança como será medido o sucesso e qual é o padrão esperado." },
+        { "titulo": "Acesso à informação", "texto": "Negocie acesso direto aos dados e às pessoas de que você precisa para decidir, sem depender de intermediários." },
+        { "titulo": "Autonomia sobre o método", "texto": "Peça liberdade para escolher como fazer, desde que o resultado e os critérios combinados sejam atendidos." }
+      ]
+    },
+    "como_lidera": {
+      "texto": "Com ou sem cargo, você tende a liderar pela competência e pela estrutura: define metas claras, estabelece padrões, cria processos e cobra resultado com precisão. Equipes costumam saber exatamente o que se espera delas, e a qualidade do trabalho tende a subir. O ponto de atenção é o lado relacional: você pode cobrar muito e reconhecer pouco, corrigir em vez de ensinar e exigir o seu padrão de todos, sem considerar estágios diferentes de experiência. Pessoas podem render por medo de errar, e não por engajamento.",
+      "itens": [
+        { "titulo": "Equilibre a régua", "texto": "Para cada correção que fizer em uma semana, faça pelo menos um reconhecimento específico. Acompanhe essa proporção." },
+        { "titulo": "Padrão por nível", "texto": "Defina expectativas diferentes para quem está aprendendo e para quem já domina. Explique a cada pessoa onde ela está." },
+        { "titulo": "Ensine o critério", "texto": "Transforme seu padrão em checklists e exemplos. Assim o time aprende a se avaliar sem depender da sua revisão." },
+        { "titulo": "Pergunte como estão", "texto": "Uma vez por semana, converse com alguém da equipe sobre algo além das tarefas: carga, dificuldades, ideias." }
+      ]
+    },
+    "como_prefere_ser_liderado": {
+      "texto": "Você tende a render mais com uma liderança competente, objetiva e coerente, que defina resultados e critérios e confie no seu método. Costuma respeitar quem domina o assunto e argumenta com lógica, e ter dificuldade com quem decide sem fundamento ou muda de ideia sem explicação. Microgestão tende a irritar você, assim como retornos vagos. Ajuda muito quando a liderança dá retorno franco e específico e reconhece a qualidade do seu trabalho com exemplos concretos.",
+      "itens": [
+        { "titulo": "Peça critérios claros", "texto": "Pergunte à liderança: “como você vai avaliar se essa entrega ficou boa?”. Isso alinha expectativas desde o início." },
+        { "titulo": "Peça retorno específico", "texto": "Quando receber um retorno vago, peça exemplos concretos. Você tende a aproveitar muito bem críticas precisas." },
+        { "titulo": "Respeite o freio", "texto": "Quando a liderança pedir para reduzir o nível de acabamento por prazo, pergunte o impacto e então aceite." }
+      ]
+    },
+    "papel_na_equipe": {
+      "texto": "Na equipe, você tende a ser quem estrutura e garante a qualidade: transforma objetivos vagos em plano, cria critérios, identifica riscos e cobra consistência. É comum que o grupo recorra a você para resolver problemas complexos e revisar entregas importantes. O desafio é não se tornar o único guardião do padrão, revisando tudo e virando gargalo, nem o crítico de quem todos têm receio. A equipe ganha muito quando você compartilha seus critérios e confia que outros podem mantê-los.",
+      "itens": [
+        { "titulo": "Desenhe o caminho", "texto": "Ofereça-se para estruturar projetos novos: etapas, responsáveis, indicadores. É onde sua combinação faz mais diferença." },
+        { "titulo": "Compartilhe o padrão", "texto": "Crie com o time um guia simples de qualidade para as entregas mais comuns e revise junto a cada trimestre." },
+        { "titulo": "Equilibre com os relacionais", "texto": "Aproxime-se de colegas que cuidam bem das pessoas. Juntos, vocês entregam qualidade sem desgastar o grupo." }
+      ]
+    },
+    "persuasao_negociacao": {
+      "texto": "Você tende a convencer pela lógica e pela consistência dos argumentos. Costuma chegar a negociações com a lição de casa feita: dados, cenários e limites claros, e sustentar a posição com firmeza. Isso é muito eficaz com interlocutores racionais e em decisões técnicas. O risco é subestimar o lado emocional da negociação: a outra parte pode se sentir encurralada pelos seus argumentos, ceder sem se convencer e resistir depois. Também é comum que você perca paciência com quem argumenta por impressão.",
+      "itens": [
+        { "titulo": "Argumento e relação", "texto": "Antes de apresentar dados, gaste alguns minutos entendendo o que a outra parte valoriza além dos números." },
+        { "titulo": "Deixe uma saída", "texto": "Em negociações difíceis, ofereça opções para que o outro lado possa escolher, em vez de uma única proposta irrecusável." },
+        { "titulo": "Simplifique a prova", "texto": "Escolha os três dados mais fortes e apresente só eles. Excesso de evidência pode cansar e soar como pressão." }
+      ]
+    },
+    "ambientes": {
+      "texto": "Você tende a render mais em contextos que pedem estrutura e decisão ao mesmo tempo: implantação de sistemas, reorganização de processos, resolução de problemas complexos, projetos com padrões técnicos altos e metas mensuráveis. Tarefas que juntam análise, planejamento e execução firme costumam mostrar o melhor da sua combinação. O que tende a drenar você são ambientes improvisados, decisões por simpatia, pouca autonomia, excesso de reuniões sem conclusão e culturas que toleram descuido.",
+      "itens": [
+        { "titulo": "Assuma o que está desorganizado", "texto": "Ofereça-se para estruturar processos ou áreas que funcionam no improviso. É onde seu valor fica mais visível." },
+        { "titulo": "Escolha suas exigências", "texto": "Em ambientes mais informais, defina os três pontos de qualidade inegociáveis e flexibilize o resto." },
+        { "titulo": "Exercite o relacional", "texto": "Participe de vez em quando de projetos com muito contato humano. Isso amplia seu repertório além do técnico." }
+      ]
+    },
+    "pontos_cegos": {
+      "texto": "O ponto cego mais comum da sua combinação é o impacto emocional da sua exigência. Você pode achar que está apenas sendo preciso, enquanto a outra pessoa sente que está sendo julgada. Outro é a confiança excessiva no próprio raciocínio: por ter lógica forte, você pode subestimar informações que não vêm em forma de dado, como intuição, clima e relações. Um terceiro é o gargalo: ao revisar tudo para garantir a qualidade, você pode impedir que o time cresça e se tornar indispensável de um jeito que limita a todos, inclusive você.",
+      "itens": [
+        { "titulo": "Pergunte como chegou", "texto": "Depois de dar um retorno crítico, pergunte: “como isso chegou para você?”. Ouça a resposta sem defender o argumento." },
+        { "titulo": "Dados que não são números", "texto": "Em decisões importantes, inclua a percepção de alguém próximo das pessoas afetadas como uma informação relevante." },
+        { "titulo": "Teste de ausência", "texto": "Imagine que você ficasse duas semanas fora. O que pararia? Comece a transferir isso agora." }
+      ]
+    },
+    "valoriza_nos_outros": {
+      "texto": "Você tende a valorizar nos outros competência, precisão, responsabilidade e argumentos bem fundamentados. Pessoas que cumprem o que combinam, conhecem o assunto e assumem os próprios erros costumam ganhar seu respeito. O cuidado é não reduzir o valor de alguém à qualidade técnica. Quem cria vínculos, acalma conflitos, engaja o grupo ou traz ideias ainda imperfeitas contribui de maneiras que sua régua pode não medir, e que muitas vezes sustentam o ambiente onde você entrega.",
+      "itens": [
+        { "titulo": "Valorize o que não mede", "texto": "Liste três contribuições de colegas que não são técnicas, mas que facilitaram o seu trabalho no último mês." },
+        { "titulo": "Acolha a ideia crua", "texto": "Quando alguém trouxer uma ideia incompleta, ajude a desenvolvê-la antes de apontar as falhas." },
+        { "titulo": "Diga o que respeita", "texto": "Conte às pessoas competentes que você admira o trabalho delas. Seu respeito tem peso e raramente é dito." }
+      ]
+    }
+  },
+  "pressao": {
+    "primeira_reacao": "Quando a pressão começa, você tende a aumentar o controle e a exigência ao mesmo tempo. Decide mais rápido, cobra com mais rigor, revisa mais e fala de forma ainda mais curta e técnica. Erros que antes seriam apontados com cuidado passam a ser apontados com dureza. O time costuma sentir que o nível de tolerância caiu de repente.",
+    "se_continua": "Se a pressão se prolonga, a Conformidade tende a ganhar espaço: você se fecha na análise, assume tarefas para garantir que fiquem certas, desconfia do trabalho dos outros e se apega às regras. O tom pode ficar distante, frio e muito crítico, inclusive na avaliação que você faz de si. A combinação de prazo apertado com padrão máximo pode gerar sobrecarga e travar entregas que precisavam sair.",
+    "como_volta": "Você tende a se reequilibrar quando recupera clareza e controle: um plano bem estruturado, prioridades redefinidas e a certeza de que o essencial está sob controle. Ajuda muito aceitar conscientemente um nível de acabamento menor em partes não críticas. Conversar com alguém de confiança, que ajude a separar o que é realmente grave do que é perfeccionismo, também costuma trazer alívio.",
+    "sinais": [
+      "Você passa a revisar e refazer o trabalho de outras pessoas.",
+      "Suas críticas ficam mais frequentes e com menos explicação.",
+      "Para de responder mensagens que não considera prioritárias.",
+      "Fica até mais tarde para garantir que tudo esteja perfeito.",
+      "Começa a desconfiar das informações que recebe e pede comprovação de tudo."
+    ],
+    "o_que_ajuda": [
+      "Classificar as entregas em críticas e não críticas e aplicar padrão máximo só às primeiras.",
+      "Delegar com critério claro, em vez de assumir o trabalho para garantir a qualidade.",
+      "Avisar o time de que está sob pressão e pedir paciência com o tom.",
+      "Fazer pausas curtas entre tarefas intensas para retomar a perspectiva.",
+      "Conversar com alguém de fora da situação para separar o que é grave do que é detalhe."
+    ]
+  },
+  "relacoes": {
+    "D": {
+      "texto": "Com pessoas de Dominância alta, você tende a ter afinidade no foco em resultado e na objetividade. O atrito vem da forma: elas podem decidir rápido demais para o seu padrão de qualidade, e o seu jeito pode parecer lento ou detalhista demais para o ritmo delas. Disputas sobre quem tem razão podem ficar longas.",
+      "dicas": [
+        "Concentre suas objeções nos riscos realmente relevantes.",
+        "Combine antes quem decide cada assunto para evitar disputas.",
+        "Apresente dados de forma resumida, com conclusão logo no início."
+      ]
+    },
+    "I": {
+      "texto": "Com pessoas de Influência alta, você tende a ter o maior contraste: elas são expressivas, otimistas e informais; seu jeito é objetivo, crítico e estruturado. Elas podem achar seu tom frio, e você pode achar que elas não têm foco. Quando há respeito, porém, elas abrem portas e engajam pessoas para os planos que você desenha.",
+      "dicas": [
+        "Comece a conversa com um momento de troca pessoal antes da pauta.",
+        "Reconheça em voz alta as ideias boas antes de apontar as falhas.",
+        "Use a facilidade delas para apresentar e vender o que você estruturou."
+      ]
+    },
+    "S": {
+      "texto": "Com pessoas de Estabilidade alta, você tende a encontrar parceiros confiáveis, que cumprem os processos que você cria. O atrito costuma vir do ritmo e do tom: elas preferem calma e previsibilidade, e sua cobrança intensa pode gerar insegurança. Elas podem evitar trazer problemas para não enfrentar sua crítica.",
+      "dicas": [
+        "Explique mudanças com antecedência e com calma.",
+        "Suavize o tom das correções e reconheça a constância delas.",
+        "Pergunte diretamente se há algum problema, porque elas podem não falar."
+      ]
+    },
+    "C": {
+      "texto": "Com pessoas de Conformidade alta, você tende a ter grande afinidade no padrão de qualidade e na lógica. O atrito costuma ser sobre ritmo: elas podem querer mais análise antes de decidir, e você já quer avançar. Também podem surgir debates longos sobre detalhes técnicos em que ambos querem ter razão.",
+      "dicas": [
+        "Definam juntos um prazo para a análise e respeitem-no.",
+        "Combinem quais detalhes realmente importam para o resultado.",
+        "Reconheçam o cuidado um do outro, sem transformar tudo em debate."
+      ]
+    }
+  },
+  "o_que_dizem": {
+    "elogios": [
+      "“Se passou pela revisão dessa pessoa, pode confiar.”",
+      "“Transforma qualquer bagunça em plano.”",
+      "“Decide rápido, mas nunca sem fundamento.”",
+      "“É exigente, mas a gente aprende muito trabalhando junto.”",
+      "“Encontra o problema antes de ele virar crise.”"
+    ],
+    "criticas": [
+      "“Nada parece bom o bastante de verdade.”",
+      "“Aponta todos os erros e esquece de dizer o que ficou bom.”",
+      "“Às vezes parece que é mais importante ter razão do que resolver.”",
+      "“Prefere fazer a confiar no que a gente faz.”",
+      "“O tom das críticas às vezes pesa mais do que o conteúdo.”"
+    ]
+  },
+  "pdi": {
+    "foco": "Seu foco número 1 é tornar sua exigência humana e transmissível. Sua combinação costuma unir ambição e qualidade de forma rara; o que limita o seu alcance é o custo emocional que sua cobrança gera e o gargalo que você vira ao revisar tudo. Aprender a reconhecer antes de corrigir, explicar o critério por trás do padrão e escolher onde aplicar a régua máxima tende a transformar sua exigência em referência que as pessoas querem seguir, e não em pressão que elas evitam.",
+    "habitos": [
+      { "nome": "Um reconhecimento por correção", "como": "Para cada correção que fizer no trabalho de alguém, faça também um reconhecimento específico sobre algo que ficou bom, com o motivo.", "sinal_de_progresso": "As pessoas passam a trazer o trabalho para sua revisão mais cedo, em vez de evitar." },
+      { "nome": "Régua por entrega", "como": "Antes de cada tarefa, classifique o nível necessário: excelente, bom ou suficiente. Aplique o esforço de acordo com essa classificação.", "sinal_de_progresso": "Você entrega mais no prazo, com menos horas extras e sem queda nas entregas críticas." },
+      { "nome": "Critério explicado", "como": "Ao pedir uma correção, diga qual critério não foi atendido e por que ele importa para o resultado.", "sinal_de_progresso": "Os mesmos erros param de se repetir, porque o time entendeu o padrão." },
+      { "nome": "Pergunta do impacto", "como": "Depois de toda conversa crítica, pergunte: “como isso chegou para você?” e ouça sem defender o argumento.", "sinal_de_progresso": "Diminuem os sinais de distância, receio e silêncio da equipe com você." },
+      { "nome": "Transferência de revisão", "como": "Escolha uma etapa que hoje só passa por você e, em quatro semanas, treine outra pessoa para assumi-la com um checklist.", "sinal_de_progresso": "Você deixa de ser gargalo nessa etapa e a qualidade se mantém." }
+    ],
+    "perguntas": [
+      "Quantas vezes nesta semana eu reconheci o trabalho de alguém antes de corrigir?",
+      "Em quais entregas eu gastei tempo com perfeição que ninguém iria perceber?",
+      "Quem da minha equipe evita me mostrar o trabalho antes de estar pronto, e por quê?",
+      "Quando foi a última vez que eu cedi numa discussão mesmo achando que tinha razão?",
+      "O que pararia se eu ficasse duas semanas fora?",
+      "Que informações sobre pessoas eu deixo de considerar porque não vêm em forma de dado?",
+      "Como eu quero que a minha exigência seja lembrada por quem trabalhou comigo?"
+    ],
+    "dias_30": [
+      "Peça a três colegas uma opinião franca sobre como suas críticas e cobranças são recebidas.",
+      "Aplique o hábito de um reconhecimento por correção e anote a proporção diariamente.",
+      "Liste as etapas em que você é gargalo e escolha uma para transferir."
+    ],
+    "dias_60": [
+      "Crie com o time um checklist de qualidade para as entregas mais frequentes da área.",
+      "Treine uma pessoa para assumir a etapa escolhida e acompanhe apenas pelo checklist.",
+      "Aplique a régua por entrega em todos os projetos e compare o tempo gasto com o do mês anterior."
+    ],
+    "dias_90": [
+      "Repita a conversa de retorno com os mesmos colegas e compare a percepção sobre o seu tom.",
+      "Conduza um projeto em que o time faça as revisões e você atue apenas como consultoria.",
+      "Defina com a liderança um próximo desafio que exija liderar pessoas, e não só processos."
+    ]
+  }
+}

@@ -1,0 +1,487 @@
+{
+  "codigo": "C",
+  "retrato": [
+    "No trabalho, você tende a ser a pessoa que percebe o que os outros deixaram passar: a fórmula que puxa a célula errada, a cláusula que contradiz a anterior, o número do slide que não bate com o do relatório. Seu estilo é o de quem pega uma entrega já razoável e a deixa certa. Você costuma preferir entender antes de agir, trabalhar com critérios claros e ter tempo para fazer direito. Quando a tarefa pede profundidade, concentração e rigor, é comum que você renda mais do que quase qualquer pessoa ao redor.",
+    "Como a Conformidade domina com folga, os outros fatores aparecem pouco para equilibrar. Falta o empurrão da Dominância para decidir com informação incompleta, o calor da Influência para vender o que você descobriu e a paciência relacional da Estabilidade para amortecer as críticas. O resultado é um estilo concentrado: muito preciso, muito independente, muitas vezes silencioso. A tensão central é esta: seu padrão de qualidade mora dentro da sua cabeça, e ninguém consegue ver o tamanho dele. Você sabe quantas versões aquela planilha teve; os outros só veem que ela ainda não chegou.",
+    "Quem trabalha com você costuma confiar no que você assina. Se passou pela sua revisão, está certo. Ao mesmo tempo, é comum que colegas te achem difícil de ler: você fala pouco em reunião, responde com perguntas, demora a se comprometer com um prazo e, quando aponta um erro, faz isso de forma tão objetiva que a pessoa pode ouvir crítica onde você só quis ajudar. Chefes mais rápidos tendem a valorizar sua segurança técnica e, no mesmo dia, se irritar com o seu “preciso verificar”.",
+    "Você costuma chegar ao seu melhor quando recebe um problema bem definido, acesso às informações de que precisa, autonomia para escolher o método e um prazo realista combinado de antemão. Nessas condições, sua entrega tende a ser a referência que os outros copiam. Também rende quando alguém te pede, explicitamente, para encontrar falhas: aí seu olhar crítico deixa de ser incômodo e passa a ser o serviço. Seu salto de desenvolvimento costuma estar em decidir o que merece cem por cento e o que já está bom em oitenta."
+  ],
+  "manual": {
+    "como_falar_comigo": [
+      "Mande por escrito o que você precisa, com contexto, critério de pronto e prazo.",
+      "Traga números, exemplos e fontes; opinião sem base tende a não me convencer.",
+      "Se a decisão já foi tomada, me diga isso; se ainda está aberta, me diga até quando posso contribuir.",
+      "Me dê um tempo para pensar antes de cobrar uma posição; a resposta que eu der depois tende a ser mais útil.",
+      "Quando for corrigir meu trabalho, aponte o ponto exato e o motivo; eu prefiro precisão a delicadeza vaga.",
+      "Avise mudanças com antecedência e explique o que mudou e por quê."
+    ],
+    "evite": [
+      "Pedir uma resposta definitiva na hora, no meio da reunião, sobre algo que eu ainda não analisei.",
+      "Mudar o critério depois que a entrega está feita sem reconhecer que o critério mudou.",
+      "Elogios genéricos como “ficou ótimo”; prefiro saber o que exatamente funcionou.",
+      "Expor um erro meu em público antes de conversar comigo em particular."
+    ],
+    "me_energiza": [
+      "Um problema difícil, com dados suficientes, e algumas horas sem interrupção para resolvê-lo.",
+      "Perceber que um processo que eu desenhei passou a evitar erros que antes se repetiam.",
+      "Trabalhar com quem também confere, documenta e cumpre o que combinou.",
+      "Aprender algo a fundo, até entender por que funciona, e não só como usar."
+    ],
+    "me_desgasta": [
+      "Reuniões longas sem pauta, que terminam sem decisão registrada.",
+      "Ter de entregar algo que eu sei que ainda tem erro porque “o cliente já está esperando”.",
+      "Ambientes em que as regras mudam conforme quem pede e ninguém explica.",
+      "Ser a única pessoa que revisa enquanto o resto do time trata a revisão como burocracia."
+    ]
+  },
+  "dimensoes": {
+    "dia_a_dia": {
+      "texto": "No dia a dia, você tende a trabalhar em blocos de concentração, com uma tarefa de cada vez e um caminho mental bem desenhado. Gosta de entender o pedido por inteiro antes de começar e, por isso, é comum que faça perguntas que outras pessoas consideram óbvias, mas que evitam retrabalho lá na frente. Seu ritmo pode parecer lento no início e muito rápido no fim, porque a fase de entendimento consome tempo e a execução já sai quase sem correção. Interrupções constantes custam caro para você: cada uma obriga a refazer o raciocínio do começo.",
+      "itens": [
+        {
+          "titulo": "Entender antes de executar",
+          "texto": "Você tende a investir tempo no começo esclarecendo escopo e critério. Isso evita retrabalho, mas pode parecer demora para quem só vê o início."
+        },
+        {
+          "titulo": "Blocos protegidos",
+          "texto": "Reserve na agenda duas janelas de 90 minutos por semana sem mensagens abertas para o trabalho que mais exige atenção."
+        },
+        {
+          "titulo": "Revisão embutida",
+          "texto": "Você costuma revisar enquanto produz. Para tarefas simples, combine para si uma única revisão no final em vez de várias no meio."
+        },
+        {
+          "titulo": "Registro como hábito",
+          "texto": "É comum que você anote decisões, versões e fontes. Compartilhe esse registro com o time: ele vira memória da equipe, não só sua."
+        }
+      ]
+    },
+    "decisao": {
+      "texto": "Você tende a decidir com base em evidência, comparação de alternativas e consequências previstas. Antes de escolher, costuma querer saber o que pode dar errado e quanto custa cada erro. Isso faz com que suas decisões sejam raramente revertidas, porque já foram testadas na sua cabeça. A armadilha é a busca por mais uma informação: quando o cenário é incerto por natureza, nenhum dado adicional elimina o risco, e a espera passa a ser a própria decisão. Também é comum que você decida bem e comunique pouco, deixando os outros sem entender o raciocínio que te levou até ali.",
+      "itens": [
+        {
+          "titulo": "Base em critério",
+          "texto": "Você decide melhor quando sabe quais critérios importam. Escreva-os antes de olhar as opções, para não ajustá-los depois à opção preferida."
+        },
+        {
+          "titulo": "Prazo para a dúvida",
+          "texto": "Para cada decisão relevante, defina a data em que vai escolher com o que tiver em mãos. Coloque essa data na agenda."
+        },
+        {
+          "titulo": "Reversível ou não",
+          "texto": "Pergunte se dá para voltar atrás. Se dá, decida com 70% da informação; guarde o rigor total para o que não tem volta."
+        },
+        {
+          "titulo": "Mostrar o caminho",
+          "texto": "Ao comunicar uma decisão, explique em três linhas o raciocínio. Isso reduz contestações e mostra o cuidado que ficou invisível."
+        }
+      ]
+    },
+    "aprendizado": {
+      "texto": "Você tende a aprender melhor por conta própria, com o material, no seu ritmo, indo até o fundo. Prefere manuais, documentação, cursos estruturados e exemplos resolvidos a dinâmicas de grupo ou palestras motivacionais. Costuma desconfiar de atalhos e quer saber por que algo funciona, não apenas que funciona. Isso dá a você um domínio sólido, que resiste a perguntas difíceis. O cuidado é não adiar o uso prático: é comum estudar muito antes de testar, e algumas coisas só se aprendem errando na frente dos outros, em pequena escala.",
+      "itens": [
+        {
+          "titulo": "Fonte primária",
+          "texto": "Você tende a confiar mais na documentação original do que em resumos. Use isso, mas registre um resumo próprio para consultar depois."
+        },
+        {
+          "titulo": "Testar cedo",
+          "texto": "Quando aprender algo novo, aplique em uma tarefa pequena e real antes de terminar o curso. O erro barato ensina rápido."
+        },
+        {
+          "titulo": "Perguntar sem vergonha",
+          "texto": "Faça a pergunta na hora em vez de pesquisar por uma tarde inteira. Faça um combinado: depois de 30 minutos sem avançar, pergunte."
+        },
+        {
+          "titulo": "Ensinar para fixar",
+          "texto": "Explicar a outra pessoa o que você aprendeu revela lacunas e transforma seu conhecimento em algo útil para o time."
+        }
+      ]
+    },
+    "mudanca": {
+      "texto": "Mudanças tendem a ser aceitas por você quando vêm com motivo, plano e critério. A resistência raramente é ao novo em si; é à mudança mal explicada, decidida às pressas ou sem considerar os riscos que você enxerga de longe. Diante de um sistema novo, por exemplo, é comum que você seja a primeira pessoa a apontar o que não foi migrado e a última a aceitar desligar o sistema antigo. Isso protege a empresa de falhas reais, mas pode ser lido como má vontade quando você só questiona e não propõe.",
+      "itens": [
+        {
+          "titulo": "Pedir o porquê",
+          "texto": "Antes de resistir, pergunte qual problema a mudança quer resolver. Muitas vezes, entender o motivo já reduz metade do incômodo."
+        },
+        {
+          "titulo": "Risco com proposta",
+          "texto": "Para cada risco que apontar, traga uma forma de reduzi-lo. Assim você deixa de ser obstáculo e passa a ser parte do plano."
+        },
+        {
+          "titulo": "Período de convivência",
+          "texto": "Negocie uma fase em que o jeito antigo e o novo rodam juntos, com data marcada para acabar. Isso dá segurança sem travar."
+        },
+        {
+          "titulo": "Primeira versão imperfeita",
+          "texto": "Aceite que a primeira semana do processo novo vai ter falhas. Anote-as em uma lista em vez de usá-las como prova de que não funciona."
+        }
+      ]
+    },
+    "tempo_organizacao": {
+      "texto": "Você tende a ser uma pessoa organizada no detalhe: pastas com nome padronizado, listas, versões controladas. A dificuldade costuma aparecer em outro lugar, na estimativa de tempo. Como você calcula o prazo pensando na entrega ideal, é comum subestimar quanto a revisão vai consumir e acabar trabalhando além do horário para não entregar algo abaixo do seu padrão. Prioridades também podem se embaralhar: a tarefa mais interessante tecnicamente nem sempre é a mais importante para o negócio, e o seu foco tende a ir para a primeira.",
+      "itens": [
+        {
+          "titulo": "Nível de acabamento",
+          "texto": "Ao receber uma tarefa, pergunte que nível de acabamento é esperado: rascunho, versão interna ou versão final para cliente."
+        },
+        {
+          "titulo": "Margem para revisar",
+          "texto": "Some 30% ao tempo que você estima para qualquer entrega com revisão. Compare no fim do mês quanto a estimativa acertou."
+        },
+        {
+          "titulo": "Prioridade do negócio",
+          "texto": "Toda segunda-feira, ordene suas tarefas pelo impacto para o cliente ou para a equipe, não pelo quanto elas te interessam."
+        }
+      ]
+    },
+    "comunicacao": {
+      "texto": "Sua comunicação tende a ser precisa, econômica e lógica. Por escrito, seus textos costumam ser muito fáceis de ler: estruturado, com dados e sem ambiguidade. Falando, especialmente em grupo, é comum que você fale menos do que sabe, espere ter certeza antes de abrir a boca e deixe a conversa seguir sem a sua contribuição. Quando fala, vai ao conteúdo e pula a parte relacional, o que pode soar frio para quem espera um “bom dia, tudo bem?” antes do assunto. E-mails seus às vezes respondem perfeitamente à pergunta e esquecem de dizer o que a pessoa deve fazer em seguida.",
+      "itens": [
+        {
+          "titulo": "Conclusão primeiro",
+          "texto": "Comece mensagens e falas pela conclusão ou pelo pedido; depois traga os detalhes para quem quiser. A maioria lê só o começo."
+        },
+        {
+          "titulo": "Falar antes de ter certeza",
+          "texto": "Nas próximas três reuniões, compartilhe pelo menos uma observação mesmo sem ter checado tudo, dizendo que é uma hipótese."
+        },
+        {
+          "titulo": "Uma linha de relação",
+          "texto": "Abra mensagens importantes com uma frase pessoal curta. Não muda o conteúdo, mas muda como ele é recebido."
+        },
+        {
+          "titulo": "Próximo passo explícito",
+          "texto": "Feche cada e-mail com quem faz o quê até quando. Sua precisão no conteúdo merece a mesma precisão no encaminhamento."
+        }
+      ]
+    },
+    "conflito": {
+      "texto": "Em conflito, você tende a recuar do confronto pessoal e a defender sua posição com argumentos técnicos. Prefere discutir o fato a discutir a relação. Se a outra pessoa sobe o tom, é comum que você se feche, responda curto e leve o assunto para o e-mail, onde pode argumentar com calma e com provas. Isso evita explosões, mas pode deixar a questão emocional sem tratamento e o colega com a sensação de que foi derrotado por uma planilha. Quando você tem razão e sabe disso, pode ser difícil abrir mão, mesmo em pontos que não fazem diferença.",
+      "itens": [
+        {
+          "titulo": "Separar fato e pessoa",
+          "texto": "Comece reconhecendo a intenção do outro antes de mostrar o dado que contradiz. Isso evita que a pessoa defenda o orgulho em vez do argumento."
+        },
+        {
+          "titulo": "Escolher as batalhas",
+          "texto": "Antes de contestar, pergunte se o erro muda o resultado. Se não muda, anote e siga; guarde a firmeza para o que importa."
+        },
+        {
+          "titulo": "Voltar ao assunto",
+          "texto": "Se você se fechou numa discussão, retome em até 24 horas, de preferência em conversa e não por mensagem."
+        },
+        {
+          "titulo": "Nomear o desconforto",
+          "texto": "Uma frase como “me incomodou a forma como isso foi decidido” ajuda mais do que dez argumentos técnicos."
+        }
+      ]
+    },
+    "motivadores": {
+      "texto": "Você tende a se motivar com qualidade, domínio e coerência. Gosta de fazer algo difícil bem feito e de saber que fez. Ambientes que valorizam o rigor, reconhecem o trabalho invisível e dão tempo para pensar costumam despertar o seu melhor. Também é comum que a sensação de progresso venha de ver um sistema funcionando sem falhas, um processo ficando mais simples ou uma dúvida técnica finalmente resolvida. Reconhecimento importa, mas o que mais pesa é receber reconhecimento de quem entende o que você fez.",
+      "itens": [
+        {
+          "titulo": "Fazer certo",
+          "texto": "A satisfação de entregar algo sem erro, que resiste à conferência de qualquer pessoa, costuma ser recompensa suficiente para você."
+        },
+        {
+          "titulo": "Domínio técnico",
+          "texto": "Aprofundar-se num assunto até ser a referência dele no time tende a te dar energia por meses."
+        },
+        {
+          "titulo": "Regras claras",
+          "texto": "Saber o que é esperado e como será avaliado libera sua energia para o trabalho em vez de gastá-la adivinhando."
+        }
+      ]
+    },
+    "desmotivadores": {
+      "texto": "O que mais tende a te desmotivar é a sensação de que a qualidade não importa. Prazos impostos sem considerar o trabalho, decisões tomadas no improviso, retrabalho causado por quem não leu o combinado e critérios que mudam no meio do caminho costumam corroer seu engajamento devagar, sem alarde. Como você não costuma reclamar em voz alta, o desgaste pode passar despercebido até virar distanciamento. Ambientes muito barulhentos, com exposição constante e pouca previsibilidade, também tendem a drenar sua energia mais rápido do que a de outros perfis.",
+      "itens": [
+        {
+          "titulo": "Pressa sem motivo",
+          "texto": "Correr por correr, quando o prazo apertado poderia ter sido evitado com planejamento, tende a ser lido por você como descaso."
+        },
+        {
+          "titulo": "Critério que muda",
+          "texto": "Refazer um trabalho porque a régua mudou depois da entrega costuma pesar mais do que refazer por erro próprio."
+        },
+        {
+          "titulo": "Exposição forçada",
+          "texto": "Ter de apresentar algo sem preparo, ou receber um pedido de opinião de surpresa, tende a gerar desconforto desproporcional."
+        }
+      ]
+    },
+    "necessidades": {
+      "texto": "Para render, você tende a precisar de clareza, previsibilidade e espaço. Clareza sobre o que é esperado e como será avaliado; previsibilidade sobre prazos e mudanças; espaço físico e mental para se concentrar. Também precisa de acesso às informações: trabalhar com dados incompletos que poderiam estar disponíveis costuma ser frustrante. Por fim, é comum precisar de um interlocutor que respeite o seu tempo de análise e não leia silêncio como falta de interesse. Quando essas condições faltam, sua qualidade tende a se manter, mas o custo pessoal sobe.",
+      "itens": [
+        {
+          "titulo": "Critério de pronto",
+          "texto": "Peça por escrito o que define uma entrega como concluída. Isso evita que você trabalhe com um padrão maior do que o necessário."
+        },
+        {
+          "titulo": "Tempo de concentração",
+          "texto": "Negocie com a liderança períodos sem reunião. Explique em termos de resultado: menos interrupção, menos erro."
+        },
+        {
+          "titulo": "Acesso a informação",
+          "texto": "Mapeie quais dados você precisa com frequência e peça acesso direto, em vez de depender de pedir a alguém toda vez."
+        }
+      ]
+    },
+    "como_lidera": {
+      "texto": "Quando lidera, mesmo sem cargo, você tende a liderar pelo padrão. Define como as coisas devem ser feitas, cria modelos, checklists e processos, e garante que o resultado tenha qualidade. As pessoas costumam aprender muito com você e sair do seu time mais cuidadosas. O desafio é que a sua liderança pode ficar muito centrada na tarefa e pouco na pessoa: é comum revisar o trabalho de todos, corrigir em vez de ensinar e delegar pouco, porque fazer por conta própria parece mais garantido. O time pode sentir que nunca está bom o suficiente.",
+      "itens": [
+        {
+          "titulo": "Padrão escrito",
+          "texto": "Transforme o que está na sua cabeça em um checklist curto. Assim o time sabe o que você espera sem depender da sua revisão."
+        },
+        {
+          "titulo": "Corrigir ensinando",
+          "texto": "Em vez de corrigir o arquivo, aponte o erro e deixe a pessoa corrigir. Demora mais na primeira vez e menos para sempre."
+        },
+        {
+          "titulo": "Elogio antes do ajuste",
+          "texto": "Antes de apontar o que falta, diga o que está bom. Seja específico nos dois casos."
+        },
+        {
+          "titulo": "Delegar com margem",
+          "texto": "Escolha uma tarefa por semana para delegar aceitando um resultado 80% do seu jeito, desde que atenda ao critério."
+        }
+      ]
+    },
+    "como_prefere_ser_liderado": {
+      "texto": "Você tende a preferir uma liderança que seja competente, coerente e previsível. Respeita quem domina o assunto e desconfia de quem decide por intuição sem explicar. Gosta de receber objetivos claros e autonomia no método, sem acompanhamento hora a hora. Feedback é bem recebido quando é específico e baseado em fatos; feedback vago ou emocional tende a gerar mais dúvida do que orientação. Também é comum que você valorize um líder que te proteja de interrupções e que defenda o tempo necessário para fazer bem feito diante de pressões externas.",
+      "itens": [
+        {
+          "titulo": "Objetivo claro, método livre",
+          "texto": "Diga ao seu líder que você rende mais quando recebe o resultado esperado e escolhe o caminho para chegar até ele."
+        },
+        {
+          "titulo": "Feedback com exemplo",
+          "texto": "Peça que o feedback venha com um caso concreto. Isso transforma uma impressão em algo que você consegue ajustar."
+        },
+        {
+          "titulo": "Combinados por escrito",
+          "texto": "Ao final de cada conversa com a liderança, mande um resumo do que ficou combinado. Isso evita ruído e retrabalho."
+        },
+        {
+          "titulo": "Atualizações sem pedido",
+          "texto": "Antecipe-se e informe o andamento antes de ser perguntado. Isso reduz a vontade do líder de acompanhar de perto."
+        }
+      ]
+    },
+    "papel_na_equipe": {
+      "texto": "Na equipe, você tende a ser a pessoa da qualidade e da memória técnica. É quem revisa, quem lembra como foi feito da última vez, quem sabe onde está o documento e quem percebe a inconsistência antes do cliente. Esse papel costuma ser vital e pouco visível: quando tudo dá certo, ninguém lembra que você conferiu. Em projetos, é comum assumir a etapa final, de checagem, e acabar absorvendo o atraso de todos que vieram antes. Vale tornar esse papel explícito, com tempo previsto no cronograma.",
+      "itens": [
+        {
+          "titulo": "Guardião da qualidade",
+          "texto": "Você tende a ser o último filtro antes da entrega. Peça que esse tempo de revisão apareça no cronograma desde o início."
+        },
+        {
+          "titulo": "Memória do time",
+          "texto": "Seu hábito de registrar faz de você uma referência. Transforme isso em documentação acessível para que não dependa só de você."
+        },
+        {
+          "titulo": "Alerta precoce",
+          "texto": "Você costuma ver o risco antes. Leve-o cedo e de forma breve, em vez de esperar ter certeza e levar tarde."
+        },
+        {
+          "titulo": "Papel visível",
+          "texto": "No fechamento de cada projeto, cite em uma linha o que a revisão evitou. Não é vaidade: é tornar o trabalho visível."
+        }
+      ]
+    },
+    "persuasao_negociacao": {
+      "texto": "Você tende a persuadir pela consistência do argumento: dados, comparação, histórico e lógica. Diante de uma pessoa racional, isso é muito eficaz. Diante de quem decide pela emoção ou pela relação, pode não funcionar, e é comum você se frustrar por perder uma discussão em que estava certo. Em negociações, você costuma se preparar muito bem, conhecer os números melhor do que a outra parte e ter dificuldade em ceder sem justificativa técnica. O ponto de desenvolvimento é traduzir a análise em benefício para quem ouve, em menos tempo.",
+      "itens": [
+        {
+          "titulo": "Benefício antes do dado",
+          "texto": "Comece dizendo o que a outra pessoa ganha. Depois mostre os números que sustentam isso. Inverter a ordem costuma dobrar a atenção."
+        },
+        {
+          "titulo": "Três números, não trinta",
+          "texto": "Escolha os três dados mais fortes para a conversa. Leve o restante em anexo, para quem pedir."
+        },
+        {
+          "titulo": "Margem planejada",
+          "texto": "Antes de negociar, defina o que você aceita ceder. Assim a concessão vira estratégia, não derrota."
+        }
+      ]
+    },
+    "ambientes": {
+      "texto": "Você tende a render mais em contextos com regras claras, problemas que pedem precisão, tempo para análise e baixa exposição social obrigatória. Tarefas de verificação, construção de processos, trabalho com dados, documentação, qualidade e tudo o que exige consistência ao longo do tempo costumam combinar com seu estilo. O que tende a drenar é o oposto: ambientes caóticos, de prioridade que muda a cada hora, muito dependentes de improviso, de relacionamento constante ou de decisões rápidas sem base. Não significa que você não consiga atuar ali; significa que o custo é mais alto.",
+      "itens": [
+        {
+          "titulo": "Onde você rende",
+          "texto": "Contextos em que o erro tem custo alto e o cuidado é valorizado, com tempo para pensar e critério definido."
+        },
+        {
+          "titulo": "O que drena",
+          "texto": "Rotinas de interrupção constante, exposição social sem preparo e decisões tomadas no improviso, sem registro."
+        },
+        {
+          "titulo": "Ajustar o ambiente",
+          "texto": "Se o contexto é caótico, crie pequenas ilhas de ordem: um modelo, uma lista, um horário fixo de concentração."
+        }
+      ]
+    },
+    "pontos_cegos": {
+      "texto": "Seus pontos cegos tendem a nascer da força em excesso. O rigor pode virar perfeccionismo que atrasa; a objetividade pode soar como frieza; a independência pode virar isolamento; o senso crítico pode parecer que nada te agrada. É comum também que você não perceba quanto o seu silêncio é interpretado: em reunião, pode ser lido como desinteresse ou discordância velada. Outro ponto cego frequente é avaliar as pessoas pela precisão do que entregam e subestimar contribuições que não são técnicas, como acalmar um cliente ou unir o time.",
+      "itens": [
+        {
+          "titulo": "Bom o bastante",
+          "texto": "Você tende a não perceber quando a entrega já atende ao objetivo. Pergunte: o que muda para o cliente com mais uma revisão?"
+        },
+        {
+          "titulo": "Silêncio interpretado",
+          "texto": "Seu silêncio costuma ser lido como discordância. Diga em voz alta quando está de acordo, ou quando só está pensando."
+        },
+        {
+          "titulo": "Tom das correções",
+          "texto": "Uma correção certa dita de forma seca pode doer mais do que o erro. Releia antes de enviar."
+        },
+        {
+          "titulo": "Valor não técnico",
+          "texto": "Repare em quem resolve conflitos, anima o grupo ou destrava decisões. Essas contribuições também sustentam o resultado."
+        }
+      ]
+    },
+    "valoriza_nos_outros": {
+      "texto": "Você tende a valorizar nos outros competência, coerência e cuidado. Respeita quem cumpre o que promete, quem admite quando não sabe, quem lê o material antes da reunião e quem entrega com atenção ao detalhe. Também costuma admirar quem tem profundidade num assunto, mesmo que seja diferente do seu. Ao contrário, é comum perder a confiança em quem fala muito e entrega pouco, promete sem checar ou muda de posição sem explicar. Vale lembrar que nem todo mundo demonstra cuidado da mesma forma que você.",
+      "itens": [
+        {
+          "titulo": "Confiabilidade",
+          "texto": "Pessoas que fazem o que disseram, no prazo e do jeito combinado, tendem a ganhar sua confiança rápido e de forma duradoura."
+        },
+        {
+          "titulo": "Honestidade intelectual",
+          "texto": "Você costuma respeitar muito quem diz “não sei” ou “errei” em vez de inventar uma resposta."
+        },
+        {
+          "titulo": "Preparo",
+          "texto": "Quem chega na reunião tendo lido o material e com perguntas boas tende a ser visto por você como parceiro de verdade."
+        }
+      ]
+    }
+  },
+  "pressao": {
+    "primeira_reacao": "Quando a pressão começa, você tende a se recolher para o trabalho: confere mais, pede mais informação, responde mais curto e evita exposição. A primeira defesa é a qualidade. É comum que você se agarre ao procedimento e às regras como um porto seguro, e que pare de participar das conversas para concentrar energia em não errar.",
+    "se_continua": "Se a pressão dura, a firmeza que normalmente fica guardada pode aparecer sem polimento. A crítica ao trabalho dos outros tende a endurecer, as regras ficam inflexíveis e as respostas, secas. Para quem está perto, parece que surgiu outra pessoa, menos paciente. Em alguns casos, o movimento é o inverso: você cede por cansaço, entrega algo de que discorda e fica remoendo depois.",
+    "como_volta": "O que tende a te trazer de volta é recuperar o controle sobre o próprio trabalho: um tempo a sós para reorganizar a lista, entender o que de fato está em jogo e separar o urgente do importante. Uma conversa objetiva com alguém de confiança, que ouça sem julgar, também ajuda. Ter o critério de pronto redefinido por escrito costuma aliviar muito.",
+    "sinais": [
+      "Respostas cada vez mais curtas e formais, inclusive com pessoas próximas.",
+      "Revisar a mesma coisa várias vezes sem conseguir dar por terminada.",
+      "Ficar até tarde corrigindo detalhes que ninguém pediu.",
+      "Apontar erros dos outros com mais frequência e menos cuidado no tom.",
+      "Evitar reuniões e preferir resolver tudo por e-mail."
+    ],
+    "o_que_ajuda": [
+      "Escreva em uma lista tudo o que está pendente e marque o que é realmente crítico.",
+      "Pergunte ao líder qual é o nível de acabamento aceitável para as entregas desta semana.",
+      "Reserve meia hora sem tela no meio do dia para caminhar ou simplesmente parar.",
+      "Converse com uma pessoa de confiança sobre o que está pesando, antes que vire distanciamento."
+    ]
+  },
+  "relacoes": {
+    "D": {
+      "texto": "Com pessoas de Dominância alta, você tende a sentir um atrito de ritmo: elas querem decidir agora, você quer verificar. A afinidade está no foco em resultado e na objetividade, já que nenhum dos dois gosta de rodeio. O atrito aparece quando a pessoa ignora riscos que você apontou ou quando sua cautela é lida como obstáculo. Bem combinados, vocês formam uma dupla poderosa: ela empurra, você garante que o que foi empurrado funciona.",
+      "dicas": [
+        "Leve a conclusão em uma frase e o detalhe só se for pedido.",
+        "Apresente riscos com probabilidade e impacto, não como lista infinita.",
+        "Combine antes quais decisões ela toma sozinha e quais passam por você."
+      ]
+    },
+    "I": {
+      "texto": "Com pessoas de Influência alta, a diferença tende a ser grande: elas falam muito, improvisam e se movem pela relação; você fala pouco, planeja e se move pelo critério. É comum que você as ache pouco rigorosas e que elas sintam falta de abertura da sua parte. Mas elas sabem vender o que você constrói e abrir portas que você não abriria. Quando há respeito, você ganha visibilidade e elas ganham consistência.",
+      "dicas": [
+        "Reserve os primeiros minutos da conversa para o assunto pessoal; isso abre espaço para o técnico.",
+        "Confirme por escrito o que foi combinado verbalmente com elas.",
+        "Use o entusiasmo delas para apresentar seu trabalho a quem precisa conhecê-lo."
+      ]
+    },
+    "S": {
+      "texto": "Com pessoas de Estabilidade alta, você tende a ter uma convivência tranquila. Ambos preferem ritmo previsível, evitam confronto e valorizam fazer bem feito. A afinidade costuma ser natural. O risco é que, juntos, vocês adiem decisões, deixem problemas sem nome e evitem a conversa difícil esperando que o outro a puxe. Sua objetividade pode ajudá-las a sair da indecisão, desde que dita com cuidado.",
+      "dicas": [
+        "Mostre reconhecimento pelo esforço, não só pelo resultado técnico.",
+        "Quando houver um problema, nomeie você mesmo, com calma e sem culpa.",
+        "Evite críticas secas: essas pessoas tendem a guardar o incômodo sem falar."
+      ]
+    },
+    "C": {
+      "texto": "Com outras pessoas de Conformidade alta, você tende a sentir afinidade imediata: mesma linguagem, mesmo respeito pelo dado e pelo processo. A conversa costuma ser eficiente. O atrito aparece quando os critérios de vocês são diferentes, porque cada um tem certeza do seu, e a discussão técnica pode virar disputa de quem está mais certo. Juntos, também é comum demorarem demais a fechar algo que já poderia ter seguido.",
+      "dicas": [
+        "Combine logo no início qual critério vai prevalecer em caso de divergência.",
+        "Defina juntos uma data limite para a análise e respeitem-na.",
+        "Reconheça em voz alta quando o outro achou algo que você não tinha visto."
+      ]
+    }
+  },
+  "o_que_dizem": {
+    "elogios": [
+      "“Se passou por essa pessoa, pode mandar para o cliente.”",
+      "“Ela lembra de coisas que todo mundo esqueceu, e tem o documento para provar.”",
+      "“Nunca vi uma planilha tão bem montada.”",
+      "“Quando pergunta alguma coisa, é porque achou um problema que ninguém viu.”"
+    ],
+    "criticas": [
+      "“Às vezes demora tanto para fechar que a oportunidade passa.”",
+      "“É difícil saber o que está pensando; fica quieta na reunião e depois manda um e-mail de duas páginas.”",
+      "“O feedback é certo, mas vem tão direto que dói.”",
+      "“Parece que nada está bom o suficiente.”"
+    ]
+  },
+  "pdi": {
+    "foco": "Seu foco número 1 tende a ser calibrar o nível de exigência à situação. Com a Conformidade concentrada, quase não há outro fator puxando para a velocidade, para a exposição ou para a relação. Por isso, o mesmo rigor que torna seu trabalho confiável pode fazer você entregar tarde, falar pouco e se isolar. Aprender a decidir quanto cuidado cada entrega merece libera tempo e energia para ser visto, influenciar decisões e liderar.",
+    "habitos": [
+      {
+        "nome": "Nível de acabamento combinado",
+        "como": "Antes de começar qualquer entrega relevante, pergunte e anote se ela é rascunho, interna ou final. Ajuste o tempo de revisão a esse nível.",
+        "sinal_de_progresso": "Você termina tarefas de rascunho em menos tempo e sem sensação de culpa."
+      },
+      {
+        "nome": "Uma fala por reunião",
+        "como": "Em toda reunião de que participar, faça pelo menos uma contribuição verbal nos primeiros 15 minutos, mesmo que seja uma pergunta ou hipótese.",
+        "sinal_de_progresso": "Colegas passam a pedir sua opinião durante a reunião, e não só depois."
+      },
+      {
+        "nome": "Prazo para a dúvida",
+        "como": "Para cada decisão pendente, escreva a data em que vai decidir com o que tiver. Ao chegar a data, decida e registre o motivo.",
+        "sinal_de_progresso": "Sua lista de decisões em aberto diminui semana a semana."
+      },
+      {
+        "nome": "Elogio específico",
+        "como": "Uma vez por dia, diga a alguém o que exatamente ficou bom no trabalho dela, antes de qualquer ajuste. Dê ao elogio a mesma precisão que você dá à crítica.",
+        "sinal_de_progresso": "As pessoas passam a te procurar para revisar trabalho, em vez de evitar."
+      },
+      {
+        "nome": "Pedir ajuda cedo",
+        "como": "Quando passar mais de 30 minutos sem avançar em algo, pergunte a alguém. Anote quanto tempo isso economizou.",
+        "sinal_de_progresso": "Menos horas extras e mais conversas curtas com colegas ao longo da semana."
+      }
+    ],
+    "perguntas": [
+      "Quais entregas minhas dos últimos meses poderiam ter saído antes sem prejuízo real?",
+      "Em que situações meu silêncio foi interpretado de um jeito diferente do que eu queria?",
+      "Qual é o custo, para mim e para o time, de eu revisar tudo pessoalmente?",
+      "Quem, no meu time, contribui de formas que eu tenho dificuldade de enxergar?",
+      "Quando foi a última vez que defendi uma ideia minha antes de ter certeza total?",
+      "O que eu sei hoje que deveria estar escrito para o time e ainda só existe na minha cabeça?"
+    ],
+    "dias_30": [
+      "Pergunte o nível de acabamento esperado em todas as entregas novas e registre a resposta.",
+      "Faça pelo menos uma contribuição falada em cada reunião, nos primeiros quinze minutos.",
+      "Liste as decisões que você está adiando e dê a cada uma uma data limite."
+    ],
+    "dias_60": [
+      "Transforme o seu padrão de revisão de uma tarefa recorrente em checklist e entregue ao time.",
+      "Delegue uma tarefa por semana aceitando um resultado diferente do seu jeito, se atender ao critério.",
+      "Peça a dois colegas um retorno sobre como suas correções são recebidas e ajuste o tom."
+    ],
+    "dias_90": [
+      "Apresente para o time ou para a liderança um processo que você melhorou, com números do antes e depois.",
+      "Compare suas estimativas de prazo dos três meses com o tempo real e ajuste sua margem de revisão.",
+      "Converse com sua liderança sobre como tornar visível o papel de qualidade que você exerce na equipe."
+    ]
+  }
+}

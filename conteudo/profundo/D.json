@@ -1,0 +1,279 @@
+{
+  "codigo": "D",
+  "retrato": [
+    "No trabalho, você tende a ser a pessoa que pergunta “qual é o objetivo?” antes de qualquer outra coisa e, assim que a resposta aparece, já começa a se mexer. Problema parado incomoda você mais do que problema difícil. Quando uma reunião gira em círculos, é comum que seja sua voz que diz “então vamos fazer assim” e coloca um nome e uma data ao lado da tarefa. Você costuma render mais quando existe uma meta clara, um obstáculo real e liberdade para escolher o caminho.",
+    "No seu perfil, a Dominância aparece com folga sobre os outros fatores, e isso dá ao seu estilo uma concentração rara: quase toda a sua energia vai para avançar, decidir e vencer resistências. Os fatores que costumam equilibrar essa força (a paciência com pessoas, o cuidado com detalhes, o gosto pela rotina) estão mais discretos em você. A tensão interna é esta: você quer chegar ao resultado agora, mas quase todo resultado grande depende de gente com outro ritmo, de etapas chatas e de detalhes que você prefere não ter de olhar.",
+    "Quem trabalha com você tende a perceber firmeza, coragem e uma capacidade incomum de tirar as coisas do papel. Em momentos de crise, muita gente se sente mais segura com você por perto, porque você não se paralisa. Ao mesmo tempo, algumas pessoas podem sentir sua presença como pressão: perguntas que soam como cobrança, decisões que chegam prontas, pouco espaço para discordar. É comum que admirem o que você entrega e, às vezes, temam o jeito como você entrega, e essa segunda parte tende a passar despercebida para você.",
+    "Você costuma chegar ao seu melhor quando tem um desafio do tamanho certo: grande o bastante para exigir esforço, claro o bastante para medir. Autonomia real, com responsabilidade de verdade, tende a tirar o melhor da sua iniciativa. O que eleva o seu nível, porém, não é mais velocidade, e sim a escuta que você coloca antes de acelerar. Quando você aprende a trazer as pessoas junto em vez de puxá-las, sua força deixa de ser só sua e passa a multiplicar o resultado do grupo."
+  ],
+  "manual": {
+    "como_falar_comigo": [
+      "Comece pelo objetivo e pela decisão que você precisa de mim.",
+      "Traga duas ou três opções, com a sua recomendação já indicada.",
+      "Se houver um problema, diga logo no início, sem rodeios.",
+      "Mostre o impacto em resultado, prazo ou custo.",
+      "Discorde de mim com argumento e firmeza: eu respeito quem se posiciona.",
+      "Se precisar de mais tempo para decidir, diga quanto e por quê."
+    ],
+    "evite": [
+      "Introduções longas antes de chegar ao assunto.",
+      "Reclamar de um problema sem trazer nenhuma proposta de saída.",
+      "Tirar de mim uma decisão que estava combinada como minha sem conversar antes.",
+      "Concordar na reunião e discordar depois, pelos corredores."
+    ],
+    "me_energiza": [
+      "Metas difíceis com placar visível.",
+      "Liberdade para escolher como chegar ao resultado.",
+      "Situações travadas que ninguém conseguiu destravar.",
+      "Ver a coisa andando no mesmo dia em que foi decidida."
+    ],
+    "me_desgasta": [
+      "Reuniões que terminam sem decisão e sem responsável.",
+      "Aprovações em várias camadas para coisas pequenas.",
+      "Tarefas repetitivas sem desafio nem meta clara.",
+      "Ambientes em que ninguém assume a responsabilidade por nada."
+    ]
+  },
+  "dimensoes": {
+    "dia_a_dia": {
+      "texto": "Seu dia tende a ser organizado em torno do que precisa sair, não em torno do que estava previsto na agenda. Você costuma começar pelo que destrava mais coisas, resolver por mensagem curta o que outros resolveriam em reunião e mudar de tarefa sem cerimônia quando surge algo mais urgente. É comum que você termine o dia com muita coisa encaminhada e algumas pontas soltas, porque o seu interesse cai assim que o problema principal está resolvido. Rotina, para você, é algo que precisa servir a uma meta; sem isso, tende a virar peso.",
+      "itens": [
+        { "titulo": "Comece pelo que destrava", "texto": "Mantenha esse hábito, mas anote no fim do dia as pontas que ficaram soltas e defina quem fecha cada uma." },
+        { "titulo": "Bloco sem interrupção", "texto": "Reserve 45 minutos por dia para uma tarefa que exige continuidade. Feche as mensagens e não troque de assunto nesse período." },
+        { "titulo": "Entregue o final também", "texto": "Antes de considerar algo resolvido, confira se a pessoa que depende da entrega recebeu o que precisava, do jeito que precisava." }
+      ]
+    },
+    "decisao": {
+      "texto": "Você tende a decidir rápido e com conforto, mesmo com informação incompleta. Seu raciocínio costuma ser: “decidir errado e corrigir é melhor do que ficar parado”. Na maioria das situações isso ajuda, porque evita paralisia. A armadilha aparece em decisões que afetam muita gente ou que são difíceis de desfazer: ali, a sua velocidade pode atropelar informações que outras pessoas tinham e que você não pediu. Também é comum que você confunda o desconforto de esperar com falta de motivo para esperar. Nem toda demora é enrolação.",
+      "itens": [
+        { "titulo": "Separe decisões reversíveis", "texto": "Antes de decidir, pergunte: dá para desfazer em uma semana? Se sim, decida. Se não, ouça pelo menos duas pessoas antes." },
+        { "titulo": "Pergunta do ponto cego", "texto": "Nas decisões grandes, pergunte a alguém de fora da área: “o que eu não estou vendo aqui?” e anote a resposta." },
+        { "titulo": "Explique o motivo", "texto": "Ao comunicar uma decisão, gaste uma frase explicando por que escolheu esse caminho. Isso reduz resistência e retrabalho." }
+      ]
+    },
+    "aprendizado": {
+      "texto": "Você tende a aprender fazendo, errando e ajustando, muito mais do que lendo manual ou assistindo aula. O conteúdo prende sua atenção quando está ligado a um problema real que você precisa resolver agora. Teoria sem aplicação imediata costuma parecer perda de tempo, e é comum que você pule partes do treinamento para chegar logo ao que interessa. O risco é aprender o suficiente para resolver o problema de hoje e deixar lacunas que aparecem meses depois, em situações mais complexas.",
+      "itens": [
+        { "titulo": "Aprenda com um desafio", "texto": "Ao começar um curso ou leitura, escolha antes um problema concreto do trabalho que você vai resolver com aquele conteúdo." },
+        { "titulo": "Volte ao que pulou", "texto": "Depois de aplicar algo novo, reserve meia hora para revisar a parte teórica que você pulou. É ali que costumam estar os erros futuros." },
+        { "titulo": "Peça retorno direto", "texto": "Pergunte a quem domina o assunto o que você está fazendo de errado. Você tende a aproveitar bem a franqueza." }
+      ]
+    },
+    "mudanca": {
+      "texto": "Mudança costuma ser terreno confortável para você, desde que tenha sentido e que você tenha alguma participação no rumo. Você tende a ser das primeiras pessoas a testar o sistema novo, a propor o corte que ninguém queria propor e a defender que o jeito antigo já deu o que tinha que dar. O atrito aparece de dois jeitos: quando a mudança vem imposta sem explicação e tira sua autonomia, ou quando você é quem conduz e esquece que outras pessoas precisam de tempo para largar o que conheciam.",
+      "itens": [
+        { "titulo": "Dê tempo de adaptação", "texto": "Ao liderar uma mudança, combine com o grupo uma fase de transição com data. Não exija o ritmo final na primeira semana." },
+        { "titulo": "Pergunte o que se perde", "texto": "Antes de trocar um processo, pergunte a quem o usa todos os dias o que ele resolvia bem. Preserve essas partes." },
+        { "titulo": "Mudança imposta", "texto": "Quando uma mudança vier de cima, pergunte qual é o objetivo e onde você pode decidir. Isso costuma reduzir sua resistência." }
+      ]
+    },
+    "tempo_organizacao": {
+      "texto": "Você tende a ter um senso aguçado de prioridade: sabe rapidamente o que move o resultado e o que é acessório. Prazos costumam ser levados a sério, principalmente os seus. A organização, porém, tende a ser mais mental do que registrada, e funciona até o volume crescer. É comum que você aceite frentes demais por gostar de desafios, subestime o tempo de tarefas operacionais e deixe para depois o que considera burocracia, até que essa burocracia vire urgência.",
+      "itens": [
+        { "titulo": "Limite de frentes", "texto": "Defina um número máximo de projetos ativos sob sua responsabilidade. Para entrar um novo, outro precisa ser concluído ou delegado." },
+        { "titulo": "Burocracia com hora marcada", "texto": "Agrupe tarefas administrativas em um horário fixo da semana. Feitas em bloco, elas tendem a incomodar menos." },
+        { "titulo": "Lista fora da cabeça", "texto": "Mantenha uma lista visível dos compromissos assumidos com outras pessoas. Revise toda sexta-feira o que está atrasado." }
+      ]
+    },
+    "comunicacao": {
+      "texto": "Sua comunicação tende a ser curta, direta e orientada à ação. Você costuma ir ao ponto, falar em tom firme e escrever mensagens de uma linha que, para você, são eficientes, e para alguns colegas soam secas ou irritadas. Em conversas, é comum que você interrompa quando já entendeu onde a pessoa quer chegar. Seu ponto forte é a clareza: ninguém fica em dúvida sobre o que você pensa. O ponto de ajuste é o tom e a escuta, especialmente com quem precisa de mais contexto para se sentir em terreno firme.",
+      "itens": [
+        { "titulo": "Uma linha a mais", "texto": "Em mensagens escritas, acrescente uma frase de contexto ou de reconhecimento antes do pedido. Custa dez segundos e muda a leitura." },
+        { "titulo": "Deixe terminar", "texto": "Nas próximas cinco conversas importantes, espere a pessoa concluir a ideia antes de responder, mesmo que você já tenha entendido." },
+        { "titulo": "Confirme o entendimento", "texto": "Ao final de uma orientação, peça que a pessoa diga com as palavras dela o que vai fazer. Isso evita o “mas eu achei que...”." }
+      ]
+    },
+    "conflito": {
+      "texto": "Você tende a não fugir de conflito. Quando discorda, diz, e costuma preferir uma discussão franca a um acordo falso. Isso tem muito valor em grupos que evitam assuntos difíceis. O risco é transformar a divergência em disputa: elevar o tom, tratar o argumento do outro como obstáculo e querer sair da conversa com a vitória. Pessoas mais reservadas podem recuar não porque concordaram, mas porque desistiram de enfrentar sua intensidade, e o problema volta depois, mais escondido.",
+      "itens": [
+        { "titulo": "Problema, não pessoa", "texto": "Em uma discussão, fale do fato e do efeito no trabalho. Evite frases que começam com “você sempre” ou “você nunca”." },
+        { "titulo": "Pergunte antes de rebater", "texto": "Antes de contra-argumentar, faça uma pergunta sobre o ponto do outro. Isso mostra que você ouviu e baixa a temperatura." },
+        { "titulo": "Confira o silêncio", "texto": "Se a pessoa parou de discutir de repente, não conte como acordo. Retome depois, a sós: “ficou alguma coisa que você não disse?”." }
+      ]
+    },
+    "motivadores": {
+      "texto": "Você tende a se mover por desafio, resultado e autonomia. Metas ambiciosas, um placar claro e a chance de fazer algo que outras pessoas consideravam difícil costumam acender sua energia. Ter poder de decisão real, e não apenas de execução, também pesa muito. É comum que reconhecimento para você tenha menos a ver com elogio público e mais com receber responsabilidades maiores. Quando você percebe que seu esforço muda o resultado de forma visível, a motivação tende a se sustentar sozinha.",
+      "itens": [
+        { "titulo": "Meta que estica", "texto": "Negocie com sua liderança ao menos uma meta por ciclo que pareça difícil de verdade. Ela tende a manter seu engajamento alto." },
+        { "titulo": "Placar visível", "texto": "Crie um indicador simples para acompanhar o seu avanço semanal. Ver o número mudar costuma alimentar sua energia." },
+        { "titulo": "Responsabilidade como prêmio", "texto": "Diga à sua liderança que, para você, ganhar autonomia sobre uma área conta mais do que um elogio em reunião." }
+      ]
+    },
+    "desmotivadores": {
+      "texto": "O que tende a apagar sua energia é a sensação de estar preso: decisões que dependem de muitas aprovações, metas que mudam sem explicação, chefes que controlam cada passo e ambientes onde o esforço não altera o resultado. Trabalho repetitivo por longos períodos também costuma pesar. É comum que, nessas situações, você não fique em silêncio: primeiro questiona, depois pressiona e, se nada muda, começa a buscar outro desafio, às vezes dentro da mesma empresa, às vezes fora dela.",
+      "itens": [
+        { "titulo": "Nomeie o travamento", "texto": "Quando a frustração crescer, escreva exatamente o que está travando: uma aprovação, uma regra, uma pessoa. Leve isso à liderança com uma proposta." },
+        { "titulo": "Desafio paralelo", "texto": "Em fases de trabalho mais repetitivo, assuma um pequeno projeto de melhoria com meta própria para manter o fôlego." },
+        { "titulo": "Antes de sair", "texto": "Antes de decidir mudar de área ou de empresa por tédio, converse abertamente sobre o que faltaria para ficar." }
+      ]
+    },
+    "necessidades": {
+      "texto": "Para render bem, você tende a precisar de três coisas: clareza sobre o objetivo, espaço para decidir o caminho e acesso direto a quem decide. Ambientes que oferecem metas claras e cobram resultado, sem cobrar cada etapa, costumam combinar com você. Também ajuda ter retorno franco, sem rodeios, e alguma margem para errar e corrigir rápido. Quando essas condições faltam, é comum que você gaste energia lutando contra o ambiente em vez de lutar pelo resultado.",
+      "itens": [
+        { "titulo": "Combine a autonomia", "texto": "No início de um projeto, combine por escrito onde você decide por conta própria e onde precisa consultar. Isso evita atrito no meio do caminho." },
+        { "titulo": "Peça acesso", "texto": "Negocie uma conversa curta e regular com quem toma as decisões que afetam seu trabalho, em vez de esperar que a informação chegue." },
+        { "titulo": "Margem de erro", "texto": "Combine com sua liderança quais erros são aceitáveis em troca de velocidade e quais não são de jeito nenhum." }
+      ]
+    },
+    "como_lidera": {
+      "texto": "Com ou sem cargo, você tende a liderar pela iniciativa: assume o que está sem dono, define metas e cobra com clareza. Em crises, esse estilo costuma ser exatamente o que o grupo precisa. Em períodos normais, o risco é centralizar: decidir tudo, corrigir o trabalho dos outros em vez de ensinar e medir a equipe pela própria régua de velocidade. Pessoas com outro ritmo podem passar a esperar suas ordens em vez de pensar por conta própria, o que aumenta ainda mais a sua carga.",
+      "itens": [
+        { "titulo": "Delegue o resultado", "texto": "Ao delegar, defina o que precisa ser entregue e até quando, e deixe o como com a pessoa. Combine um ponto de conferência, não vários." },
+        { "titulo": "Ouça primeiro", "texto": "Nas próximas três reuniões de equipe, faça duas perguntas e ouça as respostas antes de dar a sua opinião." },
+        { "titulo": "Reconheça o esforço", "texto": "Uma vez por semana, diga a alguém do time, de forma específica, o que fez bem. Você tende a apontar só o que falta." },
+        { "titulo": "Desenvolva substitutos", "texto": "Escolha uma pessoa para assumir parte das suas decisões nos próximos três meses e acompanhe o crescimento dela." }
+      ]
+    },
+    "como_prefere_ser_liderado": {
+      "texto": "Você tende a render mais com uma liderança que defina o destino com clareza, confie no seu caminho e apareça quando houver algo relevante para decidir. Microgestão costuma ser o atalho mais rápido para a sua frustração. Você valoriza quem fala de forma franca, sem diplomacia excessiva, e respeita quem tem firmeza para dizer não a você com argumento. Também ajuda uma liderança que proteja você da burocracia e que dê desafios crescentes à medida que você entrega.",
+      "itens": [
+        { "titulo": "Peça clareza de destino", "texto": "Diga à sua liderança: “me diga onde precisamos chegar e o que não pode acontecer; o resto eu proponho”." },
+        { "titulo": "Combine a frequência", "texto": "Proponha um encontro curto e fixo para alinhar o andamento. Isso tende a reduzir a vontade da liderança de acompanhar cada passo." },
+        { "titulo": "Aceite o freio útil", "texto": "Quando sua liderança pedir para esperar, pergunte o motivo antes de reagir. Às vezes ela enxerga um risco que você não vê." }
+      ]
+    },
+    "papel_na_equipe": {
+      "texto": "Na equipe, você tende a ocupar o papel de quem dá a partida e de quem empurra quando o grupo emperra. É comum que você seja a pessoa que propõe a meta, aponta o problema que todos estavam contornando e cobra o prazo. Esse papel é valioso e cansativo para você, porque tende a vir com a sensação de que, se você não puxar, nada anda. A equipe ganha muito quando você divide esse papel e deixa outras pessoas também assumirem a frente em algumas situações.",
+      "itens": [
+        { "titulo": "Partida, não corrida inteira", "texto": "Em projetos coletivos, assuma o começo e o desbloqueio, mas deixe a condução diária com alguém que tenha mais constância." },
+        { "titulo": "Dê espaço para outra liderança", "texto": "Escolha uma reunião por semana em que outra pessoa conduz e você apenas contribui." },
+        { "titulo": "Combine com os detalhistas", "texto": "Aproxime-se de quem cuida bem dos detalhes. Juntos, vocês tendem a entregar rápido e com menos retrabalho." }
+      ]
+    },
+    "persuasao_negociacao": {
+      "texto": "Você tende a convencer pela firmeza e pela clareza do objetivo. Em negociações, costuma ir direto ao que interessa, sustentar sua posição com segurança e não se intimidar diante de alguém com mais poder. Isso costuma funcionar bem em acordos rápidos e com interlocutores também diretos. O risco é tratar a negociação como disputa a ser vencida: pressionar demais, fechar um acordo que o outro lado aceita sem acreditar e perder a relação para a próxima rodada.",
+      "itens": [
+        { "titulo": "Descubra o interesse do outro", "texto": "Antes de apresentar sua proposta, faça três perguntas sobre o que a outra parte precisa. Use as respostas no seu argumento." },
+        { "titulo": "Pense na próxima rodada", "texto": "Antes de fechar, pergunte a si: esta pessoa vai querer negociar comigo de novo? Se a resposta for não, reveja os termos." },
+        { "titulo": "Silêncio estratégico", "texto": "Depois de fazer uma proposta, espere a resposta sem completar o silêncio. Você tende a ceder ou pressionar cedo demais." }
+      ]
+    },
+    "ambientes": {
+      "texto": "Você tende a render mais em contextos com metas claras, ritmo acelerado e espaço para decidir: situações de crise, projetos novos, áreas que precisam de reorganização, desafios com prazo e resultado mensurável. Tarefas que pedem iniciativa, negociação firme e tomada de risco calculada costumam combinar com seu estilo. O que tende a drenar sua energia são ambientes muito hierárquicos, com regras rígidas para tudo, tarefas repetitivas por longos períodos e pouca relação entre esforço e resultado.",
+      "itens": [
+        { "titulo": "Procure o que está travado", "texto": "Ofereça-se para assumir projetos parados ou mal resolvidos. É nesse tipo de situação que sua iniciativa costuma aparecer melhor." },
+        { "titulo": "Reduza a rotina", "texto": "Se parte do seu trabalho é muito repetitiva, proponha automatizar, delegar ou agrupar essas tarefas para abrir espaço a desafios." },
+        { "titulo": "Ambiente estável não é inimigo", "texto": "Em fases de estabilidade, use o tempo para construir estrutura e equipe. É o que permite acelerar na próxima crise." }
+      ]
+    },
+    "pontos_cegos": {
+      "texto": "Como a Dominância aparece com folga, alguns efeitos do seu estilo tendem a ficar fora do seu campo de visão. O principal: o quanto sua firmeza pode calar as pessoas. Você pode achar que o time concorda porque ninguém discordou, quando na verdade ninguém teve coragem. Outro ponto cego comum é o custo dos detalhes que você deixou para os outros. E um terceiro: confundir sua velocidade com a velocidade do grupo, achando que todos entenderam o plano porque você entendeu.",
+      "itens": [
+        { "titulo": "Silêncio não é acordo", "texto": "Nas reuniões que você conduz, peça explicitamente uma discordância antes de fechar. “Quem vê um problema nisso?” é suficiente." },
+        { "titulo": "O custo do retrabalho", "texto": "Pergunte a quem executa depois de você quanto tempo gasta corrigindo pontas soltas das suas entregas. A resposta tende a surpreender." },
+        { "titulo": "Peça retorno sobre o tom", "texto": "Escolha uma pessoa de confiança e pergunte, uma vez por mês, como seu jeito tem sido recebido pela equipe." }
+      ]
+    },
+    "valoriza_nos_outros": {
+      "texto": "Você tende a valorizar nos outros iniciativa, franqueza, competência e responsabilidade pelo resultado. Quem traz a solução junto com o problema, cumpre o que promete e discorda de frente costuma ganhar seu respeito rápido. O cuidado é não medir todo mundo apenas por essas qualidades. Pessoas mais cautelosas, mais calmas ou mais atentas a detalhes contribuem com coisas que você tende a não priorizar e que, muitas vezes, são justamente o que falta para o seu resultado ficar completo.",
+      "itens": [
+        { "titulo": "Amplie a régua", "texto": "Liste três contribuições de colegas que não são velocidade nem firmeza e que já evitaram problemas para você." },
+        { "titulo": "Valorize a cautela", "texto": "Quando alguém levantar um risco, agradeça antes de responder. Isso estimula o grupo a continuar avisando você." },
+        { "titulo": "Diga o que respeita", "texto": "Quando alguém se posicionar com firmeza diante de você, reconheça isso em voz alta. Ajuda outras pessoas a fazerem o mesmo." }
+      ]
+    }
+  },
+  "pressao": {
+    "primeira_reacao": "Quando a pressão começa, você tende a acelerar e assumir o controle. Fala mais curto, decide sem consultar, distribui tarefas em tom de ordem e corta conversas que parecem atrasar. No curto prazo, isso costuma resolver. O efeito colateral é que as pessoas se fecham e passam a apenas obedecer, justamente quando você mais precisaria de ideias e alertas delas.",
+    "se_continua": "Se a pressão dura semanas, a tendência é concentrar ainda mais: puxar tarefas para si, perder a paciência com quem pergunta e endurecer com quem erra. Como os outros fatores estão discretos no seu perfil, há pouco amortecedor. Quando nem assim o resultado vem, é comum que você se desligue do problema e busque outra frente, deixando a anterior sem fechamento.",
+    "como_volta": "Você tende a voltar ao equilíbrio quando recupera alguma sensação de controle: uma vitória pequena e concreta, uma decisão que dependa só de você, um problema resolvido. Atividade física, um tempo só seu para reorganizar as prioridades e uma conversa franca com alguém que você respeita costumam ajudar. Admitir que precisa de ajuda costuma ser difícil, e muitas vezes é o passo que mais encurta a crise.",
+    "sinais": [
+      "Mensagens ficam ainda mais curtas, às vezes só com uma palavra.",
+      "Você começa a refazer tarefas dos outros em vez de orientar.",
+      "Interrompe as pessoas com mais frequência e eleva o tom.",
+      "Decide coisas importantes sem consultar ninguém, nem quem será afetado.",
+      "Fica impaciente com perguntas, mesmo as pertinentes."
+    ],
+    "o_que_ajuda": [
+      "Dividir o problema grande em três vitórias pequenas para os próximos dias.",
+      "Nomear em voz alta para o time: “estou sob pressão, me avisem se eu passar do ponto”.",
+      "Delegar uma frente inteira a alguém de confiança, em vez de controlar todas.",
+      "Fazer uma pausa física curta antes de responder a mensagens que irritaram você.",
+      "Conversar com alguém de fora da situação para enxergar opções que você não está vendo."
+    ]
+  },
+  "relacoes": {
+    "D": {
+      "texto": "Com pessoas de Dominância alta, você tende a ter respeito mútuo imediato: os dois falam a mesma língua, gostam de decidir e não se ofendem com franqueza. O atrito surge quando ambos querem conduzir a mesma coisa. Aí a conversa pode virar queda de braço, com cada um defendendo sua posição mais por orgulho do que por argumento.",
+      "dicas": [
+        "Dividam territórios de decisão logo no começo: quem decide o quê.",
+        "Discordem em particular e apresentem uma posição única ao grupo.",
+        "Antes de insistir, pergunte se o ponto vale uma disputa."
+      ]
+    },
+    "I": {
+      "texto": "Com pessoas de Influência alta, você tende a compartilhar a energia e a vontade de fazer acontecer. Elas costumam trazer leveza e capacidade de engajar que você não tem com a mesma facilidade. O atrito aparece quando você sente que a conversa está longa demais e o compromisso, vago demais, e elas sentem seu jeito frio ou apressado.",
+      "dicas": [
+        "Reserve dois minutos de conversa antes de entrar na pauta.",
+        "Peça que os combinados saiam com dono e data, sem cortar o entusiasmo.",
+        "Use a facilidade delas para apresentar ideias que você decidiu."
+      ]
+    },
+    "S": {
+      "texto": "Com pessoas de Estabilidade alta, você tende a encontrar o complemento ideal: elas dão continuidade ao que você começa. O risco é a sua intensidade parecer ameaçadora para elas. Mudanças bruscas, cobranças em tom firme e decisões sem aviso costumam gerar silêncio e resistência discreta, que você pode confundir com concordância.",
+      "dicas": [
+        "Avise mudanças com antecedência e explique o motivo.",
+        "Pergunte a opinião delas em particular, não só na reunião.",
+        "Reconheça a constância delas com palavras, não apenas com mais tarefas."
+      ]
+    },
+    "C": {
+      "texto": "Com pessoas de Conformidade alta, você tende a ganhar muito: elas enxergam riscos e erros que você atropela. O atrito vem do ritmo. Você quer decidir, elas querem mais dados; você vê perguntas como demora, elas veem sua pressa como descuido. Quando há respeito, a dupla costuma ser muito eficaz.",
+      "dicas": [
+        "Dê prazo claro para a análise, em vez de pressionar a cada hora.",
+        "Pergunte quais riscos elas veem antes de bater o martelo.",
+        "Quando for discordar, traga argumento, não apenas urgência."
+      ]
+    }
+  },
+  "o_que_dizem": {
+    "elogios": [
+      "“Com essa pessoa na frente, a coisa anda.”",
+      "“Quando ninguém quer decidir, é essa pessoa que decide.”",
+      "“Fala duro, mas você sempre sabe onde está pisando.”",
+      "“Na crise, é a primeira pessoa que eu quero ver na sala.”",
+      "“Não tem medo de assumir o risco nem a responsabilidade.”"
+    ],
+    "criticas": [
+      "“Às vezes chega com a decisão pronta e só comunica.”",
+      "“Quando está com pressa, atropela quem pensa mais devagar.”",
+      "“Começa muita coisa e deixa os detalhes para os outros.”",
+      "“É difícil discordar sem parecer que estou comprando briga.”",
+      "“Esquece de dizer quando algo ficou bom.”"
+    ]
+  },
+  "pdi": {
+    "foco": "Seu foco número 1 é transformar a sua força de puxar em capacidade de envolver. Sua iniciativa já costuma garantir que as coisas comecem e andem; o próximo nível vem de fazer com que outras pessoas também decidam, discordem e assumam a frente. Isso exige ouvir antes de acelerar e delegar resultado em vez de tarefa. Sem esse ajuste, o seu alcance fica limitado ao quanto você consegue carregar sem ajuda.",
+    "habitos": [
+      { "nome": "Duas perguntas antes", "como": "Em toda reunião em que você precisa opinar, faça duas perguntas genuínas aos outros antes de apresentar a sua posição.", "sinal_de_progresso": "Mais pessoas trazem ideias e discordâncias nas reuniões sem que você precise pedir." },
+      { "nome": "Delegar o resultado", "como": "Uma vez por semana, delegue uma entrega inteira, com objetivo e prazo, sem definir o passo a passo. Combine um único ponto de conferência.", "sinal_de_progresso": "Você corrige menos e a pessoa volta com soluções que você não teria pensado." },
+      { "nome": "Pedido de discordância", "como": "Antes de fechar uma decisão em grupo, pergunte em voz alta: “quem vê um problema nisso?” e espere dez segundos em silêncio.", "sinal_de_progresso": "Aparecem objeções antes da decisão, e não depois, pelos corredores." },
+      { "nome": "Reconhecimento específico", "como": "Toda sexta-feira, diga a uma pessoa da equipe algo concreto que ela fez bem e o efeito disso no resultado.", "sinal_de_progresso": "Colegas passam a comentar que você percebe o trabalho deles." },
+      { "nome": "Fechar as pontas", "como": "No fim de cada dia, revise o que ficou meio feito e defina quem conclui cada item e até quando.", "sinal_de_progresso": "Diminuem as cobranças sobre detalhes esquecidos e o retrabalho dos colegas." }
+    ],
+    "perguntas": [
+      "Quais decisões das últimas semanas eu teria tomado de outro jeito se tivesse ouvido mais uma pessoa?",
+      "Quem da minha equipe parou de discordar de mim, e por quê?",
+      "O que eu ainda faço por conta própria que outra pessoa poderia fazer melhor do que eu?",
+      "Quando foi a última vez que mudei de ideia por causa de um argumento de alguém?",
+      "Que detalhes eu costumo deixar para os outros, e quanto isso custa a eles?",
+      "Como eu quero que as pessoas descrevam o jeito de trabalhar comigo daqui a um ano?",
+      "Em quais situações minha pressa é útil e em quais ela só alivia o meu desconforto de esperar?"
+    ],
+    "dias_30": [
+      "Peça a três colegas uma resposta franca sobre como sua firmeza é recebida no dia a dia.",
+      "Aplique o hábito das duas perguntas antes de opinar em todas as reuniões de equipe.",
+      "Liste todas as frentes sob sua responsabilidade e escolha uma para delegar por inteiro."
+    ],
+    "dias_60": [
+      "Delegue um projeto completo a alguém e acompanhe apenas nos pontos de conferência combinados.",
+      "Conduza uma mudança da equipe com fase de transição definida e explicada a todos com antecedência.",
+      "Escolha uma pessoa mais cautelosa do time e consulte essa pessoa antes de toda decisão grande."
+    ],
+    "dias_90": [
+      "Repita a conversa de retorno com os mesmos três colegas e compare as respostas com as do primeiro mês.",
+      "Prepare uma pessoa da equipe para assumir parte das suas decisões de forma permanente.",
+      "Avalie quantas decisões grandes foram revistas por falta de escuta e defina a próxima meta de ajuste."
+    ]
+  }
+}

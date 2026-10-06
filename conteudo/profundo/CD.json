@@ -1,0 +1,281 @@
+{
+  "codigo": "CD",
+  "retrato": [
+    "No trabalho, você tende a ser quem desenha o caminho certo e depois cobra que ele seja seguido. Antes de agir, costuma estudar o problema a fundo, comparar alternativas e montar uma estrutura que se sustente. Depois que chega a uma conclusão, muda de marcha: defende a posição com firmeza, aponta o que está fora do padrão e não costuma recuar sem um argumento melhor. Em projetos que exigem método e alguém disposto a sustentar decisões impopulares, sua presença tende a fazer a diferença.",
+    "A Conformidade é o seu motor principal e a Dominância dá a ela dentes. Sozinha, a Conformidade analisaria e esperaria; com a Dominância ao lado, ela analisa e impõe. Daí vem a tensão típica do seu estilo: sua conclusão demora a sair e, quando sai, sobra pouca paciência para quem demora a aceitá-la. Quer o tempo necessário para pensar, mas não quer dar esse mesmo tempo a quem discorda. Quer qualidade sem concessão e quer controle do resultado. Quando as duas forças se alinham, sai uma entrega sólida; quando brigam, sai rigidez.",
+    "Quem trabalha com você costuma te ver como alguém muito competente e, ao mesmo tempo, exigente de um jeito que pode intimidar. Seus pares tendem a respeitar sua capacidade de achar a falha num plano e de dizer isso sem rodeio. Quem está abaixo na hierarquia pode sentir que nunca acerta por completo, e quem está acima pode estranhar ver suas decisões questionadas com dados na mão. É comum ouvir que convencer você dá trabalho; quase nunca, que enganar você é fácil.",
+    "Você costuma chegar ao seu melhor quando tem autoridade sobre o padrão de uma entrega e responsabilidade clara pelo resultado. Projetos que precisam sair do improviso e ganhar estrutura, processos que falham repetidamente, auditorias, implantações em que um erro custa caro: aí sua mistura de análise e firmeza tende a brilhar. Seu desenvolvimento costuma passar por perceber que ter razão não basta. A forma como você sustenta o que é certo define se as pessoas vão seguir o caminho junto com você ou apesar de você."
+  ],
+  "manual": {
+    "como_falar_comigo": [
+      "Traga o problema com dados e diga claramente o que você espera de mim.",
+      "Se discorda de mim, mostre o argumento ou o número; eu mudo de posição com evidência, não com insistência.",
+      "Seja breve e organizado: pauta, ponto, decisão.",
+      "Diga quem decide o quê; ambiguidade de autoridade me tira do sério.",
+      "Pode ser direto comigo. Eu prefiro uma crítica franca a um elogio diplomático.",
+      "Quando o prazo for curto de verdade, diga o porquê; aceito correr quando entendo o motivo."
+    ],
+    "evite": [
+      "Prometer algo em meu nome sem ter verificado se é viável.",
+      "Passar por cima de um padrão combinado porque “dessa vez não tem problema”.",
+      "Responder a uma objeção técnica minha com hierarquia ou com “confia em mim”.",
+      "Trazer um problema já grande que poderia ter sido avisado quando era pequeno."
+    ],
+    "me_energiza": [
+      "Ter autonomia para estruturar um projeto do zero, com método e critérios meus.",
+      "Ver um processo bagunçado passar a funcionar com previsibilidade.",
+      "Debater com alguém que conhece o assunto e não leva a discussão para o lado pessoal.",
+      "Assumir um problema que outros desistiram de resolver."
+    ],
+    "me_desgasta": [
+      "Decisões tomadas por política, sem base, que eu vou ter de executar.",
+      "Repetir a mesma orientação para quem não leu o que já foi documentado.",
+      "Responsabilidade pelo resultado sem autoridade sobre como ele é feito.",
+      "Reuniões em que todos opinam e ninguém decide."
+    ]
+  },
+  "dimensoes": {
+    "dia_a_dia": {
+      "texto": "No dia a dia, você tende a trabalhar como quem gerencia um sistema: define a estrutura, confere os pontos críticos e intervém onde algo sai do esperado. Costuma planejar antes, mas não se perde no plano; quando o plano está bom, executa com disciplina e espera o mesmo dos outros. É comum assumir o controle de partes do trabalho que não são suas porque percebe que ninguém está cuidando direito delas. Isso resolve o problema da semana e cria outro: o time se acostuma a que você conserte.",
+      "itens": [
+        { "titulo": "Estrutura primeiro", "texto": "Você tende a montar a arquitetura do trabalho antes de executar. Compartilhe essa estrutura cedo, para os outros saberem onde se encaixam." },
+        { "titulo": "Pontos de controle", "texto": "Defina dois ou três pontos de checagem por projeto em vez de acompanhar tudo. Confie no intervalo entre eles." },
+        { "titulo": "Não assumir o que é do outro", "texto": "Quando perceber algo mal cuidado, avise o responsável e combine um prazo antes de pegar a tarefa para você." },
+        { "titulo": "Disciplina com folga", "texto": "Deixe 10% da agenda livre para imprevistos. Seu plano fica mais firme quando não depende de tudo dar certo." }
+      ]
+    },
+    "decisao": {
+      "texto": "Você tende a decidir em duas fases. Na primeira, analisa: busca dados, testa hipóteses, procura o ponto fraco de cada alternativa. Na segunda, decide e sustenta, muitas vezes com uma firmeza que surpreende quem só viu a fase de análise. Suas decisões costumam ser bem fundamentadas e difíceis de derrubar. A armadilha é dupla: demorar demais na primeira fase quando o cenário pede rapidez e, na segunda, tratar a decisão como encerrada mesmo quando surge informação nova. Revisar uma decisão com base em fato novo não é fraqueza; é o mesmo rigor aplicado de novo.",
+      "itens": [
+        { "titulo": "Critério antes, opinião depois", "texto": "Você decide melhor quando os critérios estão escritos. Faça isso antes de ouvir as opiniões, para não usá-los só para justificar a sua." },
+        { "titulo": "Gatilho de revisão", "texto": "Ao decidir, anote qual fato faria você mudar de ideia. Se ele aparecer, reabra a decisão sem resistência." },
+        { "titulo": "Decidir com o time", "texto": "Em decisões que afetam outras pessoas, ouça duas opiniões antes de anunciar a sua. Mesmo que não mude nada, muda a adesão." },
+        { "titulo": "Velocidade sob medida", "texto": "Se a decisão é reversível, limite a análise a um dia. Reserve a investigação profunda para o que não tem volta." }
+      ]
+    },
+    "aprendizado": {
+      "texto": "Você tende a aprender de forma autônoma, profunda e crítica. Lê a fonte, testa, compara com o que já sabe e descarta rápido o que não se sustenta. Costuma ter pouca paciência com treinamentos superficiais ou com instrutores que não dominam o tema, e pode desligar da aula no primeiro erro técnico de quem ensina. Aprende muito com desafios reais e com problemas que ninguém resolveu. O cuidado é não fechar a porta para jeitos de aprender que parecem menos rigorosos, como ouvir a experiência prática de alguém que não sabe explicar a teoria.",
+      "itens": [
+        { "titulo": "Desafio real", "texto": "Escolha um problema concreto da sua área e use-o como projeto de estudo. Você aprende mais aplicando do que acumulando." },
+        { "titulo": "Ouvir antes de julgar", "texto": "Quando o instrutor ou o colega errar um detalhe, anote e continue ouvindo. O resto do conteúdo ainda pode valer." },
+        { "titulo": "Aprender com a prática alheia", "texto": "Converse com quem faz o trabalho na ponta. Eles sabem coisas que nenhum manual registra." }
+      ]
+    },
+    "mudanca": {
+      "texto": "Mudanças tendem a ser bem recebidas por você quando você participou do desenho delas ou quando a lógica é impecável. Quando a mudança vem de cima, sem fundamento, você costuma contestar, e com argumentos que incomodam porque são bons. Se a mudança é sua, por outro lado, você pode conduzi-la com uma determinação que atropela quem ainda está se adaptando. Nos dois sentidos, o desafio é o mesmo: separar a qualidade da ideia da forma como as pessoas precisam ser trazidas para ela.",
+      "itens": [
+        { "titulo": "Questionar com proposta", "texto": "Quando discordar de uma mudança, leve junto uma alternativa viável. Crítica sem saída tende a ser lida como resistência." },
+        { "titulo": "Tempo de adaptação", "texto": "Quando a mudança for sua, preveja de duas a quatro semanas de adaptação no plano. Não é atraso; é parte da implantação." },
+        { "titulo": "Explicar o porquê", "texto": "Você conhece o motivo da mudança; os outros não. Explique o problema que ela resolve antes de explicar como funciona." },
+        { "titulo": "Ceder no secundário", "texto": "Escolha o que é inegociável na mudança e abra mão do resto. As pessoas aderem melhor quando podem opinar em algo." }
+      ]
+    },
+    "tempo_organizacao": {
+      "texto": "Você tende a ser uma pessoa organizada e exigente com prazos, seus e dos outros. Cronogramas, listas de pendência e controles fazem parte do seu jeito natural de trabalhar. A dificuldade costuma estar em dois pontos. Primeiro, você subestima o tempo que a sua própria exigência vai consumir. Segundo, absorve tarefas demais porque confia mais no próprio trabalho, e a agenda incha. É comum terminar o mês com tudo entregue no padrão e com a sensação de que carregou o time nas costas.",
+      "itens": [
+        { "titulo": "Agenda com limite", "texto": "Defina quantas frentes você toca ao mesmo tempo. Ao chegar ao limite, delegue ou negocie prazo antes de aceitar a próxima." },
+        { "titulo": "Prazo dos outros", "texto": "Ao combinar prazos com colegas, pergunte o que eles precisam para cumprir. Cobrar sem saber a carga gera desgaste." },
+        { "titulo": "Revisão no cronograma", "texto": "Inclua o tempo de revisão no prazo desde o início. Sua exigência é parte do trabalho, não um extra." }
+      ]
+    },
+    "comunicacao": {
+      "texto": "Sua comunicação tende a ser direta, lógica e assertiva. Você costuma ir ao ponto, usar dados e dizer o que pensa sem suavizar. Por escrito, seu texto é preciso e às vezes cortante; ao vivo, pode interromper quem está divagando e corrigir na frente de todos. Isso economiza tempo e evita mal-entendidos, mas pode fechar a conversa: as pessoas param de trazer ideias imperfeitas porque esperam ser corrigidas. Seu desafio não é ser menos claro, e sim deixar espaço para que os outros também falem antes de você concluir.",
+      "itens": [
+        { "titulo": "Perguntar antes de afirmar", "texto": "Nas próximas três reuniões, faça duas perguntas antes de dar sua opinião. Repare no que você aprende com isso." },
+        { "titulo": "Correção em particular", "texto": "Aponte erros de pessoas em conversa individual. Em público, fale do problema, não de quem errou." },
+        { "titulo": "Releitura de tom", "texto": "Antes de enviar uma mensagem com crítica, leia como se fosse você recebendo. Troque uma frase seca por uma neutra." },
+        { "titulo": "Concordar em voz alta", "texto": "Quando concordar com alguém, diga. Seu silêncio costuma ser lido como desaprovação." }
+      ]
+    },
+    "conflito": {
+      "texto": "Em conflito, você tende a não fugir. Ao contrário do perfil de Conformidade pura, que recua, a sua Dominância faz você entrar na discussão, com dados, lógica e firmeza. Costuma ganhar boa parte dos debates técnicos. O risco é ganhar o argumento e perder a pessoa: o outro pode sair calado, mas não convencido, e a resistência reaparece depois na execução. Também é comum transformar uma divergência de opinião numa questão de certo e errado, quando às vezes são só duas formas válidas de fazer.",
+      "itens": [
+        { "titulo": "Validar antes de rebater", "texto": "Antes de responder a uma objeção, repita o argumento do outro com suas palavras. Só depois apresente o seu." },
+        { "titulo": "Certo ou preferência", "texto": "Pergunte-se se a discordância é sobre um erro ou sobre um estilo. Se for estilo, deixe o outro seguir do jeito dele." },
+        { "titulo": "Silêncio não é acordo", "texto": "Depois de uma discussão, pergunte diretamente: “ficou alguma dúvida ou discordância?”. Dê tempo para a resposta." },
+        { "titulo": "Esfriar antes de escrever", "texto": "Se a discussão esquentou, espere uma hora antes de mandar a resposta escrita. Ela vai sair igualmente firme e menos dura." }
+      ]
+    },
+    "motivadores": {
+      "texto": "Você tende a se motivar com desafios que exigem competência e com a autoridade para resolvê-los do jeito certo. Gosta de ter o problema nas mãos, montar a solução e ver que ela se sustenta. Também é comum que a motivação venha de elevar o padrão: tornar um processo mais confiável, um relatório mais preciso, uma equipe mais disciplinada. Reconhecimento importa quando vem acompanhado de mais responsabilidade e mais autonomia, e não de aplausos genéricos.",
+      "itens": [
+        { "titulo": "Problemas difíceis", "texto": "Questões que outros consideraram sem solução tendem a te atrair. Peça para assumir uma por trimestre." },
+        { "titulo": "Autoridade sobre o padrão", "texto": "Ter a palavra final sobre a qualidade de uma entrega costuma aumentar muito seu engajamento." },
+        { "titulo": "Resultado mensurável", "texto": "Ver o efeito do seu trabalho em números, como menos erros ou menos retrabalho, alimenta sua energia." }
+      ]
+    },
+    "desmotivadores": {
+      "texto": "Você tende a perder o ânimo quando a competência não é o critério. Decisões políticas, promoções sem mérito claro, regras que valem para uns e não para outros e líderes que não dominam o assunto costumam corroer seu engajamento. Também desgasta ter responsabilidade pelo resultado sem poder sobre o método, e ver um trabalho bem estruturado ser desmontado por pressa de quem não entendeu. Diferente de outros perfis, você costuma dizer quando algo não está bom; o risco é dizer de um jeito que fecha a negociação.",
+      "itens": [
+        { "titulo": "Incoerência", "texto": "Regras aplicadas de forma desigual tendem a ser, para você, um dos maiores motivos de desconfiança na liderança." },
+        { "titulo": "Responsabilidade sem autoridade", "texto": "Responder pelo resultado sem poder decidir o método costuma gerar frustração crescente. Negocie isso de forma explícita." },
+        { "titulo": "Desmanche por pressa", "texto": "Ver uma estrutura cuidadosa ser descartada sem análise tende a pesar. Registre o motivo da estrutura para defendê-la melhor." }
+      ]
+    },
+    "necessidades": {
+      "texto": "Para render, você tende a precisar de clareza de autoridade, acesso à informação e liberdade de método. Saber exatamente o que é seu, o que é de outra pessoa e quem decide em caso de impasse costuma evitar metade dos seus atritos. Precisa também de interlocutores competentes, capazes de debater de igual para igual, e de uma liderança que aceite questionamento sem tratá-lo como insubordinação. Previsibilidade importa, mas menos do que no perfil de Conformidade pura: você tolera mudança quando ela é bem fundamentada.",
+      "itens": [
+        { "titulo": "Fronteiras claras", "texto": "Peça, no início de cada projeto, um mapa simples de quem decide o quê. Isso reduz disputas de controle." },
+        { "titulo": "Espaço para questionar", "texto": "Combine com a liderança um canal para discordar, como uma conversa semanal, em vez de contestar em reunião aberta." },
+        { "titulo": "Dados acessíveis", "texto": "Garanta acesso direto às informações de que você precisa para decidir. Depender de terceiros tende a te travar." }
+      ]
+    },
+    "como_lidera": {
+      "texto": "Quando lidera, você tende a liderar pela estrutura e pela exigência. Define o padrão, cria o processo, acompanha os indicadores e cobra. Times sob sua condução costumam ficar mais organizados, mais confiáveis e com menos retrabalho. O desafio está no lado humano: é comum que você corrija mais do que reconheça, centralize decisões por desconfiar do critério alheio e espere que todos tenham o seu nível de rigor desde o primeiro dia. Pessoas com outro estilo podem se sentir permanentemente avaliadas e deixar de propor.",
+      "itens": [
+        { "titulo": "Reconhecimento na proporção", "texto": "Para cada correção que fizer na semana, faça um reconhecimento específico. Conte por uma semana para ver a proporção real." },
+        { "titulo": "Delegar decisões, não só tarefas", "texto": "Escolha um tipo de decisão que o time passa a tomar sem você, com critérios definidos. Revise só o resultado." },
+        { "titulo": "Explicar o padrão", "texto": "Quando cobrar algo, explique a razão do padrão. Gente que entende o porquê cumpre sem precisar de vigilância." },
+        { "titulo": "Errar em público", "texto": "Admita um erro seu na frente do time. Isso autoriza os outros a falarem dos deles antes que virem problema." }
+      ]
+    },
+    "como_prefere_ser_liderado": {
+      "texto": "Você tende a preferir uma liderança tecnicamente competente, coerente e direta, que dê objetivos claros e autonomia real. Costuma respeitar quem sabe mais do que você em algum ponto e ter dificuldade com quem lidera só pelo cargo. Gosta de feedback franco e baseado em fatos e de participar das decisões que afetam a sua área. Acompanhamento próximo tende a ser lido como desconfiança. A melhor relação com sua liderança costuma ser a de parceria: você entrega o padrão e o líder protege seu espaço para fazê-lo.",
+      "itens": [
+        { "titulo": "Combinar autonomia", "texto": "Proponha ao seu líder um acordo: você reporta resultados em datas fixas e ele evita acompanhar cada passo." },
+        { "titulo": "Discordar no lugar certo", "texto": "Questione decisões da liderança em conversa individual, não na frente do time. A chance de sua posição ser ouvida aumenta." },
+        { "titulo": "Aceitar decisões contrárias", "texto": "Quando a decisão for contra a sua opinião, registre sua posição e execute bem. Isso aumenta sua credibilidade para a próxima." }
+      ]
+    },
+    "papel_na_equipe": {
+      "texto": "Na equipe, você tende a ser quem dá estrutura e quem segura o padrão. É a pessoa que transforma uma ideia solta em plano com etapas, responsáveis e critérios; que aponta o risco que ninguém quer ver; que diz “isso não está pronto” quando todos querem entregar. Esse papel é valioso e pode ser solitário. Como você não costuma suavizar, é comum que sua presença seja lida como o freio do grupo, quando na verdade é quem evita a batida.",
+      "itens": [
+        { "titulo": "Estrutura do projeto", "texto": "Ofereça-se para montar o plano de projetos novos. É onde sua combinação de análise e firmeza tem mais impacto." },
+        { "titulo": "Alerta com saída", "texto": "Quando apontar um risco, traga uma forma de mitigá-lo. Assim você deixa de ser o freio e vira o seguro." },
+        { "titulo": "Dividir o padrão", "texto": "Ensine duas pessoas do time a revisar com o seu critério. O padrão fica no grupo, não só em você." }
+      ]
+    },
+    "persuasao_negociacao": {
+      "texto": "Você tende a convencer pela solidez: dados, lógica, histórico e consequências. Em negociação, costuma chegar com a lição de casa feita, conhecer os números melhor do que a outra parte e sustentar a posição com firmeza. Isso dá muita força diante de interlocutores racionais e pode gerar impasse diante de quem negocia pela relação. É comum você tratar concessão como derrota e perder acordos bons por não aceitar um detalhe. O desenvolvimento passa por enxergar a negociação como construção conjunta, não como prova de quem tem razão.",
+      "itens": [
+        { "titulo": "Interesse por trás da posição", "texto": "Pergunte à outra parte o que ela precisa resolver. Muitas vezes, o interesse dela cabe na sua solução com um ajuste pequeno." },
+        { "titulo": "Concessões planejadas", "texto": "Antes da negociação, liste três pontos que você pode ceder. Use-os de forma deliberada para destravar o que importa." },
+        { "titulo": "Menos dados, mais impacto", "texto": "Escolha os três argumentos mais fortes. Excesso de dados pode soar como tentativa de vencer pelo cansaço." }
+      ]
+    },
+    "ambientes": {
+      "texto": "Você tende a render mais em contextos que precisam de método, padrão e alguém disposto a sustentar decisões: implantações, reorganizações, controles, projetos técnicos de alto risco, situações em que o improviso já causou prejuízo. Rende bem quando tem autonomia e responsabilidade clara. O que tende a drenar é a combinação de muita política e pouca lógica, liderança que não domina o assunto, ambientes em que agradar vale mais do que acertar e tarefas repetitivas sem espaço para melhorar o processo.",
+      "itens": [
+        { "titulo": "Onde você rende", "texto": "Contextos de construção ou correção de processos, em que o erro custa caro e a firmeza é bem-vinda." },
+        { "titulo": "O que drena", "texto": "Ambientes muito políticos, em que decisões são tomadas pela relação e não pelo mérito, e sem espaço para questionar." },
+        { "titulo": "Em contexto adverso", "texto": "Se o ambiente é desorganizado, escolha uma área pequena para estruturar primeiro. Um caso de sucesso abre espaço para o resto." }
+      ]
+    },
+    "pontos_cegos": {
+      "texto": "Seus pontos cegos tendem a vir de uma certeza bem construída. Como suas conclusões costumam ser sólidas, você pode deixar de perceber quando a outra pessoa tem um ponto válido que não está nos dados: uma percepção do cliente, um clima do time, um fator político real. Também é comum não notar o efeito do seu tom: o que para você é uma correção objetiva pode ser sentido como desqualificação. E, por centralizar o padrão, você pode estar formando uma equipe que depende de você para tudo.",
+      "itens": [
+        { "titulo": "Certeza que fecha portas", "texto": "Quanto mais certeza você tiver, mais vale perguntar: o que eu não estou vendo? Faça isso em voz alta." },
+        { "titulo": "Peso do tom", "texto": "Peça a alguém de confiança que te avise quando seu tom passar do ponto numa reunião. Combine um sinal discreto." },
+        { "titulo": "Time dependente", "texto": "Se o trabalho para quando você sai de férias, o padrão está concentrado demais. Documente e treine." },
+        { "titulo": "Fatores não mensuráveis", "texto": "Clima, confiança e política também afetam resultado. Inclua esses fatores na sua análise, mesmo sem número." }
+      ]
+    },
+    "valoriza_nos_outros": {
+      "texto": "Você tende a valorizar competência, coerência e coragem de dizer a verdade. Respeita quem domina o que faz, sustenta uma posição com argumentos e admite o erro sem rodeio. Costuma admirar quem cumpre o combinado e quem melhora o trabalho a cada entrega. Ao contrário, perde rápido a confiança em quem improvisa sem base, fala bonito e entrega pouco, ou muda de opinião para agradar. Vale lembrar que nem toda contribuição valiosa vem com argumento técnico; algumas vêm em forma de cuidado com as pessoas.",
+      "itens": [
+        { "titulo": "Quem enfrenta você com dados", "texto": "Você costuma respeitar mais quem discorda com bons argumentos do que quem concorda sem pensar. Diga isso ao time." },
+        { "titulo": "Evolução visível", "texto": "Você tende a valorizar quem melhora entre uma entrega e outra. Reconheça a evolução, não só o resultado final." },
+        { "titulo": "Outros tipos de força", "texto": "Procure enxergar o valor de quem cuida do clima, da relação com o cliente e da união do time." }
+      ]
+    }
+  },
+  "pressao": {
+    "primeira_reacao": "Quando a pressão começa, você tende a apertar o controle: confere mais, cobra mais, estreita os critérios e passa a revisar o trabalho dos outros de perto. A primeira defesa é o padrão. É comum ficar mais impaciente com explicações longas e com erros que, em dias normais, você corrigiria sem comentar.",
+    "se_continua": "Se a pressão dura, a Dominância assume a frente. Você pode passar a impor em vez de argumentar, decidir sem consultar o que antes discutiria, tomar tarefas dos outros e usar um tom cortante que fere. Para quem está perto, a exigência vira dureza. Por dentro, é comum sentir que só você está levando o problema a sério.",
+    "como_volta": "O que tende a te trazer de volta é recuperar a sensação de controle de forma legítima: redefinir prioridades com a liderança, devolver ao responsável o que você tomou e separar o que é crítico do que é preferência. Atividade física, uma pausa longe da tela e uma conversa franca com alguém que você respeita costumam baixar a tensão.",
+    "sinais": [
+      "Você passa a refazer o trabalho de colegas em vez de devolver com comentários.",
+      "As mensagens ficam curtas, imperativas e sem cumprimento.",
+      "Você interrompe mais nas reuniões e encerra discussões antes do fim.",
+      "A tolerância a pequenos erros cai visivelmente.",
+      "Você começa a decidir sem consultar quem normalmente consultaria."
+    ],
+    "o_que_ajuda": [
+      "Liste o que está sob sua responsabilidade e devolva por escrito o que não está.",
+      "Antes de responder a algo que te irritou, espere uma hora.",
+      "Pergunte ao líder quais são as três prioridades reais da semana e corte o resto.",
+      "Peça a um colega de confiança que te avise quando o tom subir."
+    ]
+  },
+  "relacoes": {
+    "D": {
+      "texto": "Com pessoas de Dominância alta, a afinidade está na objetividade e no foco em resultado; o atrito, na disputa de controle. Vocês dois querem decidir, mas por caminhos diferentes: ela pela velocidade e pela intuição, você pela análise. É comum o embate virar queda de braço. Quando o terreno de cada um está claro, a parceria é forte: ela abre a frente e você estrutura o que foi aberto.",
+      "dicas": [
+        "Combinem antes quem tem a palavra final em cada tipo de decisão.",
+        "Leve a conclusão primeiro e o dado só se ela pedir.",
+        "Escolha os riscos que realmente importam; listas longas tendem a ser ignoradas por ela."
+      ]
+    },
+    "I": {
+      "texto": "Com pessoas de Influência alta, a diferença tende a ser marcante. Elas improvisam, falam muito e decidem pela relação; você planeja, vai ao ponto e decide pelo dado. É comum você as achar pouco sérias e elas acharem seu jeito duro. Mas elas têm algo que falta ao seu estilo: a capacidade de engajar pessoas. Quando você estrutura e elas mobilizam, a mudança acontece com adesão.",
+      "dicas": [
+        "Comece a conversa pela pessoa, não pela pauta; dois minutos bastam.",
+        "Critique a ideia em particular e com uma sugestão junto.",
+        "Peça a ajuda delas para apresentar suas propostas a grupos maiores."
+      ]
+    },
+    "S": {
+      "texto": "Com pessoas de Estabilidade alta, a relação tende a ser produtiva no trabalho e frágil no tom. Elas valorizam a sua organização e cumprem o que você estrutura, mas podem se magoar com a sua franqueza sem dizer nada. O risco é você confundir o silêncio delas com concordância e só descobrir o desgaste quando ele já virou distância.",
+      "dicas": [
+        "Explique mudanças com antecedência e dê tempo para adaptação.",
+        "Pergunte diretamente como a pessoa está se sentindo com o projeto.",
+        "Reconheça a constância e a confiabilidade delas, não só os resultados."
+      ]
+    },
+    "C": {
+      "texto": "Com pessoas de Conformidade alta, há respeito mútuo pelo dado e pelo método. A conversa costuma ser técnica e eficiente. O atrito surge quando os critérios divergem: elas podem achar que você decide rápido demais, e você pode achar que elas analisam eternamente. Sua firmeza pode fazê-las recuar sem que o argumento delas tenha sido realmente ouvido.",
+      "dicas": [
+        "Dê tempo para elas apresentarem a análise inteira antes de concluir.",
+        "Reconheça os pontos que elas acertaram antes de mostrar onde discorda.",
+        "Defina com elas uma data limite para fechar a análise."
+      ]
+    }
+  },
+  "o_que_dizem": {
+    "elogios": [
+      "“Quando essa pessoa monta o plano, a gente sabe que vai funcionar.”",
+      "“Não tem medo de dizer que o rei está nu, mesmo para a diretoria.”",
+      "“É difícil de convencer, mas impossível de enganar.”",
+      "“Ela pega um processo bagunçado e devolve redondo.”"
+    ],
+    "criticas": [
+      "“Tem razão quase sempre, mas a forma como fala deixa a gente sem vontade de concordar.”",
+      "“Quer controlar tudo; parece que não confia em ninguém.”",
+      "“Depois que decide, não tem argumento que mude.”",
+      "“A gente para de sugerir porque sabe que vai ser corrigido.”"
+    ]
+  },
+  "pdi": {
+    "foco": "Seu foco número 1 tende a ser transformar autoridade técnica em influência real. Você já tem o rigor e a firmeza; o que costuma faltar é a adesão das pessoas. Quando a Dominância se soma à Conformidade, o padrão alto vem acompanhado de pressão para que todos o sigam, e isso gera obediência, não compromisso. Aprender a ouvir antes de concluir, reconhecer antes de corrigir e delegar decisões multiplica o alcance do seu trabalho.",
+    "habitos": [
+      { "nome": "Duas perguntas antes", "como": "Em cada reunião, faça duas perguntas genuínas ao grupo antes de dar sua opinião. Anote o que surgiu que você não tinha considerado.", "sinal_de_progresso": "Mais pessoas trazem ideias para você antes de as decisões chegarem prontas." },
+      { "nome": "Proporção de reconhecimento", "como": "Para cada correção dada na semana, dê um reconhecimento específico. Conte em um papel para manter a proporção visível.", "sinal_de_progresso": "Colegas passam a pedir sua revisão espontaneamente." },
+      { "nome": "Decisão delegada", "como": "Escolha um tipo de decisão por mês que passa a ser do time, com critérios escritos. Revise só o resultado, não o caminho.", "sinal_de_progresso": "Sua agenda tem menos aprovações pendentes e o time decide sem esperar você." },
+      { "nome": "Pausa antes de responder", "como": "Quando algo te irritar, espere pelo menos uma hora antes de responder por escrito e releia o texto antes de enviar.", "sinal_de_progresso": "Menos conversas de reparo depois de mensagens enviadas no calor do momento." },
+      { "nome": "Gatilho de revisão", "como": "Em cada decisão importante, registre qual fato te faria mudar de ideia. Revise a lista uma vez por mês.", "sinal_de_progresso": "Você reabre ao menos uma decisão por trimestre diante de fato novo, sem desgaste." }
+    ],
+    "perguntas": [
+      "Em quais situações recentes eu ganhei a discussão e perdi a pessoa?",
+      "Que decisões só passam por mim porque eu não confio no critério de outra pessoa?",
+      "Como as pessoas do meu time descreveriam a experiência de receber um feedback meu?",
+      "Qual foi a última vez que mudei de opinião por causa do argumento de alguém?",
+      "O que no meu trabalho é padrão necessário e o que é preferência minha?",
+      "Se eu saísse por um mês, o que deixaria de funcionar e por quê?"
+    ],
+    "dias_30": [
+      "Faça duas perguntas antes de opinar em todas as reuniões e anote o que aprendeu.",
+      "Conte suas correções e reconhecimentos durante duas semanas e equilibre a proporção.",
+      "Mapeie as tarefas que você assumiu de outras pessoas e devolva pelo menos duas."
+    ],
+    "dias_60": [
+      "Delegue um tipo de decisão ao time, com critérios escritos, e revise apenas o resultado.",
+      "Peça a três colegas um retorno sincero sobre como seu tom é recebido em reuniões.",
+      "Documente o padrão de uma entrega crítica e treine duas pessoas para revisá-la."
+    ],
+    "dias_90": [
+      "Conduza uma mudança relevante envolvendo o time no desenho antes de definir a solução.",
+      "Compare o número de aprovações que dependem de você hoje com o de noventa dias atrás.",
+      "Repita a conversa de retorno com os mesmos três colegas e compare as respostas."
+    ]
+  }
+}
