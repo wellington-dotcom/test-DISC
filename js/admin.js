@@ -160,11 +160,14 @@
   }
 
   // Confiabilidade calculada no painel (como o perfil), nunca enviada pelo participante.
-  function confiabilidade(respostas, validacao, duracaoSeg) {
+  // passiva: venda direta (origem 'pessoal'), sem a etapa de confirmação — o selo vem só do jeito de responder.
+  function confiabilidade(respostas, validacao, duracaoSeg, passiva) {
     var CF = dep('DISC_CONFIABILIDADE');
     if (!CF || typeof CF.avaliar !== 'function') return null;
     var d = Number(duracaoSeg);
-    try { return CF.avaliar(respostas, lerValidacao(validacao), isFinite(d) && d > 0 ? { duracaoSeg: d } : undefined); } catch (e) { return null; }
+    var op = isFinite(d) && d > 0 ? { duracaoSeg: d } : {};
+    if (passiva) op.passiva = true;
+    try { return CF.avaliar(respostas, lerValidacao(validacao), op); } catch (e) { return null; }
   }
 
   // Recalcula a partir de payload.respostas; nunca confia em payload.resultado.
@@ -182,7 +185,7 @@
       r.calc = null;
       r.invalido = true;
     }
-    r.conf = confiabilidade(r.respostas, r.validacao, r.duracaoSeg);
+    r.conf = confiabilidade(r.respostas, r.validacao, r.duracaoSeg, r.origem === 'pessoal');
     return r;
   }
 

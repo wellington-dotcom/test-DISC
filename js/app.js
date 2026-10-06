@@ -1273,8 +1273,19 @@
       fim: fim.toISOString(),
       duracaoSeg: Math.max(0, Math.round((fim.getTime() - inicio.getTime()) / 1000)),
       respostas: scoring.compactar(respostas),
-      resultado: { percentuais: res.percentuais, codigo: res.codigo }
+      resultado: { percentuais: res.percentuais, codigo: res.codigo },
+      validacao: montarValidacaoPassiva(dados)
     };
+  }
+
+  // Venda direta não tem a etapa de confirmação: manda só os sinais do jeito de responder para o selo de confiabilidade
+  // do painel (js/confiabilidade.js, avaliação passiva). Nada disso é mostrado à pessoa.
+  function montarValidacaoPassiva(dados) {
+    var aceitos = Array.isArray(dados && dados.aceitos) ? dados.aceitos : [];
+    var semMexer = 0;
+    for (var i = 0; i < TOTAL; i++) if (aceitos[i] === true) semMexer++;
+    // pares/escolhas/itens vazios: o mesmo formato que os validadores do servidor aceitam (etapa não respondida).
+    return { versao: 1, passiva: true, pares: [], escolhas: [], itens: [], gruposSeg: somarTempo(dados && dados.gruposSeg, -1, 0), semMexer: semMexer, demonstracao: !!(dados && dados.demonstracao) };
   }
 
   function modCheckout() {

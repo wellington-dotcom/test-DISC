@@ -598,6 +598,12 @@ test('montarPayloadPessoal: origem pessoal, sem idade/vaga/avaliação; telefone
   assert.deepEqual(p.resultado, { percentuais: { D: 40, I: 30, S: 20, C: 10 }, codigo: 'DI' });
   ['idade', 'vaga', 'avaliacao', 'empresa', 'foto'].forEach((k) => assert.ok(!(k in p), k));
   assert.equal(A.montarPayloadPessoal({ ...dados, telefone: '11987654321' }, ordens).telefone, '5511987654321');
+  // Selo de confiabilidade do painel (avaliação passiva): tempo por grupo e ordem aceita, sem a etapa de confirmação.
+  const v = A.montarPayloadPessoal({ ...dados, gruposSeg: [5, 7], aceitos: [true, false, true] }, ordens).validacao;
+  assert.equal(v.passiva, true);
+  assert.equal(v.semMexer, 2);
+  assert.equal(v.gruposSeg.length, 25);
+  assert.deepEqual(v.gruposSeg.slice(0, 2), [5, 7]);
 });
 
 test('checkout: pacotes do servidor (ou o padrão), preço vigente, formato e links', () => {

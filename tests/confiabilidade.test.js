@@ -219,3 +219,23 @@ test('novos sinais somam ao selo: dois leves novos derrubam de alta para média'
   assert.equal(C.avaliar(ds, v, { duracaoSeg: 600 }).nivel, 'alta');
   assert.equal(C.avaliar(ds, v, { duracaoSeg: 120 }).nivel, 'media');
 });
+
+test('passiva (venda direta, sem confirmação): alta só com tempo por grupo e sem alertas; sem tempo por grupo, no máximo média', () => {
+  const seg = Array(25).fill(12);
+  const alta = C.avaliar(RESP, { versao: 1, passiva: true, gruposSeg: seg, semMexer: 2 }, { duracaoSeg: 420 });
+  assert.equal(alta.nivel, 'alta');
+  assert.equal(alta.detalhes.passiva, true);
+  assert.ok(alta.motivos.some((m) => /sem a etapa de confirmação/.test(m)));
+  // Respostas antigas da venda direta (validacao null): avaliação parcial, nunca "Sem dados", no máximo média.
+  const antiga = C.avaliar(RESP, null, { duracaoSeg: 420, passiva: true });
+  assert.equal(antiga.nivel, 'media');
+  assert.ok(antiga.motivos.some((m) => /parcial/.test(m)));
+  // Rapidez (forte) + tempo curto (leve) = baixa.
+  const baixa = C.avaliar(RESP, { passiva: true, gruposSeg: Array(25).fill(1.5), semMexer: 0 }, { duracaoSeg: 60 });
+  assert.equal(baixa.nivel, 'baixa');
+  // Um alerta leve só (sem mexer na ordem) = média.
+  assert.equal(C.avaliar(RESP, { passiva: true, gruposSeg: seg, semMexer: 20 }, { duracaoSeg: 420 }).nivel, 'media');
+  for (const r of [alta, antiga, baixa]) for (const m of r.motivos) assert.ok(!PROIBIDOS.test(m), m);
+  // Sem a marca "passiva", o comportamento antigo continua: sem confirmação = sem dados.
+  assert.equal(C.avaliar(RESP, null).nivel, 'indisponivel');
+});
