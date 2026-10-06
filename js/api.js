@@ -43,6 +43,7 @@
  *              resumoPessoal, criarPedido, iniciarPagamento, statusPedido, relatorioPessoal, salvarParte2Pessoal,
  *              recuperarAcesso, confirmarRetorno, listarPedidos, atualizarPedido, listarCupons, salvarCupom, excluirCupom, listarPacotes,
  *              salvarPacote, resumoVendas.
+ *   Aba Conexões (só Supabase/prévia; aqui também recusam): diagnosticoConexoes, testarConexao.
  *   Utilitários: protocoloValido, normalizarProtocolo, normalizarCodigoAvaliacao, codigoAvaliacaoDaUrl.
  */
 (function (root) {
@@ -329,6 +330,9 @@
     listarPacotes: soSupabase,
     salvarPacote: soSupabase,
     resumoVendas: soSupabase,
+    // Aba Conexões: só no Supabase (e na prévia).
+    diagnosticoConexoes: soSupabase,
+    testarConexao: soSupabase,
 
     // --- pública: página do relatório para o contratante ---
     relatorioPublico: seguro(function (relatorioToken) {
@@ -350,7 +354,8 @@
     'moverResposta', 'contratarPessoa', 'versaoBanco',
     'pacotesPublicos', 'enviarPessoal', 'resumoPessoal', 'criarPedido', 'iniciarPagamento', 'statusPedido', 'relatorioPessoal',
     'salvarParte2Pessoal', 'recuperarAcesso', 'confirmarRetorno',
-    'listarPedidos', 'atualizarPedido', 'listarCupons', 'salvarCupom', 'excluirCupom', 'listarPacotes', 'salvarPacote', 'resumoVendas'];
+    'listarPedidos', 'atualizarPedido', 'listarCupons', 'salvarCupom', 'excluirCupom', 'listarPacotes', 'salvarPacote', 'resumoVendas',
+    'diagnosticoConexoes', 'testarConexao'];
 
   if (typeof module !== 'undefined' && module.exports) module.exports = DISC_API;
   else root.DISC_API = DISC_API;

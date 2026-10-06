@@ -51,7 +51,7 @@ function contextoBase(base) {
   const cu = criarClickUp({ token: env.CLICKUP_TOKEN, pastaId: env.CLICKUP_PASTA_ID, fetch: base.fetch, dormir: base.dormir, agora });
   return {
     env, agora, cu, db: base.db, authAdmin: base.authAdmin, fetch: base.fetch,
-    motor: base.motor, confiabilidade: base.confiabilidade
+    motor: base.motor, confiabilidade: base.confiabilidade, prazoConexoesMs: base.prazoConexoesMs
   };
 }
 

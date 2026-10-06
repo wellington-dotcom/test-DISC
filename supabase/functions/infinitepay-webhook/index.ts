@@ -772,6 +772,7 @@ function montarEmailAcesso(env, nome, pedidos) {
 }
 
 async function enviarEmailPago(ctx, pedido) {
+  if (dadosDoPedido(pedido).teste === true) return false; // pedido de teste da aba Conexões: sem e-mail de acesso
   if (!ctx.email.configurado || !pedido.email || !linkRelatorio(ctx.env, pedido.token_acesso)) return false;
   try {
     const m = montarEmailAcesso(ctx.env, pedido.nome, [pedido]);

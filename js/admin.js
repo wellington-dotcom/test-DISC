@@ -195,9 +195,10 @@
   // Abas que cada papel vê. Sem API (modo local) não há login: lista, comparativo e importação.
   // Com API, só o administrador usa o painel (gestor desativado nesta versão).
   // vendas: true quando o servidor tem a API de vendas (DISC_API.listarPedidos) — a aba Vendas vem depois de Relatórios.
-  function abasDoPapel(papel, modoApi, vendas) {
+  // conexoes: true quando o servidor tem a aba Conexões (DISC_API.diagnosticoConexoes) — sempre a última aba.
+  function abasDoPapel(papel, modoApi, vendas, conexoes) {
     if (!modoApi) return ['lista', 'comparativo', 'importar'];
-    if (papel === 'admin') return ['lista', 'processos', 'empresas', 'relatorios'].concat(vendas ? ['vendas'] : []).concat(['usuarios', 'comparativo', 'importar']);
+    if (papel === 'admin') return ['lista', 'processos', 'empresas', 'relatorios'].concat(vendas ? ['vendas'] : []).concat(['usuarios', 'comparativo', 'importar']).concat(conexoes ? ['conexoes'] : []);
     return [];
   }
 
@@ -1465,7 +1466,335 @@
     return 'O banco de dados está desatualizado: faltam ' + faltam + '. Peça para aplicar as migrações (veja docs/SUPABASE.md).';
   }
 
+  /* ---------- Conexões (aba do admin): cartões a partir do diagnóstico; nunca mostra valor de segredo ---------- */
+
+  var STATUS_CONEXAO = {
+    ok: { texto: 'Funcionando', classe: 'selo--verde' },
+    nao_configurado: { texto: 'Não configurado', classe: '' },
+    erro: { texto: 'Com erro', classe: 'selo--vermelho' },
+    testando: { texto: 'Testando…', classe: 'selo--noite' },
+    pendente: { texto: 'Não testado', classe: '' },
+    manual: { texto: 'Conferir no GitHub', classe: '' }
+  };
+  var PASSO_SECRETS = 'No Supabase: menu Edge Functions → Secrets → Add new secret (Name e Value) → Save. Não cole o valor em conversa nenhuma.';
+  var PASSO_TESTAR = 'Volte aqui e clique em "Testar".';
+  var NOMES_FUNCOES = {
+    admin: 'Painel (ClickUp, relatórios, usuários, conexões)', 'disc-sync': 'Leva o resultado do candidato ao ClickUp',
+    'clickup-webhook': 'Recebe os avisos do ClickUp', pagamento: 'Pagamento do site (venda direta)',
+    'asaas-webhook': 'Recebe os avisos do Asaas', 'infinitepay-webhook': 'Recebe os avisos da InfinitePay'
+  };
+  var WEBHOOKS_SEM_JWT = ['clickup-webhook', 'asaas-webhook', 'infinitepay-webhook', 'pagamento'];
+
+  function passosPublicarFuncao(nome) {
+    return [
+      'Jeito automático: com a integração do GitHub do Supabase ligada, as funções da pasta supabase/functions são publicadas a cada push na branch principal.',
+      'Jeito manual: no GitHub abra dist/funcoes/' + nome + '/index.ts → Copy raw file.',
+      'No Supabase: Edge Functions → clique em "' + nome + '" → aba Code → apague tudo, cole → Deploy updates. Se ela não existir: Deploy a new function → Via Editor → Function name "' + nome + '" → cole → Deploy function.',
+      WEBHOOKS_SEM_JWT.indexOf(nome) >= 0 ? 'Na página da função: Details → Verify JWT (Enforce JWT Verification) DESLIGADO → Save changes.' : 'Verify JWT pode ficar ligado.',
+      PASSO_TESTAR
+    ];
+  }
+
+  function textoSimNao(b) { return b ? 'existe' : 'não existe'; }
+  function baseUrl(u) { return String(u || '').split('#')[0].split('?')[0].replace(/[^/]*$/, '').replace(/\/+$/, '').toLowerCase(); }
+  function hostLocal(u) { return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(String(u || '')); }
+
+  // Monta os 10 cartões. diag = DISC_API.diagnosticoConexoes; testes = {alvo: resultado de testarConexao};
+  // testando = {idCartao: true}. Cada cartão: {id, nome, serve, status, linhas[], erro, passos[], quando, verificado, acoes[], link?}
+  function cartoesConexoes(diag, testes, testando) {
+    diag = diag || {};
+    testes = testes || {};
+    testando = testando || {};
+    var sv = diag.servidor || null;
+    var sg = (sv && sv.segredos) || {};
+    var pag = (sv && sv.pagamento) || {};
+    var estadoSv = diag.servidorEstado || (sv ? 'ok' : 'erro');
+    var semServidor = !sv;
+    var avisoServidor = estadoSv === 'desatualizada' ? 'A função admin está desatualizada: publique de novo (cartão "Funções do servidor").'
+      : (estadoSv === 'ausente' ? 'A função admin não está publicada (cartão "Funções do servidor").'
+        : 'Não deu para perguntar ao servidor: ' + (diag.servidorErro || 'sem resposta') + '.');
+    var em = diag.em || '';
+    var lista = [];
+    function novoCartao(c) { c.linhas = []; c.passos = []; return c; }
+    function cartao(c) {
+      c.linhas = c.linhas || []; c.passos = c.passos || []; c.acoes = c.acoes || ['testar'];
+      c.erro = c.erro || ''; c.quando = c.quando || em; c.verificado = c.verificado || '';
+      if (testando[c.id]) c.status = 'testando';
+      lista.push(c);
+    }
+    function usarTeste(c, alvo) {
+      var t = testes[alvo];
+      if (!t) return false;
+      c.quando = t.em || c.quando;
+      c.verificado = t.verificado || c.verificado;
+      if (t.sucesso) c.linhas.push(t.mensagem); else c.erro = t.mensagem || 'O teste falhou.';
+      return true;
+    }
+    function funcaoPublicada(nome) {
+      var t = testes.funcoes && testes.funcoes.detalhes && testes.funcoes.detalhes.funcoes;
+      var fs = Array.isArray(t) ? t : ((sv && sv.funcoes) || []);
+      for (var i = 0; i < fs.length; i++) if (fs[i].nome === nome) return fs[i].publicada;
+      return null;
+    }
+
+    // 1. Site
+    (function () {
+      var c = novoCartao({ id: 'site', nome: 'Site', serve: 'Endereço público onde os candidatos, clientes e o painel abrem.' });
+      var atual = diag.siteAtual || '';
+      c.linhas.push('Endereço atual: ' + (atual || '—'));
+      c.verificado = 'Endereço desta página comparado com o segredo SITE_URL das funções.';
+      if (semServidor) { c.status = 'erro'; c.erro = avisoServidor; }
+      else if (!sv.siteUrl) {
+        c.status = 'nao_configurado';
+        c.linhas.push('SITE_URL nas funções: não existe');
+        c.passos = [PASSO_SECRETS, 'Name: SITE_URL — Value: o endereço do site, sem barra no fim' + (atual && !hostLocal(atual) ? ' (ex.: ' + baseUrl(atual) + ')' : '') + '.', PASSO_TESTAR];
+      } else {
+        c.linhas.push('SITE_URL nas funções: ' + sv.siteUrl);
+        if (baseUrl(atual) === baseUrl(sv.siteUrl) || baseUrl(atual + 'x') === baseUrl(sv.siteUrl + 'x')) c.status = 'ok';
+        else if (hostLocal(atual)) { c.status = 'ok'; c.linhas.push('Você está numa cópia local: os links enviados usam o SITE_URL.'); }
+        else {
+          c.status = 'erro';
+          c.erro = 'O painel está aberto num endereço diferente do SITE_URL. Links de relatório, convites e a volta do pagamento usam o SITE_URL.';
+          c.passos = [PASSO_SECRETS, 'Troque o valor de SITE_URL para o endereço certo do site (sem barra no fim).', PASSO_TESTAR];
+        }
+      }
+      c.acoes = ['testar'];
+      cartao(c);
+    })();
+
+    // 2. Banco de dados
+    (function () {
+      var c = novoCartao({ id: 'banco', nome: 'Banco de dados (Supabase)', serve: 'Guarda processos, respostas, pessoas, empresas e pedidos.' });
+      var b = (testes.banco && testes.banco.banco) || diag.banco || null;
+      if (testes.banco) c.quando = testes.banco.em || em;
+      c.verificado = 'Conexão, tempo de resposta, versão do banco (migrações) e leitura das tabelas principais.';
+      if (testes.banco && testes.banco.sucesso === false && !testes.banco.banco) b = { erro: testes.banco.mensagem || 'O teste falhou.' };
+      if (!b) { c.status = 'pendente'; cartao(c); return; }
+      if (b.erro) {
+        c.status = 'erro'; c.erro = b.erro;
+        c.passos = ['Abra o projeto no Supabase. Se aparecer "Project paused", clique em Restore project e espere alguns minutos.',
+          'Confira em js/config.js se SUPABASE_URL e SUPABASE_ANON_KEY são os do projeto (Project Settings → API).', PASSO_TESTAR];
+        cartao(c); return;
+      }
+      c.linhas.push('Respondeu em ' + b.ms + ' ms.');
+      var ct = b.contagens || {};
+      var nomes = [['processos', 'Processos'], ['respostas', 'Respostas'], ['pessoas', 'Pessoas'], ['empresas', 'Empresas'], ['pedidos', 'Pedidos']];
+      c.linhas.push(nomes.map(function (n) { return n[1] + ': ' + (typeof ct[n[0]] === 'number' ? ct[n[0]] : '—'); }).join(' · '));
+      var falt = Array.isArray(b.faltando) ? b.faltando : [];
+      if (falt.length) {
+        c.status = 'erro';
+        c.erro = 'Faltam ' + falt.length + (falt.length === 1 ? ' migração' : ' migrações') + ' no banco: ' +
+          falt.map(function (f) { return (f.descricao || f.nome) + ' (' + f.nome + '.sql)'; }).join('; ') + '.';
+        c.passos = ['Com a integração do GitHub do Supabase ligada, as migrações rodam sozinhas no push. Se não rodaram:',
+          'No GitHub abra cada arquivo supabase/migrations/<nome>.sql da lista acima, NA ORDEM → Copy raw file.',
+          'No Supabase: SQL Editor → + → cole → Run (se avisar "destructive operations", Run this query: nada é apagado).', PASSO_TESTAR];
+      } else {
+        c.status = 'ok';
+        c.linhas.push('Versão do banco: ' + (b.versao || '—') + ' (todas as migrações aplicadas).');
+      }
+      cartao(c);
+    })();
+
+    // 3. Login e usuários
+    (function () {
+      var c = novoCartao({ id: 'login', nome: 'Login e usuários', serve: 'Entrada no painel (Supabase Auth) e quem é administrador.' });
+      if (!diag.login) { c.status = 'pendente'; cartao(c); return; }
+      var l = diag.login;
+      c.verificado = 'Sessão deste navegador, papel de administrador e a regra de cadastro do Supabase.';
+      c.linhas.push('Sessão atual: ' + (l.sessao ? 'ativa' + (l.email ? ' (' + l.email + ')' : '') : 'não encontrada'));
+      c.linhas.push('Papel: ' + (l.admin === true ? 'administrador' : (l.admin === false ? 'não é administrador' : 'não deu para conferir')));
+      var fechado = sv && sv.auth ? sv.auth.cadastroFechado : null;
+      var passosCadastro = ['No Supabase: Authentication → Sign In / Providers (em versões antigas: Providers ou Settings).',
+        'Na seção User Signups, desligue "Allow new users to sign up" → Save.', PASSO_TESTAR];
+      if (l.admin === false) { c.status = 'erro'; c.erro = 'Este usuário não está na lista de administradores.'; }
+      else if (fechado === false) {
+        c.status = 'erro';
+        c.erro = 'O cadastro livre está ABERTO: qualquer pessoa pode criar uma conta (ela não vira administradora, mas o certo é fechar).';
+        c.passos = passosCadastro;
+      } else {
+        c.status = 'ok';
+        if (fechado === true) c.linhas.push('Cadastro livre: fechado (só entra quem for convidado).');
+        else { c.linhas.push('Cadastro livre: não deu para conferir daqui. Lembrete: ele precisa estar fechado.'); c.passos = passosCadastro; }
+      }
+      cartao(c);
+    })();
+
+    // 4. Funções do servidor
+    (function () {
+      var c = novoCartao({ id: 'funcoes', nome: 'Funções do servidor (Edge Functions)', serve: 'Programas no Supabase que falam com ClickUp, pagamento, e-mail e IA.' });
+      c.verificado = 'O servidor chama o endereço de cada função (404 = não publicada).';
+      if (testes.funcoes) c.quando = testes.funcoes.em || em;
+      if (semServidor) {
+        c.status = 'erro';
+        c.erro = estadoSv === 'desatualizada' ? 'A função admin está desatualizada: publique de novo.'
+          : (estadoSv === 'ausente' ? 'A função admin não está publicada no Supabase.' : avisoServidor);
+        c.passos = passosPublicarFuncao('admin');
+        cartao(c); return;
+      }
+      var opcional = {
+        'asaas-webhook': !sg.ASAAS_API_KEY && pag.provedor !== 'asaas' ? 'só precisa se usar o Asaas' : '',
+        'infinitepay-webhook': !sg.INFINITEPAY_HANDLE ? 'só precisa se usar a InfinitePay' : '',
+        'clickup-webhook': !sg.CLICKUP_TOKEN ? 'só precisa se usar o ClickUp' : ''
+      };
+      var faltam = [];
+      var duvida = [];
+      ['admin', 'disc-sync', 'clickup-webhook', 'pagamento', 'asaas-webhook', 'infinitepay-webhook'].forEach(function (n) {
+        var p = funcaoPublicada(n);
+        var txt = n + ' — ' + (p === true ? 'publicada' : (p === false ? 'NÃO publicada' + (opcional[n] ? ' (' + opcional[n] + ')' : '') : 'não deu para conferir'));
+        c.linhas.push(txt);
+        if (p === false && !opcional[n]) faltam.push(n);
+        if (p === null) duvida.push(n);
+      });
+      if (faltam.length) {
+        c.status = 'erro';
+        c.erro = 'Não publicadas: ' + faltam.join(', ') + '.';
+        c.passos = passosPublicarFuncao(faltam[0]);
+        if (faltam.length > 1) c.passos.unshift('Repita para cada uma: ' + faltam.join(', ') + '.');
+      } else if (duvida.length) {
+        c.status = 'erro';
+        c.erro = 'Não deu para conferir: ' + duvida.join(', ') + '. Tente de novo em instantes.';
+      } else c.status = 'ok';
+      cartao(c);
+    })();
+
+    // 5. InfinitePay
+    (function () {
+      var c = novoCartao({ id: 'infinitepay', nome: 'Pagamento — InfinitePay', serve: 'Recebe o pagamento (Pix e cartão) da venda direta do Mapa DISC.' });
+      c.acoes = ['testar', 'link', 'verificar'];
+      c.verificado = 'Presença dos segredos e da função que recebe o aviso de pagamento.';
+      if (semServidor) { c.status = 'erro'; c.erro = avisoServidor; cartao(c); return; }
+      c.linhas.push('InfiniteTag (INFINITEPAY_HANDLE): ' + (sg.INFINITEPAY_HANDLE ? 'existe (' + (pag.handleParcial || '***') + ')' : 'não existe'));
+      c.linhas.push('SITE_URL: ' + textoSimNao(sg.SITE_URL));
+      c.linhas.push('PAGAMENTO_PROVEDOR: ' + (pag.provedorEscolhido === 'invalido' ? 'valor desconhecido' : (pag.provedorEscolhido || 'não existe (usa a InfinitePay quando há InfiniteTag)')));
+      c.linhas.push('Provedor em uso no site: ' + (pag.provedor === 'infinitepay' ? 'InfinitePay' : (pag.provedor === 'asaas' ? 'Asaas' : 'nenhum')));
+      var passos = ['No app da InfinitePay, abra o seu perfil: a InfiniteTag é o seu "$nome" de recebimento. Anote SEM o $.', PASSO_SECRETS,
+        'Name: INFINITEPAY_HANDLE — Value: a InfiniteTag sem o $.', 'Name: PAGAMENTO_PROVEDOR — Value: infinitepay.',
+        'Confira também o SITE_URL (endereço do site, sem barra no fim).', PASSO_TESTAR];
+      if (!sg.INFINITEPAY_HANDLE) { c.status = 'nao_configurado'; c.passos = passos; }
+      else if (!sg.SITE_URL) { c.status = 'erro'; c.erro = 'Falta o segredo SITE_URL: a InfinitePay não sabe para onde devolver o cliente.'; c.passos = passos; }
+      else if (pag.provedorEscolhido === 'invalido') { c.status = 'erro'; c.erro = 'PAGAMENTO_PROVEDOR tem um valor desconhecido: use infinitepay ou asaas.'; c.passos = passos; }
+      else if (funcaoPublicada('infinitepay-webhook') === false) {
+        c.status = 'erro'; c.erro = 'A função infinitepay-webhook não está publicada: o pagamento não seria confirmado sozinho.';
+        c.passos = passosPublicarFuncao('infinitepay-webhook');
+      } else c.status = 'ok';
+      if (sv.colunaTeste === false) c.linhas.push('Link de teste: aplique antes a migração 20261013120000_conexoes.');
+      var tl = testes['infinitepay.link'];
+      if (tl) {
+        c.quando = tl.em || c.quando;
+        if (tl.sucesso && tl.detalhes && tl.detalhes.url) { c.link = { url: tl.detalhes.url, pedidoId: tl.detalhes.pedidoId || '' }; c.linhas.push(tl.mensagem); }
+        else if (!tl.sucesso) { c.erro = tl.mensagem; c.status = 'erro'; }
+      } else if (sv.pedidoTeste && sv.pedidoTeste.url) {
+        c.link = { url: sv.pedidoTeste.url, pedidoId: sv.pedidoTeste.id };
+        c.linhas.push('Último pedido de teste: ' + (sv.pedidoTeste.status === 'pago' ? 'pago' : 'aguardando pagamento') + '.');
+      }
+      var tv = testes['infinitepay.verificar'];
+      if (tv) {
+        c.quando = tv.em || c.quando;
+        c.verificado = tv.verificado || c.verificado;
+        if (tv.sucesso) c.linhas.push(tv.mensagem); else { c.erro = tv.mensagem; c.status = 'erro'; }
+      }
+      cartao(c);
+    })();
+
+    // 6. Asaas
+    (function () {
+      var c = novoCartao({ id: 'asaas', nome: 'Pagamento — Asaas (alternativa)', serve: 'Outro meio de pagamento (Pix no site e cartão), usado só se escolhido.' });
+      if (semServidor) { c.status = 'erro'; c.erro = avisoServidor; cartao(c); return; }
+      c.linhas.push('ASAAS_API_KEY: ' + textoSimNao(sg.ASAAS_API_KEY) + ' · ASAAS_WEBHOOK_TOKEN: ' + textoSimNao(sg.ASAAS_WEBHOOK_TOKEN));
+      c.linhas.push('Ambiente: ' + (pag.asaasAmbiente === 'producao' ? 'produção' : 'sandbox (testes)') + (sg.ASAAS_AMBIENTE ? '' : ' (ASAAS_AMBIENTE não existe: vale sandbox)'));
+      var passos = ['Só precisa se for usar o Asaas no lugar da InfinitePay.',
+        'No Asaas: menu do usuário (canto superior direito) → Integrações → Chaves de API → Gerar chave.', PASSO_SECRETS,
+        'Name: ASAAS_API_KEY — Value: a chave. Name: ASAAS_AMBIENTE — Value: sandbox (testes) ou producao.',
+        'Webhook: invente uma senha longa, guarde como ASAAS_WEBHOOK_TOKEN e cadastre em Asaas → Integrações → Webhooks (passo a passo em docs/VENDAS.md).', PASSO_TESTAR];
+      c.verificado = 'Presença dos segredos.';
+      if (!sg.ASAAS_API_KEY) { c.status = 'nao_configurado'; c.passos = passos; }
+      else if (usarTeste(c, 'asaas')) {
+        c.status = testes.asaas.sucesso ? (sg.ASAAS_WEBHOOK_TOKEN ? 'ok' : 'erro') : 'erro';
+        if (testes.asaas.sucesso && !sg.ASAAS_WEBHOOK_TOKEN) c.erro = 'Falta o ASAAS_WEBHOOK_TOKEN: o aviso de pagamento do Asaas seria recusado.';
+        if (c.status === 'erro') c.passos = passos;
+      } else c.status = 'pendente';
+      cartao(c);
+    })();
+
+    // 7. E-mail
+    (function () {
+      var c = novoCartao({ id: 'email', nome: 'E-mail (Resend)', serve: 'Manda ao cliente o link do relatório comprado e o "recuperar meu relatório".' });
+      c.acoes = ['testar', 'email'];
+      if (semServidor) { c.status = 'erro'; c.erro = avisoServidor; cartao(c); return; }
+      c.linhas.push('RESEND_API_KEY: ' + textoSimNao(sg.RESEND_API_KEY) + ' · EMAIL_REMETENTE: ' + textoSimNao(sg.EMAIL_REMETENTE));
+      var passos = ['Em resend.com: Domains → Add domain (o domínio do site) e crie os registros DNS que ele mostrar; espere "Verified".',
+        'API Keys → Create API Key (permissão Sending access) → copie.', PASSO_SECRETS,
+        'Name: RESEND_API_KEY — Value: a chave. Name: EMAIL_REMETENTE — Value: Gestão sem Caos <relatorio@seudominio.com.br>.',
+        'Volte aqui e clique em "Enviar e-mail de teste para mim".'];
+      c.verificado = 'Presença dos segredos.';
+      if (!sg.RESEND_API_KEY) { c.status = 'nao_configurado'; c.passos = passos; }
+      else if (usarTeste(c, 'email')) { c.status = testes.email.sucesso ? 'ok' : 'erro'; if (c.status === 'erro') c.passos = passos; }
+      else { c.status = 'pendente'; c.linhas.push('Para confirmar o envio, use "Enviar e-mail de teste para mim".'); }
+      cartao(c);
+    })();
+
+    // 8. ClickUp
+    (function () {
+      var c = novoCartao({ id: 'clickup', nome: 'ClickUp', serve: 'Lê as listas e candidatos dos processos e recebe o pedido de "gerar relatório".' });
+      if (semServidor) { c.status = 'erro'; c.erro = avisoServidor; cartao(c); return; }
+      c.linhas.push('CLICKUP_TOKEN: ' + textoSimNao(sg.CLICKUP_TOKEN) + ' · CLICKUP_WEBHOOK_SECRET: ' + textoSimNao(sg.CLICKUP_WEBHOOK_SECRET));
+      var passos = ['No ClickUp: clique na sua foto → Configurações → Apps → API Token → Gerar → copie (começa com pk_).', PASSO_SECRETS,
+        'Name: CLICKUP_TOKEN — Value: o token.',
+        'Para o aviso "gerar relatório": crie o webhook do ClickUp (docs/SUPABASE.md, passo 13) e guarde o secret como CLICKUP_WEBHOOK_SECRET.', PASSO_TESTAR];
+      c.verificado = 'Presença dos segredos.';
+      if (!sg.CLICKUP_TOKEN) { c.status = 'nao_configurado'; c.passos = passos; }
+      else if (usarTeste(c, 'clickup')) {
+        c.status = testes.clickup.sucesso ? 'ok' : 'erro';
+        if (c.status === 'erro') c.passos = passos;
+        else if (!sg.CLICKUP_WEBHOOK_SECRET) { c.linhas.push('Sem CLICKUP_WEBHOOK_SECRET o status "gerar relatório" do ClickUp não aciona nada (o resto funciona).'); c.passos = passos.slice(3); }
+      } else c.status = 'pendente';
+      cartao(c);
+    })();
+
+    // 9. IA
+    (function () {
+      var c = novoCartao({ id: 'ia', nome: 'IA (opcional, melhorar textos)', serve: 'Botão "Melhorar textos com IA" no editor do relatório.' });
+      if (semServidor) { c.status = 'erro'; c.erro = avisoServidor; cartao(c); return; }
+      c.linhas.push('ANTHROPIC_API_KEY: ' + textoSimNao(sg.ANTHROPIC_API_KEY));
+      var passos = ['É opcional: sem a chave o painel funciona, só sem o botão de IA.',
+        'Em console.anthropic.com: API Keys → Create Key → copie (começa com sk-ant-).', PASSO_SECRETS,
+        'Name: ANTHROPIC_API_KEY — Value: a chave.', PASSO_TESTAR];
+      c.verificado = 'Presença do segredo.';
+      if (!sg.ANTHROPIC_API_KEY) { c.status = 'nao_configurado'; c.passos = passos; }
+      else if (usarTeste(c, 'ia')) { c.status = testes.ia.sucesso ? 'ok' : 'erro'; if (c.status === 'erro') c.passos = passos; }
+      else c.status = 'pendente';
+      cartao(c);
+    })();
+
+    // 10. Despertador
+    (function () {
+      var c = novoCartao({ id: 'despertador', nome: 'Despertador (GitHub Actions)', serve: 'Consulta o banco a cada 3 dias para o Supabase grátis não pausar o projeto.' });
+      c.status = 'manual';
+      var b = diag.banco || {};
+      c.linhas.push('Não dá para testar daqui: o despertador não grava nada no banco.');
+      c.linhas.push('Última atividade registrada no banco (última resposta recebida): ' + (b.ultimaResposta ? formatarData(b.ultimaResposta) : 'nenhuma'));
+      c.verificado = 'Só a última atividade do banco.';
+      c.passos = ['No GitHub, abra o repositório → aba Actions → "Manter Supabase ativo": a última execução deve estar com ✓ verde (roda a cada 3 dias).',
+        'Para testar agora: na mesma tela, Run workflow → Run workflow.',
+        'Se aparecer "segredos ausentes": Settings → Secrets and variables → Actions → New repository secret: SUPABASE_URL e SUPABASE_ANON_KEY (a chave pública, nunca a service_role).'];
+      c.acoes = [];
+      cartao(c);
+    })();
+
+    return lista;
+  }
+
+  // Resumo do topo: quantos funcionam, com erro e não configurados.
+  function resumoConexoes(cartoes) {
+    var r = { ok: 0, erro: 0, nao_configurado: 0, outros: 0 };
+    (cartoes || []).forEach(function (c) { if (r[c.status] !== undefined) r[c.status]++; else r.outros++; });
+    return r;
+  }
+
   var util = {
+    STATUS_CONEXAO: STATUS_CONEXAO,
+    cartoesConexoes: cartoesConexoes,
+    resumoConexoes: resumoConexoes,
     STATUS_PEDIDO: STATUS_PEDIDO,
     PACOTES_PADRAO: PACOTES_PADRAO,
     formatarReais: formatarReais,
@@ -1619,6 +1948,7 @@
     editor: null,     // {processoId, token, relatorio, avisos, status, url, sujo}
     emp: null,        // aba Empresas: ver novoEstadoEmpresas()
     vd: null,         // aba Vendas: ver novoEstadoVendas()
+    cx: null,         // aba Conexões: ver novoEstadoConexoes()
     rl: null          // aba Relatórios: ver novoEstadoRelatorios()
   };
 
@@ -2382,6 +2712,8 @@
     var grupos = agruparPessoas(itens);
     var total = agruparPessoas(estado.registros).length;
     var nResp = estado.registros.length;
+    var nMenu = $('aba-n-lista');
+    if (nMenu) nMenu.textContent = total ? String(total) : '';
     $('contagem').textContent = nResp === 0
       ? (MODO_API ? 'Nenhuma resposta recebida ainda.' : 'Nenhum participante importado. Use a aba "Importar códigos".')
       : grupos.length + ' de ' + total + ' participante' + (total === 1 ? '' : 's') +
@@ -2419,7 +2751,7 @@
   /* ---------- Detalhe ---------- */
 
   function esconderVistas() {
-    ['vista-lista', 'vista-processos', 'vista-empresas', 'vista-relatorios', 'vista-vendas', 'vista-usuarios', 'vista-comparativo', 'vista-importar']
+    ['vista-lista', 'vista-processos', 'vista-empresas', 'vista-relatorios', 'vista-vendas', 'vista-usuarios', 'vista-comparativo', 'vista-importar', 'vista-conexoes']
       .forEach(function (id) { $(id).hidden = true; });
   }
 
@@ -6221,9 +6553,167 @@
     return box;
   }
 
+  /* ---------- Conexões (aba do admin: estado de cada integração, com "Testar") ---------- */
+
+  function temConexoes() { return MODO_API && (SUPABASE || SIMULADA) && !!metodoApi('diagnosticoConexoes'); }
+  function novoEstadoConexoes() { return { diag: null, testes: {}, testando: {}, carregado: false, rodando: false, erro: '' }; }
+  // Volta da InfinitePay depois de pagar o link de teste: admin.html?conexoes=teste&order_nsu=…&transaction_nsu=…&slug=…
+  var RETORNO_CONEXOES = (function () {
+    try {
+      var q = new URLSearchParams(root.location.search || '');
+      if (q.get('conexoes') !== 'teste') return null;
+      var r = { pedidoId: q.get('order_nsu') || '', transactionNsu: q.get('transaction_nsu') || '', slug: q.get('slug') || '' };
+      if (root.history && root.history.replaceState) root.history.replaceState(null, '', root.location.pathname + root.location.hash);
+      return r;
+    } catch (e) { return null; }
+  })();
+  var CARTOES_DIAGNOSTICO = ['site', 'login', 'infinitepay', 'email', 'despertador'];
+  var ALVO_DO_CARTAO = { banco: 'banco', funcoes: 'funcoes', asaas: 'asaas', clickup: 'clickup', ia: 'ia' };
+
+  function erroComoTeste(alvo, e) {
+    return { ok: true, alvo: alvo, sucesso: false, mensagem: (e && e.message) || 'O teste falhou. Tente de novo.', em: new Date().toISOString() };
+  }
+  function carregarDiagnostico() {
+    var cx = estado.cx;
+    return api('diagnosticoConexoes').then(function (d) {
+      cx.diag = d; cx.erro = ''; cx.carregado = true;
+    }, function (e) {
+      if (e && e.tratado) throw e;
+      cx.erro = (e && e.message) || 'Não foi possível conferir as conexões.'; cx.carregado = true;
+    });
+  }
+  function rodarTeste(alvo, opcoes) {
+    var cx = estado.cx;
+    return api('testarConexao', alvo, opcoes || {}).then(function (r) { cx.testes[alvo] = r; return r; }, function (e) {
+      if (e && e.tratado) throw e;
+      cx.testes[alvo] = erroComoTeste(alvo, e);
+      return cx.testes[alvo];
+    });
+  }
+  // Marca os cartões como "Testando…", espera a promessa e redesenha.
+  function comTestando(ids, promessa) {
+    var cx = estado.cx;
+    ids.forEach(function (id) { cx.testando[id] = true; });
+    renderizarConexoes();
+    return promessa.then(null, function (e) { if (e && e.tratado) throw e; }).then(function () {
+      ids.forEach(function (id) { delete cx.testando[id]; });
+      renderizarConexoes();
+    });
+  }
+  function testarTudo() {
+    var cx = estado.cx;
+    if (cx.rodando) return cx.rodando;
+    var ids = cartoesConexoes(cx.diag, cx.testes, {}).map(function (c) { return c.id; });
+    if (!ids.length) ids = ['site', 'banco', 'login', 'funcoes', 'infinitepay', 'asaas', 'email', 'clickup', 'ia', 'despertador'];
+    cx.testes = {};
+    cx.rodando = true; // antes de redesenhar: o desenho não pode disparar outro "Testar tudo"
+    cx.rodando = comTestando(ids, carregarDiagnostico().then(function () {
+      var sg = (cx.diag && cx.diag.servidor && cx.diag.servidor.segredos) || null;
+      var alvos = ['banco'];
+      if (sg) {
+        alvos.push('funcoes');
+        if (sg.CLICKUP_TOKEN) alvos.push('clickup');
+        if (sg.ASAAS_API_KEY) alvos.push('asaas');
+        if (sg.ANTHROPIC_API_KEY) alvos.push('ia');
+      }
+      return Promise.all(alvos.map(function (a) { return rodarTeste(a); }));
+    })).then(function () {
+      cx.rodando = false;
+      renderizarConexoes();
+      var r = resumoConexoes(cartoesConexoes(cx.diag, cx.testes, {}));
+      avisar('Teste concluído: ' + r.ok + ' funcionando, ' + r.erro + ' com erro, ' + r.nao_configurado + ' não configurada' + (r.nao_configurado === 1 ? '' : 's') + '.', r.erro ? 'erro' : 'ok');
+    }, function () { cx.rodando = false; renderizarConexoes(); });
+    return cx.rodando;
+  }
+  function testarCartao(id) {
+    var alvo = ALVO_DO_CARTAO[id];
+    if (alvo) return comTestando([id], rodarTeste(alvo));
+    return comTestando([id], carregarDiagnostico());
+  }
+  function acaoCartao(id, acao) {
+    var cx = estado.cx;
+    if (acao === 'link') return comTestando([id], rodarTeste('infinitepay.link'));
+    if (acao === 'email') return comTestando([id], rodarTeste('email'));
+    if (acao === 'verificar') {
+      var ref = RETORNO_CONEXOES || {};
+      var c = cartoesConexoes(cx.diag, cx.testes, {}).filter(function (x) { return x.id === 'infinitepay'; })[0];
+      var op = { pedidoId: ref.pedidoId || (c && c.link ? c.link.pedidoId : ''), transactionNsu: ref.transactionNsu || '', slug: ref.slug || '' };
+      return comTestando([id], rodarTeste('infinitepay.verificar', op));
+    }
+    return testarCartao(id);
+  }
+
+  var ROTULOS_ACAO = { testar: 'Testar', link: 'Gerar link de teste (R$ 1,00)', verificar: 'Verificar pagamento de teste', email: 'Enviar e-mail de teste para mim' };
+
+  function cartaoConexao(c) {
+    var st = STATUS_CONEXAO[c.status] || STATUS_CONEXAO.pendente;
+    var ocupado = c.status === 'testando' || !!estado.cx.rodando;
+    var art = el('article', { classe: 'caixa caixa--compacta cx-cartao cx-cartao--' + c.status, id: 'cx-' + c.id, 'data-conexao': c.id, 'data-status': c.status, 'aria-busy': c.status === 'testando' ? 'true' : null }, [
+      el('div', { classe: 'cx-cartao__topo' }, [
+        el('h3', { classe: 'cx-cartao__nome', texto: c.nome }),
+        el('span', { classe: 'selo cx-pilula ' + st.classe, 'data-status': c.status, texto: st.texto })
+      ]),
+      el('p', { classe: 'cx-cartao__serve', texto: c.serve })
+    ]);
+    if (c.linhas.length) art.appendChild(el('ul', { classe: 'cx-cartao__linhas' }, c.linhas.map(function (l) { return el('li', { texto: l }); })));
+    if (c.erro) art.appendChild(el('p', { classe: 'cx-cartao__erro', role: 'alert', texto: c.erro }));
+    if (c.link) {
+      art.appendChild(el('div', { classe: 'cx-link', id: 'cx-link-teste' }, [
+        el('a', { classe: 'cx-link__abrir seminegrito', href: c.link.url, target: '_blank', rel: 'noopener noreferrer', id: 'cx-link-abrir', texto: 'Abrir o link de pagamento de teste ↗' }),
+        el('span', { classe: 'cx-link__url', texto: c.link.url }),
+        botao('botao--claro botao--pequeno', 'Copiar link', function () { copiar(c.link.url, 'Link copiado.'); }, { id: 'cx-link-copiar' })
+      ]));
+    }
+    if (c.quando || c.verificado) {
+      art.appendChild(el('p', { classe: 'cx-cartao__quando' }, [
+        c.quando ? 'Último teste: ' + formatarData(c.quando) : '', c.quando && c.verificado ? ' · ' : '', c.verificado || ''
+      ]));
+    }
+    if (c.passos.length) {
+      art.appendChild(el('details', { classe: 'cx-resolver', open: c.status === 'erro' ? true : null }, [
+        el('summary', { classe: 'cx-resolver__titulo seminegrito', texto: 'Como resolver' }),
+        el('ol', { classe: 'cx-resolver__passos' }, c.passos.map(function (p) { return el('li', { texto: p }); }))
+      ]));
+    }
+    if (c.acoes.length) {
+      art.appendChild(el('div', { classe: 'cx-cartao__acoes' }, c.acoes.map(function (a) {
+        return botao(a === 'testar' ? 'botao--claro botao--pequeno' : 'botao--contorno botao--pequeno', ROTULOS_ACAO[a],
+          function () { acaoCartao(c.id, a); }, { 'data-acao': a, disabled: ocupado ? true : null });
+      })));
+    }
+    return art;
+  }
+
+  function renderizarConexoes() {
+    var box = $('vista-conexoes');
+    if (!box || !estado.cx) return;
+    limpar(box);
+    if (!temConexoes() || papel() !== 'admin') return;
+    var cx = estado.cx;
+    box.appendChild(cabecalhoVista('Configurações', 'Conexões',
+      'Veja se cada integração está funcionando. Nenhum segredo aparece aqui: só se ele existe.',
+      [botao('botao--principal', cx.rodando ? 'Testando…' : 'Testar tudo', testarTudo, { id: 'btn-cx-testar-tudo', disabled: cx.rodando ? true : null })]));
+    // Primeira vez que a aba aparece: testa tudo sozinho (não testa no login, só quando a aba é aberta).
+    if (!cx.carregado && !cx.rodando) {
+      if (estado.aba === 'conexoes') { testarTudo(); return; }
+      box.appendChild(el('p', { classe: 'texto-suave t-corpo', texto: 'Carregando…' }));
+      return;
+    }
+    if (cx.erro) box.appendChild(el('p', { classe: 'aviso aviso--erro proc-aviso', id: 'cx-erro', role: 'alert', texto: cx.erro }));
+    var cartoes = cartoesConexoes(cx.diag, cx.testes, cx.testando);
+    var r = resumoConexoes(cartoes);
+    box.appendChild(el('p', { classe: 'cx-resumo', id: 'cx-resumo', 'aria-live': 'polite' }, [
+      el('span', { classe: 'selo selo--verde', texto: r.ok + ' funcionando' }), ' ',
+      el('span', { classe: 'selo selo--vermelho', texto: r.erro + ' com erro' }), ' ',
+      el('span', { classe: 'selo', texto: r.nao_configurado + ' não configurada' + (r.nao_configurado === 1 ? '' : 's') }),
+      cx.diag && cx.diag.em ? el('span', { classe: 'cx-resumo__quando', texto: ' Última verificação: ' + formatarData(cx.diag.em) }) : null
+    ]));
+    box.appendChild(el('div', { classe: 'cx-grade', id: 'cx-grade' }, cartoes.map(cartaoConexao)));
+  }
+
   /* ---------- Navegação ---------- */
 
-  function abasPermitidas() { return abasDoPapel(papel(), MODO_API, temVendas()); }
+  function abasPermitidas() { return abasDoPapel(papel(), MODO_API, temVendas(), temConexoes()); }
 
   function mostrarAba(aba) {
     var permitidas = abasPermitidas();
@@ -6236,12 +6726,13 @@
       if (b.getAttribute('data-aba') === aba) b.setAttribute('aria-current', 'page');
       else b.removeAttribute('aria-current');
     });
+    if (aba === 'conexoes') renderizarConexoes();
   }
 
   function renderizarTudo() {
     renderizarLista();
     renderizarComparativo();
-    if (MODO_API && papel() === 'admin') { renderizarProcessos(); renderizarEmpresas(); renderizarRelatorios(); renderizarVendas(); renderizarUsuarios(); }
+    if (MODO_API && papel() === 'admin') { renderizarProcessos(); renderizarEmpresas(); renderizarRelatorios(); renderizarVendas(); renderizarUsuarios(); renderizarConexoes(); }
     if (estado.abertoId) renderizarDetalhe();
   }
 
@@ -6250,6 +6741,10 @@
     var permitidas = abasPermitidas();
     Array.prototype.forEach.call(document.querySelectorAll('.aba'), function (b) {
       b.hidden = permitidas.indexOf(b.getAttribute('data-aba')) === -1;
+    });
+    // Título do grupo do menu só aparece se o grupo tem algum item visível.
+    Array.prototype.forEach.call(document.querySelectorAll('.menu-grupo'), function (g) {
+      g.hidden = !g.querySelector('.aba:not([hidden])');
     });
     $('btn-excluir-todos').hidden = !pode('excluir');
     $('btn-excluir-todos').textContent = MODO_API ? 'Excluir respostas' : 'Excluir todos';
@@ -6266,13 +6761,57 @@
     $('sobretitulo-lista').textContent = MODO_API ? 'Todos os processos' : 'Processo seletivo';
   }
 
+  /* ---------- Menu lateral (computador) / gaveta (tela estreita) ---------- */
+
+  var CHAVE_MENU = 'disc_admin_menu_recolhido';
+  function mostrarMenu(sim) {
+    $('menu-lateral').hidden = !sim;
+    $('btn-menu').hidden = !sim;
+    document.body.classList.toggle('com-menu', !!sim);
+    if (!sim) fecharGaveta();
+  }
+  function aplicarRecolhido(recolhido) {
+    document.body.classList.toggle('menu-recolhido', !!recolhido);
+    var b = $('btn-recolher-menu');
+    b.setAttribute('aria-expanded', recolhido ? 'false' : 'true');
+    b.setAttribute('aria-label', recolhido ? 'Abrir menu' : 'Recolher menu');
+    b.setAttribute('title', recolhido ? 'Abrir menu' : 'Recolher menu');
+  }
+  function alternarRecolhido() {
+    var recolhido = !document.body.classList.contains('menu-recolhido');
+    aplicarRecolhido(recolhido);
+    ls('set', CHAVE_MENU, recolhido ? '1' : '0');
+    fecharMenuUsuario();
+  }
+  function gavetaAberta() { return document.body.classList.contains('menu-aberto'); }
+  function abrirGaveta() {
+    document.body.classList.add('menu-aberto');
+    $('menu-veu').hidden = false;
+    $('btn-menu').setAttribute('aria-expanded', 'true');
+    var atual = document.querySelector('.aba[aria-current="page"]') || document.querySelector('.aba:not([hidden])');
+    if (atual) atual.focus();
+  }
+  function fecharGaveta() {
+    if (!document.body) return;
+    document.body.classList.remove('menu-aberto');
+    if ($('menu-veu')) $('menu-veu').hidden = true;
+    if ($('btn-menu')) $('btn-menu').setAttribute('aria-expanded', 'false');
+  }
+
   function entrarPainel() {
     $('tela-login').hidden = true;
     $('tela-painel').hidden = false;
+    mostrarMenu(true);
     estado.listaMostrada = false;
     aplicarPapel();
     mostrarAba(MODO_API ? 'lista' : (lerLocais().length ? 'lista' : 'importar'));
     verificarBanco();
+    // Volta da InfinitePay (link de teste): abre Conexões e confere o pagamento.
+    if (RETORNO_CONEXOES && temConexoes() && papel() === 'admin') {
+      estado.cx.carregado = true;
+      mostrarAba('conexoes');
+      carregarDiagnostico().then(function () { acaoCartao('infinitepay', 'verificar'); });
+    }
     return carregar();
   }
 
@@ -6309,6 +6848,7 @@
     estado.emp = novoEstadoEmpresas();
     estado.rl = novoEstadoRelatorios();
     estado.vd = novoEstadoVendas();
+    estado.cx = novoEstadoConexoes();
     fecharMenuUsuario();
     clearTimeout(avisoTimer);
     $('aviso-geral').hidden = true;
@@ -6321,6 +6861,7 @@
   // Mostra só um dos formulários da tela de entrada.
   function mostrarForm(id) {
     $('tela-painel').hidden = true;
+    mostrarMenu(false);
     $('usuario-area').hidden = true;
     $('tela-login').hidden = false;
     ['form-login', 'form-primeiro', 'form-esqueci', 'form-nova-senha'].forEach(function (f) { $(f).hidden = f !== id; });
@@ -6418,9 +6959,16 @@
     estado.emp = novoEstadoEmpresas();
     estado.rl = novoEstadoRelatorios();
     estado.vd = novoEstadoVendas();
+    estado.cx = novoEstadoConexoes();
     if (CONFIG.EMPRESA) $('nome-empresa').textContent = '· ' + CONFIG.EMPRESA;
     $('modo-indicador').textContent = SIMULADA ? 'Prévia (dados de demonstração)'
       : (SUPABASE ? 'Conectado ao servidor' : (MODO_API ? 'Conectado à planilha' : 'Modo local (importar códigos)'));
+    $('menu-modo').textContent = SIMULADA ? 'Prévia' : '';
+    if (CONFIG.EMPRESA) $('menu-modo').textContent = CONFIG.EMPRESA + (SIMULADA ? ' · Prévia' : '');
+    aplicarRecolhido(ls('get', CHAVE_MENU) === '1');
+    $('btn-recolher-menu').addEventListener('click', alternarRecolhido);
+    $('btn-menu').addEventListener('click', function () { if (gavetaAberta()) fecharGaveta(); else abrirGaveta(); });
+    $('menu-veu').addEventListener('click', fecharGaveta);
     $('dica-previa').hidden = !SIMULADA;
     $('dica-previa-chave').hidden = !SIMULADA;
     if (MODO_API) $('destino-importacao').textContent = SUPABASE
@@ -6441,6 +6989,7 @@
         if (aba === 'relatorios' && estado.rl.tela !== 'modelos' && estado.rl.tela !== 'gerados') { estado.rl.tela = 'modelos'; estado.rl.rel = null; renderizarRelatorios(); }
         if (aba === 'vendas' && estado.vd.pedidoId) { estado.vd.pedidoId = null; renderizarVendas(); }
         mostrarAba(aba);
+        fecharGaveta();
       });
     });
     // Busca: só 'input'. Um 'change' na busca dispara no blur (ao tocar em "Ver detalhes") e recriaria
@@ -6453,6 +7002,7 @@
     document.addEventListener('keydown', function (e) {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
       if (!$('menu-usuario').hidden) { fecharMenuUsuario(); $('btn-usuario').focus(); return; }
+      if (gavetaAberta()) { fecharGaveta(); $('btn-menu').focus(); return; }
       if (estado.abertoId && !$('janela') && !$('confirmar')) fecharDetalhe();
     });
 
@@ -6464,8 +7014,8 @@
       if (!$('usuario-area').contains(e.target)) fecharMenuUsuario();
     });
     $('btn-sair').addEventListener('click', sair);
-    $('btn-trocar-senha').addEventListener('click', function () { fecharMenuUsuario(); janelaTrocarSenha(); });
-    $('btn-minha-foto').addEventListener('click', function () { fecharMenuUsuario(); janelaMinhaFoto(); });
+    $('btn-trocar-senha').addEventListener('click', function () { fecharMenuUsuario(); fecharGaveta(); janelaTrocarSenha(); });
+    $('btn-minha-foto').addEventListener('click', function () { fecharMenuUsuario(); fecharGaveta(); janelaMinhaFoto(); });
 
     // Login
     $('form-login').addEventListener('submit', function (e) {

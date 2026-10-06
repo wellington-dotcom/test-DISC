@@ -14,6 +14,7 @@ import {
   REL_MAX_TEXTO
 } from './relatorio.js';
 import { lerAvisos } from './avisos.js';
+import { acaoDiagnostico, acaoTestar } from './conexoes.js';
 
 function agoraIso(ctx) { return new Date(ctx.agora()).toISOString(); }
 
@@ -278,7 +279,10 @@ export const ACOES_ADMIN = {
   'relatorio.melhorarTextos': (ctx, c) => acaoRelatorioMelhorarTextos(ctx, c.relatorioToken, c.ids),
   'usuarios.listar': (ctx) => acaoUsuariosListar(ctx),
   'usuarios.convidar': (ctx, c) => acaoUsuariosConvidar(ctx, c),
-  'usuarios.remover': (ctx, c) => acaoUsuariosRemover(ctx, c.id)
+  'usuarios.remover': (ctx, c) => acaoUsuariosRemover(ctx, c.id),
+  // Aba Conexões (supabase/funcoes-compartilhadas/conexoes.js): nunca devolvem valores de segredos.
+  'conexoes.diagnostico': (ctx) => acaoDiagnostico(ctx),
+  'conexoes.testar': (ctx, c) => acaoTestar(ctx, c)
 };
 
 /** Executa uma ação já autenticada (ctx.usuario é admin). Sempre devolve {ok, ...}. */

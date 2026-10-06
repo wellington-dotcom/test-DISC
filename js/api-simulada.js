@@ -68,7 +68,7 @@
 (function (root) {
   'use strict';
 
-  var VERSAO_BANCO = 20261012120000;                     // última migração (supabase/migrations)
+  var VERSAO_BANCO = 20261013120000;                     // última migração (supabase/migrations)
   var CHAVE_ARMAZENAMENTO = 'disc_planilha_simulada';     // respostas (mesma chave das versões anteriores)
   var CHAVES = {
     usuarios: 'disc_simulada_usuarios',
@@ -2167,7 +2167,71 @@
       return { ok: true, id: id };
     }
 
+    /* ----- aba Conexões (prévia): respostas fictícias plausíveis, com algumas conexões "não configuradas" ----- */
+    var cxPrevia = { pedidoTeste: null };
+    var FUNCOES_PREVIA = ['admin', 'disc-sync', 'clickup-webhook', 'pagamento', 'asaas-webhook', 'infinitepay-webhook'];
+    function siteDaPrevia() {
+      try { return root.location ? String(root.location.href).split('#')[0].split('?')[0].replace(/[^/]*$/, '') : ''; } catch (e) { return ''; }
+    }
+    function bancoPrevia() {
+      var resp = ler();
+      var ultima = resp.map(function (r) { return String(r.recebidoEm || ''); }).sort().pop() || '';
+      return { ms: 84, versao: VERSAO_BANCO, semFuncao: false, faltando: [], ultimaResposta: ultima, erro: '',
+        contagens: { processos: avaliacoes().length, respostas: resp.length, pessoas: pessoas().length, empresas: empresas().length,
+          pedidos: pedidosSalvos().length } };
+    }
+    function funcoesPrevia() {
+      return FUNCOES_PREVIA.map(function (n) {
+        // Na prévia o Asaas não está configurado e a função dele não foi publicada.
+        return n === 'asaas-webhook' ? { nome: n, publicada: false, status: 404, mensagem: 'Não publicada (o Supabase respondeu 404).' }
+          : { nome: n, publicada: true, status: n === 'admin' ? 200 : 204, mensagem: 'Publicada.' };
+      });
+    }
+    function acaoConexoesDiagnostico(u) {
+      var em = new Date(agora()).toISOString();
+      var segredos = { SUPABASE_URL: true, SUPABASE_ANON_KEY: true, SUPABASE_SERVICE_ROLE_KEY: true, SITE_URL: true,
+        PAGAMENTO_PROVEDOR: true, INFINITEPAY_HANDLE: true, ASAAS_API_KEY: false, ASAAS_WEBHOOK_TOKEN: false, ASAAS_AMBIENTE: false,
+        RESEND_API_KEY: true, EMAIL_REMETENTE: true, CLICKUP_TOKEN: true, CLICKUP_PASTA_ID: true, CLICKUP_WEBHOOK_SECRET: false,
+        ANTHROPIC_API_KEY: false };
+      return { ok: true, em: em, siteAtual: siteDaPrevia(), banco: bancoPrevia(),
+        login: { sessao: true, email: u.email || '', admin: u.papel === 'admin' },
+        servidor: { ok: true, versao: 1, em: em, siteUrl: siteDaPrevia(), segredos: segredos,
+          pagamento: { provedor: 'infinitepay', provedorEscolhido: 'infinitepay', handleParcial: 'ge***', asaasAmbiente: 'sandbox' },
+          funcoes: funcoesPrevia(), auth: { cadastroFechado: true }, pedidoTeste: cxPrevia.pedidoTeste ? copiar(cxPrevia.pedidoTeste) : null,
+          colunaTeste: true },
+        servidorEstado: 'ok', servidorErro: '' };
+    }
+    function acaoConexoesTestar(u, c) {
+      var alvo = String((c && c.alvo) || '');
+      var r = function (sucesso, mensagem, verificado, detalhes) {
+        var x = { ok: true, alvo: alvo, sucesso: sucesso, mensagem: mensagem, verificado: verificado, em: new Date(agora()).toISOString() };
+        if (detalhes) x.detalhes = detalhes;
+        return x;
+      };
+      if (alvo === 'banco') { var b = bancoPrevia(); var x = r(true, 'O banco respondeu em ' + b.ms + ' ms.', 'Conexão, versão do banco e leitura das tabelas principais.'); x.banco = b; return x; }
+      if (alvo === 'funcoes') return r(false, 'Não publicadas: asaas-webhook.', 'Endereço de cada função chamado pelo servidor.', { funcoes: funcoesPrevia() });
+      if (alvo === 'clickup') return r(true, 'Conectado ao ClickUp como Prévia.', 'Leitura do usuário dono do token (GET /user).', { usuario: 'Prévia', webhookSecreto: false });
+      if (alvo === 'asaas') return r(false, 'Segredo ASAAS_API_KEY não existe.', 'Presença do segredo.');
+      if (alvo === 'ia') return r(false, 'Segredo ANTHROPIC_API_KEY não existe (a IA é opcional).', 'Presença do segredo.');
+      if (alvo === 'email') return r(true, 'E-mail de teste enviado para ' + (u.email || 'você') + '. (Prévia: nada foi enviado de verdade.)', 'Envio real pelo Resend.');
+      if (alvo === 'infinitepay.link') {
+        var id = 'previa-teste-' + hexAleatorio(4);
+        var url = 'https://checkout.infinitepay.io/gestaosemcaos?previa=' + id;
+        cxPrevia.pedidoTeste = { id: id, status: 'aguardando', criadoEm: new Date(agora()).toISOString(), url: url };
+        return r(true, 'Link de teste criado (R$ 1,00). Nada é cobrado se ninguém pagar. (Prévia: link de exemplo.)',
+          'Criação de um link real de checkout na InfinitePay (InfiniteTag ge***).', { url: url, pedidoId: id, valorCentavos: 100 });
+      }
+      if (alvo === 'infinitepay.verificar') {
+        if (!cxPrevia.pedidoTeste) return r(false, 'Nenhum pedido de teste encontrado. Gere um link de teste primeiro.', 'Leitura do pedido de teste.');
+        return r(true, 'A InfinitePay respondeu: este pedido de teste ainda não foi pago. Pague o link (R$ 1,00) e verifique de novo.',
+          'Consulta do pagamento na InfinitePay (payment_check) do pedido de teste.', { pedidoId: cxPrevia.pedidoTeste.id, pago: false });
+      }
+      return erro('Teste desconhecido.');
+    }
+
     var ACOES_COM_SESSAO = {
+      'conexoes.diagnostico': { soAdmin: true, fn: function (u) { return acaoConexoesDiagnostico(u); } },
+      'conexoes.testar': { soAdmin: true, fn: function (u, c) { return acaoConexoesTestar(u, c); } },
       'eu': { fn: function (u) { return { ok: true, usuario: usuarioPublico(u, mapaEmpresas()) }; } },
       'sair': { fn: function (u, c, token) { encerrarSessao(token); return { ok: true }; } },
       'trocarSenha': { fn: function (u, c, token) { return acaoTrocarSenha(u, c, token); } },
@@ -3130,6 +3194,12 @@
       listarPacotes: seguro(function (token) { return comSessao('pacotes.listar', token); }),
       salvarPacote: seguro(function (token, pacote) { return comSessao('pacotes.salvar', token, { pacote: pacote || {} }); }),
       resumoVendas: seguro(function (token, periodo) { return comSessao('vendas.resumo', token, { periodo: periodo }); }),
+      diagnosticoConexoes: seguro(function (token) { return comSessao('conexoes.diagnostico', token); }),
+      testarConexao: seguro(function (token, alvo, opcoes) {
+        var dados = { alvo: String(alvo || '') };
+        if (opcoes && typeof opcoes === 'object') ['pedidoId', 'transactionNsu', 'slug'].forEach(function (k) { if (opcoes[k]) dados[k] = String(opcoes[k]); });
+        return comSessao('conexoes.testar', token, dados);
+      }),
       avaliacaoPublica: seguro(function (codigo) {
         exigir(codigo, MSG_LINK_INVALIDO);
         return chamar({ acao: 'avaliacaoPublica', codigo: codigo });
@@ -3310,7 +3380,8 @@
     'moverResposta', 'contratarPessoa', 'versaoBanco',
     'pacotesPublicos', 'enviarPessoal', 'resumoPessoal', 'criarPedido', 'iniciarPagamento', 'statusPedido', 'relatorioPessoal',
     'salvarParte2Pessoal', 'recuperarAcesso', 'confirmarRetorno',
-    'listarPedidos', 'atualizarPedido', 'listarCupons', 'salvarCupom', 'excluirCupom', 'listarPacotes', 'salvarPacote', 'resumoVendas'];
+    'listarPedidos', 'atualizarPedido', 'listarCupons', 'salvarCupom', 'excluirCupom', 'listarPacotes', 'salvarPacote', 'resumoVendas',
+    'diagnosticoConexoes', 'testarConexao'];
 
   // Liga no lugar do DISC_API real quando CONFIG.API_URL === 'simulada' (o objeto continua o mesmo).
   function instalar(alvo, cfg, opcoes) {

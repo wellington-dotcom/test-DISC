@@ -1014,6 +1014,722 @@ function relIdsParaIa(textos, ids) {
   return escolhidos.slice(0, REL_MAX_TEXTOS_IA);
 }
 
+// ======== supabase/funcoes-compartilhadas/infinitepay.js ========
+// Cliente mínimo do "Checkout Integrado" da InfinitePay (CloudWalk), sem nada do Deno: recebe fetch por parâmetro
+// (testável no Node com respostas falsas).
+//
+// A API é pública e NÃO tem chave: a conta é identificada pela InfiniteTag ("handle", sem o $), guardada no segredo
+// INFINITEPAY_HANDLE (Supabase > Edge Functions > Secrets). Não é senha, mas trate como configuração (não no código).
+//
+//   POST https://api.checkout.infinitepay.io/links
+//     {handle, items:[{quantity, price (CENTAVOS, inteiro), description}], order_nsu, redirect_url, webhook_url,
+//      customer?:{name, email, phone_number}}
+//     -> {url: 'https://checkout.infinitepay.io/...'}  (a página hospedada oferece Pix e cartão)
+//   Ao pagar, o cliente volta para redirect_url com ?order_nsu&transaction_nsu&slug&capture_method&receipt_url.
+//   O webhook (POST em webhook_url) traz order_nsu, transaction_nsu, invoice_slug/slug, amount/paid_amount,
+//   capture_method, receipt_url — SEM assinatura: o corpo nunca é confiável; sempre conferir com payment_check.
+//   POST https://api.checkout.infinitepay.io/payment_check {handle, order_nsu, transaction_nsu, slug}
+//     -> {success, paid: bool, amount, paid_amount, installments, capture_method}
+//
+// SUPOSIÇÕES (a documentação oficial — https://www.infinitepay.io/checkout-documentacao — não pôde ser lida daqui):
+//   * a URL do checkout vem em `url` (aceitamos também `link`, `checkout_url`, `payment_url` e os mesmos dentro de `data`);
+//   * amount/paid_amount do payment_check estão em CENTAVOS (como o preço do link). Número com casas decimais é lido
+//     como reais (×100). Na dúvida o pedido NÃO é liberado (valor menor que o do pedido = não pago);
+//   * `paid` pode vir como booleano ou texto 'true'; `success:false` = não pago.
+
+const INFINITEPAY_API = 'https://api.checkout.infinitepay.io';
+const INFINITEPAY_TIMEOUT_MS = 15000;
+const RE_HANDLE = /^[a-z0-9._-]{1,60}$/i;
+const RE_REF = /^[A-Za-z0-9._:-]{1,120}$/;
+
+/** InfiniteTag do segredo -> handle sem "$"/"@" e sem espaços; inválida -> ''. */
+function normalizarHandle(v) {
+  const h = String(v == null ? '' : v).trim().replace(/^[$@]+/, '').trim();
+  return RE_HANDLE.test(h) ? h : '';
+}
+
+/** transaction_nsu / slug vindos da URL ou do webhook: só caracteres seguros; senão ''. */
+function refInfinitePay(v) {
+  const s = String(v == null ? '' : v).trim();
+  return RE_REF.test(s) ? s : '';
+}
+
+/** capture_method da InfinitePay -> pedidos.metodo */
+function infinitepayMetodo(v) {
+  const s = String(v || '').toLowerCase();
+  if (s === 'pix') return 'pix';
+  if (/credit|debit|card|cartao/.test(s)) return 'cartao';
+  return '';
+}
+
+/** amount/paid_amount -> centavos (inteiro). Inteiro = centavos; com casas decimais (29.9, '29.00') = reais. NaN se inválido. */
+function centavosInfinitePay(v) {
+  if (v === null || v === undefined || v === '') return NaN;
+  const txt = typeof v === 'string' ? v.trim().replace(',', '.') : v;
+  const n = Number(txt);
+  if (!isFinite(n) || n < 0) return NaN;
+  const emReais = !Number.isInteger(n) || (typeof txt === 'string' && txt.indexOf('.') >= 0);
+  return emReais ? Math.round(n * 100) : n;
+}
+
+/** Lê order_nsu/transaction_nsu/slug/capture_method de um corpo de webhook ou de parâmetros de retorno. */
+function lerRefsInfinitePay(o) {
+  const x = o && typeof o === 'object' ? o : {};
+  const dentro = x.data && typeof x.data === 'object' ? x.data : {};
+  const pegar = (...nomes) => {
+    for (const n of nomes) {
+      if (x[n] !== undefined && x[n] !== null && x[n] !== '') return x[n];
+      if (dentro[n] !== undefined && dentro[n] !== null && dentro[n] !== '') return dentro[n];
+    }
+    return '';
+  };
+  return {
+    orderNsu: String(pegar('order_nsu', 'orderNsu')).trim(),
+    transactionNsu: refInfinitePay(pegar('transaction_nsu', 'transactionNsu')),
+    slug: refInfinitePay(pegar('invoice_slug', 'slug')),
+    metodo: infinitepayMetodo(pegar('capture_method', 'captureMethod'))
+  };
+}
+
+function urlDoLink(r) {
+  const fontes = [r, r && typeof r.data === 'object' ? r.data : null];
+  for (const f of fontes) {
+    if (!f) continue;
+    for (const n of ['url', 'link', 'checkout_url', 'payment_url']) {
+      if (typeof f[n] === 'string' && /^https:\/\//i.test(f[n].trim())) return f[n].trim();
+    }
+  }
+  return '';
+}
+
+function erroInfinitePay(status, texto) {
+  const e = new Error('InfinitePay: HTTP ' + status + (texto ? ' ' + String(texto).substring(0, 200) : ''));
+  e.status = status;
+  return e;
+}
+
+/**
+ * criarInfinitePay({handle, fetch}) -> {configurado, handle, criarLink, conferir}
+ * Lançam Error('InfinitePay: ...') com e.status em resposta não-2xx ou sem os campos esperados.
+ */
+function criarInfinitePay(op) {
+  const handle = normalizarHandle(op && op.handle);
+  const fetchFn = op && op.fetch;
+
+  async function chamar(caminho, corpo) {
+    const controle = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = controle ? setTimeout(() => controle.abort(), INFINITEPAY_TIMEOUT_MS) : null;
+    try {
+      const r = await fetchFn(INFINITEPAY_API + caminho, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'User-Agent': 'gestao-sem-caos-mapa-disc' },
+        body: JSON.stringify(corpo),
+        signal: controle ? controle.signal : undefined
+      });
+      const texto = await r.text();
+      let json = null;
+      try { json = texto ? JSON.parse(texto) : null; } catch (err) { json = null; }
+      if (!r.ok) throw erroInfinitePay(r.status, texto);
+      return json && typeof json === 'object' ? json : {};
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  return {
+    configurado: !!handle,
+    handle,
+    /**
+     * {pedidoId, valorCentavos, descricao, redirectUrl, webhookUrl, cliente?:{nome, email, telefone}}
+     * -> {url, bruto} (bruto = resposta da InfinitePay, para provedor_dados)
+     */
+    async criarLink(d) {
+      const corpo = {
+        handle,
+        items: [{ quantity: 1, price: Math.round(Number(d.valorCentavos) || 0), description: String(d.descricao || '').substring(0, 120) }],
+        order_nsu: String(d.pedidoId),
+        redirect_url: d.redirectUrl,
+        webhook_url: d.webhookUrl
+      };
+      const c = d.cliente || {};
+      const customer = {};
+      if (c.nome) customer.name = String(c.nome).substring(0, 120);
+      if (c.email) customer.email = String(c.email).substring(0, 120);
+      if (c.telefone) customer.phone_number = String(c.telefone).replace(/\D/g, '').substring(0, 20);
+      if (Object.keys(customer).length) corpo.customer = customer;
+      const r = await chamar('/links', corpo);
+      const url = urlDoLink(r);
+      if (!url) throw erroInfinitePay(200, 'resposta sem a URL do checkout');
+      return { url, bruto: r };
+    },
+    /**
+     * {pedidoId, transactionNsu, slug} -> {pago, valorCentavos (NaN se não veio), metodo, parcelas, bruto}
+     * pago = success !== false e paid === true. A comparação com o valor do pedido fica com quem chama.
+     */
+    async conferir(d) {
+      const r = await chamar('/payment_check', {
+        handle, order_nsu: String(d.pedidoId), transaction_nsu: String(d.transactionNsu || ''), slug: String(d.slug || '')
+      });
+      const pago = r.success !== false && (r.paid === true || String(r.paid).toLowerCase() === 'true');
+      const pagoCent = centavosInfinitePay(r.paid_amount);
+      const valorCentavos = isFinite(pagoCent) ? pagoCent : centavosInfinitePay(r.amount);
+      return { pago, valorCentavos, metodo: infinitepayMetodo(r.capture_method), parcelas: Number(r.installments) || 0, bruto: r };
+    }
+  };
+}
+
+// ======== supabase/funcoes-compartilhadas/asaas.js ========
+// Cliente mínimo da API v3 do Asaas (cobrança Pix + link de cartão) e do Resend (e-mail), sem nada do Deno:
+// recebe fetch por parâmetro (testável no Node com respostas falsas).
+//
+// Segredos (Supabase > Edge Functions > Secrets; NUNCA no código nem no repositório):
+//   ASAAS_API_KEY       chave da API do Asaas (copiada do painel do Asaas). Sem ela: "Pagamento ainda não configurado."
+//   ASAAS_AMBIENTE      'sandbox' (padrão, testes) ou 'producao'
+//   ASAAS_WEBHOOK_TOKEN token que o Asaas manda no cabeçalho asaas-access-token do webhook
+//   RESEND_API_KEY      (opcional) envio de e-mail com o link do relatório
+//   EMAIL_REMETENTE     (opcional) ex.: 'Gestão sem Caos <relatorio@seudominio.com.br>' (domínio verificado no Resend)
+
+const ASAAS_URLS = {
+  sandbox: 'https://api-sandbox.asaas.com/v3',
+  producao: 'https://api.asaas.com/v3'
+};
+const ASAAS_PAGO = ['RECEIVED', 'CONFIRMED', 'RECEIVED_IN_CASH'];
+const ASAAS_EVENTOS_PAGO = ['PAYMENT_RECEIVED', 'PAYMENT_CONFIRMED'];
+const ASAAS_EVENTOS_ESTORNO = ['PAYMENT_REFUNDED', 'PAYMENT_PARTIALLY_REFUNDED', 'PAYMENT_CHARGEBACK_REQUESTED',
+  'PAYMENT_CHARGEBACK_DISPUTE'];
+const ASAAS_EVENTOS_CANCELA = ['PAYMENT_DELETED'];
+const ASAAS_TIMEOUT_MS = 15000;
+
+function asaasAmbiente(v) {
+  const s = String(v || '').trim().toLowerCase();
+  return s === 'producao' || s === 'produção' || s === 'production' ? 'producao' : 'sandbox';
+}
+
+/** forma de pagamento do Asaas -> pedidos.metodo */
+function asaasMetodo(billingType) {
+  const b = String(billingType || '').toUpperCase();
+  if (b === 'PIX') return 'pix';
+  if (b === 'CREDIT_CARD' || b === 'DEBIT_CARD') return 'cartao';
+  if (b === 'BOLETO') return 'boleto';
+  return '';
+}
+
+/** Compara dois textos em tempo constante (tamanhos diferentes = falso). */
+function iguaisSeguro(a, b) {
+  if (typeof a !== 'string' || typeof b !== 'string' || !a || a.length !== b.length) return false;
+  let dif = 0;
+  for (let i = 0; i < a.length; i++) dif |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return dif === 0;
+}
+
+/** CPF (11 dígitos com dígitos verificadores) ou CNPJ (14 dígitos) -> só dígitos; inválido -> ''. */
+function documentoValido(v) {
+  const d = String(v == null ? '' : v).replace(/\D/g, '');
+  if (d.length === 11) {
+    if (/^(\d)\1{10}$/.test(d)) return '';
+    const dv = (n) => {
+      let s = 0;
+      for (let i = 0; i < n; i++) s += Number(d[i]) * (n + 1 - i);
+      const r = (s * 10) % 11;
+      return r === 10 ? 0 : r;
+    };
+    return dv(9) === Number(d[9]) && dv(10) === Number(d[10]) ? d : '';
+  }
+  if (d.length === 14) {
+    if (/^(\d)\1{13}$/.test(d)) return '';
+    const calc = (n) => {
+      const pesos = n === 12 ? [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2] : [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2];
+      let s = 0;
+      for (let i = 0; i < n; i++) s += Number(d[i]) * pesos[i];
+      const r = s % 11;
+      return r < 2 ? 0 : 11 - r;
+    };
+    return calc(12) === Number(d[12]) && calc(13) === Number(d[13]) ? d : '';
+  }
+  return '';
+}
+
+function erroAsaas(status, corpo) {
+  const lista = corpo && Array.isArray(corpo.errors) ? corpo.errors : [];
+  const texto = lista.map((e) => String((e && (e.description || e.code)) || '')).filter(Boolean).join(' ') || ('HTTP ' + status);
+  const e = new Error('Asaas: ' + texto.substring(0, 300));
+  e.status = status;
+  e.codigos = lista.map((x) => String((x && x.code) || ''));
+  e.texto = texto;
+  return e;
+}
+
+/**
+ * criarAsaas({apiKey, ambiente, fetch}) -> {configurado, ambiente, clienteCriar, cobrancaCriar, cobranca, pixQrCode}
+ * Todas lançam Error('Asaas: ...') com e.status/e.codigos/e.texto em resposta não-2xx.
+ */
+function criarAsaas(op) {
+  const apiKey = String((op && op.apiKey) || '').trim();
+  const ambiente = asaasAmbiente(op && op.ambiente);
+  const base = ASAAS_URLS[ambiente];
+  const fetchFn = op && op.fetch;
+
+  async function chamar(metodo, caminho, corpo) {
+    const controle = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = controle ? setTimeout(() => controle.abort(), ASAAS_TIMEOUT_MS) : null;
+    try {
+      const r = await fetchFn(base + caminho, {
+        method: metodo,
+        headers: { access_token: apiKey, 'Content-Type': 'application/json', 'User-Agent': 'gestao-sem-caos-mapa-disc' },
+        body: corpo === undefined ? undefined : JSON.stringify(corpo),
+        signal: controle ? controle.signal : undefined
+      });
+      const texto = await r.text();
+      let json = null;
+      try { json = texto ? JSON.parse(texto) : null; } catch (err) { json = null; }
+      if (!r.ok) throw erroAsaas(r.status, json);
+      return json || {};
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  return {
+    configurado: !!apiKey,
+    ambiente,
+    /** {nome, email, cpfCnpj?, referencia} -> id do cliente (cus_...) */
+    async clienteCriar(d) {
+      const corpo = { name: d.nome, email: d.email, externalReference: d.referencia, notificationDisabled: true };
+      if (d.cpfCnpj) corpo.cpfCnpj = d.cpfCnpj;
+      const r = await chamar('POST', '/customers', corpo);
+      if (!r.id) throw new Error('Asaas: cliente sem id');
+      return String(r.id);
+    },
+    /** {cliente, valorCentavos, vencimento 'YYYY-MM-DD', descricao, referencia} -> {id, invoiceUrl, status} */
+    async cobrancaCriar(d) {
+      const r = await chamar('POST', '/payments', {
+        customer: d.cliente, billingType: 'UNDEFINED', value: Math.round(d.valorCentavos) / 100,
+        dueDate: d.vencimento, description: d.descricao, externalReference: d.referencia
+      });
+      if (!r.id) throw new Error('Asaas: cobrança sem id');
+      return { id: String(r.id), invoiceUrl: String(r.invoiceUrl || ''), status: String(r.status || '') };
+    },
+    /** id -> {id, status, billingType, value, externalReference, invoiceUrl} */
+    async cobranca(id) {
+      return chamar('GET', '/payments/' + encodeURIComponent(id));
+    },
+    /** id -> {qrBase64, copiaECola, expira} */
+    async pixQrCode(id) {
+      const r = await chamar('GET', '/payments/' + encodeURIComponent(id) + '/pixQrCode');
+      return { qrBase64: String(r.encodedImage || ''), copiaECola: String(r.payload || ''), expira: String(r.expirationDate || '') };
+    }
+  };
+}
+
+/** Envio pelo Resend. {configurado, enviar({para, assunto, html, texto})} — lança erro em falha. */
+function criarResend(op) {
+  const chave = String((op && op.apiKey) || '').trim();
+  const remetente = String((op && op.remetente) || '').trim() || 'Gestão sem Caos <onboarding@resend.dev>';
+  return {
+    configurado: !!chave,
+    async enviar(m) {
+      const r = await op.fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: { Authorization: 'Bearer ' + chave, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ from: remetente, to: [m.para], subject: m.assunto, html: m.html, text: m.texto })
+      });
+      if (!r.ok) throw new Error('Resend: HTTP ' + r.status);
+      return true;
+    }
+  };
+}
+
+// ======== supabase/funcoes-compartilhadas/conexoes.js ========
+// Aba "Conexões" do painel: ações conexoes.diagnostico e conexoes.testar da Edge Function "admin" (só administrador).
+// Sem nada do Deno: recebe fetch/env/db pelo ctx (testável no Node com respostas falsas).
+//
+// REGRA DE OURO: nenhuma resposta leva o VALOR de um segredo. Só "existe: sim/não", o provedor escolhido (não é
+// segredo), as 2 primeiras letras da InfiniteTag e mensagens. Tudo que volta passa por ocultarSegredos().
+// Cada teste externo tem prazo de no máximo CONEXOES_PRAZO_MS (8 s).
+//
+//   conexoes.diagnostico {} -> {ok, versao, em, siteUrl, segredos:{NOME: bool}, pagamento:{provedor, provedorEscolhido,
+//     handleParcial, asaasAmbiente}, funcoes:[{nome, publicada:true|false|null, status, mensagem}],
+//     auth:{cadastroFechado:true|false|null}, pedidoTeste:{id, status, criadoEm, url}|null, colunaTeste:bool|null}
+//   conexoes.testar {alvo, ...} -> {ok, alvo, sucesso:bool, mensagem, verificado, detalhes?}
+//     alvo: 'funcoes' | 'clickup' | 'asaas' | 'ia' | 'email' (manda um e-mail para o admin logado)
+//           'infinitepay.link'      cria um pedido de TESTE (pedidos.teste = true, R$ 1,00; fora das vendas/receita) e um
+//                                   link real de checkout. Nada é cobrado se ninguém pagar. -> detalhes {url, pedidoId}
+//           'infinitepay.verificar' {pedidoId?, transactionNsu?, slug?} confere o pedido de teste no payment_check.
+
+const CONEXOES_VERSAO = 1;
+const CONEXOES_PRAZO_MS = 8000;
+const FUNCOES_EDGE = ['admin', 'disc-sync', 'clickup-webhook', 'pagamento', 'asaas-webhook', 'infinitepay-webhook'];
+const SEGREDOS_CONEXOES = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'SITE_URL',
+  'PAGAMENTO_PROVEDOR', 'INFINITEPAY_HANDLE', 'ASAAS_API_KEY', 'ASAAS_WEBHOOK_TOKEN', 'ASAAS_AMBIENTE',
+  'RESEND_API_KEY', 'EMAIL_REMETENTE', 'CLICKUP_TOKEN', 'CLICKUP_PASTA_ID', 'CLICKUP_WEBHOOK_SECRET', 'ANTHROPIC_API_KEY'];
+// Segredos de verdade (o valor nunca sai do servidor). SITE_URL, PAGAMENTO_PROVEDOR e ASAAS_AMBIENTE são configuração.
+const SEGREDOS_OCULTOS = ['SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'INFINITEPAY_HANDLE', 'ASAAS_API_KEY',
+  'ASAAS_WEBHOOK_TOKEN', 'RESEND_API_KEY', 'CLICKUP_TOKEN', 'CLICKUP_WEBHOOK_SECRET', 'ANTHROPIC_API_KEY'];
+const VALOR_TESTE_CENTAVOS = 100;
+const ANTHROPIC_MODELOS = 'https://api.anthropic.com/v1/models?limit=1';
+const RE_UUID_CX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function cxAgoraIso(ctx) { return new Date(ctx.agora()).toISOString(); }
+function cxPrazo(ctx) { return Math.min(CONEXOES_PRAZO_MS, Number(ctx.prazoConexoesMs) || CONEXOES_PRAZO_MS); }
+function cxTem(env, nome) { return !!String((env && env[nome]) || '').trim(); }
+
+/** Troca qualquer valor de segredo que apareça no texto por "***" (rede de segurança das mensagens). */
+function ocultarSegredos(texto, env) {
+  let s = String(texto == null ? '' : texto);
+  SEGREDOS_OCULTOS.forEach((n) => {
+    const v = String((env && env[n]) || '').trim();
+    if (v.length >= 4) s = s.split(v).join('***');
+  });
+  return s;
+}
+
+/** Só as 2 primeiras letras + "***" (a InfiniteTag não aparece inteira). */
+function parcial(valor) {
+  const v = String(valor == null ? '' : valor).trim().replace(/^[$@]+/, '');
+  return v ? v.substring(0, 2) + '***' : '';
+}
+
+/** Promessa com prazo: passou de ms -> Error com tempoEsgotado = true. */
+function comPrazo(promessa, ms) {
+  let timer;
+  const limite = new Promise((_, rejeitar) => {
+    timer = setTimeout(() => { const e = new Error('tempo esgotado'); e.tempoEsgotado = true; rejeitar(e); }, ms);
+  });
+  return Promise.race([Promise.resolve(promessa), limite]).finally(() => clearTimeout(timer));
+}
+
+/** fetch que desiste depois de ms (aborta a requisição). */
+function fetchComPrazo(fetchFn, ms) {
+  return async (url, op) => {
+    const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const o = Object.assign({}, op || {});
+    if (ctl) {
+      if (o.signal) { if (o.signal.aborted) ctl.abort(); else o.signal.addEventListener('abort', () => ctl.abort()); }
+      o.signal = ctl.signal;
+    }
+    return comPrazo(fetchFn(url, o), ms).catch((err) => { if (ctl) ctl.abort(); throw err; });
+  };
+}
+
+function statusDoErro(err) {
+  if (err && Number(err.status)) return Number(err.status);
+  const m = /(?:HTTP|respondeu)\s+(\d{3})/.exec(String((err && err.message) || ''));
+  return m ? Number(m[1]) : 0;
+}
+
+/** Erro de um serviço externo -> frase curta em português simples (sem detalhes técnicos nem segredos). */
+function traduzirErro(servico, err) {
+  if (err && err.tempoEsgotado) return servico + ' não respondeu em 8 segundos. Pode ser instabilidade: tente de novo em alguns minutos.';
+  const st = statusDoErro(err);
+  if (st === 401) return servico + ' recusou a chave: ela está errada, foi apagada ou trocada. Gere uma nova e atualize o segredo.';
+  if (st === 403) return servico + ' recusou o pedido por falta de permissão (chave sem acesso a isto, ou domínio/conta não verificados).';
+  if (st === 404) return servico + ' não encontrou o endereço chamado (conta, ambiente ou recurso errado).';
+  if (st === 422 || st === 400) return servico + ' recusou os dados enviados (erro ' + st + '). Confira a configuração da conta.';
+  if (st === 429) return servico + ' recebeu chamadas demais agora. Espere 1 minuto e teste de novo.';
+  if (st >= 500) return servico + ' está com problema do lado dele (erro ' + st + '). Tente de novo mais tarde.';
+  if (st >= 400) return servico + ' recusou o pedido (erro ' + st + ').';
+  return 'Não foi possível falar com ' + servico + ' (sem resposta da rede). Tente de novo em instantes.';
+}
+
+function resultado(ctx, alvo, sucesso, mensagem, verificado, detalhes) {
+  const r = { ok: true, alvo, sucesso: !!sucesso, mensagem: ocultarSegredos(mensagem, ctx.env), verificado: verificado || '', em: cxAgoraIso(ctx) };
+  if (detalhes) {
+    // O link de checkout é público e leva a InfiniteTag no endereço: ele passa inteiro; o resto é filtrado.
+    const url = detalhes.url;
+    r.detalhes = JSON.parse(ocultarSegredos(JSON.stringify(Object.assign({}, detalhes, { url: undefined })), ctx.env));
+    if (url) r.detalhes.url = String(url);
+  }
+  return r;
+}
+
+/** Provedor que o site usa agora (mesma regra de pagamento.js). */
+function provedorAtual(env) {
+  const escolhido = String(env.PAGAMENTO_PROVEDOR || '').trim().toLowerCase();
+  if (escolhido === 'infinitepay') return cxTem(env, 'INFINITEPAY_HANDLE') ? 'infinitepay' : '';
+  if (escolhido === 'asaas') return cxTem(env, 'ASAAS_API_KEY') ? 'asaas' : '';
+  if (cxTem(env, 'INFINITEPAY_HANDLE')) return 'infinitepay';
+  if (cxTem(env, 'ASAAS_API_KEY')) return 'asaas';
+  return '';
+}
+
+function baseSupabase(env) {
+  const s = String(env.SUPABASE_URL || '').trim().replace(/\/+$/, '');
+  return /^https?:\/\//i.test(s) ? s : '';
+}
+
+function siteBase(env) {
+  const s = String(env.SITE_URL || '').trim();
+  if (!/^https?:\/\//i.test(s)) return '';
+  return s.replace(/\/+$/, '') + '/';
+}
+
+// ---------------------------------------------------------------------------
+// Funções publicadas (o SERVIDOR chama: sem CORS no navegador)
+// ---------------------------------------------------------------------------
+
+/** OPTIONS em SUPABASE_URL/functions/v1/<nome>: 404 = não publicada; qualquer outra resposta = publicada. */
+async function pingFuncao(ctx, nome) {
+  const base = baseSupabase(ctx.env);
+  if (!base) return { nome, publicada: null, status: 0, mensagem: 'SUPABASE_URL não disponível no servidor.' };
+  const f = fetchComPrazo(ctx.fetch, cxPrazo(ctx));
+  try {
+    const headers = {};
+    if (cxTem(ctx.env, 'SUPABASE_ANON_KEY')) headers.apikey = ctx.env.SUPABASE_ANON_KEY;
+    const r = await f(base + '/functions/v1/' + nome, { method: 'OPTIONS', headers });
+    try { await r.text(); } catch (e) { /* corpo ignorado */ }
+    if (r.status === 404) return { nome, publicada: false, status: 404, mensagem: 'Não publicada (o Supabase respondeu 404).' };
+    if (r.status >= 500) return { nome, publicada: true, status: r.status, mensagem: 'Publicada, mas respondeu com erro ' + r.status + '.' };
+    return { nome, publicada: true, status: r.status, mensagem: 'Publicada (respondeu ' + r.status + ').' };
+  } catch (err) {
+    return { nome, publicada: null, status: 0, mensagem: traduzirErro('O Supabase', err) };
+  }
+}
+
+async function funcoesPublicadas(ctx) {
+  return Promise.all(FUNCOES_EDGE.map((nome) => (nome === 'admin'
+    ? { nome, publicada: true, status: 200, mensagem: 'Publicada (é ela que está respondendo agora).' }
+    : pingFuncao(ctx, nome))));
+}
+
+/** Cadastro livre fechado? GET /auth/v1/settings (público) -> disable_signup. null = não deu para saber. */
+async function cadastroFechado(ctx) {
+  const base = baseSupabase(ctx.env);
+  if (!base || !cxTem(ctx.env, 'SUPABASE_ANON_KEY')) return null;
+  try {
+    const r = await fetchComPrazo(ctx.fetch, cxPrazo(ctx))(base + '/auth/v1/settings', { method: 'GET', headers: { apikey: ctx.env.SUPABASE_ANON_KEY } });
+    if (!r.ok) return null;
+    const j = await r.json();
+    return j && typeof j.disable_signup === 'boolean' ? j.disable_signup : null;
+  } catch (err) {
+    return null;
+  }
+}
+
+function colunaInexistente(err) {
+  const c = err && err.causa ? String(err.causa.code || '') + ' ' + String(err.causa.message || '') : String((err && err.message) || '');
+  return /42703|PGRST204|teste/.test(c);
+}
+
+function pedidoTesteSaida(p) {
+  if (!p) return null;
+  return { id: String(p.id), status: String(p.status || ''), criadoEm: p.criado_em || '', url: p.checkout_url || '' };
+}
+
+// ---------------------------------------------------------------------------
+// Ações
+// ---------------------------------------------------------------------------
+
+async function acaoDiagnostico(ctx) {
+  const env = ctx.env || {};
+  const segredos = {};
+  SEGREDOS_CONEXOES.forEach((n) => { segredos[n] = cxTem(env, n); });
+  const escolhido = String(env.PAGAMENTO_PROVEDOR || '').trim().toLowerCase();
+  const [funcoes, fechado, teste] = await Promise.all([
+    funcoesPublicadas(ctx),
+    cadastroFechado(ctx),
+    (async () => {
+      if (!ctx.db || typeof ctx.db.pedidoTesteUltimo !== 'function') return { coluna: null, pedido: null };
+      try { return { coluna: true, pedido: await comPrazo(ctx.db.pedidoTesteUltimo(), cxPrazo(ctx)) }; } catch (err) {
+        return { coluna: colunaInexistente(err) ? false : null, pedido: null };
+      }
+    })()
+  ]);
+  const site = siteBase(env);
+  return {
+    ok: true, versao: CONEXOES_VERSAO, em: cxAgoraIso(ctx),
+    siteUrl: site,
+    segredos,
+    pagamento: {
+      provedor: provedorAtual(env),
+      // PAGAMENTO_PROVEDOR não é segredo: mostra o valor (só os conhecidos; outro texto vira 'invalido').
+      provedorEscolhido: !escolhido ? '' : (escolhido === 'infinitepay' || escolhido === 'asaas' ? escolhido : 'invalido'),
+      handleParcial: parcial(env.INFINITEPAY_HANDLE),
+      asaasAmbiente: asaasAmbiente(env.ASAAS_AMBIENTE)
+    },
+    funcoes,
+    auth: { cadastroFechado: fechado },
+    pedidoTeste: pedidoTesteSaida(teste.pedido),
+    colunaTeste: teste.coluna
+  };
+}
+
+async function testarFuncoes(ctx) {
+  const lista = await funcoesPublicadas(ctx);
+  const faltam = lista.filter((f) => f.publicada === false).map((f) => f.nome);
+  const sem = lista.filter((f) => f.publicada === null).map((f) => f.nome);
+  const msg = faltam.length ? 'Não publicadas: ' + faltam.join(', ') + '.'
+    : (sem.length ? 'Não deu para conferir: ' + sem.join(', ') + '.' : 'Todas as ' + lista.length + ' funções estão publicadas.');
+  return resultado(ctx, 'funcoes', !faltam.length && !sem.length, msg, 'Endereço de cada função chamado pelo servidor.', { funcoes: lista });
+}
+
+async function testarClickUp(ctx) {
+  if (!cxTem(ctx.env, 'CLICKUP_TOKEN')) return resultado(ctx, 'clickup', false, 'Segredo CLICKUP_TOKEN não existe.', 'Presença do segredo.');
+  const cu = criarClickUp({ token: ctx.env.CLICKUP_TOKEN, fetch: fetchComPrazo(ctx.fetch, cxPrazo(ctx)), dormir: async () => {}, agora: ctx.agora });
+  try {
+    const u = ((await comPrazo(cu.get('/user'), cxPrazo(ctx))) || {}).user || {};
+    const nome = limparTexto(u.username || u.email || '', 80);
+    return resultado(ctx, 'clickup', true, 'Conectado ao ClickUp' + (nome ? ' como ' + nome : '') + '.', 'Leitura do usuário dono do token (GET /user).',
+      { usuario: nome, webhookSecreto: cxTem(ctx.env, 'CLICKUP_WEBHOOK_SECRET') });
+  } catch (err) {
+    return resultado(ctx, 'clickup', false, traduzirErro('O ClickUp', err), 'Leitura do usuário dono do token (GET /user).');
+  }
+}
+
+async function testarAsaas(ctx) {
+  if (!cxTem(ctx.env, 'ASAAS_API_KEY')) return resultado(ctx, 'asaas', false, 'Segredo ASAAS_API_KEY não existe.', 'Presença do segredo.');
+  const asaas = criarAsaas({ apiKey: ctx.env.ASAAS_API_KEY, ambiente: ctx.env.ASAAS_AMBIENTE, fetch: fetchComPrazo(ctx.fetch, cxPrazo(ctx)) });
+  const amb = asaas.ambiente === 'producao' ? 'produção' : 'sandbox (testes)';
+  try {
+    // Consulta leve (1 cliente, nada é criado nem cobrado). Só o "deu certo" volta para o painel.
+    await comPrazo(asaas.cobranca('__teste_conexao__').catch((err) => {
+      if (Number(err && err.status) === 404) return null; // chave aceita; a cobrança de mentira não existe (esperado)
+      throw err;
+    }), cxPrazo(ctx));
+    return resultado(ctx, 'asaas', true, 'O Asaas aceitou a chave no ambiente ' + amb + '.', 'Consulta leve à API do Asaas (' + amb + ').', { ambiente: asaas.ambiente });
+  } catch (err) {
+    return resultado(ctx, 'asaas', false, traduzirErro('O Asaas', err) + ' (ambiente ' + amb + ')', 'Consulta leve à API do Asaas (' + amb + ').', { ambiente: asaas.ambiente });
+  }
+}
+
+async function testarIa(ctx) {
+  if (!cxTem(ctx.env, 'ANTHROPIC_API_KEY')) return resultado(ctx, 'ia', false, 'Segredo ANTHROPIC_API_KEY não existe (a IA é opcional).', 'Presença do segredo.');
+  try {
+    // Lista de modelos: não gera texto, não gasta créditos.
+    const r = await fetchComPrazo(ctx.fetch, cxPrazo(ctx))(ANTHROPIC_MODELOS, {
+      method: 'GET', headers: { 'x-api-key': ctx.env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01' }
+    });
+    try { await r.text(); } catch (e) { /* ignora */ }
+    if (!r.ok) { const e = new Error('HTTP ' + r.status); e.status = r.status; throw e; }
+    return resultado(ctx, 'ia', true, 'A chave da IA foi aceita (teste sem custo).', 'Consulta à lista de modelos (não gera texto, não gasta créditos).');
+  } catch (err) {
+    return resultado(ctx, 'ia', false, traduzirErro('A IA (Anthropic)', err), 'Consulta à lista de modelos (não gera texto, não gasta créditos).');
+  }
+}
+
+async function testarEmail(ctx) {
+  if (!cxTem(ctx.env, 'RESEND_API_KEY')) return resultado(ctx, 'email', false, 'Segredo RESEND_API_KEY não existe.', 'Presença do segredo.');
+  const para = String((ctx.usuario && ctx.usuario.email) || '').trim();
+  if (!para) return resultado(ctx, 'email', false, 'Seu usuário não tem e-mail para receber o teste.', 'Envio de um e-mail de teste.');
+  const resend = criarResend({ apiKey: ctx.env.RESEND_API_KEY, remetente: ctx.env.EMAIL_REMETENTE, fetch: fetchComPrazo(ctx.fetch, cxPrazo(ctx)) });
+  const quando = new Date(ctx.agora()).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+  try {
+    await comPrazo(resend.enviar({
+      para,
+      assunto: 'Teste de e-mail — Gestão sem Caos',
+      texto: 'Este é um e-mail de teste enviado pela aba Conexões do painel em ' + quando + '.\nSe chegou, o envio automático está funcionando.\n\nGestão sem Caos',
+      html: '<p>Este é um e-mail de teste enviado pela aba <b>Conexões</b> do painel em ' + quando + '.</p><p>Se chegou, o envio automático está funcionando.</p><p>Gestão sem Caos</p>'
+    }), cxPrazo(ctx));
+    return resultado(ctx, 'email', true, 'E-mail de teste enviado para ' + para + '. Confira a caixa de entrada (e o spam).',
+      'Envio real pelo Resend' + (cxTem(ctx.env, 'EMAIL_REMETENTE') ? '' : ' (remetente padrão do Resend: EMAIL_REMETENTE não existe)') + '.');
+  } catch (err) {
+    return resultado(ctx, 'email', false, traduzirErro('O Resend', err), 'Envio real pelo Resend.');
+  }
+}
+
+async function gerarLinkTeste(ctx) {
+  const env = ctx.env;
+  if (!cxTem(env, 'INFINITEPAY_HANDLE')) return resultado(ctx, 'infinitepay.link', false, 'Segredo INFINITEPAY_HANDLE não existe.', 'Presença do segredo.');
+  const site = siteBase(env);
+  if (!site) return resultado(ctx, 'infinitepay.link', false, 'Segredo SITE_URL não existe: a InfinitePay precisa saber para onde voltar depois do pagamento.', 'Presença do segredo.');
+  const base = baseSupabase(env);
+  const ip = criarInfinitePay({ handle: env.INFINITEPAY_HANDLE, fetch: fetchComPrazo(ctx.fetch, cxPrazo(ctx)) });
+  if (!ip.configurado) return resultado(ctx, 'infinitepay.link', false, 'O INFINITEPAY_HANDLE existe, mas não parece uma InfiniteTag válida (só letras, números, ponto, - ou _).', 'Formato do segredo.');
+  let pedido;
+  try {
+    pedido = await comPrazo(ctx.db.pedidoTesteInserir({
+      pacote: 'completo', valor_centavos: VALOR_TESTE_CENTAVOS, valor_original_centavos: VALOR_TESTE_CENTAVOS,
+      email: limparTexto((ctx.usuario && ctx.usuario.email) || '', 120), nome: 'Teste de conexão (painel)',
+      teste: true, provedor: 'infinitepay', provedor_dados: { teste: true }
+    }), cxPrazo(ctx));
+  } catch (err) {
+    if (colunaInexistente(err)) {
+      return resultado(ctx, 'infinitepay.link', false, 'Falta aplicar a migração 20261013120000_conexoes no banco (ela marca o pedido como teste, fora das vendas).', 'Criação do pedido de teste no banco.');
+    }
+    return resultado(ctx, 'infinitepay.link', false, 'Não foi possível criar o pedido de teste no banco.', 'Criação do pedido de teste no banco.');
+  }
+  try {
+    const r = await comPrazo(ip.criarLink({
+      pedidoId: pedido.id, valorCentavos: VALOR_TESTE_CENTAVOS,
+      descricao: 'Teste de conexão — Gestão sem Caos (pode ignorar)',
+      redirectUrl: site + 'admin.html?conexoes=teste',
+      webhookUrl: base ? base + '/functions/v1/infinitepay-webhook' : undefined
+    }), cxPrazo(ctx));
+    const dados = { teste: true, link: { url: r.url, valor: VALOR_TESTE_CENTAVOS, criadoEm: cxAgoraIso(ctx) } };
+    try { await ctx.db.pedidoTesteAtualizar(pedido.id, { checkout_url: r.url, provedor_dados: dados }); } catch (e) { /* o link já existe */ }
+    return resultado(ctx, 'infinitepay.link', true, 'Link de teste criado (R$ 1,00). Nada é cobrado se ninguém pagar.',
+      'Criação de um link real de checkout na InfinitePay (InfiniteTag ' + parcial(env.INFINITEPAY_HANDLE) + ').',
+      { url: r.url, pedidoId: String(pedido.id), valorCentavos: VALOR_TESTE_CENTAVOS });
+  } catch (err) {
+    try { await ctx.db.pedidoTesteAtualizar(pedido.id, { status: 'cancelado' }); } catch (e) { /* ignora */ }
+    return resultado(ctx, 'infinitepay.link', false, traduzirErro('A InfinitePay', err) + ' Confira se a InfiniteTag está certa.', 'Criação de um link real de checkout na InfinitePay.');
+  }
+}
+
+function refsDoPedido(p) {
+  const d = p && p.provedor_dados && typeof p.provedor_dados === 'object' ? p.provedor_dados : {};
+  const refs = { transactionNsu: '', slug: '' };
+  [d.retorno, d.webhook && lerRefsInfinitePay(d.webhook.corpo)].forEach((f) => {
+    if (!f) return;
+    if (!refs.transactionNsu && f.transactionNsu) refs.transactionNsu = refInfinitePay(f.transactionNsu);
+    if (!refs.slug && f.slug) refs.slug = refInfinitePay(f.slug);
+  });
+  return refs;
+}
+
+async function verificarPagamentoTeste(ctx, corpo) {
+  const alvo = 'infinitepay.verificar';
+  if (!cxTem(ctx.env, 'INFINITEPAY_HANDLE')) return resultado(ctx, alvo, false, 'Segredo INFINITEPAY_HANDLE não existe.', 'Presença do segredo.');
+  let p = null;
+  try {
+    const id = String(corpo.pedidoId || '');
+    p = RE_UUID_CX.test(id) ? await ctx.db.pedidoTesteLer(id) : await ctx.db.pedidoTesteUltimo();
+  } catch (err) {
+    return resultado(ctx, alvo, false, colunaInexistente(err) ? 'Falta aplicar a migração 20261013120000_conexoes no banco.' : 'Não foi possível ler o pedido de teste no banco.', 'Leitura do pedido de teste.');
+  }
+  if (!p) return resultado(ctx, alvo, false, 'Nenhum pedido de teste encontrado. Gere um link de teste primeiro.', 'Leitura do pedido de teste.');
+  if (p.status === 'pago') return resultado(ctx, alvo, true, 'O pagamento de teste já está confirmado. O ciclo completo funciona.', 'Pedido de teste no banco.', { pedidoId: String(p.id), pago: true });
+  const guardadas = refsDoPedido(p);
+  const refs = { transactionNsu: refInfinitePay(corpo.transactionNsu) || guardadas.transactionNsu, slug: refInfinitePay(corpo.slug) || guardadas.slug };
+  const ip = criarInfinitePay({ handle: ctx.env.INFINITEPAY_HANDLE, fetch: fetchComPrazo(ctx.fetch, cxPrazo(ctx)) });
+  const verificado = 'Consulta do pagamento na InfinitePay (payment_check) do pedido de teste.';
+  try {
+    const c = await comPrazo(ip.conferir({ pedidoId: p.id, transactionNsu: refs.transactionNsu, slug: refs.slug }), cxPrazo(ctx));
+    if (c.pago && c.valorCentavos >= VALOR_TESTE_CENTAVOS) {
+      try {
+        await ctx.db.pedidoTesteAtualizar(p.id, { status: 'pago', metodo: c.metodo || '', provedor_ref: refs.transactionNsu || refs.slug || null });
+      } catch (e) { /* a confirmação vale mesmo sem gravar */ }
+      return resultado(ctx, alvo, true, 'Pagamento de teste confirmado pela InfinitePay. O ciclo completo funciona.', verificado, { pedidoId: String(p.id), pago: true });
+    }
+    return resultado(ctx, alvo, true, 'A InfinitePay respondeu: este pedido de teste ainda não foi pago. Pague o link (R$ 1,00) e verifique de novo.', verificado, { pedidoId: String(p.id), pago: false });
+  } catch (err) {
+    if (!refs.transactionNsu && !refs.slug && statusDoErro(err) >= 400 && statusDoErro(err) < 500) {
+      return resultado(ctx, alvo, true, 'Ainda não há pagamento para este link. Depois de pagar, a InfinitePay avisa o sistema; verifique de novo em 1 minuto.', verificado, { pedidoId: String(p.id), pago: false });
+    }
+    return resultado(ctx, alvo, false, traduzirErro('A InfinitePay', err), verificado, { pedidoId: String(p.id) });
+  }
+}
+
+const TESTES = {
+  funcoes: testarFuncoes,
+  clickup: testarClickUp,
+  asaas: testarAsaas,
+  ia: testarIa,
+  email: testarEmail,
+  'infinitepay.link': gerarLinkTeste,
+  'infinitepay.verificar': verificarPagamentoTeste
+};
+
+async function acaoTestar(ctx, corpo) {
+  const alvo = String((corpo && corpo.alvo) || '');
+  if (!Object.prototype.hasOwnProperty.call(TESTES, alvo)) return erro('Teste desconhecido.');
+  try {
+    return await TESTES[alvo](ctx, corpo || {});
+  } catch (err) {
+    try { console.error(err); } catch (e) { /* sem console */ }
+    return resultado(ctx, alvo, false, 'O teste falhou dentro do servidor. Tente de novo.', '');
+  }
+}
+
 // ======== supabase/funcoes-compartilhadas/admin.js ========
 // Ações da Edge Function "admin" (só administrador). Mesmos nomes, entradas e respostas {ok, ...} das
 // ações do Apps Script (Code.gs/ClickUp.gs/Relatorio.gs), mais usuarios.* do Supabase Auth.
@@ -1284,7 +2000,10 @@ const ACOES_ADMIN = {
   'relatorio.melhorarTextos': (ctx, c) => acaoRelatorioMelhorarTextos(ctx, c.relatorioToken, c.ids),
   'usuarios.listar': (ctx) => acaoUsuariosListar(ctx),
   'usuarios.convidar': (ctx, c) => acaoUsuariosConvidar(ctx, c),
-  'usuarios.remover': (ctx, c) => acaoUsuariosRemover(ctx, c.id)
+  'usuarios.remover': (ctx, c) => acaoUsuariosRemover(ctx, c.id),
+  // Aba Conexões (supabase/funcoes-compartilhadas/conexoes.js): nunca devolvem valores de segredos.
+  'conexoes.diagnostico': (ctx) => acaoDiagnostico(ctx),
+  'conexoes.testar': (ctx, c) => acaoTestar(ctx, c)
 };
 
 /** Executa uma ação já autenticada (ctx.usuario é admin). Sempre devolve {ok, ...}. */
@@ -1467,7 +2186,7 @@ function contextoBase(base) {
   const cu = criarClickUp({ token: env.CLICKUP_TOKEN, pastaId: env.CLICKUP_PASTA_ID, fetch: base.fetch, dormir: base.dormir, agora });
   return {
     env, agora, cu, db: base.db, authAdmin: base.authAdmin, fetch: base.fetch,
-    motor: base.motor, confiabilidade: base.confiabilidade
+    motor: base.motor, confiabilidade: base.confiabilidade, prazoConexoesMs: base.prazoConexoesMs
   };
 }
 
@@ -1571,7 +2290,10 @@ async function atenderWebhookClickUp(req, base) {
 // são testáveis no Node com um cliente falso.
 
 const NOMES_ENV = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'CLICKUP_TOKEN',
-  'CLICKUP_PASTA_ID', 'CLICKUP_WEBHOOK_SECRET', 'ANTHROPIC_API_KEY', 'SITE_URL'];
+  'CLICKUP_PASTA_ID', 'CLICKUP_WEBHOOK_SECRET', 'ANTHROPIC_API_KEY', 'SITE_URL',
+  // Só para a aba Conexões (presença) e o link de teste da InfinitePay: os valores nunca saem do servidor.
+  'PAGAMENTO_PROVEDOR', 'INFINITEPAY_HANDLE', 'ASAAS_API_KEY', 'ASAAS_WEBHOOK_TOKEN', 'ASAAS_AMBIENTE',
+  'RESEND_API_KEY', 'EMAIL_REMETENTE'];
 
 /** Lê os segredos pelo getter (Deno.env.get). Ausente -> ''. */
 function lerEnv(get) {
@@ -1580,6 +2302,7 @@ function lerEnv(get) {
   return env;
 }
 
+const COLUNAS_TESTE = 'id, status, valor_centavos, checkout_url, provedor_dados, criado_em, pago_em';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 function uuidValido(v) { return typeof v === 'string' && UUID.test(v); }
 
@@ -1661,6 +2384,21 @@ function criarDb(sb) {
     },
     async adminRemover(userId) {
       await dados(sb.from('admins').delete().eq('user_id', userId));
+    },
+    // Pedidos de TESTE da aba Conexões (pedidos.teste = true; migração 20261013120000_conexoes.sql).
+    async pedidoTesteInserir(reg) {
+      return dados(sb.from('pedidos').insert(reg).select('id, criado_em').single());
+    },
+    async pedidoTesteLer(id) {
+      if (!uuidValido(String(id || ''))) return null;
+      return dados(sb.from('pedidos').select(COLUNAS_TESTE).eq('id', id).eq('teste', true).maybeSingle());
+    },
+    async pedidoTesteUltimo() {
+      const linhas = await dados(sb.from('pedidos').select(COLUNAS_TESTE).eq('teste', true).order('criado_em', { ascending: false }).limit(1));
+      return (linhas && linhas[0]) || null;
+    },
+    async pedidoTesteAtualizar(id, campos) {
+      await dados(sb.from('pedidos').update(campos).eq('id', id).eq('teste', true));
     }
   };
 }
@@ -2974,7 +3712,8 @@ const DISC_RELATORIO = __motoresDisc.DISC_RELATORIO;
 // Edge Function "admin" — painel do recrutador (só administradores). Corpo {acao, ...}; resposta {ok, ...}.
 // Ações: clickup.status, clickup.listas, processo.dados, relatorio.rascunho, relatorio.salvar,
 // relatorio.publicar, relatorio.despublicar, relatorios.listar, relatorio.melhorarTextos,
-// usuarios.listar, usuarios.convidar, usuarios.remover. Lógica em supabase/funcoes-compartilhadas/.
+// usuarios.listar, usuarios.convidar, usuarios.remover, conexoes.diagnostico, conexoes.testar (aba Conexões).
+// Lógica em supabase/funcoes-compartilhadas/.
 // Para colar no painel do Supabase use dist/funcoes/admin/index.ts (gerado por npm run montar:funcoes).
 
 Deno.serve((req) => atenderAdmin(req, criarBaseSupabase(createClient, (n) => Deno.env.get(n), {

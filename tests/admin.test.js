@@ -248,6 +248,9 @@ test('abas e permissões: só o administrador usa o painel (gestor desativado ne
   assert.deepEqual(AD.abasDoPapel('gestor', true), [], 'gestor não vê nada');
   assert.deepEqual(AD.abasDoPapel('', true), []);
   assert.deepEqual(AD.abasDoPapel('', false), ['lista', 'comparativo', 'importar'], 'modo local, sem login');
+  assert.deepEqual(AD.abasDoPapel('admin', true, true, true).slice(-1), ['conexoes'], 'Conexões é a última');
+  assert.ok(!AD.abasDoPapel('', false, true, true).includes('conexoes'), 'sem servidor não há Conexões');
+  assert.deepEqual(AD.abasDoPapel('gestor', true, true, true), []);
   const g = AD.permissoes('gestor', true);
   assert.equal(g.excluir, false);
   assert.equal(g.criar, false);
@@ -421,9 +424,9 @@ test('admin.html: login por e-mail e senha, sem a tela de chave, carrega validac
   assert.ok(scripts.indexOf('js/relatorio-view.js') !== -1 && scripts.indexOf('js/relatorio-view.js') < iAdmin);
   assert.match(html, /Prévia: <span class="negrito">admin@previa\.com<\/span>, senha <span class="negrito">previa123<\/span>/);
   assert.doesNotMatch(html, /gestor@previa/);
-  assert.match(html, /data-aba="processos"[^>]*>Processos</);
+  assert.match(html, /data-aba="processos"[^]*?<span class="aba__texto">Processos</);
   assert.doesNotMatch(html, /data-aba="avaliacoes"/);
-  assert.match(html, /data-aba="empresas"[^>]*>Empresas</);
+  assert.match(html, /data-aba="empresas"[^]*?<span class="aba__texto">Empresas</);
   assert.match(html, /id="vista-empresas"/);
   assert.match(html, /id="vista-processos"/);
 });
@@ -613,7 +616,7 @@ test('painel: organograma antigo e o "topo" no localStorage foram removidos; usa
   const scripts = [...html.matchAll(/<script src="([^"]+)"/g)].map((m) => m[1]);
   assert.ok(scripts.indexOf('js/organograma.js') !== -1 && scripts.indexOf('js/organograma.js') < scripts.indexOf('js/admin.js'));
   assert.match(html, /href="assets\/organograma\.css"/);
-  assert.match(html, /data-aba="relatorios"[^>]*>Relatórios</);
+  assert.match(html, /data-aba="relatorios"[^]*?<span class="aba__texto">Relatórios</);
   assert.match(html, /id="vista-relatorios"/);
   assert.match(html, /id="faixa-banco"[^>]*hidden/);
 });
@@ -1004,4 +1007,94 @@ test('participantes: origem "pessoal" aparece como venda direta e o e-mail entra
   assert.equal(AD.textoOrigem({ origem: 'pessoal' }), 'Mapa pessoal (venda direta)');
   assert.equal(AD.textoOrigem({ origem: 'processo' }), 'Link geral');
   assert.equal(AD.correspondeBusca({ nome: 'Ana', email: 'ana.lima@gmail.com' }, 'lima@gmail'), true);
+});
+
+// ---------------------------------------------------------------------------
+// Aba Conexões: cartões montados a partir do diagnóstico (sem nunca mostrar valores de segredos)
+// ---------------------------------------------------------------------------
+
+function diagConexoes(extra) {
+  const seg = { SUPABASE_URL: true, SUPABASE_ANON_KEY: true, SUPABASE_SERVICE_ROLE_KEY: true, SITE_URL: true, PAGAMENTO_PROVEDOR: true,
+    INFINITEPAY_HANDLE: true, ASAAS_API_KEY: false, ASAAS_WEBHOOK_TOKEN: false, ASAAS_AMBIENTE: false, RESEND_API_KEY: true,
+    EMAIL_REMETENTE: false, CLICKUP_TOKEN: true, CLICKUP_PASTA_ID: false, CLICKUP_WEBHOOK_SECRET: false, ANTHROPIC_API_KEY: false };
+  const funcoes = ['admin', 'disc-sync', 'clickup-webhook', 'pagamento', 'asaas-webhook', 'infinitepay-webhook']
+    .map((nome) => ({ nome, publicada: nome !== 'asaas-webhook' }));
+  return Object.assign({
+    ok: true, em: '2026-10-05T12:00:00Z', siteAtual: 'https://disc.gsc.com.br/',
+    banco: { ms: 90, versao: 20261013120000, faltando: [], contagens: { processos: 2, respostas: 5, pessoas: 4, empresas: 1, pedidos: 0 }, ultimaResposta: '', erro: '' },
+    login: { sessao: true, email: 'dona@gsc.com.br', admin: true },
+    servidor: { siteUrl: 'https://disc.gsc.com.br/', segredos: seg, funcoes, auth: { cadastroFechado: true }, colunaTeste: true, pedidoTeste: null,
+      pagamento: { provedor: 'infinitepay', provedorEscolhido: 'infinitepay', handleParcial: 'ge***', asaasAmbiente: 'sandbox' } },
+    servidorEstado: 'ok', servidorErro: ''
+  }, extra || {});
+}
+const porId = (lista) => Object.fromEntries(lista.map((c) => [c.id, c]));
+
+test('Conexões: 10 cartões com estados; opcionais não contam como erro; testes externos mudam o estado', () => {
+  const c = porId(AD.cartoesConexoes(diagConexoes()));
+  assert.deepEqual(Object.keys(c), ['site', 'banco', 'login', 'funcoes', 'infinitepay', 'asaas', 'email', 'clickup', 'ia', 'despertador']);
+  assert.equal(c.site.status, 'ok');
+  assert.equal(c.banco.status, 'ok');
+  assert.ok(c.banco.linhas.some((l) => /Respostas: 5/.test(l)));
+  assert.equal(c.login.status, 'ok');
+  assert.equal(c.funcoes.status, 'ok', 'asaas-webhook é opcional sem o Asaas');
+  assert.ok(c.funcoes.linhas.includes('asaas-webhook — NÃO publicada (só precisa se usar o Asaas)'));
+  assert.equal(c.infinitepay.status, 'ok');
+  assert.ok(c.infinitepay.linhas.includes('InfiniteTag (INFINITEPAY_HANDLE): existe (ge***)'));
+  assert.deepEqual(c.infinitepay.acoes, ['testar', 'link', 'verificar']);
+  assert.equal(c.asaas.status, 'nao_configurado');
+  assert.ok(c.asaas.passos.some((p) => /Edge Functions → Secrets/.test(p)));
+  assert.equal(c.email.status, 'pendente');
+  assert.equal(c.clickup.status, 'pendente');
+  assert.equal(c.ia.status, 'nao_configurado');
+  assert.equal(c.despertador.status, 'manual');
+
+  const t = porId(AD.cartoesConexoes(diagConexoes(), {
+    clickup: { sucesso: true, mensagem: 'Conectado ao ClickUp como Ana.', em: '2026-10-05T12:01:00Z', verificado: 'GET /user' },
+    email: { sucesso: false, mensagem: 'O Resend recusou a chave.', em: '2026-10-05T12:01:00Z' },
+    'infinitepay.link': { sucesso: true, mensagem: 'Link criado.', detalhes: { url: 'https://checkout.infinitepay.io/x/1', pedidoId: 'p1' } }
+  }, { ia: true }));
+  assert.equal(t.clickup.status, 'ok');
+  assert.ok(t.clickup.linhas.includes('Conectado ao ClickUp como Ana.'));
+  assert.equal(t.clickup.quando, '2026-10-05T12:01:00Z');
+  assert.equal(t.email.status, 'erro');
+  assert.equal(t.email.erro, 'O Resend recusou a chave.');
+  assert.deepEqual(t.infinitepay.link, { url: 'https://checkout.infinitepay.io/x/1', pedidoId: 'p1' });
+  assert.equal(t.ia.status, 'testando');
+  assert.deepEqual(AD.resumoConexoes(Object.values(t)), { ok: 6, erro: 1, nao_configurado: 1, outros: 2 });
+});
+
+test('Conexões: migração faltando, SITE_URL diferente, cadastro aberto, função ausente e admin desatualizada', () => {
+  const d = diagConexoes({ siteAtual: 'https://outro.com/' });
+  d.banco.faltando = [{ nome: '20261013120000_conexoes', descricao: 'aba Conexões (pedido de teste fora das vendas)' }];
+  d.servidor.auth.cadastroFechado = false;
+  d.servidor.funcoes.find((f) => f.nome === 'pagamento').publicada = false;
+  const c = porId(AD.cartoesConexoes(d));
+  assert.equal(c.banco.status, 'erro');
+  assert.match(c.banco.erro, /aba Conexões \(pedido de teste fora das vendas\) \(20261013120000_conexoes\.sql\)/);
+  assert.equal(c.site.status, 'erro');
+  assert.equal(c.login.status, 'erro');
+  assert.ok(c.login.passos.some((p) => /Allow new users to sign up/.test(p)));
+  assert.equal(c.funcoes.status, 'erro');
+  assert.match(c.funcoes.erro, /pagamento/);
+  assert.ok(c.funcoes.passos.some((p) => p.includes('dist/funcoes/pagamento/index.ts')));
+  // Cópia local: endereço diferente não é erro.
+  assert.equal(porId(AD.cartoesConexoes(diagConexoes({ siteAtual: 'http://localhost:4173/' }))).site.status, 'ok');
+  // Sem SITE_URL: não configurado, com o passo.
+  const semSite = diagConexoes();
+  semSite.servidor.siteUrl = '';
+  assert.equal(porId(AD.cartoesConexoes(semSite)).site.status, 'nao_configurado');
+
+  const velha = porId(AD.cartoesConexoes(diagConexoes({ servidor: null, servidorEstado: 'desatualizada', servidorErro: 'x' })));
+  assert.equal(velha.funcoes.status, 'erro');
+  assert.equal(velha.funcoes.erro, 'A função admin está desatualizada: publique de novo.');
+  assert.ok(velha.funcoes.passos.some((p) => p.includes('dist/funcoes/admin/index.ts')));
+  assert.equal(velha.banco.status, 'ok', 'o banco é testado pelo navegador, mesmo sem a função');
+  assert.equal(velha.clickup.status, 'erro');
+});
+
+test('Conexões: nenhum texto dos cartões traz valor de segredo (só "existe"/"não existe" e o handle parcial)', () => {
+  const txt = JSON.stringify(AD.cartoesConexoes(diagConexoes()));
+  assert.ok(!/sk-ant-[A-Za-z0-9]{4}|pk_[A-Za-z0-9]{4}|re_[A-Za-z0-9]{4}|\$aact_|sb_secret/.test(txt));
+  assert.ok(!/Notus/i.test(txt));
 });

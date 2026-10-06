@@ -17,30 +17,71 @@
 <body>
   <a class="pular" href="#conteudo">Pular para o conteúdo</a>
 
+  <!-- Topo: tela de entrada e, no painel em tela estreita (< 1024px), a barra com o botão "Menu" -->
   <header class="topo vidro-cabecalho nao-imprimir">
     <div class="topo__dentro">
+      <button type="button" class="botao botao--claro botao--pequeno topo__menu" id="btn-menu" aria-controls="menu-lateral" aria-expanded="false" hidden>
+        <svg class="icone" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg> Menu
+      </button>
       <img class="logo-gsc topo__logo" src="assets/marca/gsc-logo.svg" alt="Gestão sem Caos" width="171" height="24">
       <p class="topo__titulo"><span class="seminegrito">Painel DISC</span> <span class="topo__empresa" id="nome-empresa"></span></p>
       <span class="selo topo__modo" id="modo-indicador"></span>
-      <div class="usuario" id="usuario-area" hidden>
-        <button type="button" class="usuario__botao" id="btn-usuario" aria-haspopup="true" aria-expanded="false" aria-controls="menu-usuario">
-          <span class="usuario__inicial" id="usuario-inicial" aria-hidden="true"></span>
-          <span class="usuario__nome" id="usuario-nome"></span>
-          <svg class="icone usuario__seta" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
-        </button>
-        <div class="usuario__menu vidro-janela" id="menu-usuario" hidden>
-          <div class="usuario__info">
-            <p class="seminegrito usuario__info-nome" id="menu-nome"></p>
-            <p class="t-nota texto-suave usuario__info-email" id="menu-email"></p>
-            <p class="t-nota texto-medio" id="menu-papel"></p>
-          </div>
-          <button type="button" class="usuario__item" id="btn-minha-foto">Minha foto</button>
-          <button type="button" class="usuario__item" id="btn-trocar-senha">Trocar senha</button>
-          <button type="button" class="usuario__item" id="btn-sair">Sair</button>
-        </div>
-      </div>
     </div>
   </header>
+
+  <!-- Menu lateral do painel (computador): grupos, itens com ícone e, embaixo, o usuário logado.
+       Em tela estreita vira gaveta (botão "Menu" no topo). Recolhível: só ícones (lembrado no localStorage). -->
+  <aside class="menu-lateral nao-imprimir" id="menu-lateral" aria-label="Menu do painel" hidden>
+    <div class="menu-lateral__topo">
+      <img class="logo-gsc menu-lateral__logo" src="assets/marca/gsc-logo.svg" alt="Gestão sem Caos" width="171" height="24">
+      <img class="menu-lateral__simbolo" src="assets/marca/gsc-simbolo.svg" alt="Gestão sem Caos" width="28" height="28">
+      <button type="button" class="menu-lateral__recolher" id="btn-recolher-menu" aria-controls="menu-lateral" aria-expanded="true" aria-label="Recolher menu" title="Recolher menu">
+        <svg class="icone" viewBox="0 0 24 24" aria-hidden="true"><path d="m15 6-6 6 6 6"/></svg>
+      </button>
+    </div>
+    <p class="menu-lateral__produto"><span class="seminegrito">Painel DISC</span> <span class="menu-lateral__modo" id="menu-modo"></span></p>
+    <nav class="abas menu-lateral__nav" aria-label="Seções do painel">
+        <div class="menu-grupo" data-grupo="selecao">
+          <p class="menu-grupo__titulo" id="menu-grupo-selecao">Seleção</p>
+          <button type="button" class="aba" data-aba="lista" title="Participantes" aria-current="page"><svg class="icone menu-icone" viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><path d="M16 4.5a3.5 3.5 0 0 1 0 7M21 20c0-2.6-1.6-4.8-4-5.6"/></svg><span class="aba__texto">Participantes</span><span class="aba__n tabular" id="aba-n-lista" aria-hidden="true"></span></button>
+          <button type="button" class="aba" data-aba="processos" title="Processos" hidden><svg class="icone menu-icone" viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="17" rx="2"/><path d="M9 4V3h6v1M8 10h8M8 14h8M8 18h5"/></svg><span class="aba__texto">Processos</span></button>
+          <button type="button" class="aba" data-aba="comparativo" title="Comparativo"><svg class="icone menu-icone" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/></svg><span class="aba__texto">Comparativo</span></button>
+          <button type="button" class="aba" data-aba="importar" id="aba-importar" title="Importar códigos" hidden><svg class="icone menu-icone" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M4 20h16"/></svg><span class="aba__texto">Importar códigos</span></button>
+        </div>
+        <div class="menu-grupo" data-grupo="empresas">
+          <p class="menu-grupo__titulo" id="menu-grupo-empresas">Empresas</p>
+          <button type="button" class="aba" data-aba="empresas" title="Empresas" hidden><svg class="icone menu-icone" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="8" width="18" height="13" rx="2"/><path d="M8 8V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v3M3 14h18"/></svg><span class="aba__texto">Empresas</span></button>
+          <button type="button" class="aba" data-aba="relatorios" title="Relatórios" hidden><svg class="icone menu-icone" viewBox="0 0 24 24" aria-hidden="true"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M8 13h8M8 17h6"/></svg><span class="aba__texto">Relatórios</span></button>
+        </div>
+        <div class="menu-grupo" data-grupo="vendas">
+          <p class="menu-grupo__titulo" id="menu-grupo-vendas">Vendas</p>
+          <button type="button" class="aba" data-aba="vendas" title="Vendas" hidden><svg class="icone menu-icone" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/></svg><span class="aba__texto">Vendas</span></button>
+        </div>
+        <div class="menu-grupo" data-grupo="config">
+          <p class="menu-grupo__titulo" id="menu-grupo-config">Configurações</p>
+          <button type="button" class="aba" data-aba="usuarios" title="Usuários" hidden><svg class="icone menu-icone" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/></svg><span class="aba__texto">Usuários</span></button>
+          <button type="button" class="aba" data-aba="conexoes" title="Conexões" hidden><svg class="icone menu-icone" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 7V3M15 7V3M7 7h10v4a5 5 0 0 1-10 0z"/><path d="M12 16v5"/></svg><span class="aba__texto">Conexões</span></button>
+        </div>
+    </nav>
+    <div class="usuario menu-lateral__usuario" id="usuario-area" hidden>
+      <div class="usuario__menu vidro-janela" id="menu-usuario" hidden>
+        <div class="usuario__info">
+          <p class="seminegrito usuario__info-nome" id="menu-nome"></p>
+          <p class="t-nota texto-suave usuario__info-email" id="menu-email"></p>
+          <p class="t-nota texto-medio" id="menu-papel"></p>
+        </div>
+        <button type="button" class="usuario__item" id="btn-minha-foto">Minha foto</button>
+        <button type="button" class="usuario__item" id="btn-trocar-senha">Trocar senha</button>
+        <button type="button" class="usuario__item" id="btn-sair">Sair</button>
+      </div>
+      <button type="button" class="usuario__botao" id="btn-usuario" aria-haspopup="true" aria-expanded="false" aria-controls="menu-usuario">
+        <span class="usuario__inicial" id="usuario-inicial" aria-hidden="true"></span>
+        <span class="usuario__nome" id="usuario-nome"></span>
+        <svg class="icone usuario__seta" viewBox="0 0 24 24" aria-hidden="true"><path d="m6 15 6-6 6 6"/></svg>
+      </button>
+    </div>
+  </aside>
+  <div class="menu-veu nao-imprimir" id="menu-veu" hidden></div>
 
   <main id="conteudo" class="conteudo" tabindex="-1">
     <!-- Login (modo com API): metade laranja com brilho e o logo, metade azul-escura com os campos -->
@@ -130,16 +171,6 @@
         <svg class="icone faixa-banco__icone" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
         <p class="faixa-banco__texto" id="faixa-banco-texto"></p>
       </div>
-      <nav class="abas nao-imprimir" aria-label="Seções do painel">
-        <button type="button" class="aba" data-aba="lista" aria-current="page">Participantes</button>
-        <button type="button" class="aba" data-aba="processos" hidden>Processos</button>
-        <button type="button" class="aba" data-aba="empresas" hidden>Empresas</button>
-        <button type="button" class="aba" data-aba="relatorios" hidden>Relatórios</button>
-        <button type="button" class="aba" data-aba="vendas" hidden>Vendas</button>
-        <button type="button" class="aba" data-aba="usuarios" hidden>Usuários</button>
-        <button type="button" class="aba" data-aba="comparativo">Comparativo</button>
-        <button type="button" class="aba" data-aba="importar" id="aba-importar" hidden>Importar códigos</button>
-      </nav>
 
       <!-- Aviso flutuante: não empurra nada da página -->
       <p class="aviso aviso-geral" id="aviso-geral" role="status" aria-live="polite" hidden></p>
@@ -185,6 +216,9 @@
       <!-- Vendas (venda direta do Mapa DISC): resumo, pedidos, cupons e pacotes; só quando o servidor tem a API de vendas -->
       <div id="vista-vendas" class="vista nao-imprimir" hidden></div>
       <div id="vista-usuarios" class="vista nao-imprimir" hidden></div>
+
+      <!-- Conexões (só admin, Supabase ou prévia): estado de cada integração, com "Testar" -->
+      <div id="vista-conexoes" class="vista nao-imprimir" hidden></div>
 
       <!-- Comparativo -->
       <div id="vista-comparativo" class="vista nao-imprimir" hidden></div>

@@ -3,7 +3,10 @@
 // são testáveis no Node com um cliente falso.
 
 export const NOMES_ENV = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'CLICKUP_TOKEN',
-  'CLICKUP_PASTA_ID', 'CLICKUP_WEBHOOK_SECRET', 'ANTHROPIC_API_KEY', 'SITE_URL'];
+  'CLICKUP_PASTA_ID', 'CLICKUP_WEBHOOK_SECRET', 'ANTHROPIC_API_KEY', 'SITE_URL',
+  // Só para a aba Conexões (presença) e o link de teste da InfinitePay: os valores nunca saem do servidor.
+  'PAGAMENTO_PROVEDOR', 'INFINITEPAY_HANDLE', 'ASAAS_API_KEY', 'ASAAS_WEBHOOK_TOKEN', 'ASAAS_AMBIENTE',
+  'RESEND_API_KEY', 'EMAIL_REMETENTE'];
 
 /** Lê os segredos pelo getter (Deno.env.get). Ausente -> ''. */
 export function lerEnv(get) {
@@ -12,6 +15,7 @@ export function lerEnv(get) {
   return env;
 }
 
+const COLUNAS_TESTE = 'id, status, valor_centavos, checkout_url, provedor_dados, criado_em, pago_em';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export function uuidValido(v) { return typeof v === 'string' && UUID.test(v); }
 
@@ -93,6 +97,21 @@ export function criarDb(sb) {
     },
     async adminRemover(userId) {
       await dados(sb.from('admins').delete().eq('user_id', userId));
+    },
+    // Pedidos de TESTE da aba Conexões (pedidos.teste = true; migração 20261013120000_conexoes.sql).
+    async pedidoTesteInserir(reg) {
+      return dados(sb.from('pedidos').insert(reg).select('id, criado_em').single());
+    },
+    async pedidoTesteLer(id) {
+      if (!uuidValido(String(id || ''))) return null;
+      return dados(sb.from('pedidos').select(COLUNAS_TESTE).eq('id', id).eq('teste', true).maybeSingle());
+    },
+    async pedidoTesteUltimo() {
+      const linhas = await dados(sb.from('pedidos').select(COLUNAS_TESTE).eq('teste', true).order('criado_em', { ascending: false }).limit(1));
+      return (linhas && linhas[0]) || null;
+    },
+    async pedidoTesteAtualizar(id, campos) {
+      await dados(sb.from('pedidos').update(campos).eq('id', id).eq('teste', true));
     }
   };
 }

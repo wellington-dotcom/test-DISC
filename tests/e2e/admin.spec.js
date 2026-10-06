@@ -57,7 +57,7 @@ test.describe('Admin sem API (importar código)', () => {
     await page.click('#btn-importar');
     await expect(page.locator('#resultado-importacao')).toContainText('1 já existia');
 
-    await page.locator('.aba[data-aba="lista"]').click();
+    await abrirAba(page, 'lista');
     await expect(page.locator('#lista-candidatos > li')).toHaveCount(2);
     await expect(page.locator('#contagem')).toHaveText('2 de 2 participantes');
     expect(await page.evaluate(() => window.__xss)).toBeUndefined();
@@ -106,14 +106,14 @@ test.describe('Admin sem API (importar código)', () => {
     // Marcar aprovado (local) e ver no comparativo
     await escolher(page, '#det-status', 'aprovado');
     await expect(page.locator('#aviso-geral')).toContainText('Aprovado');
-    await page.locator('.aba[data-aba="comparativo"]').click();
+    await abrirAba(page, 'comparativo');
     await expect(page.locator('#vista-comparativo')).toContainText('1 aprovado.');
     await expect(page.locator('#vista-comparativo .empilhados')).toBeVisible();
     await expect(page.locator('#resumo-lista .caixa--destaque')).toContainText('1');
 
     // Persistência local após recarregar
     await page.reload();
-    await page.locator('.aba[data-aba="lista"]').click();
+    await abrirAba(page, 'lista');
     await expect(page.locator('#lista-candidatos > li')).toHaveCount(2);
     await expect(page.locator('#lista-candidatos > li', { hasText: 'Carla' }).locator('.status')).toHaveText('Aprovado');
 
@@ -149,7 +149,7 @@ test('fluxo integrado: código gerado pelo candidato é importado no painel', as
   await page.fill('#campo-codigos', codigo);
   await page.click('#btn-importar');
   await expect(page.locator('#resultado-importacao')).toContainText('1 importado');
-  await page.locator('.aba[data-aba="lista"]').click();
+  await abrirAba(page, 'lista');
   const card = page.locator('#lista-candidatos > li', { hasText: 'Lucas Fernandes Rocha' });
   await expect(card.locator('.badge')).toHaveText('ID');
   await expect(card).toContainText('(31) 99999-0000');
@@ -162,6 +162,21 @@ test('fluxo integrado: código gerado pelo candidato é importado no painel', as
 /* ---------- Com servidor: login por e-mail e senha, papéis e token ---------- */
 
 // Entra no painel com e-mail e senha e espera a lista aparecer.
+// Menu lateral: em tela estreita (< 1024px) ele é uma gaveta aberta pelo botão "Menu" do topo.
+async function abrirGavetaSePreciso(page) {
+  if (await page.locator('#btn-menu').isVisible() && (await page.locator('#btn-menu').getAttribute('aria-expanded')) !== 'true') {
+    await page.click('#btn-menu');
+  }
+}
+async function abrirAba(page, aba) {
+  await abrirGavetaSePreciso(page);
+  await page.locator('.aba[data-aba="' + aba + '"]').click();
+}
+async function abrirMenuUsuario(page) {
+  await abrirGavetaSePreciso(page);
+  await page.click('#btn-usuario');
+}
+
 async function entrar(page, email, senha) {
   await expect(page.locator('#form-login')).toBeVisible();
   await page.fill('#campo-email', email);
@@ -172,7 +187,7 @@ async function entrar(page, email, senha) {
 }
 
 async function sairDoPainel(page) {
-  await page.click('#btn-usuario');
+  await abrirMenuUsuario(page);
   await expect(page.locator('#menu-usuario')).toBeVisible();
   await page.click('#btn-sair');
   await expect(page.locator('#form-login')).toBeVisible();
@@ -231,13 +246,13 @@ test.describe('Admin com API (servidor simulado por page.route)', () => {
     expect(await page.evaluate(() => sessionStorage.getItem('disc_admin_token'))).toBe(TOKEN);
     expect(await page.evaluate(() => JSON.stringify(sessionStorage))).not.toContain('senha-certa-1');
     await expect(page.locator('#usuario-nome')).toHaveText('Ana Admin');
-    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'empresas', 'relatorios', 'usuarios', 'comparativo', 'importar']);
+    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'comparativo', 'importar', 'empresas', 'relatorios', 'usuarios']);
     await expect(page.locator('.aba[data-aba="processos"]')).toHaveText('Processos');
     // Apps Script (legado): a aba Empresas só avisa que precisa do Supabase, sem chamar a API
-    await page.locator('.aba[data-aba="empresas"]').click();
+    await abrirAba(page, 'empresas');
     await expect(page.locator('#empresas-indisponivel')).toContainText('Disponível com o servidor Supabase');
     await expect(page.locator('#btn-nova-empresa')).toHaveCount(0);
-    await page.locator('.aba[data-aba="lista"]').click();
+    await abrirAba(page, 'lista');
 
     // Card mostra avaliação e empresa; o perfil é recalculado das respostas (2143 -> SC), ignorando resultado.codigo
     await expect(page.locator('#lista-candidatos > li', { hasText: 'Rafael' }).locator('.card-origem')).toHaveText('Vendedor 2026 · Loja Modelo');
@@ -299,12 +314,12 @@ test.describe('Admin com API (servidor simulado por page.route)', () => {
     chamadas.filter((c) => c.corpo.acao !== 'login').forEach((c) => expect(c.corpo.token).toBe(TOKEN));
 
     // Comparativo dos aprovados
-    await page.locator('.aba[data-aba="comparativo"]').click();
+    await abrirAba(page, 'comparativo');
     await expect(page.locator('#vista-comparativo')).toContainText('1 aprovado.');
     await expect(page.locator('#vista-comparativo')).toContainText('Rafael Moreira Lima');
 
     // Exportar CSV
-    await page.locator('.aba[data-aba="lista"]').click();
+    await abrirAba(page, 'lista');
     const [download] = await Promise.all([page.waitForEvent('download'), page.click('#btn-csv')]);
     expect(download.suggestedFilename()).toMatch(/^participantes-disc-\d{4}-\d{2}-\d{2}\.csv$/);
     const csv = fs.readFileSync(await download.path(), 'utf8');
@@ -360,7 +375,7 @@ test.describe('Admin com API (servidor simulado por page.route)', () => {
     await expect(page.locator('#resultado-importacao')).toContainText('consentimento');
     expect(chamadas.filter((c) => c.corpo.acao === 'enviar').length).toBe(1);
 
-    await page.locator('.aba[data-aba="lista"]').click();
+    await abrirAba(page, 'lista');
     await expect(page.locator('#lista-candidatos > li', { hasText: 'Helena Prado Souza' })).toHaveCount(1);
     expect(erros).toEqual([]);
   });
@@ -431,14 +446,14 @@ test.describe('Admin com API (servidor simulado por page.route)', () => {
 
     await entrar(page, 'ana@empresa.com', 'senha-certa-1');
     // Usuários: só administrador; gestor antigo aparece como desativado
-    await page.locator('.aba[data-aba="usuarios"]').click();
+    await abrirAba(page, 'usuarios');
     await expect(page.locator('#lista-usuarios [data-email="gestor@empresa.com"]')).toContainText('gestor (desativado nesta versão)');
     await page.click('#btn-novo-usuario');
     await expect(page.locator('#us-papel')).toHaveCount(0);
     await page.click('#janela-cancelar');
 
     // Novo processo com config
-    await page.locator('.aba[data-aba="processos"]').click();
+    await abrirAba(page, 'processos');
     await page.click('#btn-novo-processo');
     await page.fill('#proc-nome', 'Escrevente 2026');
     await page.fill('#proc-empresa', 'Cartório Exemplo');
@@ -583,7 +598,7 @@ test.describe('Admin com API (servidor simulado por page.route)', () => {
     await page.setViewportSize({ width: 375, height: 800 });
     await page.goto('/admin.html');
     await entrar(page, 'ana@empresa.com', 'senha-certa-1');
-    await page.locator('.aba[data-aba="processos"]').click();
+    await abrirAba(page, 'processos');
     await page.click('#btn-novo-processo');
     await page.fill('#proc-nome', 'Recepção 2027');
     await expect(page.locator('#proc-mostrar + span')).toContainText('relatório DISC completo');
@@ -854,7 +869,7 @@ test.describe('Admin na prévia (API_URL "simulada")', () => {
     await expect(page.locator('#resultado-importacao')).toContainText('1 importado');
     await expect(page.locator('#resultado-importacao')).toContainText('Idade não informada');
 
-    await page.locator('.aba[data-aba="lista"]').click();
+    await abrirAba(page, 'lista');
     await expect(page.locator('#lista-candidatos > li')).toHaveCount(seed.pessoas + 2);
     const paula = page.locator('#lista-candidatos > li', { hasText: 'Paula Mendes Rocha' });
     await expect(paula.locator('.protocolo__valor')).toHaveText(r1.protocolo);
@@ -893,10 +908,11 @@ test.describe('Admin na prévia (API_URL "simulada")', () => {
     await entrar(page, 'admin@previa.com', 'previa123');
     // A prévia mostra Vendas (depois de Relatórios) quando a API simulada tem a venda direta.
     const temVendas = await page.evaluate(() => typeof window.DISC_API.listarPedidos === 'function');
-    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'empresas', 'relatorios'].concat(temVendas ? ['vendas'] : []).concat(['usuarios', 'comparativo', 'importar']));
+    // Menu lateral agrupado: Seleção, Empresas, Vendas (se houver) e Configurações.
+    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'comparativo', 'importar', 'empresas', 'relatorios'].concat(temVendas ? ['vendas'] : []).concat(['usuarios', 'conexoes']));
 
     // Processo novo
-    await page.locator('.aba[data-aba="processos"]').click();
+    await abrirAba(page, 'processos');
     await page.click('#btn-novo-processo');
     await page.fill('#proc-nome', 'Atendente 2027');
     await page.fill('#proc-empresa', 'Padaria Teste E2E');
@@ -923,7 +939,7 @@ test.describe('Admin na prévia (API_URL "simulada")', () => {
     expect(msg).toContain('Padaria Teste E2E');
 
     // Lista de processos: card com código; sem respostas pode excluir
-    await page.locator('.aba[data-aba="processos"]').click();
+    await abrirAba(page, 'processos');
     const card = page.locator('.proc-card', { hasText: 'Atendente 2027' });
     await expect(card.locator('.av-codigo')).toHaveText(codigo);
     await expect(card).toContainText('Padaria Teste E2E');
@@ -931,7 +947,7 @@ test.describe('Admin na prévia (API_URL "simulada")', () => {
 
     // Uma resposta chega pelo link novo; o filtro "Processo" mostra só ela
     await page.evaluate((p) => window.DISC_API.enviar(p), payload({ id: 'e2e-padaria-01', nome: 'Marcos Padaria Teste', idade: 25, avaliacao: codigo }));
-    await page.locator('.aba[data-aba="lista"]').click();
+    await abrirAba(page, 'lista');
     await page.click('#btn-atualizar');
     await expect(page.locator('#lista-candidatos > li', { hasText: 'Marcos Padaria Teste' })).toHaveCount(1);
     const total = await page.locator('#lista-candidatos > li').count();
@@ -940,7 +956,7 @@ test.describe('Admin na prévia (API_URL "simulada")', () => {
     await expect(page.locator('#lista-candidatos > li .card-origem')).toHaveText('Atendente 2027 · Padaria Teste E2E');
     await escolher(page, '#filtro-processo', '');
     // "Ver participantes" na página do processo já aplica o filtro
-    await page.locator('.aba[data-aba="processos"]').click();
+    await abrirAba(page, 'processos');
     await page.locator('.proc-card', { hasText: 'Atendente 2027' }).locator('[data-acao="abrir"]').click();
     await page.click('#btn-ver-participantes');
     await expect(page.locator('#filtro-processo')).toHaveAttribute('value', codigo);
@@ -965,7 +981,7 @@ test.describe('Admin na prévia (API_URL "simulada")', () => {
     await configurar(page, { API_URL: 'simulada' });
     await page.goto('/admin.html');
     await entrar(page, 'admin@previa.com', 'previa123');
-    await page.locator('.aba[data-aba="processos"]').click();
+    await abrirAba(page, 'processos');
     // O processo de exemplo da prévia é o que tem lista do ClickUp ligada
     const card = page.locator('.proc-card', { hasText: 'Lista do ClickUp ligada' }).first();
     await card.locator('[data-acao="abrir"]').click();
@@ -1038,7 +1054,7 @@ test.describe('Admin na prévia (API_URL "simulada")', () => {
     await expect(page.locator('.aba[data-aba="usuarios"]')).toBeVisible();
 
     // Trocar senha pelo menu do usuário
-    await page.click('#btn-usuario');
+    await abrirMenuUsuario(page);
     await page.click('#btn-trocar-senha');
     await page.fill('#ts-atual', 'senha-nova-1');
     await page.fill('#ts-nova', 'outra-senha-2');
@@ -1212,7 +1228,7 @@ test.describe('Admin com Supabase (DISC_API.MODO "supabase", API falsa)', () => 
     await entrar(page, 'dona@empresa.com', 'senha-boa-1');
     await expect(page.locator('#aviso-geral')).toContainText('você agora é o administrador do painel');
     await expect(page.locator('#usuario-nome')).toHaveText('Dona do Sistema');
-    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'empresas', 'relatorios', 'usuarios', 'comparativo', 'importar']);
+    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'comparativo', 'importar', 'empresas', 'relatorios', 'usuarios', 'conexoes']);
     expect(await page.evaluate(() => sessionStorage.getItem('disc_admin_token'))).toBe('tk-dona');
 
     // Segundo login não repete o aviso
@@ -1285,7 +1301,7 @@ test.describe('Admin com Supabase (DISC_API.MODO "supabase", API falsa)', () => 
     await simularSupabase(page);
     await page.goto('/admin.html');
     await entrar(page, 'dona@empresa.com', 'senha-boa-1');
-    await page.locator('.aba[data-aba="usuarios"]').click();
+    await abrirAba(page, 'usuarios');
     const lista = page.locator('#lista-usuarios');
     await expect(lista.locator('li')).toHaveCount(2);
     await expect(lista.locator('[data-email="dona@empresa.com"]')).toContainText('Dona do Sistema (você)');
@@ -1472,10 +1488,10 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await simularEmpresas(page);
     await page.goto('/admin.html');
     await entrar(page, 'dona@empresa.com', 'senha-boa-1');
-    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'empresas', 'relatorios', 'usuarios', 'comparativo', 'importar']);
+    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'comparativo', 'importar', 'empresas', 'relatorios', 'usuarios', 'conexoes']);
 
     // Cadastro: duas empresas
-    await page.locator('.aba[data-aba="empresas"]').click();
+    await abrirAba(page, 'empresas');
     await expect(page.locator('#lista-empresas')).toContainText('Nenhuma empresa cadastrada');
     await page.click('#btn-nova-empresa');
     await page.click('#janela-ok');
@@ -1637,7 +1653,7 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await expect(page.locator('#lista-empresas > li').last()).toHaveAttribute('data-nome', 'Filial Norte');
 
     // Detalhe do candidato que é colaborador: atalhos "Relatório da pessoa" e "Como liderar"
-    await page.locator('.aba[data-aba="lista"]').click();
+    await abrirAba(page, 'lista');
     await page.locator('#lista-candidatos > li', { hasText: 'Bruno Lima Costa' }).getByRole('button', { name: /Ver detalhes/ }).click();
     await expect(page.locator('#det-vinculo')).toContainText('Colaborador(a) de Loja Modelo');
     // Natural × exigido, índice de esforço e mapa (Bruno respondeu a Parte 2; Diego não)
@@ -1674,7 +1690,7 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await simularEmpresas(page);
     await page.goto('/admin.html');
     await entrar(page, 'dona@empresa.com', 'senha-boa-1');
-    await page.locator('.aba[data-aba="empresas"]').click();
+    await abrirAba(page, 'empresas');
     await page.click('#btn-nova-empresa');
     await page.fill('#emp-nome', 'Loja Modelo');
     await page.fill('#emp-cidade', 'Boa Vista / RR');
@@ -1767,7 +1783,7 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await page.goto('/admin.html');
     await entrar(page, 'dona@empresa.com', 'senha-boa-1');
     await expect(page.locator('#usuario-inicial img')).toHaveCount(0);
-    await page.click('#btn-usuario');
+    await abrirMenuUsuario(page);
     await page.click('#btn-minha-foto');
     await expect(page.locator('#janela-minha-foto')).toBeVisible();
     const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAIAAAAmkwkpAAAAEElEQVR4nGP47MIKRwzEcQAQshPB9DJ7EQAAAABJRU5ErkJggg==', 'base64');
@@ -1780,11 +1796,11 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     expect(foto).toMatch(/^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/);
     expect(foto.length).toBeLessThanOrEqual(40000);
     await expect(page.locator('#usuario-inicial img')).toHaveCount(1);
-    await page.locator('.aba[data-aba="usuarios"]').click();
+    await abrirAba(page, 'usuarios');
     await expect(page.locator('#lista-usuarios li[data-email="dona@empresa.com"] .avatar img')).toHaveCount(1);
     await expect(page.locator('#lista-usuarios li[data-email="pendente@empresa.com"] .avatar__iniciais')).toHaveText('CP');
     // Remover
-    await page.click('#btn-usuario');
+    await abrirMenuUsuario(page);
     await page.click('#btn-minha-foto');
     await page.click('#btn-minha-foto-remover');
     await page.click('#janela-ok');
@@ -1800,7 +1816,7 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await simularEmpresas(page);
     await page.goto('/admin.html');
     await entrar(page, 'dona@empresa.com', 'senha-boa-1');
-    await page.locator('.aba[data-aba="empresas"]').click();
+    await abrirAba(page, 'empresas');
     await page.click('#btn-nova-empresa');
     await page.fill('#emp-nome', 'Loja Modelo');
     await page.click('#janela-ok');
@@ -1819,7 +1835,7 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     expect(salvo).toMatchObject({ tipo: 'equipe', empresaId: 'emp1', empresa: 'Loja Modelo' });
 
     // Seleção comum: trocar o tipo some com o texto da equipe
-    await page.locator('.aba[data-aba="processos"]').click();
+    await abrirAba(page, 'processos');
     await page.click('#btn-novo-processo');
     await expect(page.locator('#proc-equipe-texto')).toBeHidden();
     await escolher(page, '#proc-tipo', 'equipe');
@@ -1828,7 +1844,7 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await expect(page.locator('#proc-equipe-texto')).toContainText('cadastro da empresa Loja Modelo');
 
     // Página da empresa mostra o link do teste da equipe
-    await page.locator('.aba[data-aba="empresas"]').click();
+    await abrirAba(page, 'empresas');
     await page.locator('#lista-empresas li[data-nome="Loja Modelo"] [data-acao="abrir"]').click();
     await expect(page.locator('#emp-link-teste')).toContainText('index.html?a=EQ');
     expect(erros).toEqual([]);
@@ -1840,7 +1856,7 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await simularEmpresas(page);
     await page.goto('/admin.html');
     await entrar(page, 'dona@empresa.com', 'senha-boa-1');
-    await page.locator('.aba[data-aba="empresas"]').click();
+    await abrirAba(page, 'empresas');
     await page.click('#btn-nova-empresa');
     await page.fill('#emp-nome', 'Empresa com um nome bem comprido para testar a quebra de linha no celular');
     await page.click('#janela-ok');
@@ -1874,7 +1890,7 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await page.goto('/admin.html');
     await entrar(page, 'admin@previa.com', 'previa123');
     await expect(page.locator('#faixa-banco')).toBeHidden();
-    await page.locator('.aba[data-aba="empresas"]').click();
+    await abrirAba(page, 'empresas');
     const card = page.locator('#lista-empresas > li').first();
     await expect(card).toBeVisible();
     await card.locator('[data-acao="abrir"]').click();
@@ -1901,7 +1917,7 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await entrar(page, 'admin@previa.com', 'previa123');
 
     // Contagens do seed (não números fixos): colaboradores e quantos têm a Parte 2
-    await page.locator('.aba[data-aba="empresas"]').click();
+    await abrirAba(page, 'empresas');
     const card = page.locator('#lista-empresas > li').first();
     await card.locator('[data-acao="abrir"]').click();
     await expect(page.locator('#lista-colaboradores > li').first()).toBeVisible();
@@ -1925,7 +1941,7 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     expect(await semRolagemLateral(page)).toBe(true);
 
     // Detalhe de uma resposta com a Parte 2
-    await page.locator('.aba[data-aba="lista"]').click();
+    await abrirAba(page, 'lista');
     const linhas = page.locator('#lista-candidatos > li');
     await expect(linhas.first()).toBeVisible();
     const n = await linhas.count();
@@ -1952,7 +1968,7 @@ test.describe('Empresas (Supabase, API falsa)', () => {
   ];
 
   async function criarLojaModelo(page) {
-    await page.locator('.aba[data-aba="empresas"]').click();
+    await abrirAba(page, 'empresas');
     await page.click('#btn-nova-empresa');
     await page.fill('#emp-nome', 'Loja Modelo');
     await page.fill('#emp-cidade', 'Boa Vista / RR');
@@ -1970,7 +1986,7 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await expect(page.locator('#faixa-banco')).toBeHidden();
     await criarLojaModelo(page);
 
-    await page.locator('.aba[data-aba="lista"]').click();
+    await abrirAba(page, 'lista');
     await page.locator('#lista-candidatos > li', { hasText: 'Diego Rocha' }).getByRole('button', { name: /Ver detalhes/ }).click();
     await expect(page.locator('#det-avaliacao')).toContainText('Vendedor Centro');
     await expect(page.locator('#btn-mover-processo')).toBeVisible();
@@ -2029,7 +2045,7 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await expect(page.locator('#lista-colaboradores > li')).toHaveCount(1);
 
     // Modelos: 5 cartões com para quem é e o que responde
-    await page.locator('.aba[data-aba="relatorios"]').click();
+    await abrirAba(page, 'relatorios');
     await expect(page.locator('#rel-subaba-modelos')).toHaveAttribute('aria-current', 'page');
     const cartoes = page.locator('#lista-modelos > li');
     await expect(cartoes.locator('.modelo-card__titulo')).toHaveText(['Pessoa · completo', 'Pessoa · simples', 'Como liderar', 'Equipe', 'Processo seletivo']);
@@ -2142,6 +2158,11 @@ const API_VENDAS_FALSA = `
   function anotar(nome, args) { sb.chamadas.push({ nome: nome, args: JSON.parse(JSON.stringify(Array.prototype.slice.call(args))) }); }
   var agora = Date.now();
   function ha(horas) { return new Date(agora - horas * 3600000).toISOString(); }
+  // "Hoje" de verdade mesmo logo depois da meia-noite: nunca recua além de metade do tempo desde 00:00 local.
+  var meiaNoite = new Date(agora); meiaNoite.setHours(0, 0, 0, 0);
+  // Escala proporcional (mantém a ordem entre os pedidos): até 0,5 h cabe sempre dentro de hoje.
+  var escalaHoje = Math.min(1, (agora - meiaNoite.getTime()) / 3600000 / 2 / 0.5);
+  function recente(horas) { return ha(horas * escalaHoje); }
   function resp(id, nome, tel, email, origem, respostas) {
     return { id: id, nome: nome, telefone: tel, email: email, origem: origem, status: 'em_analise', respostas: respostas,
       inicio: ha(30), fim: ha(29), duracaoSeg: 540, avaliacao: origem === 'pessoal' ? '' : 'SEL1', avaliacaoNome: origem === 'pessoal' ? '' : 'Vendedor 2026', recebidoEm: ha(29) };
@@ -2153,9 +2174,9 @@ const API_VENDAS_FALSA = `
   ];
   sb.pedidos = [
     { id: 'ped-ana-0001', resposta_id: 'r-ana', pacote: 'completo', valor_centavos: 2900, status: 'pago', nome: 'Ana Lima Prado', email: 'ana.lima@gmail.com',
-      telefone: '5511911112222', criado_em: ha(0.5), pago_em: ha(0.4), metodo: 'pix', asaas_cobranca_id: 'pay_123abc' },
+      telefone: '5511911112222', criado_em: recente(0.5), pago_em: recente(0.4), metodo: 'pix', asaas_cobranca_id: 'pay_123abc' },
     { id: 'ped-davi-002', resposta_id: 'r-davi', pacote: 'completo_plus', valor_centavos: 4900, status: 'aguardando', nome: 'Davi Souza', email: 'davi@gmail.com',
-      criado_em: ha(0.2), metodo: 'pix', faturaUrl: 'https://sandbox.asaas.com/i/davi123' },
+      criado_em: recente(0.2), metodo: 'pix', faturaUrl: 'https://sandbox.asaas.com/i/davi123' },
     { id: 'ped-bia-0003', resposta_id: 'r-bia', pacote: 'completo_plus', valor_centavos: 3920, status: 'pago', nome: 'Beatriz Nunes', email: 'bia@uol.com.br', cupom: 'LANC20',
       criado_em: ha(50), pago_em: ha(50), metodo: 'cartao' },
     { id: 'ped-eva-0004', resposta_id: 'r-eva', pacote: 'completo', valor_centavos: 0, status: 'cortesia', nome: 'Eva Reis', email: 'eva@gmail.com', cupom: 'PARCEIRO100',
@@ -2221,10 +2242,10 @@ test.describe('Vendas (venda direta, API falsa)', () => {
     await simularVendas(page);
     await page.goto('/admin.html');
     await entrar(page, 'dona@empresa.com', 'senha-boa-1');
-    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'empresas', 'relatorios', 'vendas', 'usuarios', 'comparativo', 'importar']);
+    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'comparativo', 'importar', 'empresas', 'relatorios', 'vendas', 'usuarios', 'conexoes']);
 
     // Resumo: receita com centavos, vendas, ticket médio, aguardando, conversão e últimos pedidos
-    await page.locator('.aba[data-aba="vendas"]').click();
+    await abrirAba(page, 'vendas');
     await expect(page.locator('#vd-subaba-resumo')).toHaveAttribute('aria-current', 'page');
     await expect(page.locator('#vd-hoje')).toContainText('R$ 29,00');
     await expect(page.locator('#vd-hoje')).toContainText('1 venda');
@@ -2412,7 +2433,7 @@ test.describe('Vendas (venda direta, API falsa)', () => {
     await expect(page.locator('#vista-vendas')).toBeVisible();
 
     // Participante pessoal sem pedido pago fica com o aviso; quem veio de processo não tem o bloco
-    await page.locator('.aba[data-aba="lista"]').click();
+    await abrirAba(page, 'lista');
     await cards.filter({ hasText: 'Caio Processo' }).getByRole('button', { name: /Ver detalhes/ }).click();
     await expect(page.locator('#det-pedido')).toHaveCount(0);
     expect(erros).toEqual([]);
@@ -2437,7 +2458,7 @@ test('prévia (API simulada): aba Vendas abre as quatro subabas sem erro', async
   await entrar(page, 'admin@previa.com', 'previa123');
   const temVendas = await page.evaluate(() => typeof window.DISC_API.listarPedidos === 'function');
   test.skip(!temVendas, 'API simulada ainda sem a venda direta');
-  await page.locator('.aba[data-aba="vendas"]').click();
+  await abrirAba(page, 'vendas');
   await expect(page.locator('#vd-hoje')).toContainText('R$');
   await expect(page.locator('#vd-erro')).toHaveCount(0);
   await page.click('#vd-subaba-pedidos');

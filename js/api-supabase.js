@@ -135,6 +135,15 @@
  *   resumoVendas(token, 'hoje'|'7d'|'30d'|'mes'|'tudo') -> {ok, periodo, hoje:{vendas, receitaCentavos}, mes:{…}, vendas,
  *     receitaCentavos, cortesias, estornos, aguardando, resumos, compras, conversao (0–1 = compras/resumos), porPacote:[…]}
  *   listar: item.origem = 'processo' | 'pessoal'.
+ * Aba Conexões do painel (só admin; migração 20261013120000_conexoes.sql + ações conexoes.* da Edge Function "admin"):
+ *   diagnosticoConexoes(token) -> {ok, em, siteAtual, banco:{ms, versao, semFuncao, faltando:[{nome, descricao}],
+ *     contagens:{processos, respostas, pessoas, empresas, pedidos (sem os de teste)}, ultimaResposta, erro},
+ *     login:{sessao, email, admin}, servidor: resposta de conexoes.diagnostico | null,
+ *     servidorEstado:'ok'|'desatualizada'|'ausente'|'erro', servidorErro}. Nunca traz valores de segredos.
+ *   testarConexao(token, alvo, {pedidoId?, transactionNsu?, slug?}) -> {ok, alvo, sucesso, mensagem, verificado, em, detalhes?}
+ *     alvo 'banco' (aqui no navegador) | 'funcoes' | 'clickup' | 'asaas' | 'ia' | 'email' | 'infinitepay.link' |
+ *     'infinitepay.verificar' (no servidor, prazo de 8 s por teste). Função admin antiga: sucesso false +
+ *     estadoServidor 'desatualizada'. listarPedidos esconde os pedidos de teste (pedidos.teste).
  * Só na prévia (js/api-simulada.js): simularPagamento(pedidoId) -> {ok, status:'pago'} (botão "Simular pagamento aprovado").
  *
  * No Node (testes): require('./js/api-supabase.js').criar({ supabase: libFalsa, url, chave, local?, timeoutMs? }).
@@ -155,6 +164,8 @@
   var MSG_LINK_INVALIDO = 'Link inválido ou avaliação encerrada. Fale com quem enviou o link.';
   var MSG_REL_NAO_ENCONTRADO = 'Relatório não encontrado ou fora do ar.';
   var MSG_LINK_EXPIRADO = 'O link expirou ou já foi usado. Peça outro em "Esqueci minha senha".';
+  var MSG_ADMIN_DESATUALIZADA = 'A função admin está desatualizada: publique de novo.';
+  var MSG_ADMIN_AUSENTE = 'A função admin não está publicada no Supabase.';
   var MSG_BANCO_DESATUALIZADO = 'O banco de dados está desatualizado. Peça para aplicar as migrações (veja docs/SUPABASE.md).';
   // Migrações (supabase/migrations), na ordem, e como conferir cada uma sem a função versao_banco.
   var MIGRACOES = [
@@ -166,9 +177,10 @@
     { nome: '20261010120000_mover_versao', descricao: 'mover resposta, contratar, topo do organograma e versão do banco',
       tabela: 'respostas', coluna: 'historico_processos' },
     { nome: '20261011120000_vendas', descricao: 'venda direta (pacotes, cupons, pedidos)', tabela: 'pedidos', coluna: 'id' },
-    { nome: '20261012120000_infinitepay', descricao: 'InfinitePay (provedor do pagamento)', tabela: 'pedidos', coluna: 'provedor_dados' }
+    { nome: '20261012120000_infinitepay', descricao: 'InfinitePay (provedor do pagamento)', tabela: 'pedidos', coluna: 'provedor_dados' },
+    { nome: '20261013120000_conexoes', descricao: 'aba Conexões (pedido de teste fora das vendas)', tabela: 'pedidos', coluna: 'teste' }
   ];
-  var VERSAO_ATUAL = 20261012120000;
+  var VERSAO_ATUAL = 20261013120000;
   var MSG_PRIMEIRO_ACESSO = 'Com o Supabase não há chave de primeiro acesso: crie o seu usuário no painel do Supabase ' +
     '(Authentication > Users > Add user) e entre com esse e-mail e senha. O primeiro login vira administrador.';
   var MSG_REDEFINIR = 'Com o Supabase cada pessoa cria a própria senha nova pelo "Esqueci minha senha", na tela de entrada.';
@@ -1407,7 +1419,8 @@
             return q.order('criado_em', { ascending: false }).limit(lim);
           });
         }).then(function (linhas) {
-          var lista = (Array.isArray(linhas) ? linhas : []).map(pedidoDaLinha);
+          // Pedidos de teste da aba Conexões (pedidos.teste) não são vendas: ficam fora da lista e da receita.
+          var lista = (Array.isArray(linhas) ? linhas : []).filter(function (l) { return !(l && l.teste === true); }).map(pedidoDaLinha);
           var busca = normalizarNomeCampo(f.busca || '');
           if (busca) {
             lista = lista.filter(function (p) {
@@ -1912,8 +1925,94 @@
         var dados = { relatorioToken: relatorioToken };
         if (Array.isArray(ids) && ids.length) dados.ids = ids.slice();
         return admin(token, 'relatorio.melhorarTextos', dados, prazoLongo);
+      }),
+
+      // --- aba Conexões (só admin): banco testado aqui; o resto pela Edge Function "admin" (nunca valores de segredos) ---
+      diagnosticoConexoes: seguro(function (token) {
+        return exigirSessao(token).then(function (sessao) {
+          return Promise.all([
+            diagnosticoBanco(),
+            rpc('e_admin').then(function (x) { return x === true; }, function () { return null; }),
+            servidorConexoes(token, 'conexoes.diagnostico', null)
+          ]).then(function (r) {
+            var u = (sessao && sessao.user) || {};
+            return { ok: true, em: new Date().toISOString(), siteAtual: baseDoSite(local), banco: r[0],
+              login: { sessao: true, email: String(u.email || ''), admin: r[1] },
+              servidor: r[2].dados, servidorEstado: r[2].estado, servidorErro: r[2].erro };
+          });
+        });
+      }),
+      testarConexao: seguro(function (token, alvo, opcoes) {
+        var a = String(alvo || '');
+        if (a === 'banco') {
+          return exigirSessao(token).then(diagnosticoBanco).then(function (b) {
+            return { ok: true, alvo: 'banco', sucesso: !b.erro, em: new Date().toISOString(), banco: b,
+              mensagem: b.erro ? b.erro : 'O banco respondeu em ' + b.ms + ' ms.', verificado: 'Conexão, versão do banco e leitura das tabelas principais.' };
+          });
+        }
+        var dados = { alvo: a };
+        if (opcoes && typeof opcoes === 'object') ['pedidoId', 'transactionNsu', 'slug'].forEach(function (k) {
+          if (opcoes[k]) dados[k] = limparTexto(opcoes[k], 120);
+        });
+        return servidorConexoes(token, 'conexoes.testar', dados).then(function (r) {
+          if (r.dados) return r.dados;
+          return { ok: true, alvo: a, sucesso: false, em: new Date().toISOString(), estadoServidor: r.estado,
+            mensagem: r.estado === 'desatualizada' ? MSG_ADMIN_DESATUALIZADA : (r.estado === 'ausente' ? MSG_ADMIN_AUSENTE : r.erro) };
+        });
       })
     };
+
+    // ---- aba Conexões ----
+    /** Chama a Edge Function "admin" sem quebrar a tela: {estado:'ok'|'desatualizada'|'ausente'|'erro', dados, erro}. */
+    function servidorConexoes(token, acao, dados) {
+      return admin(token, acao, dados, Math.max(prazo, 25000)).then(function (r) {
+        return { estado: 'ok', dados: r, erro: '' };
+      }, function (e) {
+        if (e && e.sessaoExpirada) throw e;
+        var msg = String((e && e.message) || MSG_RECUSA);
+        if (msg === 'Ação desconhecida.') return { estado: 'desatualizada', dados: null, erro: MSG_ADMIN_DESATUALIZADA };
+        if (e && e.funcaoAusente) return { estado: 'ausente', dados: null, erro: MSG_ADMIN_AUSENTE };
+        return { estado: 'erro', dados: null, erro: msg };
+      });
+    }
+    /** Contagem (head, sem trazer linhas) pela RLS do admin. null = não deu para ler. */
+    function contarTabela(tabela, filtrar) {
+      return comPrazo(Promise.resolve().then(function () {
+        var q = cliente().from(tabela).select('*', { count: 'exact', head: true });
+        return filtrar ? filtrar(q) : q;
+      }), prazo).then(function (r) {
+        if (!r || r.error) return null;
+        return typeof r.count === 'number' ? r.count : null;
+      }, function () { return null; });
+    }
+    /** Banco: tempo de resposta, versão/migrações faltando (com nome amigável), contagens e última resposta recebida. */
+    function diagnosticoBanco() {
+      var t0 = Date.now();
+      var b = { ms: 0, versao: 0, semFuncao: false, faltando: [], contagens: {}, ultimaResposta: '', erro: '' };
+      return versaoBanco().then(function (v) {
+        b.ms = Date.now() - t0;
+        b.versao = v.versao;
+        b.semFuncao = !!v.semFuncao;
+        b.faltando = (v.faltando || []).map(function (nome) {
+          var m = MIGRACOES.filter(function (x) { return x.nome === nome; })[0];
+          return { nome: nome, descricao: m ? m.descricao : '' };
+        });
+        var semTeste = b.faltando.some(function (f) { return f.nome === '20261013120000_conexoes'; });
+        var tabelas = ['processos', 'respostas', 'pessoas', 'empresas', 'pedidos'];
+        return Promise.all(tabelas.map(function (t) {
+          return contarTabela(t, t === 'pedidos' && !semTeste ? function (q) { return q.eq('teste', false); } : null);
+        })).then(function (ns) {
+          tabelas.forEach(function (t, i) { b.contagens[t] = ns[i]; });
+          return consulta(function (c) { return c.from('respostas').select('recebido_em').order('recebido_em', { ascending: false }).limit(1); })
+            .then(function (l) { b.ultimaResposta = Array.isArray(l) && l[0] ? iso(l[0].recebido_em) : ''; }, function () { /* sem a data */ });
+        });
+      }).then(function () { return b; }, function (e) {
+        if (e && e.sessaoExpirada) throw e;
+        b.ms = Date.now() - t0;
+        b.erro = String((e && e.message) || MSG_CONEXAO);
+        return b;
+      });
+    }
     return api;
   }
 
@@ -1957,7 +2056,8 @@
     'moverResposta', 'contratarPessoa', 'versaoBanco',
     'pacotesPublicos', 'enviarPessoal', 'resumoPessoal', 'criarPedido', 'iniciarPagamento', 'statusPedido', 'relatorioPessoal',
     'salvarParte2Pessoal', 'recuperarAcesso', 'confirmarRetorno',
-    'listarPedidos', 'atualizarPedido', 'listarCupons', 'salvarCupom', 'excluirCupom', 'listarPacotes', 'salvarPacote', 'resumoVendas'];
+    'listarPedidos', 'atualizarPedido', 'listarCupons', 'salvarCupom', 'excluirCupom', 'listarPacotes', 'salvarPacote', 'resumoVendas',
+    'diagnosticoConexoes', 'testarConexao'];
 
   var DISC_API_SUPABASE = {
     METODOS: METODOS,
