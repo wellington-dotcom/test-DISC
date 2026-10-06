@@ -644,6 +644,8 @@
           mostrarErro('Este pedido foi ' + status + '. Gere um novo pagamento.');
           return;
         }
+        // Stripe recusou a última tentativa: avisa (o mesmo formulário aceita outro cartão) e segue esperando.
+        if (r && r.recusado === true && !st.ocupado) mostrarErro(r.mensagem || 'O pagamento não foi aprovado. Tente de novo ou use outra forma de pagamento.');
         if (s) s.textContent = manual ? 'Ainda não recebemos a confirmação. Pix costuma levar segundos; cartão, alguns minutos.' : 'Aguardando a confirmação do pagamento…';
         agendar();
       }, function () {

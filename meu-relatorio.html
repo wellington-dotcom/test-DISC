@@ -2,6 +2,8 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
+  <!-- Política de segurança: só scripts do próprio site e do Stripe (pagamento). Mudou o script inline do head? Atualize o sha256 (npm test confere). -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://js.stripe.com https://*.js.stripe.com; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https://*.stripe.com; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://script.google.com https://script.googleusercontent.com https://api.stripe.com https://*.stripe.com; frame-src https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="description" content="Seu Mapa de Perfil completo: o seu jeito de agir, o que está te travando e um plano prático para destravar.">
   <meta name="robots" content="noindex, nofollow">

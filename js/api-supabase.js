@@ -113,7 +113,7 @@
  *     Volta da InfinitePay: o servidor confere no payment_check (paid=true e valor pago >= valor do pedido) e marca pago.
  *     'aguardando' = ainda não confirmado (Pix em processamento): siga com statusPedido. Os parâmetros da URL NÃO
  *     liberam nada sozinhos. Sem a Edge Function: devolve o status do banco.
- *   statusPedido(pedidoId, tokenAcesso) -> {ok, status:'aguardando'|'pago'|'cortesia'|'estornado'|'cancelado'}
+ *   statusPedido(pedidoId, tokenAcesso) -> {ok, status:'aguardando'|'pago'|'cortesia'|'estornado'|'cancelado', recusado?, mensagem?}
  *     (consulte a cada 4 s; a Edge Function confere no provedor no máximo a cada 15 s; sem ela, lê do banco)
  *   relatorioPessoal(tokenAcesso) -> {ok, nome (primeiro nome), resultado:{percentuais, codigo},
  *     exigido:{percentuais, codigo}|null, exigidoRespostas:'40 dígitos'|'', pacote, pacoteNome, precisaParte2, status}
@@ -796,6 +796,13 @@
       usosMax: inteiroOuNulo(l.usos_max), usos: numero(l.usos), validoAte: dataOuVazio(l.valido_ate), ativo: l.ativo !== false,
       pacotes: (Array.isArray(l.pacotes) ? l.pacotes : []).map(String), descricao: l.descricao || '', criadoEm: iso(l.criado_em) };
   }
+  // Última recusa do Stripe (webhook payment_intent.payment_failed) -> {em, codigo, motivo, mensagem} | null.
+  function recusaDaLinha(l) {
+    var d = l.provedor_dados && typeof l.provedor_dados === 'object' ? l.provedor_dados : {};
+    var r = d.recusa && typeof d.recusa === 'object' ? d.recusa : null;
+    if (!r) return null;
+    return { em: iso(r.em), codigo: limparTexto(r.codigo, 60), motivo: limparTexto(r.motivo, 60), mensagem: limparTexto(r.mensagem, 200) };
+  }
   function pedidoDaLinha(l) {
     var pag = l.pagamento && typeof l.pagamento === 'object' ? l.pagamento : {};
     return { id: String(l.id || ''), respostaId: l.resposta_id ? String(l.resposta_id) : '', pacote: String(l.pacote || ''),
@@ -804,7 +811,8 @@
       provedor: l.provedor || (l.asaas_cobranca_id ? 'asaas' : ''), provedorRef: l.provedor_ref || '',
       asaasCobrancaId: l.asaas_cobranca_id || '',
       faturaUrl: l.checkout_url ? String(l.checkout_url) : (typeof pag.cartaoUrl === 'string' ? pag.cartaoUrl : ''),
-      email: l.email || '', nome: l.nome || '', criadoEm: iso(l.criado_em), pagoEm: iso(l.pago_em), reembolsadoEm: iso(l.reembolsado_em) };
+      email: l.email || '', nome: l.nome || '', criadoEm: iso(l.criado_em), pagoEm: iso(l.pago_em), reembolsadoEm: iso(l.reembolsado_em),
+      ultimaRecusa: recusaDaLinha(l) };
   }
   /** Pedido do painel vindo da RPC (pedido_json) -> mesmo formato de pedidoDaLinha. */
   function pedidoDaRpc(p) {
@@ -1375,7 +1383,10 @@
         };
         // A Edge Function confere também no Asaas (cobre webhook perdido); fora do ar, lê direto do banco.
         return invocar('pagamento', { acao: 'status', pedidoId: String(pedidoId), tokenAcesso: String(tokenAcesso) }, prazo)
-          .then(function (r) { return { ok: true, status: r.status }; }, function (e) {
+          .then(function (r) {
+            // recusado: o Stripe recusou a última tentativa (o pedido segue aberto para tentar de novo).
+            return r.recusado === true ? { ok: true, status: r.status, recusado: true, mensagem: String(r.mensagem || '') } : { ok: true, status: r.status };
+          }, function (e) {
             if (e && e.resposta && !e.funcaoAusente) throw e;
             return porRpc();
           });

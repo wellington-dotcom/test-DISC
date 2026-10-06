@@ -20,16 +20,20 @@ InfinitePay e o Asaas (seções abaixo) continuam funcionando como **alternativa
    `disc.gestaosemcaos.com.br`. Sem isso o botão do Apple Pay não aparece (cartão e Pix funcionam).
 4. **Chaves:** **Developers → API keys**. Comece no **modo de teste** (chave `Test mode` ligada):
    - **Publishable key** (`pk_test_…`) — é pública, vai para o navegador;
-   - **Secret key** (`sk_test_…`) — clique em *Reveal*. **NUNCA** cole a chave secreta em conversa, e-mail, WhatsApp ou
-     no repositório: ela só vai nos Secrets do Supabase.
+   - **Chave restrita (recomendado)** — *Create restricted key*, nome "Mapa DISC", com só estas permissões:
+     **PaymentIntents: Write**, **PaymentMethods: Read**, **Balance: Read**, **Payment method domains: Read**
+     (o resto fica *None*). Se ela vazar, ninguém consegue mexer no resto da conta (clientes, saques, reembolsos).
+     A *Secret key* (`sk_…`) também funciona, mas abre a conta inteira — a aba Conexões avisa quando for ela.
+     **NUNCA** cole a chave (`rk_…`/`sk_…`) em conversa, e-mail, WhatsApp ou no repositório: ela só vai nos Secrets do Supabase.
 5. **Guarde no Supabase:** menu **Edge Functions → Secrets → Add new secret**:
-   - `STRIPE_SECRET_KEY` = a secreta (`sk_…`);
+   - `STRIPE_SECRET_KEY` = a chave restrita (`rk_…`) — ou a secreta (`sk_…`);
    - `STRIPE_PUBLISHABLE_KEY` = a publicável (`pk_…`);
    - `PAGAMENTO_PROVEDOR` = `stripe` (deixa a escolha explícita; sem ele o Stripe já é usado quando a chave secreta existe);
    - confira `SITE_URL` = `https://disc.gestaosemcaos.com.br` (sem barra no fim).
 6. **Aviso de pagamento (webhook):** **Developers → Webhooks → Add endpoint**:
    - Endpoint URL: `https://tevpqngqzxcswmticjnr.supabase.co/functions/v1/stripe-webhook`
-   - Eventos: `payment_intent.succeeded`, `charge.refunded`, `charge.dispute.created`
+   - Eventos: `payment_intent.succeeded`, `payment_intent.payment_failed`, `charge.refunded`, `charge.dispute.created`
+     (o `payment_failed` guarda o motivo da recusa: aparece em **Vendas → pedido → Última recusa**)
    - Salve, abra o endpoint e copie o **Signing secret** (`whsec_…`) para o segredo `STRIPE_WEBHOOK_SECRET` no Supabase.
    O sistema confere a assinatura de cada aviso e, antes de liberar, ainda pergunta ao Stripe se o pagamento foi
    aprovado e de quanto foi.
@@ -42,10 +46,14 @@ InfinitePay e o Asaas (seções abaixo) continuam funcionando como **alternativa
    teste fica **fora das vendas** e o cartão mostra "Pagamento de teste confirmado".
 9. **Compra de verdade no site em modo de teste:** faça o teste grátis, escolha um pacote, pague com `4242 4242 4242 4242`
    (ou `4000 0000 0000 0002` para ver uma recusa) e confira que o relatório abre na hora.
-10. **Produção:** desligue o *Test mode* no Stripe, pegue as chaves **live** (`pk_live_…` / `sk_live_…`), crie o mesmo
+10. **Produção:** desligue o *Test mode* no Stripe, pegue as chaves **live** (`pk_live_…` e uma restrita `rk_live_…` com as mesmas permissões), crie o mesmo
     webhook no modo live (o *Signing secret* é outro) e troque os 3 segredos no Supabase. Faça uma compra real de R$ 1
     pela aba Conexões e reembolse em seguida.
-11. **Reembolso:** no Stripe, **Payments** → abra o pagamento → **Refund**. O aviso `charge.refunded` marca o pedido
+11. **Por dentro (para quem mantém o sistema):** a versão da API do Stripe é fixa no código (`STRIPE_VERSAO` em
+    `supabase/funcoes-compartilhadas/stripe.js`), então mudar a versão padrão da conta não afeta o site. As páginas de
+    pagamento (`index.html`, `meu-relatorio.html`) têm política de segurança (CSP) que só libera scripts do próprio site
+    e do Stripe; `npm test` confere.
+12. **Reembolso:** no Stripe, **Payments** → abra o pagamento → **Refund**. O aviso `charge.refunded` marca o pedido
     como **estornado** sozinho (o relatório volta a ficar bloqueado). Contestação (chargeback) faz o mesmo. No painel,
     **Vendas → pedido** tem o link **"Abrir no Stripe"**.
 

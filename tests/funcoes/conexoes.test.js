@@ -118,7 +118,7 @@ test('diagnóstico: só presença dos segredos (booleanos), handle parcial, prov
   assert.equal(r.segredos.ASAAS_API_KEY, true);
   assert.equal(r.siteUrl, SITE + '/');
   assert.deepEqual(r.pagamento, { provedor: 'infinitepay', provedorEscolhido: 'infinitepay', handleParcial: 'mi***', asaasAmbiente: 'sandbox',
-    stripeModo: '', stripePublicavelModo: '', stripeDominio: 'disc.gestaosemcaos.com.br' });
+    stripeModo: '', stripeChaveTipo: '', stripePublicavelModo: '', stripeDominio: 'disc.gestaosemcaos.com.br' });
   assert.deepEqual(r.funcoes.map((f) => [f.nome, f.publicada]), FUNCOES_EDGE.map((n) => [n, n !== 'asaas-webhook']));
   assert.equal(r.funcoes.find((f) => f.nome === 'asaas-webhook').status, 404);
   assert.deepEqual(r.auth, { cadastroFechado: true });

@@ -1675,14 +1675,15 @@
       c.verificado = 'Presença dos segredos e da função que recebe o aviso de pagamento.';
       if (semServidor) { c.status = 'erro'; c.erro = avisoServidor; cartao(c); return; }
       var modo = pag.stripeModo === 'producao' ? 'produção (cobra de verdade)' : (pag.stripeModo === 'teste' ? 'teste (cartão 4242 4242 4242 4242)' : '');
-      c.linhas.push('Chave secreta (STRIPE_SECRET_KEY): ' + textoSimNao(sg.STRIPE_SECRET_KEY) + (sg.STRIPE_SECRET_KEY && modo ? ' — modo ' + modo : ''));
+      c.linhas.push('Chave do servidor (STRIPE_SECRET_KEY): ' + textoSimNao(sg.STRIPE_SECRET_KEY) + (sg.STRIPE_SECRET_KEY && modo ? ' — modo ' + modo : '') +
+        (pag.stripeChaveTipo === 'restrita' ? ' · chave restrita (recomendado)' : (pag.stripeChaveTipo === 'secreta' ? ' · chave secreta (sk_): prefira uma restrita (rk_)' : '')));
       c.linhas.push('Chave publicável (STRIPE_PUBLISHABLE_KEY): ' + textoSimNao(sg.STRIPE_PUBLISHABLE_KEY) + ' · Assinatura do webhook (STRIPE_WEBHOOK_SECRET): ' + textoSimNao(sg.STRIPE_WEBHOOK_SECRET));
       c.linhas.push('Provedor em uso no site: ' + (NOMES_PROVEDOR[pag.provedor] || 'nenhum') + (pag.provedorEscolhido ? '' : ' (PAGAMENTO_PROVEDOR não existe: o Stripe é o padrão quando configurado)'));
       var passos = ['Em dashboard.stripe.com: Settings → Payment methods → ative Cartões, Pix, Apple Pay e Google Pay.',
         'Settings → Payment method domains → Add domain → ' + (pag.stripeDominio || 'disc.gestaosemcaos.com.br') + ' (o Apple Pay exige).',
-        'Developers → API keys: copie a chave publicável (pk_…) e revele a secreta (sk_…). Comece pelas de teste.', PASSO_SECRETS,
-        'Name: STRIPE_SECRET_KEY — Value: a chave secreta. Name: STRIPE_PUBLISHABLE_KEY — Value: a publicável. Name: PAGAMENTO_PROVEDOR — Value: stripe.',
-        'Developers → Webhooks → Add endpoint → URL https://tevpqngqzxcswmticjnr.supabase.co/functions/v1/stripe-webhook, eventos payment_intent.succeeded, charge.refunded e charge.dispute.created → copie o Signing secret (whsec_…) para o segredo STRIPE_WEBHOOK_SECRET.',
+        'Developers → API keys: copie a chave publicável (pk_…) e crie uma chave RESTRITA (Create restricted key) com PaymentIntents: Write, PaymentMethods: Read, Balance: Read e Payment method domains: Read. Comece pelas de teste.', PASSO_SECRETS,
+        'Name: STRIPE_SECRET_KEY — Value: a chave restrita (rk_…). Name: STRIPE_PUBLISHABLE_KEY — Value: a publicável. Name: PAGAMENTO_PROVEDOR — Value: stripe.',
+        'Developers → Webhooks → Add endpoint → URL https://tevpqngqzxcswmticjnr.supabase.co/functions/v1/stripe-webhook, eventos payment_intent.succeeded, payment_intent.payment_failed, charge.refunded e charge.dispute.created → copie o Signing secret (whsec_…) para o segredo STRIPE_WEBHOOK_SECRET.',
         PASSO_TESTAR];
       if (!sg.STRIPE_SECRET_KEY) { c.status = 'nao_configurado'; c.passos = passos; }
       else if (!sg.STRIPE_PUBLISHABLE_KEY) { c.status = 'erro'; c.erro = 'Falta a chave publicável (STRIPE_PUBLISHABLE_KEY): sem ela o site não mostra o pagamento.'; c.passos = passos; }
@@ -6096,6 +6097,10 @@
   /* ---------- Vendas (aba do admin; só quando o servidor tem a API de vendas) ---------- */
 
   // Venda direta só existe no Supabase e na prévia (o js/api.js legado tem o método, mas só para recusar).
+  // "02/10/2026 14:03 — card_declined / insufficient_funds — Your card has insufficient funds."
+  function textoRecusa(r) {
+    return [r.em ? formatarData(r.em) : '', [r.codigo, r.motivo].filter(Boolean).join(' / '), r.mensagem].filter(Boolean).join(' — ') || 'Pagamento recusado';
+  }
   function temVendas() { return MODO_API && (SUPABASE || SIMULADA) && !!metodoApi('listarPedidos'); }
   function novoEstadoVendas() {
     return { sub: 'resumo', pedidoId: null, carregado: false, carregando: false, erro: '', pedidos: [], cupons: [], pacotes: [], resumo: null,
@@ -6348,6 +6353,7 @@
       el('div', null, [el('dt', { texto: 'Forma de pagamento' }), el('dd', { texto: ({ pix: 'Pix', cartao: 'Cartão', boleto: 'Boleto', cupom: 'Cupom (100%)', manual: 'Liberado no painel' })[p.metodo] || p.metodo || '—' })]),
       el('div', null, [el('dt', { texto: 'Pago em' }), el('dd', { texto: formatarData(p.pagoEm) })]),
       p.reembolsadoEm ? el('div', null, [el('dt', { texto: 'Reembolsado em' }), el('dd', { texto: formatarData(p.reembolsadoEm) })]) : null,
+      p.ultimaRecusa && p.status === 'aguardando' ? el('div', { id: 'vd-pedido-recusa' }, [el('dt', { texto: 'Última recusa' }), el('dd', { texto: textoRecusa(p.ultimaRecusa) })]) : null,
       p.provedor === 'stripe' && /^pi_[A-Za-z0-9]+$/.test(p.provedorRef) ? el('div', null, [el('dt', { texto: 'Pagamento no Stripe' }), el('dd', { classe: 'tabular' }, [
         p.provedorRef, ' · ',
         el('a', { classe: 'vd-link vd-link--stripe', id: 'vd-link-stripe', href: urlPagamentoStripe(p.provedorRef), target: '_blank', rel: 'noopener noreferrer', texto: 'Abrir no Stripe' })

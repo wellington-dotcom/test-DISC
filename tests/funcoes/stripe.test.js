@@ -10,7 +10,7 @@ import {
 } from '../../supabase/funcoes-compartilhadas/pagamento.js';
 import {
   STRIPE_API, formStripe, modoStripe, stripeMetodo, lerAssinaturaStripe, verificarAssinaturaStripe, hmacStripeHex,
-  idIntentStripe, segredoClienteStripe, chavePublicavelStripe, semChavesStripe, criarStripe
+  idIntentStripe, segredoClienteStripe, chavePublicavelStripe, semChavesStripe, criarStripe, STRIPE_VERSAO, tipoChaveStripe, recusaStripe
 } from '../../supabase/funcoes-compartilhadas/stripe.js';
 import { acaoTestar, acaoDiagnostico } from '../../supabase/funcoes-compartilhadas/conexoes.js';
 
@@ -298,6 +298,51 @@ test('estorno e contestação: charge.refunded / charge.dispute.created -> estor
     { ok: true, feito: false, motivo: 'outro_provedor' });
 });
 
+test('versão da API fixa em toda chamada; tipo da chave (restrita x secreta); recusa sem dados do cartão', async () => {
+  const t = montar();
+  await t.post({ acao: 'criar', pedidoId: ID, tokenAcesso: TOKEN });
+  t.avancar(16000);
+  await t.post({ acao: 'status', pedidoId: ID, tokenAcesso: TOKEN });
+  const doStripe = t.fetch.chamadas.filter((c) => c.url.startsWith(STRIPE_API));
+  assert.ok(doStripe.length >= 2);
+  assert.match(STRIPE_VERSAO, /^\d{4}-\d{2}-\d{2}\.[a-z]+$/);
+  for (const c of doStripe) assert.equal(c.headers['Stripe-Version'], STRIPE_VERSAO, c.url);
+  assert.equal(tipoChaveStripe('rk_' + 'live_Abc123'), 'restrita');
+  assert.equal(tipoChaveStripe('sk_' + 'test_Abc123'), 'secreta');
+  assert.equal(tipoChaveStripe('pk_' + 'test_Abc123'), '');
+  assert.equal(modoStripe('rk_' + 'test_Abc123'), 'teste');
+  assert.equal(recusaStripe({}), null);
+  assert.deepEqual(recusaStripe({ last_payment_error: { code: 'card_declined', decline_code: 'insufficient_funds', type: 'card_error',
+    message: 'Your card has insufficient funds.', payment_method: { type: 'card', card: { last4: '0002' } } } }),
+  { codigo: 'card_declined', motivo: 'insufficient_funds', tipo: 'card_error', metodo: 'card', mensagem: 'Your card has insufficient funds.' });
+});
+
+test('recusa: payment_intent.payment_failed guarda o motivo (pedido segue aberto); status avisa o cliente; depois paga normal', async () => {
+  const t = montar();
+  await t.post({ acao: 'criar', pedidoId: ID, tokenAcesso: TOKEN });
+  const erroCartao = { code: 'card_declined', decline_code: 'generic_decline', type: 'card_error', message: 'Your card was declined.', payment_method: { type: 'card' } };
+  Object.assign(t.fetch.intents.pi_Teste000001, { status: 'requires_payment_method', last_payment_error: erroCartao });
+  const w = await t.webhook(evento('payment_intent.payment_failed', { id: 'pi_Teste000001', status: 'requires_payment_method', metadata: { pedido_id: ID }, last_payment_error: erroCartao }));
+  assert.deepEqual([w.status, w.json], [200, { ok: true, feito: true, motivo: 'recusado' }]);
+  assert.equal(t.pedido().status, 'aguardando');
+  const rec = t.pedido().provedor_dados.recusa;
+  assert.deepEqual([rec.codigo, rec.motivo, rec.intent, rec.em], ['card_declined', 'generic_decline', 'pi_Teste000001', new Date(AGORA).toISOString()]);
+  assert.ok(t.pedido().provedor_dados.intent, 'mantém os dados do PaymentIntent');
+  // O site, ao consultar, recebe o aviso em português (sem o texto do Stripe).
+  t.avancar(16000);
+  const st = await t.post({ acao: 'status', pedidoId: ID, tokenAcesso: TOKEN });
+  assert.deepEqual(st, { ok: true, status: 'aguardando', recusado: true, mensagem: 'O pagamento não foi aprovado. Tente de novo ou use outra forma de pagamento.' });
+  // Nova tentativa aprovada no mesmo PaymentIntent.
+  t.pagar('pi_Teste000001', { last_payment_error: null });
+  t.avancar(16000);
+  assert.deepEqual(await t.post({ acao: 'status', pedidoId: ID, tokenAcesso: TOKEN }), { ok: true, status: 'pago' });
+  // Pedido já pago / de outro provedor / desconhecido: não mexe.
+  assert.deepEqual((await t.webhook(evento('payment_intent.payment_failed', { id: 'pi_Teste000001', metadata: { pedido_id: ID } }))).json.motivo, 'repetido');
+  const o = montar({ pedidos: [pedidoLinha({ provedor: 'asaas', provedor_ref: 'pi_Outro000001' })] });
+  assert.deepEqual((await o.webhook(evento('payment_intent.payment_failed', { id: 'pi_Outro000001', metadata: { pedido_id: ID } }))).json.motivo, 'outro_provedor');
+  assert.deepEqual((await t.webhook(evento('payment_intent.payment_failed', { id: 'pi_Sumiu000001', metadata: {} }))).json.motivo, 'pedido_nao_encontrado');
+});
+
 test('nenhuma resposta (pagamento, webhook, Conexões) leva a chave secreta ou o segredo do webhook', async () => {
   const t = montar();
   const tudo = [];
@@ -341,7 +386,8 @@ test('Conexões: Stripe — chave aceita (GET /v1/balance), modo pelo prefixo, d
   const { ctx, fetch } = ctxConexoes();
   const r = await acaoTestar(ctx, { alvo: 'stripe' });
   assert.equal(r.sucesso, true, r.mensagem);
-  assert.match(r.mensagem, /aceitou a chave \(modo teste\)/);
+  assert.match(r.mensagem, /aceitou a chave secreta \(modo teste\)\. Recomendado: troque por uma chave restrita/);
+  assert.equal(r.detalhes.chaveTipo, 'secreta');
   assert.match(r.mensagem, /disc\.gestaosemcaos\.com\.br registrado \(Apple Pay ativo, Google Pay ativo\)/);
   assert.deepEqual([r.detalhes.modo, r.detalhes.dominioRegistrado, r.detalhes.applePay, r.detalhes.webhookSecreto], ['teste', true, true, true]);
   assert.ok(fetch.chamadas.some((c) => c.url === STRIPE_API + '/v1/balance'));
@@ -361,6 +407,9 @@ test('Conexões: Stripe — chave aceita (GET /v1/balance), modo pelo prefixo, d
   assert.deepEqual([d.pagamento.provedor, d.pagamento.provedorEscolhido, d.pagamento.stripeModo, d.pagamento.stripePublicavelModo, d.pagamento.stripeDominio],
     ['stripe', 'stripe', 'teste', 'teste', 'disc.gestaosemcaos.com.br']);
   assert.equal(d.segredos.STRIPE_SECRET_KEY, true);
+  assert.equal(d.pagamento.stripeChaveTipo, 'secreta');
+  const pk = await acaoTestar(ctxConexoes({ env: { STRIPE_SECRET_KEY: PK } }).ctx, { alvo: 'stripe' });
+  assert.match(pk.mensagem, /não parece uma chave de servidor/);
   assert.ok(!JSON.stringify(d).includes(SK) && !JSON.stringify(d).includes(WH));
 });
 

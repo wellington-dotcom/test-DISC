@@ -385,7 +385,9 @@ function criarInfinitePay(op) {
 // recebe fetch por parâmetro (testável no Node com respostas falsas). Corpo form-encoded, como a API do Stripe pede.
 //
 // Segredos (Supabase > Edge Functions > Secrets; NUNCA no código nem em conversa):
-//   STRIPE_SECRET_KEY       chave secreta (sk_test_… em teste, sk_live_… em produção). Só o servidor usa.
+//   STRIPE_SECRET_KEY       chave do servidor. Recomendado: chave RESTRITA (rk_test_… / rk_live_…) só com PaymentIntents
+//                           (escrita), PaymentMethods (leitura), Balance (leitura) e Payment method domains (leitura); a secreta
+//                           (sk_…) também funciona, mas abre a conta inteira se vazar. Só o servidor usa.
 //   STRIPE_PUBLISHABLE_KEY  chave publicável (pk_…): vai para o navegador montar o Payment Element (é pública).
 //   STRIPE_WEBHOOK_SECRET   "Signing secret" do endpoint de webhook (whsec_…): confere a assinatura Stripe-Signature.
 //
@@ -395,8 +397,11 @@ function criarInfinitePay(op) {
 //   GET  /v1/balance (teste leve da chave)  ·  GET /v1/payment_method_domains?domain_name=… (Apple Pay / Google Pay)
 // Assinatura do webhook: Stripe-Signature "t=<unix>,v1=<hex>[,v1=…]"; v1 = HMAC-SHA256(segredo, `${t}.${corpo bruto}`).
 // Conferida com Web Crypto (crypto.subtle.verify: comparação em tempo constante) e tolerância de 5 minutos.
+// Versão da API FIXA (cabeçalho Stripe-Version): mudar a versão padrão da conta no painel do Stripe não muda nada aqui.
+// Para atualizar: troque STRIPE_VERSAO, rode os testes e confira um pagamento de teste na aba Conexões.
 
 const STRIPE_API = 'https://api.stripe.com';
+const STRIPE_VERSAO = '2026-08-26.dahlia';
 const STRIPE_TOLERANCIA_S = 300;
 const STRIPE_DESCRICAO = 'Mapa DISC — Gestão sem Caos';
 const STRIPE_SUFIXO_FATURA = 'MAPA DISC';
@@ -406,6 +411,23 @@ const STRIPE_TIMEOUT_MS = 15000;
 const RE_INTENT_STRIPE = /^pi_[A-Za-z0-9]{6,80}$/;
 const RE_SEGREDO_CLIENTE = /^pi_[A-Za-z0-9]{6,80}_secret_[A-Za-z0-9]{6,120}$/;
 const RE_PUBLICAVEL = /^pk_(?:test|live)_[A-Za-z0-9]{8,200}$/;
+
+/** Chave de servidor: 'restrita' (rk_) | 'secreta' (sk_) | '' (outra coisa). Não devolve a chave. */
+function tipoChaveStripe(chave) {
+  const s = String(chave == null ? '' : chave).trim();
+  if (/^rk_(?:test|live)_/.test(s)) return 'restrita';
+  if (/^sk_(?:test|live)_/.test(s)) return 'secreta';
+  return '';
+}
+
+/** Recusa do PaymentIntent (last_payment_error) -> {codigo, motivo, tipo, metodo, mensagem} | null. Sem dados do cartão. */
+function recusaStripe(pi) {
+  const e = pi && pi.last_payment_error;
+  if (!e || typeof e !== 'object') return null;
+  const t = (v, n) => String(v == null ? '' : v).substring(0, n);
+  const pm = e.payment_method && typeof e.payment_method === 'object' ? e.payment_method.type : '';
+  return { codigo: t(e.code, 60), motivo: t(e.decline_code, 60), tipo: t(e.type, 40), metodo: t(pm, 30), mensagem: semChavesStripe(t(e.message, 200)) };
+}
 
 /** "pi_…" válido ou ''. */
 function idIntentStripe(v) {
@@ -549,7 +571,7 @@ function criarStripe(op) {
     const controle = typeof AbortController !== 'undefined' ? new AbortController() : null;
     const timer = controle ? setTimeout(() => controle.abort(), STRIPE_TIMEOUT_MS) : null;
     try {
-      const headers = Object.assign({ Authorization: 'Bearer ' + chave, Accept: 'application/json', 'User-Agent': 'gestao-sem-caos-mapa-disc' }, extrasCab || {});
+      const headers = Object.assign({ Authorization: 'Bearer ' + chave, Accept: 'application/json', 'Stripe-Version': STRIPE_VERSAO, 'User-Agent': 'gestao-sem-caos-mapa-disc' }, extrasCab || {});
       const o = { method: metodo, headers, signal: controle ? controle.signal : undefined };
       if (corpo !== undefined) { headers['Content-Type'] = 'application/x-www-form-urlencoded'; o.body = formStripe(corpo); }
       const r = await fetchFn(STRIPE_API + caminho, o);
@@ -820,7 +842,9 @@ function criarResend(op) {
 //   Resposta 200 {ok, feito, motivo}; falha no banco -> 500 e InfinitePay fora -> 502 (para ela reenviar).
 // "stripe-webhook": assinatura Stripe-Signature (HMAC-SHA256 de `${t}.${corpo}` com STRIPE_WEBHOOK_SECRET; tolerância
 //   5 min; sem segredo 503, assinatura ruim 400). payment_intent.succeeded -> confere o PaymentIntent no Stripe (valor,
-//   moeda, metadata) e marca 'pago' (idempotente); charge.refunded / charge.dispute.created -> 'estornado'.
+//   moeda, metadata) e marca 'pago' (idempotente); charge.refunded / charge.dispute.created -> 'estornado';
+//   payment_intent.payment_failed -> guarda a recusa em provedor_dados.recusa (o pedido segue 'aguardando': dá para
+//   tentar de novo com outro cartão no mesmo PaymentIntent) e o painel mostra "Última recusa".
 //   Falha no banco -> 500 e Stripe fora -> 502 (o Stripe reenvia).
 // "asaas-webhook": cabeçalho asaas-access-token == ASAAS_WEBHOOK_TOKEN (senão 401; sem segredo 503).
 //   PAYMENT_RECEIVED/CONFIRMED -> 'pago' (só de aguardando/cancelado; valor pago >= valor do pedido);
@@ -832,6 +856,7 @@ const MSG_PAG_NAO_CONFIGURADO = 'Pagamento ainda não configurado.';
 const MSG_EMAIL_NAO_CONFIGURADO = 'O envio por e-mail ainda não está configurado. Fale com o suporte.';
 const MSG_PEDIDO_NAO_ENCONTRADO = 'Pedido não encontrado.';
 const MSG_PRECISA_CPF = 'Informe o seu CPF para pagar.';
+const MSG_RECUSADO = 'O pagamento não foi aprovado. Tente de novo ou use outra forma de pagamento.';
 const NOMES_ENV_VENDAS = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SITE_URL', 'PAGAMENTO_PROVEDOR',
   'STRIPE_SECRET_KEY', 'STRIPE_PUBLISHABLE_KEY', 'STRIPE_WEBHOOK_SECRET', 'INFINITEPAY_HANDLE', 'ASAAS_API_KEY', 'ASAAS_AMBIENTE', 'ASAAS_WEBHOOK_TOKEN', 'RESEND_API_KEY', 'EMAIL_REMETENTE'];
 const VERIFICAR_ASAAS_MS = 15000;
@@ -1120,7 +1145,8 @@ async function acaoStatusPagamento(ctx, corpo) {
     if (isFinite(ultimaS) && ctx.agora() - ultimaS < VERIFICAR_ASAAS_MS) return { ok: true, status: p.status };
     await ctx.db.marcarVerificado(p.id, new Date(ctx.agora()).toISOString());
     try {
-      return { ok: true, status: (await conferirStripe(ctx, p, p.provedor_ref, 'status')).status };
+      const r = await conferirStripe(ctx, p, p.provedor_ref, 'status');
+      return r.recusa ? { ok: true, status: r.status, recusado: true, mensagem: MSG_RECUSADO } : { ok: true, status: r.status };
     } catch (err) {
       try { console.error(err); } catch (e) { /* sem console */ }
       return { ok: true, status: p.status };
@@ -1363,7 +1389,11 @@ async function conferirStripe(ctx, p, piId, origem) {
     currency: pi.currency, livemode: pi.livemode === true };
   const dados = Object.assign({}, dadosDoPedido(p), { conferencia: { origem, em, intent: resumo } });
   if (!pi.metadata || String(pi.metadata.pedido_id || '') !== String(p.id)) return { status: p.status, feito: false, motivo: 'outro_pedido' };
-  if (pi.status !== 'succeeded') return { status: p.status, feito: false, motivo: 'nao_pago' };
+  if (pi.status !== 'succeeded') {
+    const recusa = pi.status === 'requires_payment_method' ? recusaStripe(pi) : null;
+    if (recusa) return { status: p.status, feito: false, motivo: 'recusado', recusa };
+    return { status: p.status, feito: false, motivo: 'nao_pago' };
+  }
   if (String(pi.currency || '').toLowerCase() !== 'brl' || !(Number(pi.amount_received) >= Number(p.valor_centavos || 0))) {
     await ctx.db.gravarProvedorDados(p.id, '', dados);
     return { status: p.status, feito: false, motivo: 'valor_menor' };
@@ -1423,6 +1453,17 @@ async function tratarEventoStripe(ctx, evento) {
       throw err;
     }
     return { ok: true, feito: r.feito, motivo: r.motivo };
+  }
+  if (tipo === 'payment_intent.payment_failed') {
+    const piId = idIntentStripe(obj.id);
+    if (!piId) return { ok: true, feito: false, motivo: 'sem_pagamento' };
+    const p = await pedidoDoStripe(ctx, obj.metadata && obj.metadata.pedido_id, piId);
+    if (!p) return { ok: true, feito: false, motivo: 'pedido_nao_encontrado' };
+    if (p.provedor && p.provedor !== 'stripe') return { ok: true, feito: false, motivo: 'outro_provedor' };
+    if (p.status !== 'aguardando') return { ok: true, feito: false, motivo: 'repetido' };
+    const recusa = Object.assign({ em: new Date(ctx.agora()).toISOString(), intent: piId }, recusaStripe(obj) || { codigo: '', motivo: '', tipo: '', metodo: '', mensagem: '' });
+    await ctx.db.gravarProvedorDados(p.id, '', Object.assign({}, dadosDoPedido(p), { recusa }));
+    return { ok: true, feito: true, motivo: 'recusado' };
   }
   if (tipo === 'charge.refunded' || tipo === 'charge.dispute.created') {
     const piId = idIntentStripe(typeof obj.payment_intent === 'object' && obj.payment_intent ? obj.payment_intent.id : obj.payment_intent);

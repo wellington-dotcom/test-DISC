@@ -24,7 +24,7 @@ import { erro, limparTexto } from './regras.js';
 import { criarClickUp } from './clickup.js';
 import { criarInfinitePay, refInfinitePay, lerRefsInfinitePay } from './infinitepay.js';
 import { criarAsaas, criarResend, asaasAmbiente } from './asaas.js';
-import { criarStripe, modoStripe, chavePublicavelStripe, segredoClienteStripe, idIntentStripe, stripeMetodo } from './stripe.js';
+import { criarStripe, modoStripe, tipoChaveStripe, chavePublicavelStripe, segredoClienteStripe, idIntentStripe, stripeMetodo } from './stripe.js';
 
 export const CONEXOES_VERSAO = 1;
 export const CONEXOES_PRAZO_MS = 8000;
@@ -231,6 +231,8 @@ export async function acaoDiagnostico(ctx) {
       asaasAmbiente: asaasAmbiente(env.ASAAS_AMBIENTE),
       // Modo pelo PREFIXO da chave (sk_test_/sk_live_); a chave em si nunca sai daqui.
       stripeModo: modoStripe(env.STRIPE_SECRET_KEY),
+      // 'restrita' (rk_, recomendado) | 'secreta' (sk_) | '' — só o tipo, pelo prefixo.
+      stripeChaveTipo: tipoChaveStripe(env.STRIPE_SECRET_KEY),
       stripePublicavelModo: modoStripe(env.STRIPE_PUBLISHABLE_KEY),
       stripeDominio: dominioSite(env)
     },
@@ -407,7 +409,8 @@ async function testarStripe(ctx) {
   const env = ctx.env;
   if (!cxTem(env, 'STRIPE_SECRET_KEY')) return resultado(ctx, 'stripe', false, 'Segredo STRIPE_SECRET_KEY não existe.', 'Presença do segredo.');
   const modo = modoStripe(env.STRIPE_SECRET_KEY);
-  if (!modo) return resultado(ctx, 'stripe', false, 'O STRIPE_SECRET_KEY existe, mas não parece uma chave secreta do Stripe (começa com sk_test_ ou sk_live_).', 'Formato do segredo.');
+  const tipoChave = tipoChaveStripe(env.STRIPE_SECRET_KEY);
+  if (!modo || !tipoChave) return resultado(ctx, 'stripe', false, 'O STRIPE_SECRET_KEY existe, mas não parece uma chave de servidor do Stripe (começa com rk_test_, rk_live_, sk_test_ ou sk_live_).', 'Formato do segredo.');
   const st = criarStripe({ chave: env.STRIPE_SECRET_KEY, fetch: fetchComPrazo(ctx.fetch, cxPrazo(ctx)) });
   const dominio = dominioSite(env);
   const verificado = 'Consulta leve ao saldo (GET /v1/balance, nada é criado) e aos domínios de Apple Pay / Google Pay.';
@@ -419,14 +422,15 @@ async function testarStripe(ctx) {
   let d = null;
   try { d = await comPrazo(st.dominio(dominio), cxPrazo(ctx)); } catch (err) { d = null; }
   const pub = modoStripe(env.STRIPE_PUBLISHABLE_KEY);
-  const partes = ['O Stripe aceitou a chave (modo ' + nomeModo(modo) + ').'];
+  const partes = ['O Stripe aceitou a chave ' + (tipoChave === 'restrita' ? 'restrita' : 'secreta') + ' (modo ' + nomeModo(modo) + ').'];
+  if (tipoChave === 'secreta') partes.push('Recomendado: troque por uma chave restrita (rk_…) só com as permissões do pagamento — veja docs/VENDAS.md.');
   if (!cxTem(env, 'STRIPE_PUBLISHABLE_KEY')) partes.push('Falta o STRIPE_PUBLISHABLE_KEY (pk_…): sem ele o site não mostra o pagamento.');
   else if (pub && pub !== modo) partes.push('Atenção: a chave publicável é de ' + nomeModo(pub) + ' e a secreta de ' + nomeModo(modo) + '. Use as duas do mesmo modo.');
-  if (d === null) partes.push('Não deu para conferir o domínio ' + dominio + ' para Apple Pay / Google Pay.');
+  if (d === null) partes.push('Não deu para conferir o domínio ' + dominio + ' para Apple Pay / Google Pay' + (tipoChave === 'restrita' ? ' (a chave restrita precisa de leitura em Payment method domains).' : '.'));
   else if (!d.registrado) partes.push('O domínio ' + dominio + ' não está registrado em Payment method domains: Apple Pay não aparece.');
   else partes.push('Domínio ' + dominio + ' registrado (Apple Pay ' + (d.applePay ? 'ativo' : 'inativo') + ', Google Pay ' + (d.googlePay ? 'ativo' : 'inativo') + ').');
   return resultado(ctx, 'stripe', true, partes.join(' '), verificado, {
-    modo, publicavelModo: pub, dominio, dominioRegistrado: d ? d.registrado : null,
+    modo, chaveTipo: tipoChave, publicavelModo: pub, dominio, dominioRegistrado: d ? d.registrado : null,
     applePay: d ? d.applePay : null, googlePay: d ? d.googlePay : null, webhookSecreto: cxTem(env, 'STRIPE_WEBHOOK_SECRET')
   });
 }

@@ -1344,7 +1344,9 @@ function criarResend(op) {
 // recebe fetch por parâmetro (testável no Node com respostas falsas). Corpo form-encoded, como a API do Stripe pede.
 //
 // Segredos (Supabase > Edge Functions > Secrets; NUNCA no código nem em conversa):
-//   STRIPE_SECRET_KEY       chave secreta (sk_test_… em teste, sk_live_… em produção). Só o servidor usa.
+//   STRIPE_SECRET_KEY       chave do servidor. Recomendado: chave RESTRITA (rk_test_… / rk_live_…) só com PaymentIntents
+//                           (escrita), PaymentMethods (leitura), Balance (leitura) e Payment method domains (leitura); a secreta
+//                           (sk_…) também funciona, mas abre a conta inteira se vazar. Só o servidor usa.
 //   STRIPE_PUBLISHABLE_KEY  chave publicável (pk_…): vai para o navegador montar o Payment Element (é pública).
 //   STRIPE_WEBHOOK_SECRET   "Signing secret" do endpoint de webhook (whsec_…): confere a assinatura Stripe-Signature.
 //
@@ -1354,8 +1356,11 @@ function criarResend(op) {
 //   GET  /v1/balance (teste leve da chave)  ·  GET /v1/payment_method_domains?domain_name=… (Apple Pay / Google Pay)
 // Assinatura do webhook: Stripe-Signature "t=<unix>,v1=<hex>[,v1=…]"; v1 = HMAC-SHA256(segredo, `${t}.${corpo bruto}`).
 // Conferida com Web Crypto (crypto.subtle.verify: comparação em tempo constante) e tolerância de 5 minutos.
+// Versão da API FIXA (cabeçalho Stripe-Version): mudar a versão padrão da conta no painel do Stripe não muda nada aqui.
+// Para atualizar: troque STRIPE_VERSAO, rode os testes e confira um pagamento de teste na aba Conexões.
 
 const STRIPE_API = 'https://api.stripe.com';
+const STRIPE_VERSAO = '2026-08-26.dahlia';
 const STRIPE_TOLERANCIA_S = 300;
 const STRIPE_DESCRICAO = 'Mapa DISC — Gestão sem Caos';
 const STRIPE_SUFIXO_FATURA = 'MAPA DISC';
@@ -1365,6 +1370,23 @@ const STRIPE_TIMEOUT_MS = 15000;
 const RE_INTENT_STRIPE = /^pi_[A-Za-z0-9]{6,80}$/;
 const RE_SEGREDO_CLIENTE = /^pi_[A-Za-z0-9]{6,80}_secret_[A-Za-z0-9]{6,120}$/;
 const RE_PUBLICAVEL = /^pk_(?:test|live)_[A-Za-z0-9]{8,200}$/;
+
+/** Chave de servidor: 'restrita' (rk_) | 'secreta' (sk_) | '' (outra coisa). Não devolve a chave. */
+function tipoChaveStripe(chave) {
+  const s = String(chave == null ? '' : chave).trim();
+  if (/^rk_(?:test|live)_/.test(s)) return 'restrita';
+  if (/^sk_(?:test|live)_/.test(s)) return 'secreta';
+  return '';
+}
+
+/** Recusa do PaymentIntent (last_payment_error) -> {codigo, motivo, tipo, metodo, mensagem} | null. Sem dados do cartão. */
+function recusaStripe(pi) {
+  const e = pi && pi.last_payment_error;
+  if (!e || typeof e !== 'object') return null;
+  const t = (v, n) => String(v == null ? '' : v).substring(0, n);
+  const pm = e.payment_method && typeof e.payment_method === 'object' ? e.payment_method.type : '';
+  return { codigo: t(e.code, 60), motivo: t(e.decline_code, 60), tipo: t(e.type, 40), metodo: t(pm, 30), mensagem: semChavesStripe(t(e.message, 200)) };
+}
 
 /** "pi_…" válido ou ''. */
 function idIntentStripe(v) {
@@ -1508,7 +1530,7 @@ function criarStripe(op) {
     const controle = typeof AbortController !== 'undefined' ? new AbortController() : null;
     const timer = controle ? setTimeout(() => controle.abort(), STRIPE_TIMEOUT_MS) : null;
     try {
-      const headers = Object.assign({ Authorization: 'Bearer ' + chave, Accept: 'application/json', 'User-Agent': 'gestao-sem-caos-mapa-disc' }, extrasCab || {});
+      const headers = Object.assign({ Authorization: 'Bearer ' + chave, Accept: 'application/json', 'Stripe-Version': STRIPE_VERSAO, 'User-Agent': 'gestao-sem-caos-mapa-disc' }, extrasCab || {});
       const o = { method: metodo, headers, signal: controle ? controle.signal : undefined };
       if (corpo !== undefined) { headers['Content-Type'] = 'application/x-www-form-urlencoded'; o.body = formStripe(corpo); }
       const r = await fetchFn(STRIPE_API + caminho, o);
@@ -1802,6 +1824,8 @@ async function acaoDiagnostico(ctx) {
       asaasAmbiente: asaasAmbiente(env.ASAAS_AMBIENTE),
       // Modo pelo PREFIXO da chave (sk_test_/sk_live_); a chave em si nunca sai daqui.
       stripeModo: modoStripe(env.STRIPE_SECRET_KEY),
+      // 'restrita' (rk_, recomendado) | 'secreta' (sk_) | '' — só o tipo, pelo prefixo.
+      stripeChaveTipo: tipoChaveStripe(env.STRIPE_SECRET_KEY),
       stripePublicavelModo: modoStripe(env.STRIPE_PUBLISHABLE_KEY),
       stripeDominio: dominioSite(env)
     },
@@ -1978,7 +2002,8 @@ async function testarStripe(ctx) {
   const env = ctx.env;
   if (!cxTem(env, 'STRIPE_SECRET_KEY')) return resultado(ctx, 'stripe', false, 'Segredo STRIPE_SECRET_KEY não existe.', 'Presença do segredo.');
   const modo = modoStripe(env.STRIPE_SECRET_KEY);
-  if (!modo) return resultado(ctx, 'stripe', false, 'O STRIPE_SECRET_KEY existe, mas não parece uma chave secreta do Stripe (começa com sk_test_ ou sk_live_).', 'Formato do segredo.');
+  const tipoChave = tipoChaveStripe(env.STRIPE_SECRET_KEY);
+  if (!modo || !tipoChave) return resultado(ctx, 'stripe', false, 'O STRIPE_SECRET_KEY existe, mas não parece uma chave de servidor do Stripe (começa com rk_test_, rk_live_, sk_test_ ou sk_live_).', 'Formato do segredo.');
   const st = criarStripe({ chave: env.STRIPE_SECRET_KEY, fetch: fetchComPrazo(ctx.fetch, cxPrazo(ctx)) });
   const dominio = dominioSite(env);
   const verificado = 'Consulta leve ao saldo (GET /v1/balance, nada é criado) e aos domínios de Apple Pay / Google Pay.';
@@ -1990,14 +2015,15 @@ async function testarStripe(ctx) {
   let d = null;
   try { d = await comPrazo(st.dominio(dominio), cxPrazo(ctx)); } catch (err) { d = null; }
   const pub = modoStripe(env.STRIPE_PUBLISHABLE_KEY);
-  const partes = ['O Stripe aceitou a chave (modo ' + nomeModo(modo) + ').'];
+  const partes = ['O Stripe aceitou a chave ' + (tipoChave === 'restrita' ? 'restrita' : 'secreta') + ' (modo ' + nomeModo(modo) + ').'];
+  if (tipoChave === 'secreta') partes.push('Recomendado: troque por uma chave restrita (rk_…) só com as permissões do pagamento — veja docs/VENDAS.md.');
   if (!cxTem(env, 'STRIPE_PUBLISHABLE_KEY')) partes.push('Falta o STRIPE_PUBLISHABLE_KEY (pk_…): sem ele o site não mostra o pagamento.');
   else if (pub && pub !== modo) partes.push('Atenção: a chave publicável é de ' + nomeModo(pub) + ' e a secreta de ' + nomeModo(modo) + '. Use as duas do mesmo modo.');
-  if (d === null) partes.push('Não deu para conferir o domínio ' + dominio + ' para Apple Pay / Google Pay.');
+  if (d === null) partes.push('Não deu para conferir o domínio ' + dominio + ' para Apple Pay / Google Pay' + (tipoChave === 'restrita' ? ' (a chave restrita precisa de leitura em Payment method domains).' : '.'));
   else if (!d.registrado) partes.push('O domínio ' + dominio + ' não está registrado em Payment method domains: Apple Pay não aparece.');
   else partes.push('Domínio ' + dominio + ' registrado (Apple Pay ' + (d.applePay ? 'ativo' : 'inativo') + ', Google Pay ' + (d.googlePay ? 'ativo' : 'inativo') + ').');
   return resultado(ctx, 'stripe', true, partes.join(' '), verificado, {
-    modo, publicavelModo: pub, dominio, dominioRegistrado: d ? d.registrado : null,
+    modo, chaveTipo: tipoChave, publicavelModo: pub, dominio, dominioRegistrado: d ? d.registrado : null,
     applePay: d ? d.applePay : null, googlePay: d ? d.googlePay : null, webhookSecreto: cxTem(env, 'STRIPE_WEBHOOK_SECRET')
   });
 }

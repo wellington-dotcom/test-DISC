@@ -42,7 +42,9 @@
 //   Resposta 200 {ok, feito, motivo}; falha no banco -> 500 e InfinitePay fora -> 502 (para ela reenviar).
 // "stripe-webhook": assinatura Stripe-Signature (HMAC-SHA256 de `${t}.${corpo}` com STRIPE_WEBHOOK_SECRET; tolerância
 //   5 min; sem segredo 503, assinatura ruim 400). payment_intent.succeeded -> confere o PaymentIntent no Stripe (valor,
-//   moeda, metadata) e marca 'pago' (idempotente); charge.refunded / charge.dispute.created -> 'estornado'.
+//   moeda, metadata) e marca 'pago' (idempotente); charge.refunded / charge.dispute.created -> 'estornado';
+//   payment_intent.payment_failed -> guarda a recusa em provedor_dados.recusa (o pedido segue 'aguardando': dá para
+//   tentar de novo com outro cartão no mesmo PaymentIntent) e o painel mostra "Última recusa".
 //   Falha no banco -> 500 e Stripe fora -> 502 (o Stripe reenvia).
 // "asaas-webhook": cabeçalho asaas-access-token == ASAAS_WEBHOOK_TOKEN (senão 401; sem segredo 503).
 //   PAYMENT_RECEIVED/CONFIRMED -> 'pago' (só de aguardando/cancelado; valor pago >= valor do pedido);
@@ -52,7 +54,7 @@
 import { erro, normalizarEmail, emailValido, MSG_ERRO_INTERNO } from './regras.js';
 import { criarInfinitePay, lerRefsInfinitePay, refInfinitePay } from './infinitepay.js';
 import {
-  criarStripe, idIntentStripe, segredoClienteStripe, chavePublicavelStripe, stripeMetodo, verificarAssinaturaStripe,
+  criarStripe, idIntentStripe, segredoClienteStripe, recusaStripe, chavePublicavelStripe, stripeMetodo, verificarAssinaturaStripe,
   STRIPE_ABERTOS, STRIPE_DESCRICAO
 } from './stripe.js';
 import {
@@ -64,6 +66,7 @@ export const MSG_PAG_NAO_CONFIGURADO = 'Pagamento ainda não configurado.';
 export const MSG_EMAIL_NAO_CONFIGURADO = 'O envio por e-mail ainda não está configurado. Fale com o suporte.';
 export const MSG_PEDIDO_NAO_ENCONTRADO = 'Pedido não encontrado.';
 export const MSG_PRECISA_CPF = 'Informe o seu CPF para pagar.';
+export const MSG_RECUSADO = 'O pagamento não foi aprovado. Tente de novo ou use outra forma de pagamento.';
 export const NOMES_ENV_VENDAS = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SITE_URL', 'PAGAMENTO_PROVEDOR',
   'STRIPE_SECRET_KEY', 'STRIPE_PUBLISHABLE_KEY', 'STRIPE_WEBHOOK_SECRET', 'INFINITEPAY_HANDLE', 'ASAAS_API_KEY', 'ASAAS_AMBIENTE', 'ASAAS_WEBHOOK_TOKEN', 'RESEND_API_KEY', 'EMAIL_REMETENTE'];
 export const VERIFICAR_ASAAS_MS = 15000;
@@ -352,7 +355,8 @@ export async function acaoStatusPagamento(ctx, corpo) {
     if (isFinite(ultimaS) && ctx.agora() - ultimaS < VERIFICAR_ASAAS_MS) return { ok: true, status: p.status };
     await ctx.db.marcarVerificado(p.id, new Date(ctx.agora()).toISOString());
     try {
-      return { ok: true, status: (await conferirStripe(ctx, p, p.provedor_ref, 'status')).status };
+      const r = await conferirStripe(ctx, p, p.provedor_ref, 'status');
+      return r.recusa ? { ok: true, status: r.status, recusado: true, mensagem: MSG_RECUSADO } : { ok: true, status: r.status };
     } catch (err) {
       try { console.error(err); } catch (e) { /* sem console */ }
       return { ok: true, status: p.status };
@@ -595,7 +599,11 @@ async function conferirStripe(ctx, p, piId, origem) {
     currency: pi.currency, livemode: pi.livemode === true };
   const dados = Object.assign({}, dadosDoPedido(p), { conferencia: { origem, em, intent: resumo } });
   if (!pi.metadata || String(pi.metadata.pedido_id || '') !== String(p.id)) return { status: p.status, feito: false, motivo: 'outro_pedido' };
-  if (pi.status !== 'succeeded') return { status: p.status, feito: false, motivo: 'nao_pago' };
+  if (pi.status !== 'succeeded') {
+    const recusa = pi.status === 'requires_payment_method' ? recusaStripe(pi) : null;
+    if (recusa) return { status: p.status, feito: false, motivo: 'recusado', recusa };
+    return { status: p.status, feito: false, motivo: 'nao_pago' };
+  }
   if (String(pi.currency || '').toLowerCase() !== 'brl' || !(Number(pi.amount_received) >= Number(p.valor_centavos || 0))) {
     await ctx.db.gravarProvedorDados(p.id, '', dados);
     return { status: p.status, feito: false, motivo: 'valor_menor' };
@@ -655,6 +663,17 @@ export async function tratarEventoStripe(ctx, evento) {
       throw err;
     }
     return { ok: true, feito: r.feito, motivo: r.motivo };
+  }
+  if (tipo === 'payment_intent.payment_failed') {
+    const piId = idIntentStripe(obj.id);
+    if (!piId) return { ok: true, feito: false, motivo: 'sem_pagamento' };
+    const p = await pedidoDoStripe(ctx, obj.metadata && obj.metadata.pedido_id, piId);
+    if (!p) return { ok: true, feito: false, motivo: 'pedido_nao_encontrado' };
+    if (p.provedor && p.provedor !== 'stripe') return { ok: true, feito: false, motivo: 'outro_provedor' };
+    if (p.status !== 'aguardando') return { ok: true, feito: false, motivo: 'repetido' };
+    const recusa = Object.assign({ em: new Date(ctx.agora()).toISOString(), intent: piId }, recusaStripe(obj) || { codigo: '', motivo: '', tipo: '', metodo: '', mensagem: '' });
+    await ctx.db.gravarProvedorDados(p.id, '', Object.assign({}, dadosDoPedido(p), { recusa }));
+    return { ok: true, feito: true, motivo: 'recusado' };
   }
   if (tipo === 'charge.refunded' || tipo === 'charge.dispute.created') {
     const piId = idIntentStripe(typeof obj.payment_intent === 'object' && obj.payment_intent ? obj.payment_intent.id : obj.payment_intent);

@@ -2,7 +2,9 @@
 // recebe fetch por parâmetro (testável no Node com respostas falsas). Corpo form-encoded, como a API do Stripe pede.
 //
 // Segredos (Supabase > Edge Functions > Secrets; NUNCA no código nem em conversa):
-//   STRIPE_SECRET_KEY       chave secreta (sk_test_… em teste, sk_live_… em produção). Só o servidor usa.
+//   STRIPE_SECRET_KEY       chave do servidor. Recomendado: chave RESTRITA (rk_test_… / rk_live_…) só com PaymentIntents
+//                           (escrita), PaymentMethods (leitura), Balance (leitura) e Payment method domains (leitura); a secreta
+//                           (sk_…) também funciona, mas abre a conta inteira se vazar. Só o servidor usa.
 //   STRIPE_PUBLISHABLE_KEY  chave publicável (pk_…): vai para o navegador montar o Payment Element (é pública).
 //   STRIPE_WEBHOOK_SECRET   "Signing secret" do endpoint de webhook (whsec_…): confere a assinatura Stripe-Signature.
 //
@@ -12,8 +14,11 @@
 //   GET  /v1/balance (teste leve da chave)  ·  GET /v1/payment_method_domains?domain_name=… (Apple Pay / Google Pay)
 // Assinatura do webhook: Stripe-Signature "t=<unix>,v1=<hex>[,v1=…]"; v1 = HMAC-SHA256(segredo, `${t}.${corpo bruto}`).
 // Conferida com Web Crypto (crypto.subtle.verify: comparação em tempo constante) e tolerância de 5 minutos.
+// Versão da API FIXA (cabeçalho Stripe-Version): mudar a versão padrão da conta no painel do Stripe não muda nada aqui.
+// Para atualizar: troque STRIPE_VERSAO, rode os testes e confira um pagamento de teste na aba Conexões.
 
 export const STRIPE_API = 'https://api.stripe.com';
+export const STRIPE_VERSAO = '2026-08-26.dahlia';
 export const STRIPE_TOLERANCIA_S = 300;
 export const STRIPE_DESCRICAO = 'Mapa DISC — Gestão sem Caos';
 export const STRIPE_SUFIXO_FATURA = 'MAPA DISC';
@@ -23,6 +28,23 @@ const STRIPE_TIMEOUT_MS = 15000;
 const RE_INTENT_STRIPE = /^pi_[A-Za-z0-9]{6,80}$/;
 const RE_SEGREDO_CLIENTE = /^pi_[A-Za-z0-9]{6,80}_secret_[A-Za-z0-9]{6,120}$/;
 const RE_PUBLICAVEL = /^pk_(?:test|live)_[A-Za-z0-9]{8,200}$/;
+
+/** Chave de servidor: 'restrita' (rk_) | 'secreta' (sk_) | '' (outra coisa). Não devolve a chave. */
+export function tipoChaveStripe(chave) {
+  const s = String(chave == null ? '' : chave).trim();
+  if (/^rk_(?:test|live)_/.test(s)) return 'restrita';
+  if (/^sk_(?:test|live)_/.test(s)) return 'secreta';
+  return '';
+}
+
+/** Recusa do PaymentIntent (last_payment_error) -> {codigo, motivo, tipo, metodo, mensagem} | null. Sem dados do cartão. */
+export function recusaStripe(pi) {
+  const e = pi && pi.last_payment_error;
+  if (!e || typeof e !== 'object') return null;
+  const t = (v, n) => String(v == null ? '' : v).substring(0, n);
+  const pm = e.payment_method && typeof e.payment_method === 'object' ? e.payment_method.type : '';
+  return { codigo: t(e.code, 60), motivo: t(e.decline_code, 60), tipo: t(e.type, 40), metodo: t(pm, 30), mensagem: semChavesStripe(t(e.message, 200)) };
+}
 
 /** "pi_…" válido ou ''. */
 export function idIntentStripe(v) {
@@ -166,7 +188,7 @@ export function criarStripe(op) {
     const controle = typeof AbortController !== 'undefined' ? new AbortController() : null;
     const timer = controle ? setTimeout(() => controle.abort(), STRIPE_TIMEOUT_MS) : null;
     try {
-      const headers = Object.assign({ Authorization: 'Bearer ' + chave, Accept: 'application/json', 'User-Agent': 'gestao-sem-caos-mapa-disc' }, extrasCab || {});
+      const headers = Object.assign({ Authorization: 'Bearer ' + chave, Accept: 'application/json', 'Stripe-Version': STRIPE_VERSAO, 'User-Agent': 'gestao-sem-caos-mapa-disc' }, extrasCab || {});
       const o = { method: metodo, headers, signal: controle ? controle.signal : undefined };
       if (corpo !== undefined) { headers['Content-Type'] = 'application/x-www-form-urlencoded'; o.body = formStripe(corpo); }
       const r = await fetchFn(STRIPE_API + caminho, o);
