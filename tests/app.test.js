@@ -698,7 +698,7 @@ test('InfinitePay: redirecionarUrl no pagamento e volta com order_nsu em meu-rel
   assert.equal(CK.normalizarPagamento({ redirecionarUrl: 'javascript:alert(1)' }).redirecionarUrl, '');
   assert.equal(CK.normalizarPagamento({ pix: { copiaECola: '0002' } }).provedor, 'asaas');
   assert.deepEqual(MR.retornoDaUrl('?order_nsu=9f1c-2&transaction_nsu=T1&slug=S1&capture_method=pix&receipt_url=https%3A%2F%2Fr.io%2F1'),
-    { pedidoId: '9f1c-2', transactionNsu: 'T1', slug: 'S1', metodo: 'pix', reciboUrl: 'https://r.io/1' });
+    { pedidoId: '9f1c-2', transactionNsu: 'T1', slug: 'S1', metodo: 'pix', reciboUrl: 'https://r.io/1', paymentIntent: '', redirectStatus: '' });
   assert.equal(MR.retornoDaUrl('?t=abc'), null);
   assert.equal(MR.retornoDaUrl('?pedido=p-9', '#t-' + 'a'.repeat(64)).pedidoId, 'p-9');
   const h = '#t-' + 'b'.repeat(64) + '?order_nsu=p-7&transaction_nsu=T9&slug=S';
@@ -706,4 +706,28 @@ test('InfinitePay: redirecionarUrl no pagamento e volta com order_nsu em meu-rel
   assert.equal(MR.tokenDaUrl(h, ''), 'b'.repeat(64));
   assert.equal(MR.tokenDaUrl('#t-' + 'c'.repeat(64) + '&slug=x', ''), 'c'.repeat(64));
   assert.equal(MR.retornoDaUrl('?order_nsu=%3Cx%3E'), null);
+});
+
+test('Stripe: normalizarPagamento guarda clientSecret/publicável válidos; volta do 3DS com payment_intent e redirect_status', () => {
+  const pg = CK.normalizarPagamento({ ok: true, provedor: 'stripe', clientSecret: 'pi_3Abc123_secret_Xyz9', publicavel: 'pk_' + 'test_Abc123', valor: 2900 });
+  assert.deepEqual([pg.provedor, pg.clientSecret, pg.publicavel, pg.simulado, pg.redirecionarUrl], ['stripe', 'pi_3Abc123_secret_Xyz9', 'pk_' + 'test_Abc123', false, '']);
+  const ruim = CK.normalizarPagamento({ provedor: 'stripe', clientSecret: '"><script>', publicavel: 'sk_' + 'test_x' });
+  assert.deepEqual([ruim.clientSecret, ruim.publicavel], ['', ''], 'nada suspeito passa (nem chave secreta como publicável)');
+  const r = MR.retornoDaUrl('?pedido=p-1&payment_intent=pi_3Abc12345&payment_intent_client_secret=pi_3Abc12345_secret_x&redirect_status=succeeded', '#t-' + 'a'.repeat(64));
+  assert.deepEqual([r.pedidoId, r.paymentIntent, r.redirectStatus], ['p-1', 'pi_3Abc12345', 'succeeded']);
+  assert.equal(MR.retornoDaUrl('?pedido=p-1&payment_intent=%3Cx%3E&redirect_status=hack').paymentIntent, '');
+  assert.equal(MR.retornoDaUrl('?pedido=p-1&redirect_status=hack').redirectStatus, '');
+  const ST = require('../js/stripe-pagamento.js');
+  assert.equal(ST.URL_STRIPE_JS, 'https://js.stripe.com/v3/');
+  assert.match(ST.mensagemErro({ type: 'card_error', code: 'card_declined', decline_code: 'insufficient_funds' }), /limite/);
+  assert.match(ST.mensagemErro({ type: 'card_error', code: 'expired_card' }), /vencido/);
+  assert.equal(ST.mensagemErro({ type: 'card_error', code: 'x', message: 'Seu cartão foi recusado.' }), 'Seu cartão foi recusado.');
+  assert.match(ST.mensagemErro({ type: 'api_error', message: 'internal' }), /Não foi possível concluir/);
+  assert.deepEqual(ST.resultadoConfirmacao({ paymentIntent: { id: 'pi_1Abc', status: 'succeeded' } }), { status: 'pago', mensagem: '', pix: null, paymentIntent: 'pi_1Abc' });
+  const pix = ST.resultadoConfirmacao({ paymentIntent: { id: 'pi_1Abc', status: 'requires_action', next_action: { type: 'pix_display_qr_code',
+    pix_display_qr_code: { data: '00020126PIX', image_url_png: 'https://qr.stripe.com/x.png', expires_at: 1790000000, hosted_instructions_url: 'https://payments.stripe.com/pix/x' } } } });
+  assert.equal(pix.status, 'pendente');
+  assert.deepEqual([pix.pix.qr, pix.pix.copiaECola], ['https://qr.stripe.com/x.png', '00020126PIX']);
+  assert.equal(ST.pixDoIntent({ next_action: { pix_display_qr_code: { image_url_png: 'javascript:1' } } }), null);
+  assert.equal(ST.resultadoConfirmacao({ error: { type: 'card_error', code: 'incorrect_cvc' } }).status, 'erro');
 });

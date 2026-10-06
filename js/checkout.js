@@ -1,6 +1,8 @@
 /*
- * Checkout do Mapa de Perfil (venda B2C, Gestão sem Caos): pacotes, cupom, Pix (QR + copia e cola), cartão (link),
- * espera da confirmação (consulta a cada 4 s) e confirmação com o link do relatório.
+ * Checkout do Mapa de Perfil (venda B2C, Gestão sem Caos): pacotes, cupom e pagamento. Com o Stripe (padrão) o pagamento
+ * acontece NA PÁGINA (Payment Element de js/stripe-pagamento.js: cartão, Apple Pay, Google Pay e Pix com QR); com a
+ * InfinitePay vai para a página dela; com o Asaas mostra Pix (QR + copia e cola) e link de cartão. Espera a confirmação
+ * (consulta a cada 4 s) e mostra a confirmação com o link do relatório.
  *
  * Módulo UMD (global DISC_CHECKOUT). Parte PURA (testada no Node):
  *   PACOTES_PADRAO, normalizarPacotes(resp), precoVigente(pacote, hoje), formatarPreco(centavos),
@@ -9,7 +11,8 @@
  * Parte do navegador: criar(opcoes) -> { montar(el), parar() }
  *   opcoes: { api, tokenResumo, pacote (normalizado), pedido (salvo, opcional), cupom (pré-preenchido), telefone, aoMudar(pedido),
  *             aoVoltar(), aoParte2(pedido), aoAnunciar(msg), intervaloMs (padrão 4000) }
- * Usa só as funções públicas da API B2C: criarPedido, iniciarPagamento, statusPedido (e simularPagamento na prévia).
+ * Usa só as funções públicas da API B2C: criarPedido, iniciarPagamento, statusPedido, confirmarRetorno (e simularPagamento
+ * na prévia). O client_secret do Stripe fica só na memória desta tela (não vai para o localStorage).
  * Só texto puro na tela: tudo passa por escapar().
  */
 (function (root) {
@@ -150,9 +153,17 @@
     };
   }
 
-  // Resposta de iniciarPagamento -> { qr (data URL ou ''), copiaECola, invoiceUrl, vencimento }.
+  // Resposta de iniciarPagamento -> { provedor, qr (data URL ou ''), copiaECola, invoiceUrl, vencimento, redirecionarUrl,
+  // clientSecret, publicavel, simulado } (Stripe: clientSecret 'pi_…_secret_…' + chave publicável 'pk_…').
   function normalizarPagamento(resp) {
     var r = resp && resp.pagamento ? resp.pagamento : (resp || {});
+    if (r.provedor === 'stripe') {
+      var cs = String(r.clientSecret || '');
+      var pk = String(r.publicavel || '');
+      var ok = /^pi_[A-Za-z0-9]+_secret_[A-Za-z0-9]+$/.test(cs) && /^pk_(test|live)_[A-Za-z0-9_]+$/.test(pk);
+      return { provedor: 'stripe', clientSecret: ok ? cs : '', publicavel: ok ? pk : '', simulado: r.simulado === true,
+        redirecionarUrl: '', qr: '', copiaECola: '', invoiceUrl: '', vencimento: '' };
+    }
     var pix = r.pix || {};
     var qr = String(pega(pix, ['qrCodeBase64', 'qrBase64', 'encodedImage', 'qr']) || pega(r, ['qrCodeBase64', 'qrBase64', 'pixQrCode', 'qr']) || '');
     if (qr && !/^data:image\//.test(qr)) qr = /^[A-Za-z0-9+/=\s]+$/.test(qr) ? 'data:image/png;base64,' + qr.replace(/\s+/g, '') : '';
@@ -213,6 +224,8 @@
 
   /* ------------------------------------------------------------------ Navegador */
 
+  // QR de enfeite da prévia (Pix fictício do "Payment Element" simulado): não é um Pix de verdade.
+  var QR_FICTICIO = 'data:image/svg+xml;base64,' + (typeof btoa === 'function' ? btoa('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 29 29" shape-rendering="crispEdges"><rect width="29" height="29" fill="#fff"/><path fill="#13283f" d="M1 1h7v7H1zM21 1h7v7h-7zM1 21h7v7H1zM3 3v3h3V3zM23 3v3h3V3zM3 23v3h3v-3zM10 2h2v2h-2zM14 1h2v3h-2zM10 6h4v2h-4zM16 6h2v4h-2zM11 10h3v2h-3zM1 10h2v3H1zM5 11h4v2H5zM19 10h3v2h-3zM24 11h4v2h-4zM10 14h2v4h-2zM14 13h4v2h-4zM20 14h2v3h-2zM24 15h3v2h-3zM2 15h3v2H2zM6 16h2v3H6zM13 17h3v3h-3zM17 18h3v2h-3zM10 21h3v2h-3zM15 22h2v4h-2zM19 21h4v2h-4zM24 20h3v3h-3zM11 25h3v3h-3zM19 25h2v3h-2zM23 25h5v3h-5z"/></svg>') : '');
   var ICONE_PIX = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3l9 9-9 9-9-9z"/><path d="M8 12h8"/></svg>';
   var ICONE_CARTAO = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true" focusable="false"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18M7 15h4"/></svg>';
   var ICONE_ESCUDO = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg>';
@@ -225,6 +238,9 @@
     var el = null;
     var timer = null;
     var inicioEspera = 0;
+    var stripeDados = null;    // {clientSecret, publicavel, simulado}: só na memória
+    var stripeSessao = null;   // Payment Element montado (DISC_STRIPE)
+    var stripePix = null;      // Pix gerado pelo Stripe (QR + copia e cola), mostrado também na nossa tela
     var st = {
       tela: pedido ? (liberado(pedido.status) ? 'confirmado' : (pedido.pagamento ? 'pagamento' : 'revisao')) : 'revisao',
       metodo: 'pix',
@@ -299,7 +315,7 @@
           '</div>' +
           erroHtml() +
           garantiaHtml() +
-          '<p class="ck-letra-miuda">Pagamento processado com segurança pelo Asaas. Vendido por ' + escapar(EMPRESA) + '.</p>' +
+          '<p class="ck-letra-miuda">Pagamento único, em ambiente seguro. Vendido por ' + escapar(EMPRESA) + '.</p>' +
         '</section>';
     }
 
@@ -338,8 +354,56 @@
         '</section>';
     }
 
+    // Stripe: o pagamento acontece aqui (Payment Element). O espaço do formulário é reservado para nada pular de lugar.
+    function telaStripe() {
+      var simular = api && typeof api.simularPagamento === 'function';
+      var pv = preco();
+      var valor = pedido && pedido.valorCentavos !== null && pedido.valorCentavos !== undefined ? pedido.valorCentavos : pv.centavos;
+      return '' +
+        '<section class="caixa ck' + surgir() + '" aria-labelledby="ck-titulo" data-ck-tela="pagamento" data-provedor="stripe">' +
+          '<p class="sobretitulo">Pagamento</p>' +
+          '<h1 id="ck-titulo" class="titulo-pagina">Falta só pagar</h1>' +
+          resumoPacoteHtml() +
+          '<div class="ck-stripe" id="ck-stripe">' +
+            '<div class="ck-stripe-elemento" id="ck-stripe-elemento" aria-busy="true">' +
+              '<p class="ck-stripe-carregando"><span class="giro" aria-hidden="true"></span>Carregando as formas de pagamento…</p>' +
+            '</div>' +
+          '</div>' +
+          pixStripeHtml() +
+          '<div class="acoes acoes-coluna ck-acoes">' +
+            '<button type="button" class="botao botao--laranja botao--grande botao--bloco ck-pagar" data-ck="pagar" disabled>Pagar ' + escapar(formatarPreco(valor)) + '</button>' +
+          '</div>' +
+          erroHtml() +
+          '<div class="ck-espera ck-espera--discreta" role="status" aria-live="polite"><span id="ck-status">Cartão, Apple Pay, Google Pay ou Pix. O relatório abre assim que o pagamento é aprovado.</span></div>' +
+          '<div class="acoes acoes-coluna ck-acoes">' +
+            '<button type="button" class="botao botao--claro botao--grande" data-ck="verificar">Já paguei</button>' +
+            (simular ? '<button type="button" class="botao botao--contorno botao--grande" data-ck="simular">Simular pagamento aprovado (prévia)</button>' : '') +
+            '<button type="button" class="botao botao--link" data-ck="trocar">Trocar o pacote ou o cupom</button>' +
+          '</div>' +
+          garantiaHtml() +
+          '<p class="ck-letra-miuda">Pagamento processado com segurança pelo Stripe. Os dados do cartão não passam pelo nosso servidor. Vendido por ' + escapar(EMPRESA) + '.</p>' +
+        '</section>';
+    }
+
+    function pixStripeHtml() {
+      var px = stripePix;
+      return '<div class="ck-pix-stripe" id="ck-pix-stripe"' + (px ? '' : ' hidden') + '>' +
+        (px ? '<p class="ck-texto ck-pix-stripe-titulo"><strong>Pix gerado.</strong> Leia o QR Code no app do banco ou use o copia e cola.</p>' +
+          (px.qr ? '<div class="ck-qr"><img src="' + escapar(px.qr) + '" alt="QR Code do Pix" width="200" height="200"></div>' : '') +
+          (px.copiaECola
+            ? '<div class="campo ck-copia">' +
+                '<label class="campo__rotulo" for="ck-pix">Pix copia e cola</label>' +
+                '<textarea class="entrada ck-pix-texto" id="ck-pix" readonly rows="3" spellcheck="false">' + escapar(px.copiaECola) + '</textarea>' +
+                '<button type="button" class="botao botao--principal botao--grande botao--bloco" data-ck="copiar-pix">Copiar código Pix</button>' +
+                '<p class="sucesso" id="ck-copiado" role="status" aria-live="polite"></p>' +
+              '</div>'
+            : '') : '') +
+        '</div>';
+    }
+
     function telaPagamento() {
       var pg = (pedido && pedido.pagamento) || {};
+      if (pg.provedor === 'stripe') return telaStripe();
       if (pg.redirecionarUrl) return telaRedirecionar(pg);
       var simular = api && typeof api.simularPagamento === 'function';
       return '' +
@@ -417,16 +481,126 @@
     // A entrada animada só quando a tela muda (redesenhar a mesma tela não pode "pular").
     var telaDesenhada = '';
     function surgir() { return st.tela === telaDesenhada ? '' : ' surgir'; }
+    function ehStripe() { return st.tela === 'pagamento' && pedido && pedido.pagamento && pedido.pagamento.provedor === 'stripe'; }
+    function soltarStripe() { if (stripeSessao) { stripeSessao.destruir(); stripeSessao = null; } }
+
     function desenhar(focar) {
       if (!el) return;
+      soltarStripe();
       el.innerHTML = html();
       telaDesenhada = st.tela;
+      if (ehStripe()) montarStripe();
       if (focar) {
         var h = el.querySelector('h1');
         if (h) { h.setAttribute('tabindex', '-1'); try { h.focus({ preventScroll: true }); } catch (e) { h.focus(); } }
         try { root.scrollTo(0, 0); } catch (e) { /* ignora */ }
       }
       if (st.tela === 'pagamento') agendar(); else pararTimer();
+    }
+
+    // Monta o Payment Element (ou o simulado da prévia). Pedido restaurado sem o client_secret: pede de novo ao servidor
+    // (ele devolve o MESMO PaymentIntent).
+    function montarStripe() {
+      var caixa = el.querySelector('#ck-stripe-elemento');
+      var S = root.DISC_STRIPE;
+      if (!caixa) return;
+      var obter = stripeDados ? Promise.resolve(stripeDados) : Promise.resolve().then(function () {
+        return api.iniciarPagamento(pedido.pedidoId, pedido.tokenAcesso);
+      }).then(function (r) {
+        if (r && r.pago === true) { confirmar(liberado(r.status) ? r.status : 'pago'); return null; }
+        var pg = normalizarPagamento(r);
+        if (pg.provedor !== 'stripe' || !pg.clientSecret) throw new Error((r && r.erro) || 'Não conseguimos gerar o pagamento. Tente de novo em instantes.');
+        stripeDados = { clientSecret: pg.clientSecret, publicavel: pg.publicavel, simulado: pg.simulado };
+        return stripeDados;
+      });
+      obter.then(function (d) {
+        if (!d || st.parado || !el.contains(caixa)) return null;
+        if (!S) throw new Error('Não foi possível carregar o pagamento. Atualize a página.');
+        var pronto = function () {
+          if (!el.contains(caixa)) return;
+          caixa.removeAttribute('aria-busy');
+          var b = el.querySelector('[data-ck="pagar"]');
+          if (b && !st.ocupado) b.disabled = false;
+        };
+        var piId = String(d.clientSecret).split('_secret_')[0];
+        if (d.simulado) {
+          return { sessao: S.montarSimulado({ el: caixa, aoPronto: pronto, paymentIntent: piId,
+            simularPago: function () { return api.simularPagamento(pedido.pedidoId, pedido.tokenAcesso); },
+            pixFicticio: { qr: QR_FICTICIO, copiaECola: 'PREVIA-NAO-PAGUE-' + pedido.pedidoId } }), caixa: caixa };
+        }
+        caixa.innerHTML = '';
+        return S.montar({ el: caixa, publicavel: d.publicavel, clientSecret: d.clientSecret, aoPronto: pronto, aoErro: mostrarErro })
+          .then(function (sessao) { return { sessao: sessao, caixa: caixa }; });
+      }).then(function (x) {
+        if (!x) return;
+        if (!el.contains(x.caixa) || st.parado) { x.sessao.destruir(); return; }
+        stripeSessao = x.sessao;
+      }).catch(function (e) {
+        if (!el.contains(caixa)) return;
+        caixa.removeAttribute('aria-busy');
+        var c = caixa.querySelector('.ck-stripe-carregando');
+        if (c) c.textContent = 'Não foi possível carregar o pagamento.';
+        mostrarErro((e && e.message) || 'Não foi possível carregar o pagamento. Verifique a conexão e tente de novo.');
+      });
+    }
+
+    function urlRetornoStripe() {
+      var b = String(root.location.href).split('#')[0].split('?')[0].replace(/[^/]*$/, '');
+      return b + 'meu-relatorio.html?pedido=' + encodeURIComponent(pedido.pedidoId) + '#t-' + encodeURIComponent(pedido.tokenAcesso);
+    }
+
+    function mostrarPixStripe(px) {
+      stripePix = px;
+      var caixa = el.querySelector('#ck-pix-stripe');
+      if (!caixa) return;
+      var tmp = document.createElement('div');
+      tmp.innerHTML = pixStripeHtml();
+      caixa.innerHTML = tmp.firstChild.innerHTML;
+      caixa.hidden = false;
+    }
+
+    function pagarStripe(botao) {
+      if (!stripeSessao || st.ocupado) return;
+      var rotulo = botao.textContent;
+      st.ocupado = true;
+      botao.disabled = true;
+      botao.setAttribute('aria-busy', 'true');
+      botao.textContent = 'Processando…';
+      mostrarErro('');
+      var s = el.querySelector('#ck-status');
+      function soltar() {
+        st.ocupado = false;
+        if (!el.contains(botao)) return;
+        botao.disabled = false;
+        botao.removeAttribute('aria-busy');
+        botao.textContent = rotulo;
+      }
+      Promise.resolve().then(function () { return stripeSessao.confirmar(urlRetornoStripe()); }).then(function (r) {
+        if (st.parado) return;
+        if (r.status === 'pago') {
+          if (s) s.textContent = 'Pagamento aprovado. Liberando o seu relatório…';
+          return Promise.resolve().then(function () {
+            return typeof api.confirmarRetorno === 'function'
+              ? api.confirmarRetorno(pedido.pedidoId, pedido.tokenAcesso, { paymentIntent: r.paymentIntent })
+              : api.statusPedido(pedido.pedidoId, pedido.tokenAcesso);
+          }).then(function (x) {
+            soltar();
+            var status = String((x && x.status) || '');
+            if (liberado(status)) confirmar(status); else verificar(false);
+          }, function () { soltar(); verificar(false); });
+        }
+        soltar();
+        if (r.status === 'pendente') {
+          if (r.pix) mostrarPixStripe(r.pix);
+          if (s) s.textContent = r.mensagem || 'Aguardando a confirmação do pagamento…';
+          agendar();
+          return;
+        }
+        mostrarErro(r.mensagem || 'Não foi possível concluir o pagamento. Tente de novo.');
+      }, function (e) {
+        soltar();
+        mostrarErro((e && e.message) || 'Não foi possível concluir o pagamento. Tente de novo.');
+      });
     }
 
     function mostrarErro(msg) {
@@ -489,7 +663,12 @@
         if (pagamentoIndisponivel(r) || (r && r.naoConfigurado)) throw Object.assign(new Error((r && r.erro) || 'Pagamento ainda não configurado.'), { indisponivel: true });
         if (r && r.ok === false) throw new Error(r.erro || 'Não conseguimos gerar o pagamento. Tente de novo em instantes.');
         var pg = normalizarPagamento(r);
-        if (!pg.qr && !pg.copiaECola && !pg.invoiceUrl && !pg.redirecionarUrl) throw new Error('Não conseguimos gerar o pagamento. Tente de novo em instantes.');
+        if (!pg.qr && !pg.copiaECola && !pg.invoiceUrl && !pg.redirecionarUrl && !pg.clientSecret) throw new Error('Não conseguimos gerar o pagamento. Tente de novo em instantes.');
+        if (pg.provedor === 'stripe') {
+          // O client_secret fica só na memória: o pedido salvo guarda apenas "é Stripe".
+          stripeDados = { clientSecret: pg.clientSecret, publicavel: pg.publicavel, simulado: pg.simulado };
+          pg = { provedor: 'stripe', simulado: pg.simulado };
+        }
         pedido.pagamento = pg;
         mudou();
         return 'pagamento';
@@ -601,7 +780,8 @@
           el.querySelector('#ck-painel-pix').hidden = st.metodo !== 'pix';
           el.querySelector('#ck-painel-cartao').hidden = st.metodo !== 'cartao';
           break;
-        case 'copiar-pix': copiar(pedido && pedido.pagamento ? pedido.pagamento.copiaECola : '', 'Código Pix copiado!'); break;
+        case 'copiar-pix': copiar(stripePix && stripePix.copiaECola ? stripePix.copiaECola : (pedido && pedido.pagamento ? pedido.pagamento.copiaECola : ''), 'Código Pix copiado!'); break;
+        case 'pagar': pagarStripe(alvo); break;
         case 'copiar-link': copiar(link(), 'Link copiado!'); break;
         case 'verificar': verificar(true); break;
         case 'simular':
@@ -611,6 +791,8 @@
           break;
         case 'trocar':
           pararTimer();
+          stripeDados = null;
+          stripePix = null;
           pedido = null;
           mudou();
           st.tela = 'revisao';
@@ -633,6 +815,7 @@
     function parar() {
       st.parado = true;
       pararTimer();
+      soltarStripe();
       document.removeEventListener('visibilitychange', aoVoltarAba);
       if (el) el.removeEventListener('click', aoClicar);
     }

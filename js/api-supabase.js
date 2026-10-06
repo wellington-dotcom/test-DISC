@@ -87,7 +87,12 @@
  *     gratuito = cupom de 100% (status 'cortesia': relatório liberado na hora). jaPago = esta resposta já tinha
  *     comprado este pacote (devolve aquele pedido). Cupom ruim: "Cupom inválido ou expirado.".
  *   iniciarPagamento(pedidoId, tokenAcesso, {cpf}?) -> uma destas (o PROVEDOR é escolhido no servidor pelos segredos
- *     PAGAMENTO_PROVEDOR / INFINITEPAY_HANDLE / ASAAS_API_KEY; InfinitePay é o padrão quando configurada):
+ *     PAGAMENTO_PROVEDOR / STRIPE_SECRET_KEY / INFINITEPAY_HANDLE / ASAAS_API_KEY; o Stripe é o padrão quando configurado):
+ *     | Stripe (migração 20261014120000_stripe.sql): {ok:true, provedor:'stripe', clientSecret ('pi_…_secret_…'), publicavel
+ *       ('pk_…'), valor} -> o site carrega https://js.stripe.com/v3/ e monta o Payment Element NA PÁGINA (cartão, Apple Pay,
+ *       Google Pay, Pix com QR). stripe.confirmPayment com redirect:'if_required'; se o banco pedir 3DS/redirecionamento, a
+ *       volta é meu-relatorio.html?pedido=<id>&payment_intent=pi_…&payment_intent_client_secret=…&redirect_status=…#t-<token>
+ *       e a página chama confirmarRetorno(pedidoId, tokenAcesso, {paymentIntent}).
  *     | InfinitePay (migração 20261012120000_infinitepay.sql): {ok:true, provedor:'infinitepay', redirecionarUrl, valor}
  *       -> o site faz location.href = redirecionarUrl (página da InfinitePay: Pix e cartão; sem Pix embutido no site).
  *       Depois de pagar a InfinitePay devolve o cliente para
@@ -103,7 +108,8 @@
  *       publicada: mostre "Compra disponível em breve — use um cupom")
  *     | {ok:false, erro:'Informe o seu CPF para pagar.' | 'CPF inválido…', precisaCpf:true} (só Asaas, que exige CPF: peça e
  *       chame de novo com {cpf}; o CPF vai só para o Asaas, não fica no banco)
- *   confirmarRetorno(pedidoId, tokenAcesso, {transactionNsu, slug}) -> {ok, status:'aguardando'|'pago'|…}
+ *   confirmarRetorno(pedidoId, tokenAcesso, {transactionNsu, slug, paymentIntent}) -> {ok, status:'aguardando'|'pago'|…}
+ *     Stripe: o servidor busca o PaymentIntent do pedido (status succeeded, valor e pedido conferidos) e marca pago.
  *     Volta da InfinitePay: o servidor confere no payment_check (paid=true e valor pago >= valor do pedido) e marca pago.
  *     'aguardando' = ainda não confirmado (Pix em processamento): siga com statusPedido. Os parâmetros da URL NÃO
  *     liberam nada sozinhos. Sem a Edge Function: devolve o status do banco.
@@ -120,7 +126,7 @@
  * Painel (token da sessão de admin; tabelas pedidos/cupons/pacotes com RLS):
  *   listarPedidos(token, {status?, pacote?, de?:'AAAA-MM-DD', ate?, busca?, limite?:500}) -> {ok, pedidos:[{id, respostaId,
  *     pacote, valorCentavos, valorOriginalCentavos, cupom, status, metodo:''|'pix'|'cartao'|'boleto'|'cupom'|'manual',
- *     provedor:''|'asaas'|'infinitepay', provedorRef (InfinitePay: transaction_nsu), asaasCobrancaId, faturaUrl (link de
+ *     provedor:''|'asaas'|'infinitepay'|'stripe', provedorRef (InfinitePay: transaction_nsu; Stripe: pi_… do PaymentIntent), asaasCobrancaId, faturaUrl (link de
  *     pagamento: checkout da InfinitePay ou fatura do Asaas), email, nome, criadoEm, pagoEm, reembolsadoEm}]} (mais novos primeiro)
  *   atualizarPedido(token, id, {status}) -> {ok, pedido} — 'estornado' (de pago/cortesia; o dinheiro é devolvido no
  *     painel do Asaas), 'cortesia' ("Liberar como cortesia"), 'pago' (confirmação manual), 'cancelado' (de aguardando).
@@ -142,7 +148,8 @@
  *     servidorEstado:'ok'|'desatualizada'|'ausente'|'erro', servidorErro}. Nunca traz valores de segredos.
  *   testarConexao(token, alvo, {pedidoId?, transactionNsu?, slug?}) -> {ok, alvo, sucesso, mensagem, verificado, em, detalhes?}
  *     alvo 'banco' (aqui no navegador) | 'funcoes' | 'clickup' | 'asaas' | 'ia' | 'email' | 'infinitepay.link' |
- *     'infinitepay.verificar' (no servidor, prazo de 8 s por teste). Função admin antiga: sucesso false +
+ *     'infinitepay.verificar' | 'stripe' | 'stripe.pagamento' (detalhes {pedidoId, clientSecret, publicavel, valorCentavos,
+ *     modo, retornoUrl}: o painel monta o Payment Element) | 'stripe.verificar' (no servidor, prazo de 8 s por teste). Função admin antiga: sucesso false +
  *     estadoServidor 'desatualizada'. listarPedidos esconde os pedidos de teste (pedidos.teste).
  * Só na prévia (js/api-simulada.js): simularPagamento(pedidoId) -> {ok, status:'pago'} (botão "Simular pagamento aprovado").
  *
@@ -178,9 +185,10 @@
       tabela: 'respostas', coluna: 'historico_processos' },
     { nome: '20261011120000_vendas', descricao: 'venda direta (pacotes, cupons, pedidos)', tabela: 'pedidos', coluna: 'id' },
     { nome: '20261012120000_infinitepay', descricao: 'InfinitePay (provedor do pagamento)', tabela: 'pedidos', coluna: 'provedor_dados' },
-    { nome: '20261013120000_conexoes', descricao: 'aba Conexões (pedido de teste fora das vendas)', tabela: 'pedidos', coluna: 'teste' }
+    { nome: '20261013120000_conexoes', descricao: 'aba Conexões (pedido de teste fora das vendas)', tabela: 'pedidos', coluna: 'teste' },
+    { nome: '20261014120000_stripe', descricao: 'Stripe (pagamento dentro do site)' }
   ];
-  var VERSAO_ATUAL = 20261013120000;
+  var VERSAO_ATUAL = 20261014120000;
   var MSG_PRIMEIRO_ACESSO = 'Com o Supabase não há chave de primeiro acesso: crie o seu usuário no painel do Supabase ' +
     '(Authentication > Users > Add user) e entre com esse e-mail e senha. O primeiro login vira administrador.';
   var MSG_REDEFINIR = 'Com o Supabase cada pessoa cria a própria senha nova pelo "Esqueci minha senha", na tela de entrada.';
@@ -1334,6 +1342,14 @@
         if (dados && dados.cpf) corpo.cpf = String(dados.cpf);
         return invocar('pagamento', corpo, prazo).then(function (r) {
           if (r.pago) return { ok: true, pago: true, status: r.status };
+          if (r.provedor === 'stripe') {
+            var cs = String(r.clientSecret || '');
+            var pk = String(r.publicavel || '');
+            if (!/^pi_[A-Za-z0-9]+_secret_[A-Za-z0-9]+$/.test(cs) || !/^pk_(test|live)_[A-Za-z0-9]+$/.test(pk)) {
+              throw recusa('Não foi possível gerar o pagamento agora. Tente de novo em instantes.');
+            }
+            return { ok: true, provedor: 'stripe', clientSecret: cs, publicavel: pk, valor: numero(r.valor) };
+          }
           if (r.redirecionarUrl) {
             var url = String(r.redirecionarUrl);
             if (!/^https:\/\//i.test(url)) throw recusa('Não foi possível gerar o pagamento agora. Tente de novo em instantes.');
@@ -1371,6 +1387,8 @@
         var ref = function (v) { var x = String(v == null ? '' : v).trim(); return /^[A-Za-z0-9._:-]{1,120}$/.test(x) ? x : ''; };
         var corpo = { acao: 'confirmar', pedidoId: String(pedidoId), tokenAcesso: String(tokenAcesso),
           transactionNsu: ref(d.transactionNsu), slug: ref(d.slug) };
+        var pi = String(d.paymentIntent == null ? '' : d.paymentIntent).trim();
+        if (/^pi_[A-Za-z0-9]{6,80}$/.test(pi)) corpo.paymentIntent = pi;
         return invocar('pagamento', corpo, prazo).then(function (r) { return { ok: true, status: r.status }; }, function (e) {
           if (e && e.resposta && !e.funcaoAusente) throw e;
           return rpcOk('status_pedido', { p_pedido: String(pedidoId), p_token: String(tokenAcesso) })

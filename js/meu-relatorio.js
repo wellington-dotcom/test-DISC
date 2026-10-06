@@ -44,7 +44,10 @@
     };
   }
 
-  // Volta do checkout hospedado (InfinitePay): ?order_nsu=&transaction_nsu=&slug=&capture_method=&receipt_url= -> objeto ou null.
+  // Volta do pagamento -> objeto ou null:
+  //   InfinitePay: ?order_nsu=&transaction_nsu=&slug=&capture_method=&receipt_url=
+  //   Stripe (3DS / redirecionamento do banco): ?pedido=&payment_intent=pi_…&payment_intent_client_secret=…&redirect_status=
+  //     succeeded|processing|failed (o client_secret é ignorado e some da URL).
   // pedido=<id> (o nosso) ou order_nsu=<id> (InfinitePay); também lidos de depois do token no hash.
   function retornoDaUrl(search, hash) {
     var resto = /^#t-[A-Za-z0-9_-]+([?&].*)$/.exec(String(hash || ''));
@@ -56,12 +59,16 @@
     var pedido = param('order_nsu') || param('pedido');
     if (!/^[A-Za-z0-9_-]{1,80}$/.test(pedido)) return null;
     var recibo = param('receipt_url');
+    var pi = param('payment_intent');
+    var rs = param('redirect_status');
     return {
       pedidoId: pedido,
       transactionNsu: param('transaction_nsu'),
       slug: param('slug'),
       metodo: param('capture_method'),
-      reciboUrl: /^https:\/\//i.test(recibo) ? recibo : ''
+      reciboUrl: /^https:\/\//i.test(recibo) ? recibo : '',
+      paymentIntent: /^pi_[A-Za-z0-9]{6,80}$/.test(pi) ? pi : '',
+      redirectStatus: ['succeeded', 'processing', 'failed', 'requires_action'].indexOf(rs) >= 0 ? rs : ''
     };
   }
 
@@ -242,7 +249,7 @@
     }
   }
 
-  /* ---- Volta do pagamento (InfinitePay): confirma o retorno e espera a confirmação, se precisar ---- */
+  /* ---- Volta do pagamento (InfinitePay ou Stripe): confirma o retorno e espera a confirmação, se precisar ---- */
   var ESPERA_MS = 4000, ESPERA_MAX = 2 * 60 * 1000;
   var espera = null;   // { ret, inicio, timer }
 
@@ -275,7 +282,7 @@
     if (e.timer) { root.clearTimeout(e.timer); e.timer = null; }
     var a = api();
     var chamada = primeira && typeof a.confirmarRetorno === 'function'
-      ? function () { return a.confirmarRetorno(e.ret.pedidoId, token, { transactionNsu: e.ret.transactionNsu, slug: e.ret.slug }); }
+      ? function () { return a.confirmarRetorno(e.ret.pedidoId, token, { transactionNsu: e.ret.transactionNsu, slug: e.ret.slug, paymentIntent: e.ret.paymentIntent }); }
       : function () { return a.statusPedido(e.ret.pedidoId, token); };
     Promise.resolve().then(chamada).then(function (r) {
       if (espera !== e) return;
@@ -299,6 +306,11 @@
     // Limpa a query (dados do pagamento) e mantém o hash com o token.
     try { root.history.replaceState(null, '', root.location.pathname + '#t-' + token); } catch (e) { /* ignora */ }
     pararEspera();
+    // Stripe: o banco recusou (3DS não concluído etc.). Nada foi cobrado; a pessoa volta e tenta de novo.
+    if (ret.redirectStatus === 'failed') {
+      telaRecuperar('O pagamento não foi aprovado pelo banco e nada foi cobrado. Volte à página do seu resumo e tente de novo (cartão, Apple Pay, Google Pay ou Pix).', 'Pagamento não concluído');
+      return;
+    }
     espera = { ret: ret, inicio: Date.now(), timer: null };
     telaConfirmando();
     consultar(true);

@@ -53,7 +53,7 @@
         CONFIG.DEMO = true;
         CONFIG.BACKEND = 'simulada';
         CONFIG.GRUPOS_DEMONSTRACAO = 3;
-        CONFIG.PAGAMENTO_PREVIA = 'asaas';
+        CONFIG.PAGAMENTO_PREVIA = 'stripe';   // "Payment Element" fictício (nada vai para o Stripe)
       }
     }
   } catch (e) { /* sem location/sessionStorage: segue normal */ }

@@ -255,7 +255,7 @@ test.describe('Venda B2C (celular, API simulada)', () => {
   });
 });
 
-// Checkout hospedado (InfinitePay, o padrão da prévia): iniciarPagamento devolve redirecionarUrl; a volta cai em
+// Checkout hospedado (InfinitePay, CONFIG.PAGAMENTO_PREVIA = 'infinitepay'): iniciarPagamento devolve redirecionarUrl; a volta cai em
 // meu-relatorio.html com order_nsu/transaction_nsu/slug na query e confirmarRetorno confirma.
 // "Ainda não confirmado": o confirmarRetorno da prévia é trocado por uma consulta simples (o pedido segue aguardando).
 async function retornoSemConfirmar(page) {
@@ -268,7 +268,7 @@ async function retornoSemConfirmar(page) {
 
 test.describe('Venda B2C com InfinitePay (checkout hospedado, API simulada)', () => {
   test.beforeEach(async ({ page }) => {
-    await configurar(page, { API_URL: 'simulada', GRUPOS_DEMONSTRACAO: GRUPOS });
+    await configurar(page, { API_URL: 'simulada', GRUPOS_DEMONSTRACAO: GRUPOS, PAGAMENTO_PREVIA: 'infinitepay' });
   });
 
   test('botão leva para a página do provedor; na volta confirma, limpa a query e mostra o relatório', async ({ page }) => {
@@ -313,6 +313,107 @@ test.describe('Venda B2C com InfinitePay (checkout hospedado, API simulada)', ()
     await semRolagemLateral(page);
     await page.evaluate((id) => window.DISC_API.simularPagamento(id), pedidoId);
     await expect(page.locator('.rel-travas')).toBeVisible({ timeout: 10000 });
+    expect(erros).toEqual([]);
+  });
+});
+
+// Stripe (padrão da prévia): o pagamento acontece NA PÁGINA com o Payment Element. Na prévia é um "Payment Element"
+// FICTÍCIO (js/stripe-pagamento.js, montarSimulado): nada vai para o Stripe (nenhuma chamada a stripe.com).
+const CAPTURAS_STRIPE = process.env.CAPTURAS_STRIPE || '';
+
+test.describe('Venda B2C com Stripe (pagamento dentro do site, Payment Element simulado)', () => {
+  test.beforeEach(async ({ page }) => {
+    await configurar(page, { API_URL: 'simulada', GRUPOS_DEMONSTRACAO: GRUPOS });
+  });
+
+  test('cartão: recusa em português abaixo do botão sem nada pular; aprovado libera na hora; 375 px sem rolagem lateral', async ({ page }) => {
+    const erros = coletarErros(page);
+    const stripe = [];
+    page.on('request', (r) => { if (/stripe\.com/.test(r.url())) stripe.push(r.url()); });
+    await fazerTestePessoal(page, { nome: 'Sara Stripe Cartao', email: 'sara.stripe@exemplo.com' });
+    await page.locator('[data-acao="comprar"][data-pacote="completo"]').click();
+    await page.locator('[data-ck="continuar"]').click();
+    const tela = page.locator('[data-ck-tela="pagamento"][data-provedor="stripe"]');
+    await expect(tela).toBeVisible();
+    await expect(tela.locator('[data-pe-simulado]')).toBeVisible();
+    const pagar = tela.locator('[data-ck="pagar"]');
+    await expect(pagar).toHaveText('Pagar R$ 29');
+    await expect(pagar).toBeEnabled();
+    await expect(pagar).toHaveClass(/botao--laranja/);
+    await expect(tela).toContainText('Pagamento processado com segurança pelo Stripe');
+    await expect(tela.locator('.pe-sim-carteira')).toHaveText(['Apple Pay', 'Google Pay']);
+    await semRolagemLateral(page);
+    if (CAPTURAS_STRIPE) await page.screenshot({ path: CAPTURAS_STRIPE + '/checkout-375.png', fullPage: true });
+    // Cartão recusado: erro em português abaixo do botão; o botão não sai do lugar.
+    const antes = await topo(pagar);
+    await tela.locator('#pe-sim-numero').fill('4000 0000 0000 0002');
+    await tela.locator('#pe-sim-validade').fill('12 / 34');
+    await tela.locator('#pe-sim-cvc').fill('123');
+    await pagar.click();
+    await expect(tela.locator('#ck-erro')).toHaveText('O cartão foi recusado. Tente outro cartão ou pague com Pix.');
+    expect(Math.abs(await topo(pagar) - antes)).toBeLessThanOrEqual(1);
+    const erroTopo = await topo(tela.locator('#ck-erro'));
+    expect(erroTopo).toBeGreaterThan(antes);
+    if (CAPTURAS_STRIPE) await page.screenshot({ path: CAPTURAS_STRIPE + '/checkout-375-recusado.png', fullPage: true });
+    // Aprovado: libera na hora.
+    await tela.locator('#pe-sim-numero').fill('4242 4242 4242 4242');
+    await pagar.click();
+    const ok = page.locator('[data-ck-tela="confirmado"]');
+    await expect(ok.locator('h1')).toHaveText('Pagamento confirmado');
+    await semRolagemLateral(page);
+    await ok.locator('[data-ck="ver"]').click();
+    await expect(page.locator('.rel-travas')).toBeVisible();
+    // O client_secret nunca fica salvo no aparelho.
+    const salvo = await page.evaluate(() => JSON.stringify(Object.assign({}, window.localStorage)));
+    expect(salvo).not.toContain('_secret_');
+    expect(stripe).toEqual([]);
+    expect(erros).toEqual([]);
+  });
+
+  test('Pix: o QR e o copia e cola aparecem na nossa tela na hora; consulta a cada 4 s e libera quando pago', async ({ page }) => {
+    const erros = coletarErros(page);
+    await fazerTestePessoal(page, { nome: 'Pedro Stripe Pix', email: 'pedro.pix@exemplo.com' });
+    await page.locator('[data-acao="comprar"][data-pacote="completo"]').click();
+    await page.locator('[data-ck="continuar"]').click();
+    const tela = page.locator('[data-ck-tela="pagamento"][data-provedor="stripe"]');
+    await tela.locator('[data-pe-metodo="pix"]').click();
+    await expect(tela.locator('[data-pe-metodo="pix"]')).toHaveAttribute('aria-selected', 'true');
+    await tela.locator('[data-ck="pagar"]').click();
+    await expect(tela.locator('#ck-pix-stripe .ck-qr img')).toBeVisible();
+    await expect(tela.locator('#ck-pix')).toHaveValue(/^PREVIA-NAO-PAGUE-/);
+    await expect(tela.locator('#ck-status')).toContainText('Pague o Pix no app do seu banco');
+    await semRolagemLateral(page);
+    if (CAPTURAS_STRIPE) await page.screenshot({ path: CAPTURAS_STRIPE + '/checkout-375-pix.png', fullPage: true });
+    // O "banco" confirma (fora da página): a consulta de 4 s libera sozinha.
+    const pedidoId = await page.evaluate(() => JSON.parse(localStorage.getItem('disc_pessoal_v1')).pedido.pedidoId);
+    await page.evaluate((id) => window.DISC_API.simularPagamento(id), pedidoId);
+    await expect(page.locator('[data-ck-tela="confirmado"] h1')).toHaveText('Pagamento confirmado', { timeout: 10000 });
+    expect(erros).toEqual([]);
+  });
+
+  test('volta do 3DS: meu-relatorio com payment_intent e redirect_status=succeeded confirma e limpa a URL; failed avisa', async ({ page }) => {
+    const erros = coletarErros(page);
+    await fazerTestePessoal(page, { nome: 'Rita Retorno Stripe', email: 'rita.3ds@exemplo.com' });
+    await page.locator('[data-acao="comprar"][data-pacote="completo"]').click();
+    await page.locator('[data-ck="continuar"]').click();
+    await expect(page.locator('[data-ck-tela="pagamento"][data-provedor="stripe"]')).toBeVisible();
+    const dados = await page.evaluate(async () => {
+      const ps = JSON.parse(localStorage.getItem('disc_pessoal_v1'));
+      const r = await window.DISC_API.iniciarPagamento(ps.pedido.pedidoId, ps.pedido.tokenAcesso);
+      return { id: ps.pedido.pedidoId, token: ps.pedido.tokenAcesso, cs: r.clientSecret };
+    });
+    const pi = dados.cs.split('_secret_')[0];
+    // Recusado pelo banco: avisa e não libera.
+    await page.goto('/meu-relatorio.html?pedido=' + dados.id + '&payment_intent=' + pi + '&payment_intent_client_secret=' + dados.cs + '&redirect_status=failed#t-' + dados.token);
+    await expect(page.locator('h1').first()).toHaveText('Pagamento não concluído');
+    await expect(page.locator('.alerta')).toContainText('nada foi cobrado');
+    // Aprovado (o Stripe acrescenta payment_intent, payment_intent_client_secret e redirect_status ao return_url).
+    await page.goto('about:blank');
+    await page.goto('/meu-relatorio.html?pedido=' + dados.id + '&payment_intent=' + pi + '&payment_intent_client_secret=' + dados.cs + '&redirect_status=succeeded#t-' + dados.token);
+    await expect(page.locator('.rel-travas')).toBeVisible();
+    await expect(page).toHaveURL(new RegExp('/meu-relatorio\\.html#t-' + dados.token + '$'));
+    expect(page.url()).not.toContain('_secret_');
+    await semRolagemLateral(page);
     expect(erros).toEqual([]);
   });
 });

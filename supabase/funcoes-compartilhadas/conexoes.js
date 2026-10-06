@@ -6,29 +6,38 @@
 // Cada teste externo tem prazo de no máximo CONEXOES_PRAZO_MS (8 s).
 //
 //   conexoes.diagnostico {} -> {ok, versao, em, siteUrl, segredos:{NOME: bool}, pagamento:{provedor, provedorEscolhido,
-//     handleParcial, asaasAmbiente}, funcoes:[{nome, publicada:true|false|null, status, mensagem}],
+//     handleParcial, asaasAmbiente, stripeModo:'teste'|'producao'|'', stripePublicavelModo, stripeDominio}, funcoes:[{nome, publicada:true|false|null, status, mensagem}],
 //     auth:{cadastroFechado:true|false|null}, pedidoTeste:{id, status, criadoEm, url}|null, colunaTeste:bool|null}
 //   conexoes.testar {alvo, ...} -> {ok, alvo, sucesso:bool, mensagem, verificado, detalhes?}
 //     alvo: 'funcoes' | 'clickup' | 'asaas' | 'ia' | 'email' (manda um e-mail para o admin logado)
 //           'infinitepay.link'      cria um pedido de TESTE (pedidos.teste = true, R$ 1,00; fora das vendas/receita) e um
 //                                   link real de checkout. Nada é cobrado se ninguém pagar. -> detalhes {url, pedidoId}
 //           'infinitepay.verificar' {pedidoId?, transactionNsu?, slug?} confere o pedido de teste no payment_check.
+//           'stripe'                chave aceita (GET /v1/balance, nada é criado), modo teste/produção pelo prefixo e se o
+//                                   domínio do site está em payment_method_domains (Apple Pay / Google Pay).
+//                                   -> detalhes {modo, dominio, dominioRegistrado, applePay, googlePay}
+//           'stripe.pagamento'      cria um pedido de TESTE (R$ 1,00, fora das vendas) e um PaymentIntent real para pagar
+//                                   no próprio painel (Payment Element). -> detalhes {pedidoId, clientSecret, publicavel,
+//                                   valorCentavos, modo, retornoUrl}
+//           'stripe.verificar'      {pedidoId?} confere o PaymentIntent do pedido de teste no Stripe e marca pago.
 import { erro, limparTexto } from './regras.js';
 import { criarClickUp } from './clickup.js';
 import { criarInfinitePay, refInfinitePay, lerRefsInfinitePay } from './infinitepay.js';
 import { criarAsaas, criarResend, asaasAmbiente } from './asaas.js';
+import { criarStripe, modoStripe, chavePublicavelStripe, segredoClienteStripe, idIntentStripe, stripeMetodo } from './stripe.js';
 
 export const CONEXOES_VERSAO = 1;
 export const CONEXOES_PRAZO_MS = 8000;
-export const FUNCOES_EDGE = ['admin', 'disc-sync', 'clickup-webhook', 'pagamento', 'asaas-webhook', 'infinitepay-webhook'];
+export const FUNCOES_EDGE = ['admin', 'disc-sync', 'clickup-webhook', 'pagamento', 'stripe-webhook', 'asaas-webhook', 'infinitepay-webhook'];
 export const SEGREDOS_CONEXOES = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'SITE_URL',
-  'PAGAMENTO_PROVEDOR', 'INFINITEPAY_HANDLE', 'ASAAS_API_KEY', 'ASAAS_WEBHOOK_TOKEN', 'ASAAS_AMBIENTE',
+  'PAGAMENTO_PROVEDOR', 'STRIPE_SECRET_KEY', 'STRIPE_PUBLISHABLE_KEY', 'STRIPE_WEBHOOK_SECRET', 'INFINITEPAY_HANDLE', 'ASAAS_API_KEY', 'ASAAS_WEBHOOK_TOKEN', 'ASAAS_AMBIENTE',
   'RESEND_API_KEY', 'EMAIL_REMETENTE', 'CLICKUP_TOKEN', 'CLICKUP_PASTA_ID', 'CLICKUP_WEBHOOK_SECRET', 'ANTHROPIC_API_KEY'];
 // Segredos de verdade (o valor nunca sai do servidor). SITE_URL, PAGAMENTO_PROVEDOR e ASAAS_AMBIENTE são configuração.
-const SEGREDOS_OCULTOS = ['SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'INFINITEPAY_HANDLE', 'ASAAS_API_KEY',
+const SEGREDOS_OCULTOS = ['SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET', 'INFINITEPAY_HANDLE', 'ASAAS_API_KEY',
   'ASAAS_WEBHOOK_TOKEN', 'RESEND_API_KEY', 'CLICKUP_TOKEN', 'CLICKUP_WEBHOOK_SECRET', 'ANTHROPIC_API_KEY'];
 export const VALOR_TESTE_CENTAVOS = 100;
 const ANTHROPIC_MODELOS = 'https://api.anthropic.com/v1/models?limit=1';
+export const DOMINIO_PADRAO_STRIPE = 'disc.gestaosemcaos.com.br';
 const RE_UUID_CX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 function cxAgoraIso(ctx) { return new Date(ctx.agora()).toISOString(); }
@@ -107,11 +116,19 @@ function resultado(ctx, alvo, sucesso, mensagem, verificado, detalhes) {
 /** Provedor que o site usa agora (mesma regra de pagamento.js). */
 function provedorAtual(env) {
   const escolhido = String(env.PAGAMENTO_PROVEDOR || '').trim().toLowerCase();
+  if (escolhido === 'stripe') return cxTem(env, 'STRIPE_SECRET_KEY') ? 'stripe' : '';
   if (escolhido === 'infinitepay') return cxTem(env, 'INFINITEPAY_HANDLE') ? 'infinitepay' : '';
   if (escolhido === 'asaas') return cxTem(env, 'ASAAS_API_KEY') ? 'asaas' : '';
+  if (cxTem(env, 'STRIPE_SECRET_KEY')) return 'stripe';
   if (cxTem(env, 'INFINITEPAY_HANDLE')) return 'infinitepay';
   if (cxTem(env, 'ASAAS_API_KEY')) return 'asaas';
   return '';
+}
+
+/** Domínio do site (para Apple Pay / Google Pay): host do SITE_URL; sem ele, o domínio oficial. */
+function dominioSite(env) {
+  try { const h = new URL(String(env.SITE_URL || '').trim()).hostname; if (h && !/^(localhost|127\.0\.0\.1)$/.test(h)) return h.toLowerCase(); } catch (e) { /* sem SITE_URL */ }
+  return DOMINIO_PADRAO_STRIPE;
 }
 
 function baseSupabase(env) {
@@ -167,6 +184,11 @@ async function cadastroFechado(ctx) {
   }
 }
 
+function provedorRecusado(err) {
+  const c = err && err.causa ? String(err.causa.code || '') + ' ' + String(err.causa.message || '') : String((err && err.message) || '');
+  return /23514|pedidos_provedor_valido/.test(c);
+}
+
 function colunaInexistente(err) {
   const c = err && err.causa ? String(err.causa.code || '') + ' ' + String(err.causa.message || '') : String((err && err.message) || '');
   return /42703|PGRST204|teste/.test(c);
@@ -204,9 +226,13 @@ export async function acaoDiagnostico(ctx) {
     pagamento: {
       provedor: provedorAtual(env),
       // PAGAMENTO_PROVEDOR não é segredo: mostra o valor (só os conhecidos; outro texto vira 'invalido').
-      provedorEscolhido: !escolhido ? '' : (escolhido === 'infinitepay' || escolhido === 'asaas' ? escolhido : 'invalido'),
+      provedorEscolhido: !escolhido ? '' : (['stripe', 'infinitepay', 'asaas'].indexOf(escolhido) >= 0 ? escolhido : 'invalido'),
       handleParcial: parcial(env.INFINITEPAY_HANDLE),
-      asaasAmbiente: asaasAmbiente(env.ASAAS_AMBIENTE)
+      asaasAmbiente: asaasAmbiente(env.ASAAS_AMBIENTE),
+      // Modo pelo PREFIXO da chave (sk_test_/sk_live_); a chave em si nunca sai daqui.
+      stripeModo: modoStripe(env.STRIPE_SECRET_KEY),
+      stripePublicavelModo: modoStripe(env.STRIPE_PUBLISHABLE_KEY),
+      stripeDominio: dominioSite(env)
     },
     funcoes,
     auth: { cadastroFechado: fechado },
@@ -371,6 +397,111 @@ async function verificarPagamentoTeste(ctx, corpo) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// Stripe: chave, domínio (Apple Pay / Google Pay) e pagamento de teste de R$ 1,00 dentro do painel
+// ---------------------------------------------------------------------------
+
+function nomeModo(m) { return m === 'producao' ? 'produção' : (m === 'teste' ? 'teste' : 'desconhecido'); }
+
+async function testarStripe(ctx) {
+  const env = ctx.env;
+  if (!cxTem(env, 'STRIPE_SECRET_KEY')) return resultado(ctx, 'stripe', false, 'Segredo STRIPE_SECRET_KEY não existe.', 'Presença do segredo.');
+  const modo = modoStripe(env.STRIPE_SECRET_KEY);
+  if (!modo) return resultado(ctx, 'stripe', false, 'O STRIPE_SECRET_KEY existe, mas não parece uma chave secreta do Stripe (começa com sk_test_ ou sk_live_).', 'Formato do segredo.');
+  const st = criarStripe({ chave: env.STRIPE_SECRET_KEY, fetch: fetchComPrazo(ctx.fetch, cxPrazo(ctx)) });
+  const dominio = dominioSite(env);
+  const verificado = 'Consulta leve ao saldo (GET /v1/balance, nada é criado) e aos domínios de Apple Pay / Google Pay.';
+  try {
+    await comPrazo(st.saldo(), cxPrazo(ctx));
+  } catch (err) {
+    return resultado(ctx, 'stripe', false, traduzirErro('O Stripe', err) + ' (modo ' + nomeModo(modo) + ')', verificado, { modo });
+  }
+  let d = null;
+  try { d = await comPrazo(st.dominio(dominio), cxPrazo(ctx)); } catch (err) { d = null; }
+  const pub = modoStripe(env.STRIPE_PUBLISHABLE_KEY);
+  const partes = ['O Stripe aceitou a chave (modo ' + nomeModo(modo) + ').'];
+  if (!cxTem(env, 'STRIPE_PUBLISHABLE_KEY')) partes.push('Falta o STRIPE_PUBLISHABLE_KEY (pk_…): sem ele o site não mostra o pagamento.');
+  else if (pub && pub !== modo) partes.push('Atenção: a chave publicável é de ' + nomeModo(pub) + ' e a secreta de ' + nomeModo(modo) + '. Use as duas do mesmo modo.');
+  if (d === null) partes.push('Não deu para conferir o domínio ' + dominio + ' para Apple Pay / Google Pay.');
+  else if (!d.registrado) partes.push('O domínio ' + dominio + ' não está registrado em Payment method domains: Apple Pay não aparece.');
+  else partes.push('Domínio ' + dominio + ' registrado (Apple Pay ' + (d.applePay ? 'ativo' : 'inativo') + ', Google Pay ' + (d.googlePay ? 'ativo' : 'inativo') + ').');
+  return resultado(ctx, 'stripe', true, partes.join(' '), verificado, {
+    modo, publicavelModo: pub, dominio, dominioRegistrado: d ? d.registrado : null,
+    applePay: d ? d.applePay : null, googlePay: d ? d.googlePay : null, webhookSecreto: cxTem(env, 'STRIPE_WEBHOOK_SECRET')
+  });
+}
+
+async function gerarPagamentoStripeTeste(ctx) {
+  const alvo = 'stripe.pagamento';
+  const env = ctx.env;
+  if (!cxTem(env, 'STRIPE_SECRET_KEY')) return resultado(ctx, alvo, false, 'Segredo STRIPE_SECRET_KEY não existe.', 'Presença do segredo.');
+  const publicavel = chavePublicavelStripe(env.STRIPE_PUBLISHABLE_KEY);
+  if (!publicavel) return resultado(ctx, alvo, false, 'Segredo STRIPE_PUBLISHABLE_KEY não existe ou não parece uma chave publicável do Stripe (começa com pk_).', 'Presença do segredo.');
+  const site = siteBase(env);
+  let pedido;
+  try {
+    pedido = await comPrazo(ctx.db.pedidoTesteInserir({
+      pacote: 'completo', valor_centavos: VALOR_TESTE_CENTAVOS, valor_original_centavos: VALOR_TESTE_CENTAVOS,
+      email: limparTexto((ctx.usuario && ctx.usuario.email) || '', 120), nome: 'Teste de conexão (painel)',
+      teste: true, provedor: 'stripe', provedor_dados: { teste: true }
+    }), cxPrazo(ctx));
+  } catch (err) {
+    if (colunaInexistente(err)) return resultado(ctx, alvo, false, 'Falta aplicar a migração 20261013120000_conexoes no banco (ela marca o pedido como teste, fora das vendas).', 'Criação do pedido de teste no banco.');
+    if (provedorRecusado(err)) return resultado(ctx, alvo, false, 'Falta aplicar a migração 20261014120000_stripe no banco (ela libera o provedor "stripe" nos pedidos).', 'Criação do pedido de teste no banco.');
+    return resultado(ctx, alvo, false, 'Não foi possível criar o pedido de teste no banco.', 'Criação do pedido de teste no banco.');
+  }
+  const modo = modoStripe(env.STRIPE_SECRET_KEY);
+  const st = criarStripe({ chave: env.STRIPE_SECRET_KEY, fetch: fetchComPrazo(ctx.fetch, cxPrazo(ctx)) });
+  try {
+    const pi = await comPrazo(st.criarIntent({
+      pedidoId: pedido.id, valorCentavos: VALOR_TESTE_CENTAVOS, email: (ctx.usuario && ctx.usuario.email) || '', teste: true,
+      descricao: 'Teste de conexão — Gestão sem Caos (pode ignorar)', chaveIdempotencia: 'mapa-disc-teste-' + pedido.id
+    }), cxPrazo(ctx));
+    const id = idIntentStripe(pi && pi.id);
+    const cs = segredoClienteStripe(pi && pi.client_secret);
+    if (!id || !cs) throw new Error('Stripe: resposta sem o PaymentIntent');
+    const dados = { teste: true, intent: { id, valor: VALOR_TESTE_CENTAVOS, livemode: pi.livemode === true, criadoEm: cxAgoraIso(ctx) } };
+    try { await ctx.db.pedidoTesteAtualizar(pedido.id, { provedor_ref: id, provedor_dados: dados }); } catch (e) { /* o pagamento já existe */ }
+    return resultado(ctx, alvo, true, 'Pagamento de teste criado (R$ 1,00, modo ' + nomeModo(modo) + '). Pague na janela que abriu; nada é cobrado se você fechar.',
+      'Criação de um PaymentIntent real no Stripe para o pedido de teste.',
+      { pedidoId: String(pedido.id), clientSecret: cs, publicavel, valorCentavos: VALOR_TESTE_CENTAVOS, modo,
+        retornoUrl: site ? site + 'admin.html?conexoes=teste&provedor=stripe&pedido=' + encodeURIComponent(String(pedido.id)) : '' });
+  } catch (err) {
+    try { await ctx.db.pedidoTesteAtualizar(pedido.id, { status: 'cancelado' }); } catch (e) { /* ignora */ }
+    return resultado(ctx, alvo, false, traduzirErro('O Stripe', err), 'Criação de um PaymentIntent real no Stripe.');
+  }
+}
+
+async function verificarPagamentoStripeTeste(ctx, corpo) {
+  const alvo = 'stripe.verificar';
+  if (!cxTem(ctx.env, 'STRIPE_SECRET_KEY')) return resultado(ctx, alvo, false, 'Segredo STRIPE_SECRET_KEY não existe.', 'Presença do segredo.');
+  let p = null;
+  try {
+    const id = String(corpo.pedidoId || '');
+    p = RE_UUID_CX.test(id) ? await ctx.db.pedidoTesteLer(id) : await ctx.db.pedidoTesteUltimo();
+  } catch (err) {
+    return resultado(ctx, alvo, false, colunaInexistente(err) ? 'Falta aplicar a migração 20261013120000_conexoes no banco.' : 'Não foi possível ler o pedido de teste no banco.', 'Leitura do pedido de teste.');
+  }
+  if (!p) return resultado(ctx, alvo, false, 'Nenhum pedido de teste encontrado. Gere um pagamento de teste primeiro.', 'Leitura do pedido de teste.');
+  if (p.status === 'pago') return resultado(ctx, alvo, true, 'O pagamento de teste já está confirmado. O ciclo completo funciona.', 'Pedido de teste no banco.', { pedidoId: String(p.id), pago: true });
+  const d = p.provedor_dados && typeof p.provedor_dados === 'object' ? p.provedor_dados : {};
+  const piId = idIntentStripe(p.provedor_ref) || idIntentStripe(d.intent && d.intent.id);
+  if (!piId) return resultado(ctx, alvo, false, 'Este pedido de teste não tem pagamento no Stripe. Gere um novo.', 'Leitura do pedido de teste.', { pedidoId: String(p.id) });
+  const st = criarStripe({ chave: ctx.env.STRIPE_SECRET_KEY, fetch: fetchComPrazo(ctx.fetch, cxPrazo(ctx)) });
+  const verificado = 'Consulta do PaymentIntent do pedido de teste no Stripe.';
+  try {
+    const pi = await comPrazo(st.intent(piId, { expandir: ['payment_method'] }), cxPrazo(ctx));
+    const doPedido = pi.metadata && String(pi.metadata.pedido_id || '') === String(p.id);
+    if (doPedido && pi.status === 'succeeded' && Number(pi.amount_received) >= VALOR_TESTE_CENTAVOS) {
+      try { await ctx.db.pedidoTesteAtualizar(p.id, { status: 'pago', metodo: stripeMetodo(pi), provedor_ref: piId }); } catch (e) { /* vale mesmo sem gravar */ }
+      return resultado(ctx, alvo, true, 'Pagamento de teste confirmado pelo Stripe. O ciclo completo funciona.', verificado, { pedidoId: String(p.id), pago: true });
+    }
+    return resultado(ctx, alvo, true, 'O Stripe respondeu: este pagamento de teste ainda não foi concluído (situação: ' + String(pi.status || '—') + ').', verificado, { pedidoId: String(p.id), pago: false });
+  } catch (err) {
+    return resultado(ctx, alvo, false, traduzirErro('O Stripe', err), verificado, { pedidoId: String(p.id) });
+  }
+}
+
 const TESTES = {
   funcoes: testarFuncoes,
   clickup: testarClickUp,
@@ -378,7 +509,10 @@ const TESTES = {
   ia: testarIa,
   email: testarEmail,
   'infinitepay.link': gerarLinkTeste,
-  'infinitepay.verificar': verificarPagamentoTeste
+  'infinitepay.verificar': verificarPagamentoTeste,
+  stripe: testarStripe,
+  'stripe.pagamento': gerarPagamentoStripeTeste,
+  'stripe.verificar': verificarPagamentoStripeTeste
 };
 
 export async function acaoTestar(ctx, corpo) {

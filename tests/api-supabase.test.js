@@ -1005,10 +1005,13 @@ test('topoIds: salvarRelacoes manda p_opcoes só quando vem topoIds; listarEquip
 });
 
 test('versaoBanco: com a função devolve versão e faltando; sem ela sonda tabelas/colunas (banco antigo)', async () => {
-  const atual = await logado({ rpc: { versao_banco: () => ({ data: { ok: true, versao: 20261013120000, migracoes: [], faltando: [] }, error: null }) } });
-  assert.deepEqual(await atual.api.versaoBanco(), { ok: true, versao: 20261013120000, faltando: [] });
-  assert.equal(SB.VERSAO_ATUAL, 20261013120000);
-  assert.deepEqual(SB.MIGRACOES.map((m) => m.nome.slice(0, 8)), ['20261005', '20261006', '20261007', '20261008', '20261009', '20261010', '20261011', '20261012', '20261013']);
+  const atual = await logado({ rpc: { versao_banco: () => ({ data: { ok: true, versao: 20261014120000, migracoes: [], faltando: [] }, error: null }) } });
+  assert.deepEqual(await atual.api.versaoBanco(), { ok: true, versao: 20261014120000, faltando: [] });
+  assert.equal(SB.VERSAO_ATUAL, 20261014120000);
+  assert.deepEqual(SB.MIGRACOES.map((m) => m.nome.slice(0, 8)), ['20261005', '20261006', '20261007', '20261008', '20261009', '20261010', '20261011', '20261012', '20261013', '20261014']);
+  // Com a 20261013 mas sem a 20261014 (Stripe): a função antiga responde a versão dela.
+  const semStripe = await logado({ rpc: { versao_banco: () => ({ data: { ok: true, versao: 20261013120000, migracoes: [], faltando: [] }, error: null }) } });
+  assert.deepEqual(await semStripe.api.versaoBanco(), { ok: true, versao: 20261013120000, faltando: ['20261014120000_stripe'] });
   assert.ok(fs.existsSync(path.join(__dirname, '..', 'supabase', 'migrations', SB.MIGRACOES[7].nome + '.sql')));
   SB.MIGRACOES.forEach((m) => assert.ok(fs.existsSync(path.join(__dirname, '..', 'supabase', 'migrations', m.nome + '.sql')), m.nome));
 
@@ -1017,7 +1020,7 @@ test('versaoBanco: com a função devolve versão e faltando; sem ela sonda tabe
   const v = await velho.api.versaoBanco();
   assert.deepEqual(v, { ok: true, versao: 20261007120000, semFuncao: true,
     faltando: ['20261008120000_parte2', '20261009120000_fotos', '20261010120000_mover_versao', '20261011120000_vendas',
-      '20261012120000_infinitepay', '20261013120000_conexoes'] });
+      '20261012120000_infinitepay', '20261013120000_conexoes', '20261014120000_stripe'] });
   const sondas = velho.e.chamadas.filter((c) => c.tabela && c.tabela !== 'admins' && c.op === 'select');
   assert.deepEqual(sondas.map((c) => c.tabela + '.' + c.colunas),
     ['pessoas.id', 'empresas.id', 'respostas.exigido', 'respostas.foto', 'respostas.historico_processos', 'pedidos.id',
@@ -1029,14 +1032,14 @@ test('versaoBanco: com a função devolve versão e faltando; sem ela sonda tabe
   // Com a 20261009 aplicada mas sem a 20261010: só ela falta.
   const quase = await logado({ faltando: ['respostas.historico_processos', 'pedidos'] });
   assert.deepEqual(await quase.api.versaoBanco(), { ok: true, versao: 20261009120000, semFuncao: true,
-    faltando: ['20261010120000_mover_versao', '20261011120000_vendas', '20261012120000_infinitepay', '20261013120000_conexoes'] });
+    faltando: ['20261010120000_mover_versao', '20261011120000_vendas', '20261012120000_infinitepay', '20261013120000_conexoes', '20261014120000_stripe'] });
   // Com a função versao_banco (20261010) mas sem a 20261011: a função antiga responde a versão dela.
   const semVendas = await logado({ rpc: { versao_banco: () => ({ data: { ok: true, versao: 20261010120000, migracoes: [], faltando: [] }, error: null }) } });
   assert.deepEqual(await semVendas.api.versaoBanco(), { ok: true, versao: 20261010120000,
-    faltando: ['20261011120000_vendas', '20261012120000_infinitepay', '20261013120000_conexoes'] });
+    faltando: ['20261011120000_vendas', '20261012120000_infinitepay', '20261013120000_conexoes', '20261014120000_stripe'] });
   // Com a 20261011 mas sem a 20261012 (InfinitePay).
   const semIP = await logado({ rpc: { versao_banco: () => ({ data: { ok: true, versao: 20261011120000, migracoes: [], faltando: [] }, error: null }) } });
-  assert.deepEqual(await semIP.api.versaoBanco(), { ok: true, versao: 20261011120000, faltando: ['20261012120000_infinitepay', '20261013120000_conexoes'] });
+  assert.deepEqual(await semIP.api.versaoBanco(), { ok: true, versao: 20261011120000, faltando: ['20261012120000_infinitepay', '20261013120000_conexoes', '20261014120000_stripe'] });
   // Sem rede: mensagem de conexão.
   quase.e.falhaRede = true;
   await assert.rejects(quase.api.versaoBanco(), /Não foi possível conectar/);
@@ -1127,6 +1130,8 @@ test('vendas: iniciarPagamento/statusPedido/recuperarAcesso pela Edge Function "
       if (modo === 'cpf') return { data: { ok: false, erro: 'Informe o seu CPF para pagar.', precisaCpf: true }, error: null };
       if (modo === 'infinitepay') return { data: { ok: true, provedor: 'infinitepay', redirecionarUrl: 'https://checkout.infinitepay.io/notus/x', valor: 2900 }, error: null };
       if (modo === 'urlRuim') return { data: { ok: true, provedor: 'infinitepay', redirecionarUrl: 'javascript:alert(1)', valor: 2900 }, error: null };
+      if (modo === 'stripe') return { data: { ok: true, provedor: 'stripe', clientSecret: 'pi_3Abc123_secret_Xyz9', publicavel: 'pk_' + 'live_Abc123', valor: 2900 }, error: null };
+      if (modo === 'stripeRuim') return { data: { ok: true, provedor: 'stripe', clientSecret: 'x', publicavel: 'sk_' + 'live_Abc123', valor: 2900 }, error: null };
       return { data: { ok: true, pix: { qrBase64: 'QR', copiaECola: 'PIX', expira: 'X' }, cartaoUrl: 'https://asaas/i/1', valor: 2900, vencimento: '2026-10-06' }, error: null };
     }
     if (body.acao === 'confirmar') {
@@ -1155,6 +1160,15 @@ test('vendas: iniciarPagamento/statusPedido/recuperarAcesso pela Edge Function "
   assert.deepEqual(await api.iniciarPagamento(PED, TA), { ok: true, provedor: 'infinitepay', redirecionarUrl: 'https://checkout.infinitepay.io/notus/x', valor: 2900 });
   modo = 'urlRuim';
   await assert.rejects(api.iniciarPagamento(PED, TA), /Não foi possível gerar o pagamento/);
+  modo = 'stripe';
+  assert.deepEqual(await api.iniciarPagamento(PED, TA), { ok: true, provedor: 'stripe', clientSecret: 'pi_3Abc123_secret_Xyz9', publicavel: 'pk_' + 'live_Abc123', valor: 2900 });
+  modo = 'stripeRuim';
+  await assert.rejects(api.iniciarPagamento(PED, TA), /Não foi possível gerar o pagamento/, 'chave secreta nunca vira publicável');
+  modo = 'ok';
+  await api.confirmarRetorno(PED, TA, { paymentIntent: 'pi_3Abc123' });
+  assert.deepEqual(e.invocacoes[e.invocacoes.length - 1].body, { acao: 'confirmar', pedidoId: PED, tokenAcesso: TA, transactionNsu: '', slug: '', paymentIntent: 'pi_3Abc123' });
+  await api.confirmarRetorno(PED, TA, { paymentIntent: 'pi_<x>' });
+  assert.ok(!('paymentIntent' in e.invocacoes[e.invocacoes.length - 1].body));
 
   modo = 'ok';
   assert.deepEqual(await api.confirmarRetorno(PED, TA, { transactionNsu: 'TX1', slug: 'S1' }), { ok: true, status: 'pago' });

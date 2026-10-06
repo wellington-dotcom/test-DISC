@@ -4,8 +4,8 @@
 
 export const NOMES_ENV = ['SUPABASE_URL', 'SUPABASE_ANON_KEY', 'SUPABASE_SERVICE_ROLE_KEY', 'CLICKUP_TOKEN',
   'CLICKUP_PASTA_ID', 'CLICKUP_WEBHOOK_SECRET', 'ANTHROPIC_API_KEY', 'SITE_URL',
-  // Só para a aba Conexões (presença) e o link de teste da InfinitePay: os valores nunca saem do servidor.
-  'PAGAMENTO_PROVEDOR', 'INFINITEPAY_HANDLE', 'ASAAS_API_KEY', 'ASAAS_WEBHOOK_TOKEN', 'ASAAS_AMBIENTE',
+  // Só para a aba Conexões (presença) e os pagamentos de teste (Stripe/InfinitePay): os valores nunca saem do servidor.
+  'PAGAMENTO_PROVEDOR', 'STRIPE_SECRET_KEY', 'STRIPE_PUBLISHABLE_KEY', 'STRIPE_WEBHOOK_SECRET', 'INFINITEPAY_HANDLE', 'ASAAS_API_KEY', 'ASAAS_WEBHOOK_TOKEN', 'ASAAS_AMBIENTE',
   'RESEND_API_KEY', 'EMAIL_REMETENTE'];
 
 /** Lê os segredos pelo getter (Deno.env.get). Ausente -> ''. */

@@ -28,7 +28,7 @@ test.describe('Aba Conexões (prévia)', () => {
 
     await page.locator('.aba[data-aba="conexoes"]').click();
     await expect(page.locator('#vista-conexoes h2')).toHaveText('Conexões');
-    await expect(page.locator('#vista-conexoes .cx-cartao')).toHaveCount(10);
+    await expect(page.locator('#vista-conexoes .cx-cartao')).toHaveCount(11);
     await expect(page.locator('#btn-cx-testar-tudo')).toHaveText('Testar tudo', { timeout: 10000 });
     await expect(page.locator('.cx-cartao[data-status="testando"]')).toHaveCount(0);
 
@@ -36,6 +36,7 @@ test.describe('Aba Conexões (prévia)', () => {
     expect(await status(page, 'banco')).toBe('ok');
     expect(await status(page, 'login')).toBe('ok');
     expect(await status(page, 'funcoes')).toBe('ok');
+    expect(await status(page, 'stripe')).toBe('ok');
     expect(await status(page, 'infinitepay')).toBe('ok');
     expect(await status(page, 'asaas')).toBe('nao_configurado');
     expect(await status(page, 'clickup')).toBe('ok');
@@ -104,6 +105,43 @@ test.describe('Aba Conexões (prévia)', () => {
     await expect(page.locator('#cx-banco')).toHaveAttribute('data-status', 'erro');
     await expect(page.locator('#cx-banco')).toContainText('Não foi possível conectar ao servidor.');
     await expect(page.locator('#cx-asaas')).toHaveAttribute('data-status', 'erro');
+    expect(erros).toEqual([]);
+  });
+
+  test('cartão "Pagamento — Stripe": modo de teste, domínio do Apple Pay e pagamento de teste de R$ 1,00 no próprio painel', async ({ page }) => {
+    const erros = coletarErros(page);
+    const externos = [];
+    page.on('request', (r) => { if (/stripe\.com/.test(r.url())) externos.push(r.url()); });
+    await entrar(page);
+    await page.locator('.aba[data-aba="conexoes"]').click();
+    await expect(page.locator('#btn-cx-testar-tudo')).toHaveText('Testar tudo', { timeout: 10000 });
+    const cartao = page.locator('#cx-stripe');
+    await expect(cartao.locator('.cx-cartao__nome')).toHaveText('Pagamento — Stripe');
+    await expect(cartao).toHaveAttribute('data-status', 'ok');
+    await expect(cartao).toContainText('existe — modo teste');
+    await expect(cartao).toContainText('Provedor em uso no site: Stripe');
+    await expect(cartao).toContainText('disc.gestaosemcaos.com.br registrado (Apple Pay ativo, Google Pay ativo)');
+    await expect(page.locator('#cx-funcoes')).toContainText('stripe-webhook — publicada');
+    await cartao.locator('[data-acao="stripe-pagar"]').click();
+    const janela = page.locator('#janela-stripe-teste');
+    await expect(janela).toBeVisible();
+    await expect(janela.locator('#janela-titulo')).toHaveText('Pagamento de teste — R$ 1,00');
+    await expect(janela.locator('[data-pe-simulado]')).toBeVisible();
+    await janela.locator('#pe-sim-numero').fill('4242 4242 4242 4242');
+    await janela.locator('#pe-sim-validade').fill('12 / 34');
+    await janela.locator('#pe-sim-cvc').fill('123');
+    if (PASTA) await page.screenshot({ path: PASTA + '/conexoes-stripe-janela.png', fullPage: false });
+    await janela.locator('#janela-ok').click();
+    await expect(janela).toHaveCount(0);
+    await expect(cartao).toContainText('Pagamento de teste confirmado pelo Stripe. O ciclo completo funciona.');
+    await expect(cartao).toHaveAttribute('data-status', 'ok');
+    if (PASTA) {
+      await cartao.scrollIntoViewIfNeeded();
+      await page.screenshot({ path: PASTA + '/conexoes-stripe.png', fullPage: false });
+    }
+    const texto = await page.locator('#vista-conexoes').innerText();
+    expect(texto).not.toMatch(/sk_(test|live)_|whsec_|pk_(test|live)_/);
+    expect(externos, 'a prévia não carrega o Stripe').toEqual([]);
     expect(erros).toEqual([]);
   });
 });

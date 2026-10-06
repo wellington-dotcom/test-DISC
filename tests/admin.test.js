@@ -1017,11 +1017,11 @@ function diagConexoes(extra) {
   const seg = { SUPABASE_URL: true, SUPABASE_ANON_KEY: true, SUPABASE_SERVICE_ROLE_KEY: true, SITE_URL: true, PAGAMENTO_PROVEDOR: true,
     INFINITEPAY_HANDLE: true, ASAAS_API_KEY: false, ASAAS_WEBHOOK_TOKEN: false, ASAAS_AMBIENTE: false, RESEND_API_KEY: true,
     EMAIL_REMETENTE: false, CLICKUP_TOKEN: true, CLICKUP_PASTA_ID: false, CLICKUP_WEBHOOK_SECRET: false, ANTHROPIC_API_KEY: false };
-  const funcoes = ['admin', 'disc-sync', 'clickup-webhook', 'pagamento', 'asaas-webhook', 'infinitepay-webhook']
-    .map((nome) => ({ nome, publicada: nome !== 'asaas-webhook' }));
+  const funcoes = ['admin', 'disc-sync', 'clickup-webhook', 'pagamento', 'stripe-webhook', 'asaas-webhook', 'infinitepay-webhook']
+    .map((nome) => ({ nome, publicada: nome !== 'asaas-webhook' && nome !== 'stripe-webhook' }));
   return Object.assign({
     ok: true, em: '2026-10-05T12:00:00Z', siteAtual: 'https://disc.gsc.com.br/',
-    banco: { ms: 90, versao: 20261013120000, faltando: [], contagens: { processos: 2, respostas: 5, pessoas: 4, empresas: 1, pedidos: 0 }, ultimaResposta: '', erro: '' },
+    banco: { ms: 90, versao: 20261014120000, faltando: [], contagens: { processos: 2, respostas: 5, pessoas: 4, empresas: 1, pedidos: 0 }, ultimaResposta: '', erro: '' },
     login: { sessao: true, email: 'dona@gsc.com.br', admin: true },
     servidor: { siteUrl: 'https://disc.gsc.com.br/', segredos: seg, funcoes, auth: { cadastroFechado: true }, colunaTeste: true, pedidoTeste: null,
       pagamento: { provedor: 'infinitepay', provedorEscolhido: 'infinitepay', handleParcial: 'ge***', asaasAmbiente: 'sandbox' } },
@@ -1030,9 +1030,11 @@ function diagConexoes(extra) {
 }
 const porId = (lista) => Object.fromEntries(lista.map((c) => [c.id, c]));
 
-test('Conexões: 10 cartões com estados; opcionais não contam como erro; testes externos mudam o estado', () => {
+test('Conexões: 11 cartões com estados; opcionais não contam como erro; testes externos mudam o estado', () => {
   const c = porId(AD.cartoesConexoes(diagConexoes()));
-  assert.deepEqual(Object.keys(c), ['site', 'banco', 'login', 'funcoes', 'infinitepay', 'asaas', 'email', 'clickup', 'ia', 'despertador']);
+  assert.deepEqual(Object.keys(c), ['site', 'banco', 'login', 'funcoes', 'stripe', 'infinitepay', 'asaas', 'email', 'clickup', 'ia', 'despertador']);
+  assert.equal(c.stripe.status, 'nao_configurado');
+  assert.ok(c.funcoes.linhas.includes('stripe-webhook — NÃO publicada (só precisa se usar o Stripe)'));
   assert.equal(c.site.status, 'ok');
   assert.equal(c.banco.status, 'ok');
   assert.ok(c.banco.linhas.some((l) => /Respostas: 5/.test(l)));
@@ -1061,7 +1063,40 @@ test('Conexões: 10 cartões com estados; opcionais não contam como erro; teste
   assert.equal(t.email.erro, 'O Resend recusou a chave.');
   assert.deepEqual(t.infinitepay.link, { url: 'https://checkout.infinitepay.io/x/1', pedidoId: 'p1' });
   assert.equal(t.ia.status, 'testando');
-  assert.deepEqual(AD.resumoConexoes(Object.values(t)), { ok: 6, erro: 1, nao_configurado: 1, outros: 2 });
+  assert.deepEqual(AD.resumoConexoes(Object.values(t)), { ok: 6, erro: 1, nao_configurado: 2, outros: 2 });
+});
+
+test('Conexões: cartão "Pagamento — Stripe" (modo pelo prefixo, sem a chave; domínio do Apple Pay; teste de R$ 1,00)', () => {
+  const d = diagConexoes();
+  Object.assign(d.servidor.segredos, { STRIPE_SECRET_KEY: true, STRIPE_PUBLISHABLE_KEY: true, STRIPE_WEBHOOK_SECRET: true });
+  Object.assign(d.servidor.pagamento, { provedor: 'stripe', provedorEscolhido: 'stripe', stripeModo: 'teste', stripePublicavelModo: 'teste', stripeDominio: 'disc.gestaosemcaos.com.br' });
+  d.servidor.funcoes.find((f) => f.nome === 'stripe-webhook').publicada = true;
+  let c = porId(AD.cartoesConexoes(d));
+  assert.equal(c.stripe.nome, 'Pagamento — Stripe');
+  assert.equal(c.stripe.status, 'ok');
+  assert.deepEqual(c.stripe.acoes, ['testar', 'stripe-pagar', 'stripe-verificar']);
+  assert.ok(c.stripe.linhas.some((l) => /STRIPE_SECRET_KEY\): existe — modo teste/.test(l)));
+  assert.ok(c.stripe.linhas.includes('Provedor em uso no site: Stripe'));
+  assert.ok(c.infinitepay.linhas.includes('Provedor em uso no site: Stripe'));
+  assert.ok(!JSON.stringify(c.stripe).includes('sk_'), 'nunca mostra a chave');
+  // Domínio não registrado: erro com o passo do Apple Pay.
+  c = porId(AD.cartoesConexoes(d, { stripe: { sucesso: true, mensagem: 'O Stripe aceitou a chave (modo teste).', detalhes: { dominio: 'disc.gestaosemcaos.com.br', dominioRegistrado: false } } }));
+  assert.equal(c.stripe.status, 'erro');
+  assert.match(c.stripe.erro, /não está registrado no Stripe: o Apple Pay não aparece/);
+  assert.ok(c.stripe.passos.some((p) => /Payment method domains/.test(p)));
+  // Pagamento de teste e verificação.
+  c = porId(AD.cartoesConexoes(d, { 'stripe.pagamento': { sucesso: true, mensagem: 'ok', detalhes: { pedidoId: 'p9' } },
+    'stripe.verificar': { sucesso: true, mensagem: 'Pagamento de teste confirmado pelo Stripe. O ciclo completo funciona.', detalhes: { pago: true } } }));
+  assert.equal(c.stripe.pedidoTeste, 'p9');
+  assert.ok(c.stripe.linhas.includes('Pagamento de teste confirmado pelo Stripe. O ciclo completo funciona.'));
+  // Sem webhook ou chaves de modos diferentes: erro.
+  d.servidor.segredos.STRIPE_WEBHOOK_SECRET = false;
+  assert.match(porId(AD.cartoesConexoes(d)).stripe.erro, /STRIPE_WEBHOOK_SECRET/);
+  d.servidor.segredos.STRIPE_WEBHOOK_SECRET = true;
+  d.servidor.pagamento.stripePublicavelModo = 'producao';
+  assert.match(porId(AD.cartoesConexoes(d)).stripe.erro, /modos diferentes/);
+  assert.equal(AD.urlPagamentoStripe('pi_3Abc123'), 'https://dashboard.stripe.com/payments/pi_3Abc123');
+  assert.equal(AD.urlPagamentoStripe('javascript:x'), '');
 });
 
 test('Conexões: migração faltando, SITE_URL diferente, cadastro aberto, função ausente e admin desatualizada', () => {

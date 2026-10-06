@@ -1,8 +1,57 @@
 # Vender o Mapa de Perfil — passo a passo (Gestão sem Caos)
 
-## Opção recomendada: InfinitePay
+## Opção recomendada: Stripe (pagamento dentro do site)
 
-Você já tem conta na **InfinitePay**, e o sistema agora usa ela como meio de pagamento **padrão**. O cliente clica em
+Com o **Stripe** o cliente paga **sem sair da nossa página** (como no checkout do Claude): digita o cartão ali mesmo,
+paga com **Apple Pay** ou **Google Pay** num toque, ou gera um **Pix com QR na hora** — sem cadastro e sem ir para outro
+site. Assim que o pagamento é aprovado, o relatório abre. Quando o Stripe está configurado ele é o meio **padrão**; a
+InfinitePay e o Asaas (seções abaixo) continuam funcionando como **alternativas**.
+
+> **Conta:** por enquanto a conta Stripe é a da **Notus**. Tudo o que o cliente vê continua "Gestão sem Caos" (a fatura
+> do cartão mostra o sufixo `MAPA DISC`; a descrição é "Mapa DISC — Gestão sem Caos"). Atenção: o dinheiro cai na conta
+> da Notus e a nota fiscal/CNPJ do recebimento é da Notus — combine isso entre vocês, e quando a Gestão sem Caos tiver a
+> própria conta Stripe é só trocar as 3 chaves abaixo (nada muda no código).
+
+**Passo a passo (uns 20 minutos):**
+
+1. **Conta:** entre em [dashboard.stripe.com](https://dashboard.stripe.com) (por enquanto, a conta da Notus).
+2. **Formas de pagamento:** **Settings → Payment methods** → ative **Cards**, **Pix**, **Apple Pay** e **Google Pay**.
+3. **Domínio (o Apple Pay exige):** **Settings → Payment method domains → Add a new domain** →
+   `disc.gestaosemcaos.com.br`. Sem isso o botão do Apple Pay não aparece (cartão e Pix funcionam).
+4. **Chaves:** **Developers → API keys**. Comece no **modo de teste** (chave `Test mode` ligada):
+   - **Publishable key** (`pk_test_…`) — é pública, vai para o navegador;
+   - **Secret key** (`sk_test_…`) — clique em *Reveal*. **NUNCA** cole a chave secreta em conversa, e-mail, WhatsApp ou
+     no repositório: ela só vai nos Secrets do Supabase.
+5. **Guarde no Supabase:** menu **Edge Functions → Secrets → Add new secret**:
+   - `STRIPE_SECRET_KEY` = a secreta (`sk_…`);
+   - `STRIPE_PUBLISHABLE_KEY` = a publicável (`pk_…`);
+   - `PAGAMENTO_PROVEDOR` = `stripe` (deixa a escolha explícita; sem ele o Stripe já é usado quando a chave secreta existe);
+   - confira `SITE_URL` = `https://disc.gestaosemcaos.com.br` (sem barra no fim).
+6. **Aviso de pagamento (webhook):** **Developers → Webhooks → Add endpoint**:
+   - Endpoint URL: `https://tevpqngqzxcswmticjnr.supabase.co/functions/v1/stripe-webhook`
+   - Eventos: `payment_intent.succeeded`, `charge.refunded`, `charge.dispute.created`
+   - Salve, abra o endpoint e copie o **Signing secret** (`whsec_…`) para o segredo `STRIPE_WEBHOOK_SECRET` no Supabase.
+   O sistema confere a assinatura de cada aviso e, antes de liberar, ainda pergunta ao Stripe se o pagamento foi
+   aprovado e de quanto foi.
+7. **Função nova:** em **Edge Functions** deve aparecer **`stripe-webhook`** (publicada pelo GitHub). Abra →
+   **Details** → **Verify JWT desligado**. Se não aparecer, crie à mão colando `dist/funcoes/stripe-webhook/index.ts`.
+   A migração `20261014120000_stripe.sql` precisa ter rodado (o painel avisa se faltar).
+8. **Teste no painel:** aba **Conexões** → cartão **"Pagamento — Stripe"** → **Testar** (confere a chave, o modo
+   teste/produção e o domínio do Apple Pay) → **Gerar pagamento de teste (R$ 1,00)**: abre uma janela com o formulário
+   do Stripe; no modo de teste use o cartão `4242 4242 4242 4242`, qualquer validade futura e qualquer CVC. O pedido de
+   teste fica **fora das vendas** e o cartão mostra "Pagamento de teste confirmado".
+9. **Compra de verdade no site em modo de teste:** faça o teste grátis, escolha um pacote, pague com `4242 4242 4242 4242`
+   (ou `4000 0000 0000 0002` para ver uma recusa) e confira que o relatório abre na hora.
+10. **Produção:** desligue o *Test mode* no Stripe, pegue as chaves **live** (`pk_live_…` / `sk_live_…`), crie o mesmo
+    webhook no modo live (o *Signing secret* é outro) e troque os 3 segredos no Supabase. Faça uma compra real de R$ 1
+    pela aba Conexões e reembolse em seguida.
+11. **Reembolso:** no Stripe, **Payments** → abra o pagamento → **Refund**. O aviso `charge.refunded` marca o pedido
+    como **estornado** sozinho (o relatório volta a ficar bloqueado). Contestação (chargeback) faz o mesmo. No painel,
+    **Vendas → pedido** tem o link **"Abrir no Stripe"**.
+
+## Alternativa: InfinitePay
+
+Você já tem conta na **InfinitePay**; ela é usada quando o Stripe não está configurado (ou com `PAGAMENTO_PROVEDOR = infinitepay`). O cliente clica em
 "Comprar", vai para a **página de pagamento da InfinitePay** (Pix ou cartão), paga e **volta sozinho** para o
 relatório, já liberado. O Asaas (passos 2 a 8 mais abaixo) continua funcionando como **alternativa**: só é usado se você
 escolher (`PAGAMENTO_PROVEDOR = asaas`) ou se a InfinitePay não estiver configurada.

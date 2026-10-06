@@ -899,3 +899,26 @@ body[data-modo="pessoal"] .topo-empresa { background: var(--branco); border: 1px
 }
 .ck-redirecionar-nota { margin: 10px 0 0; text-align: center; }
 .ck-espera--discreta { min-height: 0; }
+
+/* ---------- Pagamento dentro do site (Stripe Payment Element) ---------- */
+/* Espaço reservado para o formulário: nada pula de lugar enquanto ele carrega. */
+.ck-stripe { margin-top: 18px; }
+.ck-stripe-elemento { min-height: 236px; }
+.ck-stripe-carregando { display: flex; align-items: center; gap: 10px; min-height: 236px; justify-content: center; margin: 0; padding: 16px; border-radius: 16px; background: var(--nevoa); font-size: var(--t-rotulo); color: var(--medio); }
+.ck-pagar { min-height: 52px; }
+.ck-pagar[aria-busy="true"] { cursor: progress; }
+.ck-pix-stripe { margin-top: 18px; padding: 16px; border-radius: 16px; background: var(--nevoa); }
+.ck-pix-stripe .ck-qr img { box-shadow: none; }
+.ck-pix-stripe-titulo { margin-bottom: 0; }
+
+/* "Payment Element" de mentira da prévia/demonstração (js/stripe-pagamento.js, montarSimulado) */
+.pe-sim { display: grid; gap: 12px; }
+.pe-sim-abas { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.pe-sim-aba { min-height: 48px; padding: 8px 12px; border: 1px solid var(--linha); border-radius: var(--raio-campo); background: var(--branco); font: inherit; font-size: var(--t-rotulo); font-weight: 600; color: var(--medio); cursor: pointer; text-align: left; }
+.pe-sim-aba[aria-selected="true"] { border-color: var(--notus); box-shadow: 0 0 0 1px var(--notus); color: var(--tinta); }
+.pe-sim-carteiras { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; }
+.pe-sim-carteira { display: flex; align-items: center; justify-content: center; min-height: 44px; border-radius: var(--raio-campo); background: var(--preto); color: var(--branco); font-size: var(--t-rotulo); font-weight: 600; }
+.pe-sim-painel { display: grid; gap: 12px; }
+.pe-sim-linha { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.pe-sim-campo { display: grid; gap: 6px; font-size: var(--t-rotulo); font-weight: 600; color: var(--tinta); min-width: 0; }
+.pe-sim-nota { margin: 0; font-size: var(--t-nota); color: var(--suave); }

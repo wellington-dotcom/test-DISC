@@ -1132,7 +1132,7 @@ test('topoIds do organograma: salvarRelacoes guarda na empresa; listarEquipe dev
   assert.deepEqual((await api.listarEquipe(T, clinica.id)).topoIds, [a.pessoaId]);
   await assert.rejects(api.salvarRelacoes(T, clinica.id, [], { topoIds: 'x' }), /Relações inválidas\./);
 
-  assert.deepEqual(await api.versaoBanco(), { ok: true, versao: 20261013120000, faltando: [] });
+  assert.deepEqual(await api.versaoBanco(), { ok: true, versao: 20261014120000, faltando: [] });
 });
 
 // ---------------------------------------------------------------------------
@@ -1214,8 +1214,23 @@ test('vendas (prévia): resumo grátis -> pedido -> Pix fictício -> simularPaga
   assert.equal(itens.find((i) => i.id === 'pessoal-001').email, 'bia@x.com');
 });
 
-test('vendas (prévia): InfinitePay é o padrão — redirecionarUrl de volta ao meu-relatorio; confirmarRetorno marca pago', async () => {
+test('vendas (prévia): Stripe é o padrão — Payment Element fictício; confirmarRetorno com o pi do pedido marca pago', async () => {
   const { api, T } = nova();
+  const e = await api.enviarPessoal(payloadValido({ id: 'pessoal-st1', email: 'st@x.com', telefone: '' }));
+  const p = await api.criarPedido(e.tokenResumo, 'completo', '');
+  const pg = await api.iniciarPagamento(p.pedidoId, p.tokenAcesso);
+  assert.deepEqual([pg.ok, pg.simulado, pg.provedor, pg.valor, pg.publicavel], [true, true, 'stripe', 2900, 'pk_test_previa']);
+  const pi = pg.clientSecret.split('_secret_')[0];
+  assert.match(pi, /^pi_previa[0-9a-f]+$/);
+  assert.equal((await api.iniciarPagamento(p.pedidoId, p.tokenAcesso)).clientSecret.split('_secret_')[0], pi, 'mesmo PaymentIntent');
+  assert.deepEqual(await api.confirmarRetorno(p.pedidoId, p.tokenAcesso, { paymentIntent: 'pi_outro123' }), { ok: true, status: 'aguardando' });
+  assert.deepEqual(await api.confirmarRetorno(p.pedidoId, p.tokenAcesso, { paymentIntent: pi }), { ok: true, status: 'pago' });
+  const ped = (await api.listarPedidos(T, {})).pedidos.find((x) => x.id === p.pedidoId);
+  assert.deepEqual([ped.provedor, ped.provedorRef, ped.metodo, ped.status], ['stripe', pi, 'cartao', 'pago']);
+});
+
+test('vendas (prévia): com PAGAMENTO_PREVIA infinitepay — redirecionarUrl de volta ao meu-relatorio; confirmarRetorno marca pago', async () => {
+  const { api, T } = nova({ provedorPagamento: 'infinitepay' });
   const e = await api.enviarPessoal(payloadValido({ id: 'pessoal-ip1', email: 'ip@x.com', telefone: '' }));
   const p = await api.criarPedido(e.tokenResumo, 'completo', '');
   const pg = await api.iniciarPagamento(p.pedidoId, p.tokenAcesso);

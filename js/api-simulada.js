@@ -53,7 +53,12 @@
  * Venda direta (rodada 5, como a migração 20261011120000_vendas.sql; contrato em js/api-supabase.js): pacotesPublicos,
  * enviarPessoal, resumoPessoal, criarPedido, iniciarPagamento, confirmarRetorno, statusPedido, relatorioPessoal, salvarParte2Pessoal, recuperarAcesso ({ok:true}, sem e-mail)
  * e, no painel, listarPedidos/atualizarPedido/listarCupons/salvarCupom/excluirCupom/listarPacotes/salvarPacote/resumoVendas.
- * iniciarPagamento: por padrão como a InfinitePay (migração 20261012120000_infinitepay.sql): {ok, provedor:'infinitepay',
+ * iniciarPagamento: por padrão como o Stripe (migração 20261014120000_stripe.sql): {ok, simulado:true, provedor:'stripe',
+ * clientSecret:'pi_previa…_secret_previa…', publicavel:'pk_test_previa', valor} — o checkout monta um "Payment Element"
+ * FICTÍCIO (js/stripe-pagamento.js, montarSimulado: campos de cartão de mentira + Pix com QR de enfeite), sem carregar o
+ * Stripe; confirmarRetorno(pedidoId, tokenAcesso, {paymentIntent}) com o pi do pedido marca pago (como um redirect_status
+ * succeeded). Com criar({provedorPagamento:'infinitepay'}) ou CONFIG.PAGAMENTO_PREVIA = 'infinitepay': como a InfinitePay
+ * (migração 20261012120000_infinitepay.sql): {ok, provedor:'infinitepay',
  * redirecionarUrl:'meu-relatorio.html?pedido=<id>&order_nsu=<id>&transaction_nsu=SIM&slug=SIM&capture_method=pix#t-<token>',
  * valor, simulado:true} — "volta" direto como se a InfinitePay tivesse aprovado; confirmarRetorno(pedidoId, tokenAcesso,
  * {transactionNsu, slug}) marca pago (com alguma referência) e devolve {ok, status}. Com criar({provedorPagamento:'asaas'})
@@ -68,7 +73,7 @@
 (function (root) {
   'use strict';
 
-  var VERSAO_BANCO = 20261013120000;                     // última migração (supabase/migrations)
+  var VERSAO_BANCO = 20261014120000;                     // última migração (supabase/migrations)
   var CHAVE_ARMAZENAMENTO = 'disc_planilha_simulada';     // respostas (mesma chave das versões anteriores)
   var CHAVES = {
     usuarios: 'disc_simulada_usuarios',
@@ -722,8 +727,9 @@
     var agora = typeof opcoes.agora === 'function' ? opcoes.agora : function () { return Date.now(); };
     var aleatorio = opcoes.aleatorio;
     var comSemente = opcoes.semente !== false;
-    // Meio de pagamento da prévia: 'infinitepay' (padrão, como em produção com INFINITEPAY_HANDLE) ou 'asaas' (Pix fictício).
-    var provedorPrevia = opcoes.provedorPagamento === 'asaas' ? 'asaas' : 'infinitepay';
+    // Meio de pagamento da prévia: 'stripe' (padrão, como em produção com STRIPE_SECRET_KEY: Payment Element fictício),
+    // 'infinitepay' (checkout hospedado) ou 'asaas' (Pix fictício).
+    var provedorPrevia = opcoes.provedorPagamento === 'asaas' || opcoes.provedorPagamento === 'infinitepay' ? opcoes.provedorPagamento : 'stripe';
     var memoria = {};             // usado quando o localStorage não está disponível
     var envios = {};              // limitador: janela -> quantidade (só nesta página, como o CacheService)
 
@@ -2169,7 +2175,7 @@
 
     /* ----- aba Conexões (prévia): respostas fictícias plausíveis, com algumas conexões "não configuradas" ----- */
     var cxPrevia = { pedidoTeste: null };
-    var FUNCOES_PREVIA = ['admin', 'disc-sync', 'clickup-webhook', 'pagamento', 'asaas-webhook', 'infinitepay-webhook'];
+    var FUNCOES_PREVIA = ['admin', 'disc-sync', 'clickup-webhook', 'pagamento', 'stripe-webhook', 'asaas-webhook', 'infinitepay-webhook'];
     function siteDaPrevia() {
       try { return root.location ? String(root.location.href).split('#')[0].split('?')[0].replace(/[^/]*$/, '') : ''; } catch (e) { return ''; }
     }
@@ -2190,13 +2196,15 @@
     function acaoConexoesDiagnostico(u) {
       var em = new Date(agora()).toISOString();
       var segredos = { SUPABASE_URL: true, SUPABASE_ANON_KEY: true, SUPABASE_SERVICE_ROLE_KEY: true, SITE_URL: true,
-        PAGAMENTO_PROVEDOR: true, INFINITEPAY_HANDLE: true, ASAAS_API_KEY: false, ASAAS_WEBHOOK_TOKEN: false, ASAAS_AMBIENTE: false,
+        PAGAMENTO_PROVEDOR: true, STRIPE_SECRET_KEY: true, STRIPE_PUBLISHABLE_KEY: true, STRIPE_WEBHOOK_SECRET: true,
+        INFINITEPAY_HANDLE: true, ASAAS_API_KEY: false, ASAAS_WEBHOOK_TOKEN: false, ASAAS_AMBIENTE: false,
         RESEND_API_KEY: true, EMAIL_REMETENTE: true, CLICKUP_TOKEN: true, CLICKUP_PASTA_ID: true, CLICKUP_WEBHOOK_SECRET: false,
         ANTHROPIC_API_KEY: false };
       return { ok: true, em: em, siteAtual: siteDaPrevia(), banco: bancoPrevia(),
         login: { sessao: true, email: u.email || '', admin: u.papel === 'admin' },
         servidor: { ok: true, versao: 1, em: em, siteUrl: siteDaPrevia(), segredos: segredos,
-          pagamento: { provedor: 'infinitepay', provedorEscolhido: 'infinitepay', handleParcial: 'ge***', asaasAmbiente: 'sandbox' },
+          pagamento: { provedor: 'stripe', provedorEscolhido: 'stripe', handleParcial: 'ge***', asaasAmbiente: 'sandbox',
+            stripeModo: 'teste', stripePublicavelModo: 'teste', stripeDominio: 'disc.gestaosemcaos.com.br' },
           funcoes: funcoesPrevia(), auth: { cadastroFechado: true }, pedidoTeste: cxPrevia.pedidoTeste ? copiar(cxPrevia.pedidoTeste) : null,
           colunaTeste: true },
         servidorEstado: 'ok', servidorErro: '' };
@@ -2214,6 +2222,27 @@
       if (alvo === 'asaas') return r(false, 'Segredo ASAAS_API_KEY não existe.', 'Presença do segredo.');
       if (alvo === 'ia') return r(false, 'Segredo ANTHROPIC_API_KEY não existe (a IA é opcional).', 'Presença do segredo.');
       if (alvo === 'email') return r(true, 'E-mail de teste enviado para ' + (u.email || 'você') + '. (Prévia: nada foi enviado de verdade.)', 'Envio real pelo Resend.');
+      if (alvo === 'stripe') {
+        return r(true, 'O Stripe aceitou a chave (modo teste). Domínio disc.gestaosemcaos.com.br registrado (Apple Pay ativo, Google Pay ativo). (Prévia: resposta de exemplo.)',
+          'Consulta leve ao saldo (GET /v1/balance, nada é criado) e aos domínios de Apple Pay / Google Pay.',
+          { modo: 'teste', publicavelModo: 'teste', dominio: 'disc.gestaosemcaos.com.br', dominioRegistrado: true, applePay: true, googlePay: true, webhookSecreto: true });
+      }
+      if (alvo === 'stripe.pagamento') {
+        var idS = 'previa-stripe-' + hexAleatorio(4);
+        var piS = 'pi_previa' + hexAleatorio(8);
+        cxPrevia.pedidoTeste = { id: idS, status: 'aguardando', criadoEm: new Date(agora()).toISOString(), url: '', provedor: 'stripe' };
+        return r(true, 'Pagamento de teste criado (R$ 1,00, modo teste). Pague na janela que abriu; nada é cobrado se você fechar. (Prévia: campos fictícios.)',
+          'Criação de um PaymentIntent real no Stripe para o pedido de teste.',
+          { pedidoId: idS, clientSecret: piS + '_secret_previa' + hexAleatorio(4), publicavel: 'pk_test_previa', valorCentavos: 100, modo: 'teste', retornoUrl: '', simulado: true });
+      }
+      if (alvo === 'stripe.verificar') {
+        if (!cxPrevia.pedidoTeste || cxPrevia.pedidoTeste.provedor !== 'stripe') return r(false, 'Nenhum pedido de teste encontrado. Gere um pagamento de teste primeiro.', 'Leitura do pedido de teste.');
+        var pagoS = c && c.simuladoPago === true;
+        if (pagoS) cxPrevia.pedidoTeste.status = 'pago';
+        return cxPrevia.pedidoTeste.status === 'pago'
+          ? r(true, 'Pagamento de teste confirmado pelo Stripe. O ciclo completo funciona. (Prévia.)', 'Consulta do PaymentIntent do pedido de teste no Stripe.', { pedidoId: cxPrevia.pedidoTeste.id, pago: true })
+          : r(true, 'O Stripe respondeu: este pagamento de teste ainda não foi concluído (situação: requires_payment_method).', 'Consulta do PaymentIntent do pedido de teste no Stripe.', { pedidoId: cxPrevia.pedidoTeste.id, pago: false });
+      }
       if (alvo === 'infinitepay.link') {
         var id = 'previa-teste-' + hexAleatorio(4);
         var url = 'https://checkout.infinitepay.io/gestaosemcaos?previa=' + id;
@@ -2530,6 +2559,15 @@
       if (p.status !== 'aguardando') return erro('Este pedido não está mais aberto. Faça um novo pedido.');
       var lista = pedidosSalvos();
       var alvo = buscarPor(lista, 'id', p.id);
+      if (provedorPrevia === 'stripe') {
+        if (!/^pi_previa[0-9a-f]+$/.test(String(alvo.provedorRef || '')) || alvo.provedor !== 'stripe') {
+          alvo.provedor = 'stripe';
+          alvo.provedorRef = 'pi_previa' + hexAleatorio(8);
+          gravarChave(CHAVES.pedidos, lista);
+        }
+        return { ok: true, simulado: true, provedor: 'stripe', clientSecret: alvo.provedorRef + '_secret_previa' + hexAleatorio(6),
+          publicavel: 'pk_test_previa', valor: p.valorCentavos };
+      }
       if (provedorPrevia === 'infinitepay') {
         var url = 'meu-relatorio.html?pedido=' + encodeURIComponent(p.id) + '&order_nsu=' + encodeURIComponent(p.id) +
           '&transaction_nsu=SIM&slug=SIM&capture_method=pix#t-' + p.tokenAcesso;
@@ -2552,10 +2590,20 @@
     }
 
     // Volta da InfinitePay (prévia): com alguma referência, o "payment_check" fictício aprova.
+    // Stripe (prévia): o paymentIntent do pedido (a volta com redirect_status=succeeded) aprova; outro pi não.
     function acaoConfirmarRetorno(id, token, dados) {
       var p = pedidoDoCliente(id, token);
       if (!p) return erro(MSG_PEDIDO_NAO_ENCONTRADO);
       var d = dados && typeof dados === 'object' ? dados : {};
+      if (p.provedor === 'stripe') {
+        var pi = String(d.paymentIntent || '');
+        if (p.status !== 'aguardando' || !pi || pi !== p.provedorRef) return { ok: true, status: p.status };
+        var lst = pedidosSalvos();
+        var alv = buscarPor(lst, 'id', p.id);
+        mudarStatusPedido(alv, 'pago', 'cartao');
+        gravarChave(CHAVES.pedidos, lst);
+        return { ok: true, status: alv.status };
+      }
       var ref = function (v) { var x = String(v == null ? '' : v).trim(); return /^[A-Za-z0-9._:-]{1,120}$/.test(x) ? x : ''; };
       var tx = ref(d.transactionNsu) || ref(d.slug);
       if (p.status !== 'aguardando' || p.provedor !== 'infinitepay' || !tx) return { ok: true, status: p.status };
@@ -3172,7 +3220,7 @@
       }),
       confirmarRetorno: seguro(function (pedidoId, tokenAcesso, dados) {
         return chamar({ acao: 'pagamento.confirmar', pedidoId: String(pedidoId || ''), tokenAcesso: String(tokenAcesso || ''),
-          dados: dados && typeof dados === 'object' ? { transactionNsu: dados.transactionNsu, slug: dados.slug } : {} });
+          dados: dados && typeof dados === 'object' ? { transactionNsu: dados.transactionNsu, slug: dados.slug, paymentIntent: dados.paymentIntent } : {} });
       }),
       statusPedido: seguro(function (pedidoId, tokenAcesso) {
         return chamar({ acao: 'pedido.status', pedidoId: String(pedidoId || ''), tokenAcesso: String(tokenAcesso || '') });
@@ -3198,6 +3246,7 @@
       testarConexao: seguro(function (token, alvo, opcoes) {
         var dados = { alvo: String(alvo || '') };
         if (opcoes && typeof opcoes === 'object') ['pedidoId', 'transactionNsu', 'slug'].forEach(function (k) { if (opcoes[k]) dados[k] = String(opcoes[k]); });
+        if (opcoes && opcoes.simuladoPago === true) dados.simuladoPago = true;   // só na prévia: o "Payment Element" fictício pagou
         return comSessao('conexoes.testar', token, dados);
       }),
       avaliacaoPublica: seguro(function (codigo) {

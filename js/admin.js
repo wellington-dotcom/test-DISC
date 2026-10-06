@@ -1257,6 +1257,11 @@
   }
 
   // Aceita o pedido em camelCase ou com os nomes das colunas (snake_case).
+  // Pagamento no painel do Stripe (o mesmo endereço abre o de teste quando a conta está em modo de teste).
+  function urlPagamentoStripe(pi) {
+    return /^pi_[A-Za-z0-9]+$/.test(String(pi || '')) ? 'https://dashboard.stripe.com/payments/' + pi : '';
+  }
+
   function normalizarPedido(p) {
     p = p || {};
     var status = String(campo(p, ['status']) || 'aguardando');
@@ -1276,6 +1281,8 @@
       reembolsadoEm: String(campo(p, ['reembolsadoEm', 'reembolsado_em']) || ''),
       metodo: String(campo(p, ['metodo']) || ''),
       asaasCobrancaId: String(campo(p, ['asaasCobrancaId', 'asaas_cobranca_id']) || ''),
+      provedor: String(campo(p, ['provedor']) || ''),
+      provedorRef: String(campo(p, ['provedorRef', 'provedor_ref']) || ''),
       faturaUrl: /^https:\/\//.test(String(campo(p, ['faturaUrl']) || '')) ? String(p.faturaUrl) : ''
     };
   }
@@ -1481,9 +1488,12 @@
   var NOMES_FUNCOES = {
     admin: 'Painel (ClickUp, relatórios, usuários, conexões)', 'disc-sync': 'Leva o resultado do candidato ao ClickUp',
     'clickup-webhook': 'Recebe os avisos do ClickUp', pagamento: 'Pagamento do site (venda direta)',
-    'asaas-webhook': 'Recebe os avisos do Asaas', 'infinitepay-webhook': 'Recebe os avisos da InfinitePay'
+    'asaas-webhook': 'Recebe os avisos do Asaas', 'infinitepay-webhook': 'Recebe os avisos da InfinitePay',
+    'stripe-webhook': 'Recebe os avisos do Stripe'
   };
-  var WEBHOOKS_SEM_JWT = ['clickup-webhook', 'asaas-webhook', 'infinitepay-webhook', 'pagamento'];
+  var WEBHOOKS_SEM_JWT = ['clickup-webhook', 'asaas-webhook', 'infinitepay-webhook', 'stripe-webhook', 'pagamento'];
+  var FUNCOES_EDGE_PAINEL = ['admin', 'disc-sync', 'clickup-webhook', 'pagamento', 'stripe-webhook', 'asaas-webhook', 'infinitepay-webhook'];
+  var NOMES_PROVEDOR = { stripe: 'Stripe', infinitepay: 'InfinitePay', asaas: 'Asaas' };
 
   function passosPublicarFuncao(nome) {
     return [
@@ -1499,7 +1509,7 @@
   function baseUrl(u) { return String(u || '').split('#')[0].split('?')[0].replace(/[^/]*$/, '').replace(/\/+$/, '').toLowerCase(); }
   function hostLocal(u) { return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?(\/|$)/i.test(String(u || '')); }
 
-  // Monta os 10 cartões. diag = DISC_API.diagnosticoConexoes; testes = {alvo: resultado de testarConexao};
+  // Monta os 11 cartões. diag = DISC_API.diagnosticoConexoes; testes = {alvo: resultado de testarConexao};
   // testando = {idCartao: true}. Cada cartão: {id, nome, serve, status, linhas[], erro, passos[], quando, verificado, acoes[], link?}
   function cartoesConexoes(diag, testes, testando) {
     diag = diag || {};
@@ -1634,11 +1644,12 @@
       var opcional = {
         'asaas-webhook': !sg.ASAAS_API_KEY && pag.provedor !== 'asaas' ? 'só precisa se usar o Asaas' : '',
         'infinitepay-webhook': !sg.INFINITEPAY_HANDLE ? 'só precisa se usar a InfinitePay' : '',
+        'stripe-webhook': !sg.STRIPE_SECRET_KEY ? 'só precisa se usar o Stripe' : '',
         'clickup-webhook': !sg.CLICKUP_TOKEN ? 'só precisa se usar o ClickUp' : ''
       };
       var faltam = [];
       var duvida = [];
-      ['admin', 'disc-sync', 'clickup-webhook', 'pagamento', 'asaas-webhook', 'infinitepay-webhook'].forEach(function (n) {
+      FUNCOES_EDGE_PAINEL.forEach(function (n) {
         var p = funcaoPublicada(n);
         var txt = n + ' — ' + (p === true ? 'publicada' : (p === false ? 'NÃO publicada' + (opcional[n] ? ' (' + opcional[n] + ')' : '') : 'não deu para conferir'));
         c.linhas.push(txt);
@@ -1657,22 +1668,76 @@
       cartao(c);
     })();
 
-    // 5. InfinitePay
+    // 5. Stripe (pagamento dentro do site: cartão, Apple Pay, Google Pay e Pix)
     (function () {
-      var c = novoCartao({ id: 'infinitepay', nome: 'Pagamento — InfinitePay', serve: 'Recebe o pagamento (Pix e cartão) da venda direta do Mapa DISC.' });
+      var c = novoCartao({ id: 'stripe', nome: 'Pagamento — Stripe', serve: 'Pagamento dentro do site: cartão digitado na página, Apple Pay, Google Pay e Pix com QR.' });
+      c.acoes = ['testar', 'stripe-pagar', 'stripe-verificar'];
+      c.verificado = 'Presença dos segredos e da função que recebe o aviso de pagamento.';
+      if (semServidor) { c.status = 'erro'; c.erro = avisoServidor; cartao(c); return; }
+      var modo = pag.stripeModo === 'producao' ? 'produção (cobra de verdade)' : (pag.stripeModo === 'teste' ? 'teste (cartão 4242 4242 4242 4242)' : '');
+      c.linhas.push('Chave secreta (STRIPE_SECRET_KEY): ' + textoSimNao(sg.STRIPE_SECRET_KEY) + (sg.STRIPE_SECRET_KEY && modo ? ' — modo ' + modo : ''));
+      c.linhas.push('Chave publicável (STRIPE_PUBLISHABLE_KEY): ' + textoSimNao(sg.STRIPE_PUBLISHABLE_KEY) + ' · Assinatura do webhook (STRIPE_WEBHOOK_SECRET): ' + textoSimNao(sg.STRIPE_WEBHOOK_SECRET));
+      c.linhas.push('Provedor em uso no site: ' + (NOMES_PROVEDOR[pag.provedor] || 'nenhum') + (pag.provedorEscolhido ? '' : ' (PAGAMENTO_PROVEDOR não existe: o Stripe é o padrão quando configurado)'));
+      var passos = ['Em dashboard.stripe.com: Settings → Payment methods → ative Cartões, Pix, Apple Pay e Google Pay.',
+        'Settings → Payment method domains → Add domain → ' + (pag.stripeDominio || 'disc.gestaosemcaos.com.br') + ' (o Apple Pay exige).',
+        'Developers → API keys: copie a chave publicável (pk_…) e revele a secreta (sk_…). Comece pelas de teste.', PASSO_SECRETS,
+        'Name: STRIPE_SECRET_KEY — Value: a chave secreta. Name: STRIPE_PUBLISHABLE_KEY — Value: a publicável. Name: PAGAMENTO_PROVEDOR — Value: stripe.',
+        'Developers → Webhooks → Add endpoint → URL https://tevpqngqzxcswmticjnr.supabase.co/functions/v1/stripe-webhook, eventos payment_intent.succeeded, charge.refunded e charge.dispute.created → copie o Signing secret (whsec_…) para o segredo STRIPE_WEBHOOK_SECRET.',
+        PASSO_TESTAR];
+      if (!sg.STRIPE_SECRET_KEY) { c.status = 'nao_configurado'; c.passos = passos; }
+      else if (!sg.STRIPE_PUBLISHABLE_KEY) { c.status = 'erro'; c.erro = 'Falta a chave publicável (STRIPE_PUBLISHABLE_KEY): sem ela o site não mostra o pagamento.'; c.passos = passos; }
+      else if (pag.stripePublicavelModo && pag.stripeModo && pag.stripePublicavelModo !== pag.stripeModo) {
+        c.status = 'erro'; c.erro = 'As chaves são de modos diferentes (uma de teste e outra de produção). Use as duas do mesmo modo.'; c.passos = passos;
+      } else if (!sg.STRIPE_WEBHOOK_SECRET) {
+        c.status = 'erro'; c.erro = 'Falta o STRIPE_WEBHOOK_SECRET: estornos e pagamentos aprovados com a página fechada não seriam avisados.'; c.passos = passos.slice(5);
+      } else if (funcaoPublicada('stripe-webhook') === false) {
+        c.status = 'erro'; c.erro = 'A função stripe-webhook não está publicada: o aviso do Stripe não chegaria.';
+        c.passos = passosPublicarFuncao('stripe-webhook');
+      } else c.status = 'ok';
+      if (pag.provedorEscolhido === 'invalido') { c.status = 'erro'; c.erro = 'PAGAMENTO_PROVEDOR tem um valor desconhecido: use stripe, infinitepay ou asaas.'; }
+      var t = testes.stripe;
+      if (t) {
+        c.quando = t.em || c.quando;
+        c.verificado = t.verificado || c.verificado;
+        if (t.sucesso) {
+          c.linhas.push(t.mensagem);
+          var d = t.detalhes || {};
+          if (d.dominioRegistrado === false && c.status === 'ok') {
+            c.status = 'erro';
+            c.erro = 'O domínio ' + (d.dominio || pag.stripeDominio || 'do site') + ' não está registrado no Stripe: o Apple Pay não aparece.';
+            c.passos = [passos[1], PASSO_TESTAR];
+          }
+        } else { c.erro = t.mensagem || 'O teste falhou.'; c.status = 'erro'; c.passos = passos; }
+      }
+      if (sv.colunaTeste === false) c.linhas.push('Pagamento de teste: aplique antes a migração 20261013120000_conexoes.');
+      var tp = testes['stripe.pagamento'];
+      if (tp && !tp.sucesso) { c.quando = tp.em || c.quando; c.erro = tp.mensagem; c.status = 'erro'; }
+      else if (tp && tp.sucesso) { c.quando = tp.em || c.quando; c.pedidoTeste = (tp.detalhes && tp.detalhes.pedidoId) || ''; }
+      var tv = testes['stripe.verificar'];
+      if (tv) {
+        c.quando = tv.em || c.quando;
+        c.verificado = tv.verificado || c.verificado;
+        if (tv.sucesso) c.linhas.push(tv.mensagem); else { c.erro = tv.mensagem; c.status = 'erro'; }
+      }
+      cartao(c);
+    })();
+
+    // 6. InfinitePay
+    (function () {
+      var c = novoCartao({ id: 'infinitepay', nome: 'Pagamento — InfinitePay (alternativa)', serve: 'Outro meio de pagamento (Pix e cartão na página da InfinitePay), usado se o Stripe não estiver configurado ou se escolhido.' });
       c.acoes = ['testar', 'link', 'verificar'];
       c.verificado = 'Presença dos segredos e da função que recebe o aviso de pagamento.';
       if (semServidor) { c.status = 'erro'; c.erro = avisoServidor; cartao(c); return; }
       c.linhas.push('InfiniteTag (INFINITEPAY_HANDLE): ' + (sg.INFINITEPAY_HANDLE ? 'existe (' + (pag.handleParcial || '***') + ')' : 'não existe'));
       c.linhas.push('SITE_URL: ' + textoSimNao(sg.SITE_URL));
-      c.linhas.push('PAGAMENTO_PROVEDOR: ' + (pag.provedorEscolhido === 'invalido' ? 'valor desconhecido' : (pag.provedorEscolhido || 'não existe (usa a InfinitePay quando há InfiniteTag)')));
-      c.linhas.push('Provedor em uso no site: ' + (pag.provedor === 'infinitepay' ? 'InfinitePay' : (pag.provedor === 'asaas' ? 'Asaas' : 'nenhum')));
+      c.linhas.push('PAGAMENTO_PROVEDOR: ' + (pag.provedorEscolhido === 'invalido' ? 'valor desconhecido' : (pag.provedorEscolhido || 'não existe (usa o Stripe, depois a InfinitePay, depois o Asaas)')));
+      c.linhas.push('Provedor em uso no site: ' + (NOMES_PROVEDOR[pag.provedor] || 'nenhum'));
       var passos = ['No app da InfinitePay, abra o seu perfil: a InfiniteTag é o seu "$nome" de recebimento. Anote SEM o $.', PASSO_SECRETS,
         'Name: INFINITEPAY_HANDLE — Value: a InfiniteTag sem o $.', 'Name: PAGAMENTO_PROVEDOR — Value: infinitepay.',
         'Confira também o SITE_URL (endereço do site, sem barra no fim).', PASSO_TESTAR];
       if (!sg.INFINITEPAY_HANDLE) { c.status = 'nao_configurado'; c.passos = passos; }
       else if (!sg.SITE_URL) { c.status = 'erro'; c.erro = 'Falta o segredo SITE_URL: a InfinitePay não sabe para onde devolver o cliente.'; c.passos = passos; }
-      else if (pag.provedorEscolhido === 'invalido') { c.status = 'erro'; c.erro = 'PAGAMENTO_PROVEDOR tem um valor desconhecido: use infinitepay ou asaas.'; c.passos = passos; }
+      else if (pag.provedorEscolhido === 'invalido') { c.status = 'erro'; c.erro = 'PAGAMENTO_PROVEDOR tem um valor desconhecido: use stripe, infinitepay ou asaas.'; c.passos = passos; }
       else if (funcaoPublicada('infinitepay-webhook') === false) {
         c.status = 'erro'; c.erro = 'A função infinitepay-webhook não está publicada: o pagamento não seria confirmado sozinho.';
         c.passos = passosPublicarFuncao('infinitepay-webhook');
@@ -1683,7 +1748,7 @@
         c.quando = tl.em || c.quando;
         if (tl.sucesso && tl.detalhes && tl.detalhes.url) { c.link = { url: tl.detalhes.url, pedidoId: tl.detalhes.pedidoId || '' }; c.linhas.push(tl.mensagem); }
         else if (!tl.sucesso) { c.erro = tl.mensagem; c.status = 'erro'; }
-      } else if (sv.pedidoTeste && sv.pedidoTeste.url) {
+      } else if (sv.pedidoTeste && sv.pedidoTeste.url && /^https:\/\//.test(sv.pedidoTeste.url)) {
         c.link = { url: sv.pedidoTeste.url, pedidoId: sv.pedidoTeste.id };
         c.linhas.push('Último pedido de teste: ' + (sv.pedidoTeste.status === 'pago' ? 'pago' : 'aguardando pagamento') + '.');
       }
@@ -1696,13 +1761,13 @@
       cartao(c);
     })();
 
-    // 6. Asaas
+    // 7. Asaas
     (function () {
       var c = novoCartao({ id: 'asaas', nome: 'Pagamento — Asaas (alternativa)', serve: 'Outro meio de pagamento (Pix no site e cartão), usado só se escolhido.' });
       if (semServidor) { c.status = 'erro'; c.erro = avisoServidor; cartao(c); return; }
       c.linhas.push('ASAAS_API_KEY: ' + textoSimNao(sg.ASAAS_API_KEY) + ' · ASAAS_WEBHOOK_TOKEN: ' + textoSimNao(sg.ASAAS_WEBHOOK_TOKEN));
       c.linhas.push('Ambiente: ' + (pag.asaasAmbiente === 'producao' ? 'produção' : 'sandbox (testes)') + (sg.ASAAS_AMBIENTE ? '' : ' (ASAAS_AMBIENTE não existe: vale sandbox)'));
-      var passos = ['Só precisa se for usar o Asaas no lugar da InfinitePay.',
+      var passos = ['Só precisa se for usar o Asaas no lugar do Stripe ou da InfinitePay.',
         'No Asaas: menu do usuário (canto superior direito) → Integrações → Chaves de API → Gerar chave.', PASSO_SECRETS,
         'Name: ASAAS_API_KEY — Value: a chave. Name: ASAAS_AMBIENTE — Value: sandbox (testes) ou producao.',
         'Webhook: invente uma senha longa, guarde como ASAAS_WEBHOOK_TOKEN e cadastre em Asaas → Integrações → Webhooks (passo a passo em docs/VENDAS.md).', PASSO_TESTAR];
@@ -1716,7 +1781,7 @@
       cartao(c);
     })();
 
-    // 7. E-mail
+    // 8. E-mail
     (function () {
       var c = novoCartao({ id: 'email', nome: 'E-mail (Resend)', serve: 'Manda ao cliente o link do relatório comprado e o "recuperar meu relatório".' });
       c.acoes = ['testar', 'email'];
@@ -1733,7 +1798,7 @@
       cartao(c);
     })();
 
-    // 8. ClickUp
+    // 9. ClickUp
     (function () {
       var c = novoCartao({ id: 'clickup', nome: 'ClickUp', serve: 'Lê as listas e candidatos dos processos e recebe o pedido de "gerar relatório".' });
       if (semServidor) { c.status = 'erro'; c.erro = avisoServidor; cartao(c); return; }
@@ -1751,7 +1816,7 @@
       cartao(c);
     })();
 
-    // 9. IA
+    // 10. IA
     (function () {
       var c = novoCartao({ id: 'ia', nome: 'IA (opcional, melhorar textos)', serve: 'Botão "Melhorar textos com IA" no editor do relatório.' });
       if (semServidor) { c.status = 'erro'; c.erro = avisoServidor; cartao(c); return; }
@@ -1766,7 +1831,7 @@
       cartao(c);
     })();
 
-    // 10. Despertador
+    // 11. Despertador
     (function () {
       var c = novoCartao({ id: 'despertador', nome: 'Despertador (GitHub Actions)', serve: 'Consulta o banco a cada 3 dias para o Supabase grátis não pausar o projeto.' });
       c.status = 'manual';
@@ -1793,6 +1858,7 @@
 
   var util = {
     STATUS_CONEXAO: STATUS_CONEXAO,
+    urlPagamentoStripe: urlPagamentoStripe,
     cartoesConexoes: cartoesConexoes,
     resumoConexoes: resumoConexoes,
     STATUS_PEDIDO: STATUS_PEDIDO,
@@ -6282,7 +6348,11 @@
       el('div', null, [el('dt', { texto: 'Forma de pagamento' }), el('dd', { texto: ({ pix: 'Pix', cartao: 'Cartão', boleto: 'Boleto', cupom: 'Cupom (100%)', manual: 'Liberado no painel' })[p.metodo] || p.metodo || '—' })]),
       el('div', null, [el('dt', { texto: 'Pago em' }), el('dd', { texto: formatarData(p.pagoEm) })]),
       p.reembolsadoEm ? el('div', null, [el('dt', { texto: 'Reembolsado em' }), el('dd', { texto: formatarData(p.reembolsadoEm) })]) : null,
-      p.asaasCobrancaId || p.faturaUrl ? el('div', null, [el('dt', { texto: 'Cobrança no Asaas' }), el('dd', { classe: 'tabular' }, [
+      p.provedor === 'stripe' && /^pi_[A-Za-z0-9]+$/.test(p.provedorRef) ? el('div', null, [el('dt', { texto: 'Pagamento no Stripe' }), el('dd', { classe: 'tabular' }, [
+        p.provedorRef, ' · ',
+        el('a', { classe: 'vd-link vd-link--stripe', id: 'vd-link-stripe', href: urlPagamentoStripe(p.provedorRef), target: '_blank', rel: 'noopener noreferrer', texto: 'Abrir no Stripe' })
+      ])]) : null,
+      p.provedor !== 'stripe' && (p.asaasCobrancaId || p.faturaUrl) ? el('div', null, [el('dt', { texto: p.provedor === 'infinitepay' ? 'Pagamento na InfinitePay' : 'Cobrança no Asaas' }), el('dd', { classe: 'tabular' }, [
         p.asaasCobrancaId || '',
         p.faturaUrl ? el('a', { classe: 'vd-link vd-link--fatura', id: 'vd-link-fatura', href: p.faturaUrl, target: '_blank', rel: 'noopener noreferrer', texto: (p.asaasCobrancaId ? ' · ' : '') + 'Abrir a cobrança' }) : null
       ])]) : null
@@ -6319,7 +6389,9 @@
         botao('botao--claro botao--pequeno', 'Copiar link de pagamento (cartão)', function () { copiar(p.faturaUrl, 'Link de pagamento copiado.'); }, { id: 'btn-vd-copiar-fatura' })
       ]));
     }
-    if (p.status === 'estornado') acesso.appendChild(el('p', { classe: 't-nota texto-suave', texto: 'Confira se o estorno foi feito no Asaas.' }));
+    if (p.status === 'estornado') acesso.appendChild(el('p', { classe: 't-nota texto-suave', texto: p.provedor === 'stripe'
+      ? 'Confira se o reembolso foi feito no Stripe (Payments → o pagamento → Refund). O aviso do Stripe marca o pedido sozinho.'
+      : (p.provedor === 'infinitepay' ? 'Confira se o estorno foi feito no app da InfinitePay.' : 'Confira se o estorno foi feito no Asaas.') }));
     var quem = el('section', { classe: 'caixa', id: 'vd-pedido-resposta' }, [el('h3', { classe: 'caixa__titulo', texto: 'Teste respondido' })]);
     if (resposta) {
       quem.appendChild(el('p', { classe: 't-corpo' }, [
@@ -6557,18 +6629,20 @@
 
   function temConexoes() { return MODO_API && (SUPABASE || SIMULADA) && !!metodoApi('diagnosticoConexoes'); }
   function novoEstadoConexoes() { return { diag: null, testes: {}, testando: {}, carregado: false, rodando: false, erro: '' }; }
-  // Volta da InfinitePay depois de pagar o link de teste: admin.html?conexoes=teste&order_nsu=…&transaction_nsu=…&slug=…
+  // Volta depois de pagar o teste: InfinitePay admin.html?conexoes=teste&order_nsu=…&transaction_nsu=…&slug=…;
+  // Stripe (3DS) admin.html?conexoes=teste&provedor=stripe&pedido=…&payment_intent=…&redirect_status=…
   var RETORNO_CONEXOES = (function () {
     try {
       var q = new URLSearchParams(root.location.search || '');
       if (q.get('conexoes') !== 'teste') return null;
-      var r = { pedidoId: q.get('order_nsu') || '', transactionNsu: q.get('transaction_nsu') || '', slug: q.get('slug') || '' };
+      var r = { provedor: q.get('provedor') === 'stripe' ? 'stripe' : 'infinitepay', pedidoId: q.get('order_nsu') || q.get('pedido') || '',
+        transactionNsu: q.get('transaction_nsu') || '', slug: q.get('slug') || '' };
       if (root.history && root.history.replaceState) root.history.replaceState(null, '', root.location.pathname + root.location.hash);
       return r;
     } catch (e) { return null; }
   })();
   var CARTOES_DIAGNOSTICO = ['site', 'login', 'infinitepay', 'email', 'despertador'];
-  var ALVO_DO_CARTAO = { banco: 'banco', funcoes: 'funcoes', asaas: 'asaas', clickup: 'clickup', ia: 'ia' };
+  var ALVO_DO_CARTAO = { banco: 'banco', funcoes: 'funcoes', stripe: 'stripe', asaas: 'asaas', clickup: 'clickup', ia: 'ia' };
 
   function erroComoTeste(alvo, e) {
     return { ok: true, alvo: alvo, sucesso: false, mensagem: (e && e.message) || 'O teste falhou. Tente de novo.', em: new Date().toISOString() };
@@ -6604,7 +6678,7 @@
     var cx = estado.cx;
     if (cx.rodando) return cx.rodando;
     var ids = cartoesConexoes(cx.diag, cx.testes, {}).map(function (c) { return c.id; });
-    if (!ids.length) ids = ['site', 'banco', 'login', 'funcoes', 'infinitepay', 'asaas', 'email', 'clickup', 'ia', 'despertador'];
+    if (!ids.length) ids = ['site', 'banco', 'login', 'funcoes', 'stripe', 'infinitepay', 'asaas', 'email', 'clickup', 'ia', 'despertador'];
     cx.testes = {};
     cx.rodando = true; // antes de redesenhar: o desenho não pode disparar outro "Testar tudo"
     cx.rodando = comTestando(ids, carregarDiagnostico().then(function () {
@@ -6612,6 +6686,7 @@
       var alvos = ['banco'];
       if (sg) {
         alvos.push('funcoes');
+        if (sg.STRIPE_SECRET_KEY) alvos.push('stripe');
         if (sg.CLICKUP_TOKEN) alvos.push('clickup');
         if (sg.ASAAS_API_KEY) alvos.push('asaas');
         if (sg.ANTHROPIC_API_KEY) alvos.push('ia');
@@ -6634,8 +6709,14 @@
     var cx = estado.cx;
     if (acao === 'link') return comTestando([id], rodarTeste('infinitepay.link'));
     if (acao === 'email') return comTestando([id], rodarTeste('email'));
+    if (acao === 'stripe-pagar') return pagamentoTesteStripe();
+    if (acao === 'stripe-verificar') {
+      var rs = RETORNO_CONEXOES && RETORNO_CONEXOES.provedor === 'stripe' ? RETORNO_CONEXOES : {};
+      var cs = cartoesConexoes(cx.diag, cx.testes, {}).filter(function (x) { return x.id === 'stripe'; })[0];
+      return comTestando([id], rodarTeste('stripe.verificar', { pedidoId: rs.pedidoId || (cs && cs.pedidoTeste) || '' }));
+    }
     if (acao === 'verificar') {
-      var ref = RETORNO_CONEXOES || {};
+      var ref = RETORNO_CONEXOES && RETORNO_CONEXOES.provedor !== 'stripe' ? RETORNO_CONEXOES : {};
       var c = cartoesConexoes(cx.diag, cx.testes, {}).filter(function (x) { return x.id === 'infinitepay'; })[0];
       var op = { pedidoId: ref.pedidoId || (c && c.link ? c.link.pedidoId : ''), transactionNsu: ref.transactionNsu || '', slug: ref.slug || '' };
       return comTestando([id], rodarTeste('infinitepay.verificar', op));
@@ -6643,7 +6724,60 @@
     return testarCartao(id);
   }
 
-  var ROTULOS_ACAO = { testar: 'Testar', link: 'Gerar link de teste (R$ 1,00)', verificar: 'Verificar pagamento de teste', email: 'Enviar e-mail de teste para mim' };
+  var ROTULOS_ACAO = { testar: 'Testar', link: 'Gerar link de teste (R$ 1,00)', verificar: 'Verificar pagamento de teste', email: 'Enviar e-mail de teste para mim',
+    'stripe-pagar': 'Gerar pagamento de teste (R$ 1,00)', 'stripe-verificar': 'Verificar pagamento de teste' };
+
+  // Pagamento de teste do Stripe: cria o pedido de teste + PaymentIntent (R$ 1,00) e abre uma janela com o Payment Element
+  // para pagar de verdade aqui mesmo. Aprovado -> confere no servidor (stripe.verificar) e mostra no cartão.
+  function pagamentoTesteStripe() {
+    var cx = estado.cx;
+    var S = root.DISC_STRIPE;
+    return comTestando(['stripe'], rodarTeste('stripe.pagamento')).then(function () {
+      var t = cx.testes['stripe.pagamento'];
+      var d = (t && t.sucesso && t.detalhes) || null;
+      if (!d || !d.clientSecret || !S) return;
+      var caixa = el('div', { classe: 'cx-stripe-elemento', id: 'cx-stripe-elemento', 'aria-busy': 'true' }, [
+        el('p', { classe: 'cx-stripe-carregando' }, [el('span', { classe: 'giro', 'aria-hidden': 'true' }), 'Carregando o formulário do Stripe…'])
+      ]);
+      var pix = el('div', { classe: 'cx-stripe-pix', id: 'cx-stripe-pix', hidden: true });
+      var sessao = null;
+      var janela = abrirJanela({
+        id: 'janela-stripe-teste', titulo: 'Pagamento de teste — R$ 1,00',
+        texto: d.modo === 'producao' ? 'Modo produção: este pagamento é REAL (R$ 1,00). Depois, reembolse pelo painel do Stripe.' : 'Modo de teste: use o cartão 4242 4242 4242 4242, qualquer validade futura e qualquer CVC.',
+        corpo: [caixa, pix, el('p', { classe: 'cx-stripe-nota', texto: 'Pedido de teste: não entra nas vendas nem na receita.' })],
+        botao: 'Pagar R$ 1,00',
+        aoConfirmar: function () {
+          if (!sessao) throw new Error('Espere o formulário carregar.');
+          return sessao.confirmar(d.retornoUrl || root.location.href.split('#')[0]).then(function (r) {
+            if (r.status === 'pago') {
+              return comTestando(['stripe'], rodarTeste('stripe.verificar', { pedidoId: d.pedidoId, simuladoPago: !!d.simulado })).then(function () {
+                var v = cx.testes['stripe.verificar'];
+                avisar(v && v.sucesso && v.detalhes && v.detalhes.pago ? 'Pagamento de teste confirmado.' : 'Pagamento enviado. Verifique de novo em instantes.', 'ok');
+              });
+            }
+            if (r.status === 'pendente' && r.pix) {
+              limpar(pix);
+              if (r.pix.qr) pix.appendChild(el('img', { src: r.pix.qr, alt: 'QR Code do Pix', width: '180', height: '180' }));
+              if (r.pix.copiaECola) pix.appendChild(el('code', { classe: 'cx-stripe-pix__codigo', texto: r.pix.copiaECola }));
+              pix.hidden = false;
+              throw new Error('Pix gerado: pague no app do banco e depois clique em "Verificar pagamento de teste" no cartão do Stripe.');
+            }
+            throw new Error(r.mensagem || 'O pagamento não foi concluído.');
+          });
+        }
+      });
+      var btnOk = janela.form.querySelector('#janela-ok');
+      if (btnOk) btnOk.disabled = true;
+      var pronto = function () { caixa.removeAttribute('aria-busy'); if (btnOk) btnOk.disabled = false; };
+      var montar = d.simulado
+        ? Promise.resolve(S.montarSimulado({ el: caixa, aoPronto: pronto, paymentIntent: String(d.clientSecret).split('_secret_')[0] }))
+        : Promise.resolve().then(function () { limpar(caixa); return S.montar({ el: caixa, publicavel: d.publicavel, clientSecret: d.clientSecret, aoPronto: pronto }); });
+      montar.then(function (x) { if (document.body.contains(caixa)) sessao = x; else x.destruir(); }, function (e) {
+        limpar(caixa);
+        caixa.appendChild(el('p', { classe: 'cx-cartao__erro', role: 'alert', texto: (e && e.message) || 'Não foi possível carregar o Stripe.' }));
+      });
+    });
+  }
 
   function cartaoConexao(c) {
     var st = STATUS_CONEXAO[c.status] || STATUS_CONEXAO.pendente;
@@ -6806,11 +6940,14 @@
     aplicarPapel();
     mostrarAba(MODO_API ? 'lista' : (lerLocais().length ? 'lista' : 'importar'));
     verificarBanco();
-    // Volta da InfinitePay (link de teste): abre Conexões e confere o pagamento.
+    // Volta do pagamento de teste (InfinitePay ou 3DS do Stripe): abre Conexões e confere o pagamento.
     if (RETORNO_CONEXOES && temConexoes() && papel() === 'admin') {
       estado.cx.carregado = true;
       mostrarAba('conexoes');
-      carregarDiagnostico().then(function () { acaoCartao('infinitepay', 'verificar'); });
+      carregarDiagnostico().then(function () {
+        if (RETORNO_CONEXOES.provedor === 'stripe') acaoCartao('stripe', 'stripe-verificar');
+        else acaoCartao('infinitepay', 'verificar');
+      });
     }
     return carregar();
   }

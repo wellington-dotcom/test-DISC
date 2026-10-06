@@ -1,11 +1,17 @@
-// Venda direta (B2C): Edge Functions "pagamento" (site do cliente), "infinitepay-webhook" e "asaas-webhook" (o meio de
-// pagamento avisa). Lógica sem nada do Deno: testável no Node 20+ com fetch e banco falsos.
+// Venda direta (B2C): Edge Functions "pagamento" (site do cliente), "stripe-webhook", "infinitepay-webhook" e
+// "asaas-webhook" (o meio de pagamento avisa). Lógica sem nada do Deno: testável no Node 20+ com fetch e banco falsos.
 //
-// PROVEDOR (meio de pagamento): segredo PAGAMENTO_PROVEDOR = 'infinitepay' | 'asaas'. Sem ele: 'infinitepay' se houver
-// INFINITEPAY_HANDLE, senão 'asaas' se houver ASAAS_API_KEY, senão nenhum ("Pagamento ainda não configurado.").
+// PROVEDOR (meio de pagamento): segredo PAGAMENTO_PROVEDOR = 'stripe' | 'infinitepay' | 'asaas'. Sem ele: 'stripe' se
+// houver STRIPE_SECRET_KEY, senão 'infinitepay' se houver INFINITEPAY_HANDLE, senão 'asaas' se houver ASAAS_API_KEY,
+// senão nenhum ("Pagamento ainda não configurado.").
 // Um pedido que já começou num provedor (pedidos.provedor) continua nele enquanto esse provedor estiver configurado.
 //
 // "pagamento" (POST JSON {acao, ...}; resposta sempre HTTP 200 {ok, ...}):
+//   criar     Stripe (pagamento DENTRO do site, Payment Element): {pedidoId, tokenAcesso} -> {ok, provedor:'stripe',
+//             clientSecret, publicavel (STRIPE_PUBLISHABLE_KEY), valor}. Um PaymentIntent por pedido (Idempotency-Key
+//             "mapa-disc-<pedido>-<valor>"; reaproveitado enquanto ainda pode ser pago): amount em centavos, currency brl,
+//             automatic_payment_methods (cartão, Apple Pay, Google Pay, Pix), metadata[pedido_id]. pedidos.provedor_ref
+//             = id do PaymentIntent (pi_…). Sem STRIPE_PUBLISHABLE_KEY: "não configurado".
 //   criar     InfinitePay: {pedidoId, tokenAcesso} -> {ok, provedor:'infinitepay', redirecionarUrl, valor} (o site manda o
 //             cliente para a página da InfinitePay — Pix e cartão; o link é reaproveitado por 12 h). order_nsu = pedidoId;
 //             redirect_url = SITE_URL/meu-relatorio.html?pedido=<id>#t-<token> (a InfinitePay acrescenta order_nsu,
@@ -21,6 +27,8 @@
 //   status    {pedidoId, tokenAcesso} -> {ok, status}. Se ainda 'aguardando', confere no provedor no máximo a cada
 //             15 s (cobre webhook perdido) e marca pago. InfinitePay: só depois que transaction_nsu/slug forem
 //             conhecidos (retorno do cliente ou webhook).
+//   confirmar Stripe: {pedidoId, tokenAcesso, paymentIntent?} -> {ok, status}: busca o PaymentIntent do pedido no Stripe e só
+//             marca pago com status 'succeeded', amount_received >= valor do pedido, moeda brl e metadata[pedido_id] certo.
 //   confirmar {pedidoId, tokenAcesso, transactionNsu, slug} -> {ok, status} (retorno da InfinitePay: o site lê os
 //             parâmetros da URL e chama esta ação). Confere com payment_check (paid=true e valor pago >= valor do
 //             pedido) e marca pago. Guarda transaction_nsu/slug para o "status" voltar a conferir (Pix ainda pendente).
@@ -32,6 +40,10 @@
 //   (= pedidoId), transaction_nsu e slug e confere com payment_check; só marca pago com paid=true e valor >= pedido.
 //   Idempotente (pedido já pago: nada). Grava o corpo bruto em pedidos.provedor_dados.webhook (depuração).
 //   Resposta 200 {ok, feito, motivo}; falha no banco -> 500 e InfinitePay fora -> 502 (para ela reenviar).
+// "stripe-webhook": assinatura Stripe-Signature (HMAC-SHA256 de `${t}.${corpo}` com STRIPE_WEBHOOK_SECRET; tolerância
+//   5 min; sem segredo 503, assinatura ruim 400). payment_intent.succeeded -> confere o PaymentIntent no Stripe (valor,
+//   moeda, metadata) e marca 'pago' (idempotente); charge.refunded / charge.dispute.created -> 'estornado'.
+//   Falha no banco -> 500 e Stripe fora -> 502 (o Stripe reenvia).
 // "asaas-webhook": cabeçalho asaas-access-token == ASAAS_WEBHOOK_TOKEN (senão 401; sem segredo 503).
 //   PAYMENT_RECEIVED/CONFIRMED -> 'pago' (só de aguardando/cancelado; valor pago >= valor do pedido);
 //   PAYMENT_REFUNDED/PARTIALLY_REFUNDED/CHARGEBACK_* -> 'estornado' (relatório volta a bloqueado);
@@ -39,6 +51,10 @@
 //   reenvio do mesmo evento não faz nada. Falha no banco -> 500 (o Asaas tenta de novo).
 import { erro, normalizarEmail, emailValido, MSG_ERRO_INTERNO } from './regras.js';
 import { criarInfinitePay, lerRefsInfinitePay, refInfinitePay } from './infinitepay.js';
+import {
+  criarStripe, idIntentStripe, segredoClienteStripe, chavePublicavelStripe, stripeMetodo, verificarAssinaturaStripe,
+  STRIPE_ABERTOS, STRIPE_DESCRICAO
+} from './stripe.js';
 import {
   criarAsaas, criarResend, asaasMetodo, iguaisSeguro, documentoValido,
   ASAAS_PAGO, ASAAS_EVENTOS_PAGO, ASAAS_EVENTOS_ESTORNO, ASAAS_EVENTOS_CANCELA
@@ -49,13 +65,14 @@ export const MSG_EMAIL_NAO_CONFIGURADO = 'O envio por e-mail ainda não está co
 export const MSG_PEDIDO_NAO_ENCONTRADO = 'Pedido não encontrado.';
 export const MSG_PRECISA_CPF = 'Informe o seu CPF para pagar.';
 export const NOMES_ENV_VENDAS = ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SITE_URL', 'PAGAMENTO_PROVEDOR',
-  'INFINITEPAY_HANDLE', 'ASAAS_API_KEY', 'ASAAS_AMBIENTE', 'ASAAS_WEBHOOK_TOKEN', 'RESEND_API_KEY', 'EMAIL_REMETENTE'];
+  'STRIPE_SECRET_KEY', 'STRIPE_PUBLISHABLE_KEY', 'STRIPE_WEBHOOK_SECRET', 'INFINITEPAY_HANDLE', 'ASAAS_API_KEY', 'ASAAS_AMBIENTE', 'ASAAS_WEBHOOK_TOKEN', 'RESEND_API_KEY', 'EMAIL_REMETENTE'];
 export const VERIFICAR_ASAAS_MS = 15000;
 export const CONFIRMAR_MS = 5000;
 export const LINK_INFINITEPAY_MS = 12 * 3600 * 1000;
 const LIMITE_CORPO_PAGAMENTO = 4000;
 const LIMITE_CORPO_ASAAS = 200000;
 const LIMITE_CORPO_INFINITEPAY = 100000;
+const LIMITE_CORPO_STRIPE = 300000;
 const LIMITE_PROVEDOR_DADOS = 50000;
 const NOMES_PACOTE = { completo: 'Relatório completo', completo_plus: 'Completo + Parte 2' };
 const RE_UUID_VENDAS = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -65,12 +82,14 @@ const COLUNAS_PEDIDO = 'id, resposta_id, pacote, valor_centavos, cupom, status, 
 // Colunas da migração 20261012120000_infinitepay.sql (sem ela, o Asaas continua funcionando com as colunas antigas).
 const COLUNAS_PROVEDOR = ', provedor, provedor_ref, checkout_url, provedor_dados';
 
-/** Provedor de pagamento escolhido pelos segredos: 'infinitepay' | 'asaas' | '' (nenhum configurado). */
+/** Provedor de pagamento escolhido pelos segredos: 'stripe' | 'infinitepay' | 'asaas' | '' (nenhum configurado). */
 export function provedorPagamento(env) {
   const e = env || {};
   const escolhido = String(e.PAGAMENTO_PROVEDOR || '').trim().toLowerCase();
+  if (escolhido === 'stripe') return e.STRIPE_SECRET_KEY ? 'stripe' : '';
   if (escolhido === 'infinitepay') return e.INFINITEPAY_HANDLE ? 'infinitepay' : '';
   if (escolhido === 'asaas') return e.ASAAS_API_KEY ? 'asaas' : '';
+  if (e.STRIPE_SECRET_KEY) return 'stripe';
   if (e.INFINITEPAY_HANDLE) return 'infinitepay';
   if (e.ASAAS_API_KEY) return 'asaas';
   return '';
@@ -136,6 +155,11 @@ export function criarDbVendas(sb) {
       if (!RE_UUID_VENDAS.test(String(id || ''))) return null;
       return um(await lerPedidos((q) => q.eq('id', id).limit(1)));
     },
+    /** Pedido pela referência do provedor (Stripe: id do PaymentIntent). */
+    async pedidoPorRef(provedor, ref) {
+      if (temProvedor === false || !ref) return null;
+      return um(await lerPedidos((q) => q.eq('provedor', String(provedor)).eq('provedor_ref', String(ref)).limit(1)));
+    },
     async pedidoPorCobranca(cobrancaId) {
       return um(await lerPedidos((q) => q.eq('asaas_cobranca_id', String(cobrancaId)).limit(1)));
     },
@@ -145,6 +169,10 @@ export function criarDbVendas(sb) {
     /** Link do checkout da InfinitePay (só com o pedido aguardando). */
     async gravarCheckout(id, url, dados) {
       return trocar(id, { provedor: 'infinitepay', checkout_url: url, provedor_dados: limitarDados(dados) }, ['aguardando']);
+    },
+    /** PaymentIntent do Stripe criado para o pedido (só com o pedido aguardando). */
+    async gravarIntent(id, ref, dados) {
+      return trocar(id, { provedor: 'stripe', provedor_ref: ref, provedor_dados: limitarDados(dados) }, ['aguardando']);
     },
     /** Referência e dados brutos do provedor (qualquer status: só depuração/conferência). */
     async gravarProvedorDados(id, ref, dados) {
@@ -190,6 +218,7 @@ function contextoVendas(base) {
   return {
     env, agora, db: base.db,
     provedor: provedorPagamento(env),
+    stripe: criarStripe({ chave: env.STRIPE_SECRET_KEY, fetch: base.fetch }),
     infinitepay: criarInfinitePay({ handle: env.INFINITEPAY_HANDLE, fetch: base.fetch }),
     asaas: criarAsaas({ apiKey: env.ASAAS_API_KEY, ambiente: env.ASAAS_AMBIENTE, fetch: base.fetch }),
     email: criarResend({ apiKey: env.RESEND_API_KEY, remetente: env.EMAIL_REMETENTE, fetch: base.fetch })
@@ -270,6 +299,7 @@ export async function acaoCriarPagamento(ctx, corpo) {
   if (p.status === 'pago' || p.status === 'cortesia') return { ok: true, status: p.status, pago: true };
   if (p.status !== 'aguardando') return erro('Este pedido não está mais aberto. Faça um novo pedido.');
   const prov = provedorDoPedido(ctx, p);
+  if (prov === 'stripe') return criarStripePedido(ctx, p);
   if (prov === 'infinitepay') return criarInfinitePayPedido(ctx, p);
   if (prov !== 'asaas') return erro(MSG_PAG_NAO_CONFIGURADO);
   const cache = p.pagamento && typeof p.pagamento === 'object' ? p.pagamento : null;
@@ -316,6 +346,18 @@ export async function acaoCriarPagamento(ctx, corpo) {
 export async function acaoStatusPagamento(ctx, corpo) {
   const p = await pedidoDoCliente(ctx, corpo);
   if (!p) return erro(MSG_PEDIDO_NAO_ENCONTRADO);
+  if (p.status === 'aguardando' && p.provedor === 'stripe') {
+    if (!ctx.stripe.configurado || !idIntentStripe(p.provedor_ref)) return { ok: true, status: p.status };
+    const ultimaS = Date.parse(p.verificado_em || '');
+    if (isFinite(ultimaS) && ctx.agora() - ultimaS < VERIFICAR_ASAAS_MS) return { ok: true, status: p.status };
+    await ctx.db.marcarVerificado(p.id, new Date(ctx.agora()).toISOString());
+    try {
+      return { ok: true, status: (await conferirStripe(ctx, p, p.provedor_ref, 'status')).status };
+    } catch (err) {
+      try { console.error(err); } catch (e) { /* sem console */ }
+      return { ok: true, status: p.status };
+    }
+  }
   if (p.status === 'aguardando' && p.provedor === 'infinitepay') {
     if (!ctx.infinitepay.configurado) return { ok: true, status: p.status };
     const refs = refsGuardadas(p);
@@ -353,6 +395,7 @@ export async function acaoStatusPagamento(ctx, corpo) {
 
 /** Provedor deste pedido: o que ele já usa (se ainda configurado) ou o escolhido pelos segredos. */
 function provedorDoPedido(ctx, p) {
+  if (p.provedor === 'stripe' && ctx.stripe.configurado) return 'stripe';
   if (p.provedor === 'infinitepay' && ctx.infinitepay.configurado) return 'infinitepay';
   if ((p.provedor === 'asaas' || p.asaas_cobranca_id) && ctx.asaas.configurado) return 'asaas';
   return ctx.provedor;
@@ -439,6 +482,7 @@ async function conferirInfinitePay(ctx, p, refs, origem, extrasDados) {
 export async function acaoConfirmarPagamento(ctx, corpo) {
   const p = await pedidoDoCliente(ctx, corpo);
   if (!p) return erro(MSG_PEDIDO_NAO_ENCONTRADO);
+  if (p.provedor === 'stripe') return confirmarStripePedido(ctx, p, corpo);
   if (p.status !== 'aguardando' || p.provedor !== 'infinitepay' || !ctx.infinitepay.configurado) return { ok: true, status: p.status };
   const guardadas = refsGuardadas(p);
   const refs = {
@@ -483,6 +527,145 @@ export async function tratarWebhookInfinitePay(ctx, corpo) {
     throw err;
   }
   return { ok: true, feito: r.feito, motivo: r.motivo };
+}
+
+// ---------------------------------------------------------------------------
+// Stripe (Payment Element dentro do site)
+// ---------------------------------------------------------------------------
+
+export function urlRetornoStripe(env, p) { return urlRetornoInfinitePay(env, p); }
+
+function intentGuardado(p) {
+  const d = dadosDoPedido(p);
+  return d.intent && typeof d.intent === 'object' ? d.intent : {};
+}
+
+async function criarStripePedido(ctx, p) {
+  const publicavel = chavePublicavelStripe(ctx.env.STRIPE_PUBLISHABLE_KEY);
+  if (!publicavel) {
+    try { console.error('Stripe: defina STRIPE_PUBLISHABLE_KEY (pk_…) nos segredos das Edge Functions.'); } catch (e) { /* sem console */ }
+    return erro(MSG_PAG_NAO_CONFIGURADO);
+  }
+  const agora = ctx.agora();
+  const d = dadosDoPedido(p);
+  const responder = (pi) => {
+    const cs = segredoClienteStripe(pi && pi.client_secret);
+    if (!cs) throw new Error('Stripe: PaymentIntent sem client_secret');
+    return { ok: true, provedor: 'stripe', clientSecret: cs, publicavel, valor: p.valor_centavos };
+  };
+  try {
+    let tentativa = 0;
+    const atual = p.provedor === 'stripe' ? idIntentStripe(p.provedor_ref) : '';
+    if (atual) {
+      const pi = await ctx.stripe.intent(atual);
+      const doPedido = pi && pi.metadata && String(pi.metadata.pedido_id || '') === String(p.id);
+      if (pi.status === 'succeeded' && doPedido) {
+        const r = await conferirStripe(ctx, p, atual, 'criar');
+        if (r.status === 'pago') return { ok: true, status: 'pago', pago: true };
+      }
+      if (doPedido && STRIPE_ABERTOS.indexOf(String(pi.status)) >= 0 && Number(pi.amount) === Number(p.valor_centavos) && pi.currency === 'brl') {
+        return responder(pi);
+      }
+      tentativa = (Number(intentGuardado(p).tentativa) || 0) + 1; // cancelado/outro valor: um PaymentIntent novo
+    }
+    const pi = await ctx.stripe.criarIntent({
+      pedidoId: p.id, valorCentavos: p.valor_centavos, email: p.email, pacote: p.pacote, teste: d.teste === true,
+      descricao: STRIPE_DESCRICAO,
+      chaveIdempotencia: 'mapa-disc-' + p.id + '-' + p.valor_centavos + (tentativa ? '-' + tentativa : '')
+    });
+    const id = idIntentStripe(pi && pi.id);
+    if (!id) throw new Error('Stripe: resposta sem o id do PaymentIntent');
+    const novo = Object.assign({}, d, { intent: { id, valor: p.valor_centavos, tentativa, livemode: pi.livemode === true, criadoEm: new Date(agora).toISOString() } });
+    await ctx.db.gravarIntent(p.id, id, novo);
+    return responder(pi);
+  } catch (err) {
+    try { console.error(err); } catch (e) { /* sem console */ }
+    return erro('Não foi possível gerar o pagamento agora. Tente de novo em instantes.');
+  }
+}
+
+/**
+ * Busca o PaymentIntent no Stripe e marca pago só se: status 'succeeded', metadata[pedido_id] = pedido, moeda brl e
+ * amount_received >= valor do pedido. Lança erro se o Stripe ou o banco falharem. {status, feito, motivo}
+ */
+async function conferirStripe(ctx, p, piId, origem) {
+  const pi = await ctx.stripe.intent(piId, { expandir: ['payment_method'] });
+  const em = new Date(ctx.agora()).toISOString();
+  const resumo = { id: String(pi.id || ''), status: String(pi.status || ''), amount: pi.amount, amount_received: pi.amount_received,
+    currency: pi.currency, livemode: pi.livemode === true };
+  const dados = Object.assign({}, dadosDoPedido(p), { conferencia: { origem, em, intent: resumo } });
+  if (!pi.metadata || String(pi.metadata.pedido_id || '') !== String(p.id)) return { status: p.status, feito: false, motivo: 'outro_pedido' };
+  if (pi.status !== 'succeeded') return { status: p.status, feito: false, motivo: 'nao_pago' };
+  if (String(pi.currency || '').toLowerCase() !== 'brl' || !(Number(pi.amount_received) >= Number(p.valor_centavos || 0))) {
+    await ctx.db.gravarProvedorDados(p.id, '', dados);
+    return { status: p.status, feito: false, motivo: 'valor_menor' };
+  }
+  const mudou = await ctx.db.marcarPago(p.id, stripeMetodo(pi), { provedor: 'stripe', provedor_ref: idIntentStripe(pi.id) || null, provedor_dados: dados });
+  if (mudou) await enviarEmailPago(ctx, p);
+  return { status: 'pago', feito: mudou, motivo: mudou ? 'pago' : 'repetido' };
+}
+
+async function confirmarStripePedido(ctx, p, corpo) {
+  if (p.status !== 'aguardando' || !ctx.stripe.configurado) return { ok: true, status: p.status };
+  // O id vem do banco; o da URL (payment_intent) só vale se for o mesmo (ou se o banco ainda não tiver um).
+  const doBanco = idIntentStripe(p.provedor_ref);
+  const daUrl = idIntentStripe(corpo.paymentIntent);
+  const id = doBanco || daUrl;
+  if (!id) return { ok: true, status: p.status };
+  const agora = ctx.agora();
+  const ultima = Date.parse(p.verificado_em || '');
+  if (isFinite(ultima) && agora - ultima < CONFIRMAR_MS) return { ok: true, status: p.status };
+  await ctx.db.marcarVerificado(p.id, new Date(agora).toISOString());
+  try {
+    let r = await conferirStripe(ctx, p, id, 'retorno');
+    // Um PaymentIntent anterior do mesmo pedido pode ter sido o pago (a URL diz qual).
+    if (r.status !== 'pago' && daUrl && daUrl !== id) r = await conferirStripe(ctx, p, daUrl, 'retorno');
+    return { ok: true, status: r.status };
+  } catch (err) {
+    try { console.error(err); } catch (e) { /* sem console */ }
+    return { ok: true, status: p.status };
+  }
+}
+
+/** Pedido de um objeto do Stripe: metadata[pedido_id] ou pedidos.provedor_ref = PaymentIntent. */
+async function pedidoDoStripe(ctx, pedidoId, piId) {
+  let p = RE_UUID_VENDAS.test(String(pedidoId || '')) ? await ctx.db.pedidoPorId(String(pedidoId)) : null;
+  if (!p && piId && typeof ctx.db.pedidoPorRef === 'function') p = await ctx.db.pedidoPorRef('stripe', piId);
+  return p;
+}
+
+/** Evento do Stripe já autenticado (assinatura conferida). {ok, feito, motivo}. Lança erro (e.provedor se for o Stripe). */
+export async function tratarEventoStripe(ctx, evento) {
+  if (!evento || typeof evento !== 'object' || Array.isArray(evento)) return { ok: true, feito: false, motivo: 'evento_invalido' };
+  const tipo = String(evento.type || '');
+  const obj = evento.data && evento.data.object && typeof evento.data.object === 'object' ? evento.data.object : null;
+  if (!obj) return { ok: true, feito: false, motivo: 'evento_invalido' };
+  if (tipo === 'payment_intent.succeeded') {
+    const piId = idIntentStripe(obj.id);
+    if (!piId) return { ok: true, feito: false, motivo: 'sem_pagamento' };
+    const p = await pedidoDoStripe(ctx, obj.metadata && obj.metadata.pedido_id, piId);
+    if (!p) return { ok: true, feito: false, motivo: 'pedido_nao_encontrado' };
+    if (p.status !== 'aguardando' && p.status !== 'cancelado') return { ok: true, feito: false, motivo: 'repetido' };
+    if (!ctx.stripe.configurado) return { ok: true, feito: false, motivo: 'nao_configurado' };
+    let r;
+    try {
+      r = await conferirStripe(ctx, p, piId, 'webhook');
+    } catch (err) {
+      if (err && /^Stripe:/.test(String(err.message || ''))) err.provedor = true;
+      throw err;
+    }
+    return { ok: true, feito: r.feito, motivo: r.motivo };
+  }
+  if (tipo === 'charge.refunded' || tipo === 'charge.dispute.created') {
+    const piId = idIntentStripe(typeof obj.payment_intent === 'object' && obj.payment_intent ? obj.payment_intent.id : obj.payment_intent);
+    if (!piId) return { ok: true, feito: false, motivo: 'sem_pagamento' };
+    const p = await pedidoDoStripe(ctx, obj.metadata && obj.metadata.pedido_id, piId);
+    if (!p) return { ok: true, feito: false, motivo: 'pedido_nao_encontrado' };
+    if (p.provedor && p.provedor !== 'stripe') return { ok: true, feito: false, motivo: 'outro_provedor' };
+    const mudou = await ctx.db.marcarEstornado(p.id);
+    return { ok: true, feito: mudou, motivo: mudou ? 'estornado' : 'repetido' };
+  }
+  return { ok: true, feito: false, motivo: 'evento_ignorado' };
 }
 
 export async function acaoRecuperarAcesso(ctx, corpo) {
@@ -623,6 +806,32 @@ export async function atenderWebhookInfinitePay(req, base) {
   try { corpo = JSON.parse(texto); } catch (err) { return respJson(erro('JSON inválido.'), 400); }
   try {
     return respJson(await tratarWebhookInfinitePay(contextoVendas(base), corpo), 200);
+  } catch (err) {
+    try { console.error(err); } catch (e) { /* sem console */ }
+    return respJson(erro(MSG_ERRO_INTERNO), err && err.provedor ? 502 : 500);
+  }
+}
+
+/** Edge Function "stripe-webhook" (pública; "Verify JWT" desligado): confere a assinatura Stripe-Signature. */
+export async function atenderWebhookStripe(req, base) {
+  if (req.method !== 'POST') return respJson(erro('Método não permitido.'), 405);
+  const segredo = base.env && base.env.STRIPE_WEBHOOK_SECRET;
+  if (!segredo) return respJson(erro('Webhook não configurado: defina o segredo STRIPE_WEBHOOK_SECRET.'), 503);
+  const texto = await req.text();
+  if (texto.length > LIMITE_CORPO_STRIPE) return respJson(erro('Requisição grande demais.'), 413);
+  const agora = (base.agora || (() => Date.now()))();
+  let assinatura;
+  try {
+    assinatura = await verificarAssinaturaStripe({ corpo: texto, cabecalho: req.headers.get('stripe-signature'), segredo, agoraMs: agora });
+  } catch (err) {
+    try { console.error(err); } catch (e) { /* sem console */ }
+    return respJson(erro(MSG_ERRO_INTERNO), 500);
+  }
+  if (!assinatura.ok) return respJson(erro('Assinatura inválida.', { motivo: assinatura.motivo }), 400);
+  let evento;
+  try { evento = JSON.parse(texto); } catch (err) { return respJson(erro('JSON inválido.'), 400); }
+  try {
+    return respJson(await tratarEventoStripe(contextoVendas(base), evento), 200);
   } catch (err) {
     try { console.error(err); } catch (e) { /* sem console */ }
     return respJson(erro(MSG_ERRO_INTERNO), err && err.provedor ? 502 : 500);
