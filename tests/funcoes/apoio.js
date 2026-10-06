@@ -93,7 +93,12 @@ export function criarDbFalso(inicial) {
       const a = st.admins.find((x) => x.user_id === userId);
       if (a) a.nome = nome; else st.admins.push({ user_id: userId, nome, criado_em: new Date().toISOString() });
     },
-    async adminRemover(userId) { st.admins = st.admins.filter((a) => a.user_id !== userId); }
+    async adminRemover(userId) { st.admins = st.admins.filter((a) => a.user_id !== userId); },
+    async contarTentativa(tipo, chave, desdeIso, agoraIso) {
+      st.limites = st.limites || [];
+      st.limites.push({ tipo, chave: String(chave), em: agoraIso });
+      return st.limites.filter((l) => l.tipo === tipo && l.chave === String(chave) && l.em >= desdeIso).length;
+    }
   };
 }
 

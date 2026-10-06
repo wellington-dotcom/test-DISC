@@ -27,6 +27,7 @@
  *                                       endereço ao abrir a página (#type=recovery = "Defina sua nova senha")
  *   definirNovaSenha(novaSenha)      -> grava a senha da sessão aberta pelo link e entra: {ok, token, usuario}
  *   sessaoAtual()                    -> {ok, token, usuario} da sessão guardada (ou rejeita com sessaoExpirada)
+ *   emailDaSessao()                  -> {ok, email} da sessão aberta pelo link do e-mail ('' sem sessão)
  *   convidarUsuario(token, {email, nome}) · removerUsuario(token, id)
  *   primeiroAcesso e redefinirSenha  -> recusam com mensagem explicando o jeito do Supabase.
  *
@@ -57,6 +58,9 @@
  *   salvarRelatorioModelo(token, {id?, modelo, empresaId?, pessoaId?, dados, publicar?}) -> {relatorio:{id, token,
  *     status, modelo, url?}} · listarRelatoriosModelo(token, {empresaId?, pessoaId?}) -> {relatorios:[…]}
  *   excluirRelatorioModelo(token, id) -> {id}. relatorioPublico devolve também o "modelo".
+ *   relatorioEnviarEmail(token, relatorioToken, {para, nome?, mensagem?}) -> {para, enviadoEm, assunto} (Edge Function
+ *     "admin", ação relatorio.enviarEmail; só relatório publicado; 30 envios/h por admin; sem RESEND_API_KEY ->
+ *     {ok:false, erro:'O envio por e-mail ainda não está configurado (veja Conexões).', naoConfigurado:true}).
  * Fotos (data URL "data:image/jpeg;base64,/9j/…", até 40 000 caracteres, guardada no banco; fotoValida(str)):
  *   enviar: payload.foto ('' = sem foto), conforme formulario.campos.foto ('obrigatorio'|'opcional'|'oculto').
  *   listar: item.foto (da resposta, '' sem foto) e item.pessoa.foto (da ficha). listarEquipe: colaborador.foto
@@ -122,6 +126,7 @@
  *   salvarParte2Pessoal(tokenAcesso, exigido) -> {ok, exigido:{percentuais, codigo}, exigidoRespostas} (só completo_plus;
  *     uma vez: outro conteúdo depois -> "A segunda parte já foi respondida.")
  *   recuperarAcesso(email) -> {ok:true} (manda os links por e-mail se houver compra; não revela se houve)
+ *   enviarLinkPorEmail(tokenAcesso) -> {ok, email (mascarado)} (botão "Enviar para meu e-mail"; limite 3/h por pedido)
  *     | {ok:false, erro:'O envio por e-mail ainda não está configurado. Fale com o suporte.', naoConfigurado:true}
  * Painel (token da sessão de admin; tabelas pedidos/cupons/pacotes com RLS):
  *   listarPedidos(token, {status?, pacote?, de?:'AAAA-MM-DD', ate?, busca?, limite?:500}) -> {ok, pedidos:[{id, respostaId,
@@ -1422,6 +1427,18 @@
           return { ok: true, exigido: calcularExigido(ex), exigidoRespostas: ex };
         });
       }),
+      // "Enviar para meu e-mail" (meu-relatorio.html): o link vai para o e-mail da compra. {ok, email (mascarado)}.
+      enviarLinkPorEmail: seguro(function (tokenAcesso) {
+        if (!RE_TOKEN_VENDA.test(String(tokenAcesso || ''))) throw recusa(MSG_LINK_RELATORIO);
+        return invocar('pagamento', { acao: 'enviarLink', tokenAcesso: String(tokenAcesso) }, prazo).then(function (r) {
+          if (r && r.ok === false) throw erroDaResposta(r);
+          return { ok: true, email: (r && typeof r.email === 'string') ? r.email : '' };
+        }, function (err) {
+          if (err && err.funcaoAusente) return { ok: false, erro: MSG_EMAIL_NAO_CONFIGURADO, naoConfigurado: true };
+          if (err && err.resposta && err.resposta.erro === MSG_EMAIL_NAO_CONFIGURADO) return { ok: false, erro: MSG_EMAIL_NAO_CONFIGURADO, naoConfigurado: true };
+          throw err;
+        });
+      }),
       recuperarAcesso: seguro(function (email) {
         var e = normalizarEmail(email);
         if (!emailValido(e)) throw recusa('Informe um e-mail válido.');
@@ -1584,6 +1601,13 @@
             return sessaoGuardada().then(function (s2) { return concluirEntrada(s2 || s); });
           });
         });
+      }),
+      // E-mail da sessão aberta pelo link do e-mail (redefinição/convite), para o campo "username" do formulário de
+      // nova senha (o Safari/Chaves do iCloud salva a senha ligada ao e-mail). {ok, email} ('' sem sessão).
+      emailDaSessao: seguro(function () {
+        return sessaoGuardada().then(function (s) {
+          return { ok: true, email: String((s && s.user && s.user.email) || '') };
+        }, function () { return { ok: true, email: '' }; });
       }),
       sessaoAtual: seguro(function () {
         return sessaoGuardada().then(function (s) {
@@ -1955,6 +1979,17 @@
         if (Array.isArray(ids) && ids.length) dados.ids = ids.slice();
         return admin(token, 'relatorio.melhorarTextos', dados, prazoLongo);
       }),
+      // Manda o link do relatório publicado por e-mail (Resend, pela Edge Function "admin"; só o link, sem anexo).
+      relatorioEnviarEmail: seguro(function (token, relatorioToken, envio) {
+        exigirToken(token);
+        exigir(relatorioToken, 'Relatório não informado.');
+        envio = envio && typeof envio === 'object' ? envio : {};
+        var para = normalizarEmail(envio.para);
+        if (!emailValido(para)) throw recusa('Informe um e-mail válido para o destinatário.');
+        var dados = { relatorioToken: String(relatorioToken), para: para, nome: limparTexto(envio.nome, 80), mensagem: String(envio.mensagem || '').slice(0, 1000) };
+        if (local && local.href) dados.baseUrl = String(local.href);
+        return admin(token, 'relatorio.enviarEmail', dados, prazoLongo);
+      }),
 
       // --- aba Conexões (só admin): banco testado aqui; o resto pela Edge Function "admin" (nunca valores de segredos) ---
       diagnosticoConexoes: seguro(function (token) {
@@ -2046,7 +2081,7 @@
   }
 
   // Métodos que o painel usa só no Supabase (além dos de DISC_API.METODOS).
-  var EXTRAS = ['recuperarSenha', 'linkDeAcesso', 'definirNovaSenha', 'sessaoAtual', 'convidarUsuario', 'removerUsuario'];
+  var EXTRAS = ['recuperarSenha', 'linkDeAcesso', 'definirNovaSenha', 'sessaoAtual', 'emailDaSessao', 'convidarUsuario', 'removerUsuario'];
 
   /** Liga no lugar do DISC_API quando CONFIG.BACKEND === 'supabase' (o objeto continua o mesmo). */
   function instalar(alvo, cfg, opcoes) {
@@ -2079,12 +2114,12 @@
     'excluirUsuario', 'redefinirSenha',
     'processosListar', 'processosSalvar', 'processosExcluir', 'processoDados', 'clickupStatus', 'clickupListas',
     'relatorioRascunho', 'relatorioSalvar', 'relatorioPublicar', 'relatorioDespublicar', 'relatoriosListar',
-    'relatorioMelhorarTextos', 'relatorioPublico',
+    'relatorioMelhorarTextos', 'relatorioPublico', 'relatorioEnviarEmail',
     'listarEquipe', 'salvarColaborador', 'moverColaborador', 'desligarColaborador', 'salvarRelacoes',
     'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo', 'salvarMinhaFoto', 'removerFoto',
     'moverResposta', 'contratarPessoa', 'versaoBanco',
     'pacotesPublicos', 'enviarPessoal', 'resumoPessoal', 'criarPedido', 'iniciarPagamento', 'statusPedido', 'relatorioPessoal',
-    'salvarParte2Pessoal', 'recuperarAcesso', 'confirmarRetorno',
+    'salvarParte2Pessoal', 'recuperarAcesso', 'enviarLinkPorEmail', 'confirmarRetorno',
     'listarPedidos', 'atualizarPedido', 'listarCupons', 'salvarCupom', 'excluirCupom', 'listarPacotes', 'salvarPacote', 'resumoVendas',
     'diagnosticoConexoes', 'testarConexao'];
 

@@ -15,6 +15,8 @@ import {
 } from './relatorio.js';
 import { lerAvisos } from './avisos.js';
 import { acaoDiagnostico, acaoTestar } from './conexoes.js';
+import { criarResend } from './asaas.js';
+import { montarEmailRelatorio } from './email.js';
 
 function agoraIso(ctx) { return new Date(ctx.agora()).toISOString(); }
 
@@ -197,6 +199,52 @@ async function acaoRelatorioMelhorarTextos(ctx, token, ids) {
 }
 
 // ---------------------------------------------------------------------------
+// Enviar o link de um relatório publicado por e-mail (Resend; só o link, nunca anexo)
+// ---------------------------------------------------------------------------
+
+export const MSG_EMAIL_PAINEL_NAO_CONFIGURADO = 'O envio por e-mail ainda não está configurado (veja Conexões).';
+export const LIMITE_EMAILS_HORA = 30;
+const RE_TOKEN_REL = /^[A-Za-z0-9_-]{32,128}$/;
+const MODELOS_EMAIL = ['processo', 'equipe', 'lideranca', 'pessoa'];
+
+async function acaoRelatorioEnviarEmail(ctx, corpo) {
+  const token = typeof corpo.relatorioToken === 'string' ? corpo.relatorioToken.trim() : '';
+  const para = normalizarEmail(corpo.para);
+  const nome = limparTexto(corpo.nome, 80);
+  const mensagem = limparTextoLongo(corpo.mensagem, 1000);
+  if (!emailValido(para)) return erro('Informe um e-mail válido para o destinatário.');
+  if (!RE_TOKEN_REL.test(token)) return erro('Relatório não encontrado.');
+  const email = criarResend({ apiKey: ctx.env.RESEND_API_KEY, remetente: ctx.env.EMAIL_REMETENTE, fetch: ctx.fetch });
+  if (!email.configurado) return erro(MSG_EMAIL_PAINEL_NAO_CONFIGURADO, { naoConfigurado: true });
+  const l = await ctx.db.relatorioLer(token);
+  if (!l || !l.dados || typeof l.dados !== 'object') return erro('Relatório não encontrado.');
+  if (l.status !== 'publicado') return erro('Publique o relatório antes de enviar o link.');
+  // O link do e-mail usa o endereço oficial do site (SITE_URL); sem ele, o endereço https do painel.
+  const base = relBaseSite('', ctx.env.SITE_URL) || relBaseSite(corpo.baseUrl, '');
+  if (!base) return erro('Defina o segredo SITE_URL nas Edge Functions (endereço do site) para enviar o link por e-mail.');
+  const desde = new Date(ctx.agora() - 3600000).toISOString();
+  if (typeof ctx.db.contarTentativa !== 'function') return erro(MSG_EMAIL_PAINEL_NAO_CONFIGURADO, { naoConfigurado: true });
+  const n = await ctx.db.contarTentativa('relatorio_email', String(ctx.usuario.id), desde, agoraIso(ctx));
+  if (n > LIMITE_EMAILS_HORA) return erro('Limite de ' + LIMITE_EMAILS_HORA + ' e-mails por hora atingido. Tente de novo mais tarde.');
+  const modelo = MODELOS_EMAIL.indexOf(l.modelo) >= 0 ? l.modelo : 'processo';
+  const url = base + 'relatorio.html?r=' + l.token;
+  let remetente = '';
+  try {
+    const admins = await ctx.db.adminsListar();
+    const eu = (admins || []).find((a) => String(a.user_id) === String(ctx.usuario.id));
+    remetente = eu ? limparTexto(eu.nome, 80) : '';
+  } catch (err) { remetente = ''; }
+  const m = montarEmailRelatorio({ modelo, url, nome, mensagem, remetente, titulo: limparTexto(l.dados.titulo, 160) });
+  try {
+    await email.enviar({ para, assunto: m.assunto, html: m.html, texto: m.texto });
+  } catch (err) {
+    try { console.error(err); } catch (e) { /* sem console */ }
+    return erro('Não foi possível enviar o e-mail agora (' + limparTexto(err && err.message, 120) + '). Tente de novo em instantes.');
+  }
+  return { ok: true, para, enviadoEm: agoraIso(ctx), assunto: m.assunto };
+}
+
+// ---------------------------------------------------------------------------
 // Usuários (administradores do painel, no Supabase Auth)
 // ---------------------------------------------------------------------------
 
@@ -277,6 +325,7 @@ export const ACOES_ADMIN = {
   'relatorio.despublicar': (ctx, c) => acaoRelatorioDespublicar(ctx, c.relatorioToken),
   'relatorios.listar': (ctx, c) => acaoRelatoriosListar(ctx, c.processoId),
   'relatorio.melhorarTextos': (ctx, c) => acaoRelatorioMelhorarTextos(ctx, c.relatorioToken, c.ids),
+  'relatorio.enviarEmail': (ctx, c) => acaoRelatorioEnviarEmail(ctx, c),
   'usuarios.listar': (ctx) => acaoUsuariosListar(ctx),
   'usuarios.convidar': (ctx, c) => acaoUsuariosConvidar(ctx, c),
   'usuarios.remover': (ctx, c) => acaoUsuariosRemover(ctx, c.id),

@@ -51,7 +51,8 @@
  * guarda o topo do organograma na empresa (listarEquipe devolve topoIds); versaoBanco() -> a mais nova, nada faltando.
  *
  * Venda direta (rodada 5, como a migração 20261011120000_vendas.sql; contrato em js/api-supabase.js): pacotesPublicos,
- * enviarPessoal, resumoPessoal, criarPedido, iniciarPagamento, confirmarRetorno, statusPedido, relatorioPessoal, salvarParte2Pessoal, recuperarAcesso ({ok:true}, sem e-mail)
+ * enviarPessoal, resumoPessoal, criarPedido, iniciarPagamento, confirmarRetorno, statusPedido, relatorioPessoal, salvarParte2Pessoal, recuperarAcesso ({ok:true}, sem e-mail), enviarLinkPorEmail ({ok, email mascarado}, sem e-mail),
+ * relatorioEnviarEmail (só confere o relatório publicado e o e-mail; simula o envio)
  * e, no painel, listarPedidos/atualizarPedido/listarCupons/salvarCupom/excluirCupom/listarPacotes/salvarPacote/resumoVendas.
  * iniciarPagamento: por padrão como o Stripe (migração 20261014120000_stripe.sql): {ok, simulado:true, provedor:'stripe',
  * clientSecret:'pi_previa…_secret_previa…', publicavel:'pk_test_previa', valor} — o checkout monta um "Payment Element"
@@ -2031,6 +2032,20 @@
       return { ok: true, url: baseSite(baseUrl) + 'relatorio.html?r=' + token };
     }
 
+    // Enviar o link por e-mail: na prévia nada sai daqui (simula o sucesso), mas as regras são as do servidor.
+    var ASSUNTOS_EMAIL = { pessoa: 'Seu relatório DISC — Gestão sem Caos', equipe: 'Relatório de equipe — Gestão sem Caos',
+      lideranca: 'Como liderar — relatório da Gestão sem Caos', processo: 'Relatório do processo seletivo — Gestão sem Caos' };
+    function acaoRelatorioEnviarEmail(c) {
+      var para = limparTexto(c.para, 120).toLowerCase();
+      if (!emailValido(para)) return erro('Informe um e-mail válido para o destinatário.');
+      var token = typeof c.relatorioToken === 'string' ? c.relatorioToken : '';
+      var reg = token ? buscarPor(relatoriosSalvos(), 'token', token) : null;
+      if (!reg) return erro('Relatório não encontrado.');
+      if (reg.status !== 'publicado') return erro('Publique o relatório antes de enviar o link.');
+      var modelo = ASSUNTOS_EMAIL[reg.modelo] ? reg.modelo : 'processo';
+      return { ok: true, para: para, enviadoEm: agoraIso(), assunto: ASSUNTOS_EMAIL[modelo], simulado: true };
+    }
+
     function acaoRelatorioDespublicar(token) {
       if (!relTokenValido(token)) return erro('Relatório não encontrado.');
       var lista = relatoriosSalvos();
@@ -2313,6 +2328,7 @@
       'relatorio.despublicar': { soAdmin: true, fn: function (u, c) { return acaoRelatorioDespublicar(c.relatorioToken); } },
       'relatorios.listar': { soAdmin: true, fn: function (u, c) { return acaoRelatoriosListar(c.processoId); } },
       'relatorio.melhorarTextos': { soAdmin: true, fn: function (u, c) { return acaoRelatorioMelhorarTextos(c.relatorioToken, c.ids); } },
+      'relatorio.enviarEmail': { soAdmin: true, fn: function (u, c) { return acaoRelatorioEnviarEmail(c); } },
       'usuarios.listar': {
         soAdmin: true,
         fn: function () {
@@ -2352,6 +2368,7 @@
       if (acao === 'pessoal.relatorio') return acaoRelatorioPessoal(corpo.tokenAcesso);
       if (acao === 'pessoal.parte2') return acaoSalvarParte2(corpo.tokenAcesso, corpo.exigido);
       if (acao === 'acesso.recuperar') return acaoRecuperarAcesso(corpo.email);
+      if (acao === 'pessoal.enviarLink') return acaoEnviarLinkPessoal(corpo.tokenAcesso);
       if (typeof acao !== 'string' || !Object.prototype.hasOwnProperty.call(ACOES_COM_SESSAO, acao)) return erro('Ação desconhecida.');
       var sessao = validarSessao(corpo.token);
       if (!sessao.ok) return sessao;
@@ -2654,6 +2671,14 @@
       linhas[i].exigido = ex;
       gravar(linhas);
       return { ok: true, exigido: calcularExigido(ex), exigidoRespostas: ex };
+    }
+
+    // "Enviar para meu e-mail": na prévia nada é enviado; responde como o servidor (e-mail mascarado).
+    function acaoEnviarLinkPessoal(token) {
+      var p = pedidoPorToken(token);
+      if (!p || (p.status !== 'pago' && p.status !== 'cortesia') || !p.email) return erro('Pedido não encontrado.');
+      var em = String(p.email), i = em.indexOf('@');
+      return { ok: true, email: i < 1 ? '' : em.charAt(0) + new Array(Math.max(2, Math.min(6, i - 1)) + 1).join('*') + em.slice(i) };
     }
 
     function acaoRecuperarAcesso(emailBruto) {
@@ -3231,6 +3256,7 @@
         return chamar({ acao: 'pessoal.parte2', tokenAcesso: String(tokenAcesso || ''), exigido: exigido });
       }),
       recuperarAcesso: seguro(function (email) { return chamar({ acao: 'acesso.recuperar', email: email }); }),
+      enviarLinkPorEmail: seguro(function (tokenAcesso) { return chamar({ acao: 'pessoal.enviarLink', tokenAcesso: String(tokenAcesso || '') }); }),
       listarPedidos: seguro(function (token, filtros) { return comSessao('pedidos.listar', token, { filtros: filtros || {} }); }),
       atualizarPedido: seguro(function (token, id, campos) {
         exigir(id, MSG_PEDIDO_NAO_ENCONTRADO);
@@ -3352,6 +3378,12 @@
         if (Array.isArray(ids) && ids.length) dados.ids = ids.slice();
         return comSessao('relatorio.melhorarTextos', token, dados);
       }),
+      relatorioEnviarEmail: seguro(function (token, relatorioToken, envio) {
+        exigirToken(token);
+        exigir(relatorioToken, 'Relatório não informado.');
+        envio = envio && typeof envio === 'object' ? envio : {};
+        return comSessao('relatorio.enviarEmail', token, { relatorioToken: String(relatorioToken), para: envio.para, nome: envio.nome, mensagem: envio.mensagem });
+      }),
       relatorioPublico: seguro(function (relatorioToken) {
         exigir(relatorioToken, MSG_REL_NAO_ENCONTRADO);
         return chamar({ acao: 'relatorioPublico', token: relatorioToken });
@@ -3423,12 +3455,12 @@
     'excluirUsuario', 'redefinirSenha',
     'processosListar', 'processosSalvar', 'processosExcluir', 'processoDados', 'clickupStatus', 'clickupListas',
     'relatorioRascunho', 'relatorioSalvar', 'relatorioPublicar', 'relatorioDespublicar', 'relatoriosListar',
-    'relatorioMelhorarTextos', 'relatorioPublico',
+    'relatorioMelhorarTextos', 'relatorioPublico', 'relatorioEnviarEmail',
     'listarEquipe', 'salvarColaborador', 'moverColaborador', 'desligarColaborador', 'salvarRelacoes',
     'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo', 'salvarMinhaFoto', 'removerFoto',
     'moverResposta', 'contratarPessoa', 'versaoBanco',
     'pacotesPublicos', 'enviarPessoal', 'resumoPessoal', 'criarPedido', 'iniciarPagamento', 'statusPedido', 'relatorioPessoal',
-    'salvarParte2Pessoal', 'recuperarAcesso', 'confirmarRetorno',
+    'salvarParte2Pessoal', 'recuperarAcesso', 'enviarLinkPorEmail', 'confirmarRetorno',
     'listarPedidos', 'atualizarPedido', 'listarCupons', 'salvarCupom', 'excluirCupom', 'listarPacotes', 'salvarPacote', 'resumoVendas',
     'diagnosticoConexoes', 'testarConexao'];
 

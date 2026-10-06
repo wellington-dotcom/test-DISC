@@ -836,6 +836,8 @@ function criarResend(op) {
 //   recuperar {email} -> {ok:true} sempre que o envio estiver configurado (não revela se o e-mail comprou); manda
 //             por e-mail os links dos pedidos pagos. Sem RESEND_API_KEY/SITE_URL -> {ok:false, erro:'...suporte.'}.
 //             Limite: 3 pedidos por e-mail por hora e 60 no total por hora.
+//   enviarLink {tokenAcesso} -> {ok, email (mascarado)}: botão "Enviar para meu e-mail" de meu-relatorio.html; manda o
+//             link do relatório para o e-mail da compra (só pedido pago/cortesia). Limite: 3 por pedido por hora.
 // "infinitepay-webhook": SEM assinatura (a InfinitePay não documenta uma). O corpo NUNCA é confiável: lê order_nsu
 //   (= pedidoId), transaction_nsu e slug e confere com payment_check; só marca pago com paid=true e valor >= pedido.
 //   Idempotente (pedido já pago: nada). Grava o corpo bruto em pedidos.provedor_dados.webhook (depuração).
@@ -952,6 +954,11 @@ function criarDbVendas(sb) {
     async pedidoPorRef(provedor, ref) {
       if (temProvedor === false || !ref) return null;
       return um(await lerPedidos((q) => q.eq('provedor', String(provedor)).eq('provedor_ref', String(ref)).limit(1)));
+    },
+    /** Pedido pelo token do link do relatório (meu-relatorio.html#t-<token>). */
+    async pedidoPorToken(token) {
+      if (!RE_TOKEN_VENDAS.test(String(token || ''))) return null;
+      return um(await lerPedidos((q) => q.eq('token_acesso', String(token)).limit(1)));
     },
     async pedidoPorCobranca(cobrancaId) {
       return um(await lerPedidos((q) => q.eq('asaas_cobranca_id', String(cobrancaId)).limit(1)));
@@ -1498,6 +1505,37 @@ async function acaoRecuperarAcesso(ctx, corpo) {
   return { ok: true };
 }
 
+/** "Enviar para meu e-mail" (meu-relatorio.html): manda o link do relatório para o e-mail da compra. */
+async function acaoEnviarLink(ctx, corpo) {
+  const token = String(corpo.tokenAcesso || '');
+  if (!RE_TOKEN_VENDAS.test(token)) return erro(MSG_PEDIDO_NAO_ENCONTRADO);
+  if (!ctx.email.configurado || !baseDoSiteVendas(ctx.env)) return erro(MSG_EMAIL_NAO_CONFIGURADO);
+  const p = typeof ctx.db.pedidoPorToken === 'function' ? await ctx.db.pedidoPorToken(token) : null;
+  if (!p || !iguaisSeguro(String(p.token_acesso || ''), token) || (p.status !== 'pago' && p.status !== 'cortesia') || !p.email) {
+    return erro(MSG_PEDIDO_NAO_ENCONTRADO);
+  }
+  const hora = new Date(ctx.agora() - 3600000).toISOString();
+  const agoraIso = new Date(ctx.agora()).toISOString();
+  if (await ctx.db.contarTentativa('enviar_link', p.id, hora, agoraIso) > 3) return erro('Já enviamos o link algumas vezes. Tente de novo daqui a 1 hora.');
+  if (await ctx.db.contarTentativa('recuperar_total', '*', hora, agoraIso) > 60) return erro('Muitos pedidos agora. Tente de novo mais tarde.');
+  const m = montarEmailAcesso(ctx.env, p.nome, [p]);
+  try {
+    await ctx.email.enviar({ para: p.email, assunto: m.assunto, html: m.html, texto: m.texto });
+  } catch (err) {
+    try { console.error(err); } catch (e) { /* sem console */ }
+    return erro('Não foi possível enviar o e-mail agora. Tente de novo em instantes ou fale com o suporte.');
+  }
+  return { ok: true, email: mascararEmail(p.email) };
+}
+
+/** "bia@exemplo.com" -> "b**@exemplo.com" (a tela confirma para onde foi sem expor o e-mail inteiro). */
+function mascararEmail(email) {
+  const s = String(email || '');
+  const i = s.indexOf('@');
+  if (i < 1) return '';
+  return s.charAt(0) + '*'.repeat(Math.max(2, Math.min(6, i - 1))) + s.slice(i);
+}
+
 function valorCobre(valor, centavos) {
   const v = Number(valor);
   return isFinite(v) && Math.round(v * 100) >= Number(centavos || 0);
@@ -1579,6 +1617,7 @@ async function atenderPagamento(req, base) {
     else if (corpo.acao === 'status') r = await acaoStatusPagamento(ctx, corpo);
     else if (corpo.acao === 'confirmar') r = await acaoConfirmarPagamento(ctx, corpo);
     else if (corpo.acao === 'recuperar') r = await acaoRecuperarAcesso(ctx, corpo);
+    else if (corpo.acao === 'enviarLink') r = await acaoEnviarLink(ctx, corpo);
     else r = erro('Ação desconhecida.');
     return respJson(r, 200, cors);
   } catch (err) {

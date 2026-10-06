@@ -149,6 +149,10 @@ test.describe('Venda B2C (celular, API simulada)', () => {
     await expect(rel.locator('[data-secao="plano90"], [data-secao="esticando"], .mapa-ponto--trabalho')).toHaveCount(0);
     await expect(page.locator('[data-acao="imprimir"]')).toHaveText('Imprimir ou salvar em PDF');
     await expect(page.locator('#meu-link')).toHaveValue(link);
+    // "Enviar para meu e-mail": o link vai para o e-mail da compra (na prévia, simulado)
+    await page.locator('#btn-enviar-meu-email').click();
+    await expect(page.locator('#copiado')).toContainText(/Enviamos o link para .\*+@/);
+    await expect(page.locator('#btn-enviar-meu-email')).toHaveText('Enviado');
     await expect(page.locator('body')).not.toContainText('Notus');
     await semRolagemLateral(page);
     // De volta ao index: o resumo mostra que o relatório está liberado

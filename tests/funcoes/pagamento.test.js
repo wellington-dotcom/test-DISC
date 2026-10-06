@@ -271,3 +271,23 @@ test('HTTP: OPTIONS, método, corpo grande ou inválido', async () => {
   assert.equal((await ruim.json()).erro, 'JSON inválido.');
   assert.equal((await atenderWebhookAsaas(new Request('https://x/', { method: 'GET' }), t.base)).status, 405);
 });
+
+test('enviarLink ("Enviar para meu e-mail"): só pedido pago, vai para o e-mail da compra (mascarado na resposta) e limita', async () => {
+  const sem = montar({ pedidos: [pedidoLinha({ status: 'pago' })], env: { RESEND_API_KEY: '' } });
+  assert.deepEqual((await sem.post({ acao: 'enviarLink', tokenAcesso: TOKEN })).json, { ok: false, erro: MSG_EMAIL_NAO_CONFIGURADO });
+
+  const t = montar({ pedidos: [pedidoLinha({ status: 'pago' }), pedidoLinha({ id: ID2, token_acesso: TOKEN2, status: 'aguardando' })] });
+  assert.equal((await t.post({ acao: 'enviarLink', tokenAcesso: 'x' })).json.erro, 'Pedido não encontrado.');
+  assert.equal((await t.post({ acao: 'enviarLink', tokenAcesso: 'f'.repeat(64) })).json.erro, 'Pedido não encontrado.');
+  assert.equal((await t.post({ acao: 'enviarLink', tokenAcesso: TOKEN2 })).json.erro, 'Pedido não encontrado.', 'aguardando pagamento: nada sai');
+  assert.deepEqual((await t.post({ acao: 'enviarLink', tokenAcesso: TOKEN })).json, { ok: true, email: 'b**@exemplo.com' });
+  const em = t.fetch.chamadas.filter((c) => c.url === 'https://api.resend.com/emails');
+  assert.equal(em.length, 1);
+  assert.deepEqual(em[0].corpo.to, ['bia@exemplo.com']);
+  assert.ok(em[0].corpo.text.includes(SITE + '/meu-relatorio.html#t-' + TOKEN));
+  await t.post({ acao: 'enviarLink', tokenAcesso: TOKEN });
+  await t.post({ acao: 'enviarLink', tokenAcesso: TOKEN });
+  assert.match((await t.post({ acao: 'enviarLink', tokenAcesso: TOKEN })).json.erro, /daqui a 1 hora/);
+  t.avancar(3600 * 1000 + 1000);
+  assert.equal((await t.post({ acao: 'enviarLink', tokenAcesso: TOKEN })).json.ok, true);
+});

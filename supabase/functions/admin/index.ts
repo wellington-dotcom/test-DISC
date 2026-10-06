@@ -2123,6 +2123,83 @@ async function acaoTestar(ctx, corpo) {
   }
 }
 
+// ======== supabase/funcoes-compartilhadas/email.js ========
+// E-mails com a marca Gestão sem Caos (mesmo visual de supabase/templates/*.html: logo PNG, faixa laranja,
+// botão em pílula). Só texto e link: nunca anexos. Tudo que vem de fora passa por escaparHtml().
+
+const LOGO_EMAIL = 'https://disc.gestaosemcaos.com.br/assets/marca/gsc-logo-email.png';
+
+function escaparHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+
+const P = 'margin:0 0 16px;font-size:16px;line-height:1.6;color:#13283F';
+
+/**
+ * HTML do e-mail na moldura da marca.
+ * m = { titulo, previa?, paragrafos: [texto], botao: {texto, url}, nota?, rodape? }
+ */
+function htmlMarca(m) {
+  const paras = (m.paragrafos || []).filter((t) => t !== null && t !== undefined && String(t) !== '')
+    .map((t) => '<p style="' + P + '">' + escaparHtml(t).replace(/\n/g, '<br>') + '</p>').join('');
+  const url = escaparHtml(m.botao.url);
+  return '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">' +
+    '<meta name="color-scheme" content="light"><title>' + escaparHtml(m.titulo) + '</title></head>' +
+    '<body style="margin:0;padding:0;background:#F4F2EF;font-family:\'Plus Jakarta Sans\',Arial,Helvetica,sans-serif">' +
+    (m.previa ? '<span style="display:none;max-height:0;overflow:hidden;opacity:0">' + escaparHtml(m.previa) + '</span>' : '') +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#F4F2EF;padding:32px 12px"><tr><td align="center">' +
+    '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px;background:#FFFFFF;border-radius:16px;overflow:hidden">' +
+    '<tr><td style="height:6px;background:#F34405;font-size:0;line-height:0">&nbsp;</td></tr>' +
+    '<tr><td style="padding:32px 32px 8px"><img src="' + LOGO_EMAIL + '" width="200" alt="Gestão sem Caos" style="display:block;width:200px;max-width:100%;height:auto;border:0"></td></tr>' +
+    '<tr><td style="padding:16px 32px 8px">' +
+    '<h1 style="margin:0 0 16px;font-size:24px;line-height:1.25;color:#13283F;font-weight:700">' + escaparHtml(m.titulo) + '</h1>' + paras +
+    '<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 24px"><tr><td style="border-radius:999px;background:#F34405">' +
+    '<a href="' + url + '" style="display:inline-block;padding:14px 28px;font-size:16px;font-weight:700;color:#FFFFFF;text-decoration:none;border-radius:999px">' + escaparHtml(m.botao.texto) + '</a>' +
+    '</td></tr></table>' +
+    (m.nota ? '<p style="margin:0 0 16px;font-size:14px;line-height:1.6;color:#5B6878">' + escaparHtml(m.nota) + '</p>' : '') +
+    '<p style="margin:0 0 8px;font-size:13px;line-height:1.6;color:#5B6878">Se o botão não funcionar, copie este endereço no navegador:<br>' +
+    '<a href="' + url + '" style="color:#F34405;word-break:break-all">' + url + '</a></p>' +
+    '</td></tr>' +
+    '<tr><td style="padding:24px 32px 32px;border-top:1px solid #E7E2DC"><p style="margin:0;font-size:12px;line-height:1.6;color:#8A94A2">' +
+    escaparHtml(m.rodape || 'Gestão sem Caos · Mapa DISC') + '</p></td></tr>' +
+    '</table></td></tr></table></body></html>';
+}
+
+const ASSUNTOS_RELATORIO = {
+  pessoa: 'Seu relatório DISC — Gestão sem Caos',
+  equipe: 'Relatório de equipe — Gestão sem Caos',
+  lideranca: 'Como liderar — relatório da Gestão sem Caos',
+  processo: 'Relatório do processo seletivo — Gestão sem Caos'
+};
+
+/**
+ * E-mail com o link de um relatório publicado (painel -> cliente).
+ * d = { modelo, url, nome? (destinatário), mensagem? (do consultor), remetente? (nome do consultor), titulo? (do relatório) }
+ * -> { assunto, html, texto }
+ */
+function montarEmailRelatorio(d) {
+  const modelo = Object.prototype.hasOwnProperty.call(ASSUNTOS_RELATORIO, d.modelo) ? d.modelo : 'processo';
+  const primeiro = String(d.nome || '').trim().split(/\s+/)[0] || '';
+  const ola = primeiro ? 'Olá, ' + primeiro + '!' : 'Olá!';
+  const quem = d.remetente ? d.remetente + ', da Gestão sem Caos,' : 'A Gestão sem Caos';
+  const oque = modelo === 'pessoa' ? 'o seu relatório DISC' : (modelo === 'equipe' ? 'o relatório da equipe'
+    : (modelo === 'lideranca' ? 'o relatório "Como liderar"' : 'o relatório do processo seletivo'));
+  const intro = quem + ' enviou ' + oque + (d.titulo ? ': ' + d.titulo : '') + '.';
+  const mensagem = String(d.mensagem || '').trim();
+  const nota = 'O link abre o relatório no navegador, no celular ou no computador. Guarde este e-mail para voltar a ele.';
+  const html = htmlMarca({
+    titulo: modelo === 'pessoa' ? 'Seu relatório DISC está pronto' : 'Relatório pronto para você',
+    previa: intro,
+    paragrafos: [ola, intro, mensagem],
+    botao: { texto: 'Ver relatório', url: d.url },
+    nota,
+    rodape: 'Gestão sem Caos · Mapa DISC. Você recebeu este e-mail porque a consultoria enviou um relatório para este endereço.'
+  });
+  const texto = [ola, '', intro].concat(mensagem ? ['', mensagem] : [])
+    .concat(['', 'Ver relatório: ' + d.url, '', nota, '', 'Gestão sem Caos']).join('\n');
+  return { assunto: ASSUNTOS_RELATORIO[modelo], html, texto };
+}
+
 // ======== supabase/funcoes-compartilhadas/admin.js ========
 // Ações da Edge Function "admin" (só administrador). Mesmos nomes, entradas e respostas {ok, ...} das
 // ações do Apps Script (Code.gs/ClickUp.gs/Relatorio.gs), mais usuarios.* do Supabase Auth.
@@ -2311,6 +2388,52 @@ async function acaoRelatorioMelhorarTextos(ctx, token, ids) {
 }
 
 // ---------------------------------------------------------------------------
+// Enviar o link de um relatório publicado por e-mail (Resend; só o link, nunca anexo)
+// ---------------------------------------------------------------------------
+
+const MSG_EMAIL_PAINEL_NAO_CONFIGURADO = 'O envio por e-mail ainda não está configurado (veja Conexões).';
+const LIMITE_EMAILS_HORA = 30;
+const RE_TOKEN_REL = /^[A-Za-z0-9_-]{32,128}$/;
+const MODELOS_EMAIL = ['processo', 'equipe', 'lideranca', 'pessoa'];
+
+async function acaoRelatorioEnviarEmail(ctx, corpo) {
+  const token = typeof corpo.relatorioToken === 'string' ? corpo.relatorioToken.trim() : '';
+  const para = normalizarEmail(corpo.para);
+  const nome = limparTexto(corpo.nome, 80);
+  const mensagem = limparTextoLongo(corpo.mensagem, 1000);
+  if (!emailValido(para)) return erro('Informe um e-mail válido para o destinatário.');
+  if (!RE_TOKEN_REL.test(token)) return erro('Relatório não encontrado.');
+  const email = criarResend({ apiKey: ctx.env.RESEND_API_KEY, remetente: ctx.env.EMAIL_REMETENTE, fetch: ctx.fetch });
+  if (!email.configurado) return erro(MSG_EMAIL_PAINEL_NAO_CONFIGURADO, { naoConfigurado: true });
+  const l = await ctx.db.relatorioLer(token);
+  if (!l || !l.dados || typeof l.dados !== 'object') return erro('Relatório não encontrado.');
+  if (l.status !== 'publicado') return erro('Publique o relatório antes de enviar o link.');
+  // O link do e-mail usa o endereço oficial do site (SITE_URL); sem ele, o endereço https do painel.
+  const base = relBaseSite('', ctx.env.SITE_URL) || relBaseSite(corpo.baseUrl, '');
+  if (!base) return erro('Defina o segredo SITE_URL nas Edge Functions (endereço do site) para enviar o link por e-mail.');
+  const desde = new Date(ctx.agora() - 3600000).toISOString();
+  if (typeof ctx.db.contarTentativa !== 'function') return erro(MSG_EMAIL_PAINEL_NAO_CONFIGURADO, { naoConfigurado: true });
+  const n = await ctx.db.contarTentativa('relatorio_email', String(ctx.usuario.id), desde, agoraIso(ctx));
+  if (n > LIMITE_EMAILS_HORA) return erro('Limite de ' + LIMITE_EMAILS_HORA + ' e-mails por hora atingido. Tente de novo mais tarde.');
+  const modelo = MODELOS_EMAIL.indexOf(l.modelo) >= 0 ? l.modelo : 'processo';
+  const url = base + 'relatorio.html?r=' + l.token;
+  let remetente = '';
+  try {
+    const admins = await ctx.db.adminsListar();
+    const eu = (admins || []).find((a) => String(a.user_id) === String(ctx.usuario.id));
+    remetente = eu ? limparTexto(eu.nome, 80) : '';
+  } catch (err) { remetente = ''; }
+  const m = montarEmailRelatorio({ modelo, url, nome, mensagem, remetente, titulo: limparTexto(l.dados.titulo, 160) });
+  try {
+    await email.enviar({ para, assunto: m.assunto, html: m.html, texto: m.texto });
+  } catch (err) {
+    try { console.error(err); } catch (e) { /* sem console */ }
+    return erro('Não foi possível enviar o e-mail agora (' + limparTexto(err && err.message, 120) + '). Tente de novo em instantes.');
+  }
+  return { ok: true, para, enviadoEm: agoraIso(ctx), assunto: m.assunto };
+}
+
+// ---------------------------------------------------------------------------
 // Usuários (administradores do painel, no Supabase Auth)
 // ---------------------------------------------------------------------------
 
@@ -2391,6 +2514,7 @@ const ACOES_ADMIN = {
   'relatorio.despublicar': (ctx, c) => acaoRelatorioDespublicar(ctx, c.relatorioToken),
   'relatorios.listar': (ctx, c) => acaoRelatoriosListar(ctx, c.processoId),
   'relatorio.melhorarTextos': (ctx, c) => acaoRelatorioMelhorarTextos(ctx, c.relatorioToken, c.ids),
+  'relatorio.enviarEmail': (ctx, c) => acaoRelatorioEnviarEmail(ctx, c),
   'usuarios.listar': (ctx) => acaoUsuariosListar(ctx),
   'usuarios.convidar': (ctx, c) => acaoUsuariosConvidar(ctx, c),
   'usuarios.remover': (ctx, c) => acaoUsuariosRemover(ctx, c.id),
@@ -2768,6 +2892,13 @@ function criarDb(sb) {
     },
     async configGravar(chave, valor) {
       await dados(sb.from('configuracoes').upsert({ chave, valor }, { onConflict: 'chave' }));
+    },
+    /** Anti-abuso (tabela limites_vendas): registra uma tentativa e devolve quantas houve desde "desdeIso" (inclui esta). */
+    async contarTentativa(tipo, chave, desdeIso, agoraIso) {
+      const c = String(chave).substring(0, 200);
+      await dados(sb.from('limites_vendas').insert({ tipo, chave: c, em: agoraIso }));
+      const linhas = await dados(sb.from('limites_vendas').select('id').eq('tipo', tipo).eq('chave', c).gte('em', desdeIso).limit(1000));
+      return (linhas || []).length;
     },
     async adminsListar() {
       return (await dados(sb.from('admins').select('user_id, nome, criado_em, foto').order('criado_em', { ascending: true }))) || [];
@@ -4161,7 +4292,7 @@ const DISC_RELATORIO = __motoresDisc.DISC_RELATORIO;
 // ======== supabase/funcoes-fonte/admin/index.ts ========
 // Edge Function "admin" — painel do recrutador (só administradores). Corpo {acao, ...}; resposta {ok, ...}.
 // Ações: clickup.status, clickup.listas, processo.dados, relatorio.rascunho, relatorio.salvar,
-// relatorio.publicar, relatorio.despublicar, relatorios.listar, relatorio.melhorarTextos,
+// relatorio.publicar, relatorio.despublicar, relatorios.listar, relatorio.melhorarTextos, relatorio.enviarEmail,
 // usuarios.listar, usuarios.convidar, usuarios.remover, conexoes.diagnostico, conexoes.testar (aba Conexões).
 // Lógica em supabase/funcoes-compartilhadas/.
 // Para colar no painel do Supabase use dist/funcoes/admin/index.ts (gerado por npm run montar:funcoes).

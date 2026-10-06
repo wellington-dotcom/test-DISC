@@ -1268,3 +1268,24 @@ test('vendas (prévia): semente com cupons PREVIA100/LANCA10 e simularPagamento 
   assert.equal(api.processar({ acao: 'pedido.criar', tokenResumo: e.tokenResumo, pacote: 'completo', cupom: 'previa100' }).gratuito, true);
   assert.equal(api.processar({ acao: 'pedido.criar', tokenResumo: e.tokenResumo, pacote: 'completo_plus', cupom: 'LANCA10' }).valor, 4410);
 });
+
+test('e-mail (prévia): relatorioEnviarEmail simula o envio (só publicado, e-mail válido); enviarLinkPorEmail mascara o e-mail', async () => {
+  const { api, T } = await previa();
+  const clinica = (await api.listarEmpresas(T)).empresas.find((x) => x.nome === 'Clínica Exemplo');
+  const dados = { modelo: 'equipe', versao: 1, titulo: 'Equipe', geradoEm: '2026-10-05T10:00:00.000Z' };
+  const r = (await api.salvarRelatorioModelo(T, { modelo: 'equipe', empresaId: clinica.id, dados })).relatorio;
+  await assert.rejects(api.relatorioEnviarEmail(T, r.token, { para: 'a@b.com' }), /Publique o relatório antes/);
+  await api.salvarRelatorioModelo(T, { id: r.id, modelo: 'equipe', empresaId: clinica.id, dados, publicar: true });
+  await assert.rejects(api.relatorioEnviarEmail(T, r.token, { para: 'x' }), /e-mail válido/);
+  await assert.rejects(api.relatorioEnviarEmail(T, 'f'.repeat(64), { para: 'a@b.com' }), /Relatório não encontrado/);
+  const ok = await api.relatorioEnviarEmail(T, r.token, { para: 'Dono@Cliente.com', nome: 'Dono', mensagem: 'Oi' });
+  assert.deepEqual([ok.ok, ok.para, ok.assunto, ok.simulado], [true, 'dono@cliente.com', 'Relatório de equipe — Gestão sem Caos', true]);
+  await assert.rejects(api.relatorioEnviarEmail('', r.token, { para: 'a@b.com' }), (e) => e.sessaoExpirada === true);
+
+  const { api: v } = nova({ provedorPagamento: 'asaas' });
+  const e = await v.enviarPessoal(payloadValido({ id: 'pessoal-002', email: 'bia@x.com' }));
+  const p = await v.criarPedido(e.tokenResumo, 'completo', '');
+  await assert.rejects(v.enviarLinkPorEmail(p.tokenAcesso), /Pedido não encontrado/);
+  await v.simularPagamento(p.pedidoId);
+  assert.deepEqual(await v.enviarLinkPorEmail(p.tokenAcesso), { ok: true, email: 'b**@x.com' });
+});

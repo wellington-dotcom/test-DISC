@@ -132,6 +132,21 @@ test('hrefTeste e parâmetros de campanha', () => {
   assert.equal(L.hrefTeste(''), 'index.html?modo=pessoal');
   assert.equal(L.hrefTeste('completo'), 'index.html?modo=pessoal&pacote=completo');
   assert.equal(L.hrefTeste('gratis', '?utm_source=ig&x=1&fbclid=abc'), 'index.html?modo=pessoal&pacote=gratis&utm_source=ig&fbclid=abc');
+  // Link do painel "Página de venda": ?pacote=…&cupom=… chega ao teste (pacote só se for válido; o do card clicado ganha)
+  assert.equal(L.hrefTeste('', '?pacote=completo_plus&cupom=PRO050-7K'), 'index.html?modo=pessoal&pacote=completo_plus&cupom=PRO050-7K');
+  assert.equal(L.hrefTeste('', '?cupom=PRO050-7K&pacote=COMPLETO'), 'index.html?modo=pessoal&pacote=completo&cupom=PRO050-7K');
+  assert.equal(L.hrefTeste('completo', '?pacote=completo_plus&cupom=X1Y'), 'index.html?modo=pessoal&pacote=completo&cupom=X1Y');
+  assert.equal(L.hrefTeste('', '?pacote=premium&cupom=X1Y'), 'index.html?modo=pessoal&cupom=X1Y', 'pacote inválido fica de fora');
+  assert.equal(L.hrefTeste('', '?pacote=completo&pacote=completo_plus'), 'index.html?modo=pessoal&pacote=completo', 'um pacote só');
+  assert.deepEqual(L.paramsCampanha('?pacote=gratis&utm_source=ig'), ['pacote=gratis', 'utm_source=ig']);
+  assert.equal(L.pacoteDaBusca('?cupom=A&pacote=completo_plus'), 'completo_plus');
+  assert.equal(L.pacoteDaBusca('?pacote=x'), '');
+  // O card do pacote pedido na URL fica em destaque
+  const html = L.htmlPacotes(L.PADRAO, '?pacote=completo_plus&cupom=X1Y');
+  assert.match(html, /class="pacote pacote--destaque" data-pacote="completo_plus"/);
+  assert.equal((html.match(/pacote--destaque/g) || []).length, 1);
+  assert.match(html, /href="index\.html\?modo=pessoal&amp;pacote=completo_plus&amp;cupom=X1Y"/);
+  assert.match(L.htmlPacotes(L.PADRAO, '?pacote=gratis'), /class="pacote pacote--destaque" data-pacote="completo"/, 'grátis não tira o destaque do completo');
   assert.equal(L.linkWhatsApp('', 'oi'), '');
   assert.equal(L.linkWhatsApp('+55 (11) 99999-8888', 'oi'), 'https://wa.me/5511999998888?text=oi');
 });

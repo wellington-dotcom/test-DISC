@@ -1300,7 +1300,8 @@
       usos: inteiroOu(campo(c, ['usos']), 0),
       validoAte: String(campo(c, ['validoAte', 'valido_ate']) || '').slice(0, 10),
       ativo: campo(c, ['ativo']) !== false,
-      pacotes: Array.isArray(pac) ? pac.map(String) : []
+      pacotes: Array.isArray(pac) ? pac.map(String) : [],
+      criadoEm: String(campo(c, ['criadoEm', 'criado_em']) || '')
     };
   }
   function normalizarPacote(p) {
@@ -1442,9 +1443,145 @@
   }
 
   // Link da landing com o cupom já aplicado: descubra.html?cupom=CODIGO (na mesma pasta do painel).
-  function linkLandingCupom(href, codigo) {
+  // Com o pacote (cupom que vale para um pacote só): descubra.html?pacote=<chave>&cupom=CODIGO.
+  function linkLandingCupom(href, codigo, pacote) {
+    return linkPaginaVenda(href, { pacote: pacote, cupom: codigo });
+  }
+  // Página de venda (descubra.html), na mesma pasta do painel; opcoes: { pacote, cupom }.
+  var PACOTES_LINK = ['gratis', 'completo', 'completo_plus'];
+  function linkPaginaVenda(href, opcoes) {
+    var op = opcoes || {};
     var base = String(href || '').split('#')[0].split('?')[0].replace(/[^/]*$/, '');
-    return base + 'descubra.html?cupom=' + encodeURIComponent(String(codigo || '').toUpperCase());
+    var q = [];
+    if (op.pacote && PACOTES_LINK.indexOf(op.pacote) !== -1) q.push('pacote=' + op.pacote);
+    if (op.cupom) q.push('cupom=' + encodeURIComponent(String(op.cupom).toUpperCase()));
+    return base + 'descubra.html' + (q.length ? '?' + q.join('&') : '');
+  }
+  // WhatsApp sem número (a pessoa escolhe o contato no app) com o texto pronto.
+  function linkWhatsAppTexto(texto) {
+    return 'https://wa.me/?text=' + encodeURIComponent(String(texto || ''));
+  }
+
+  /* Página de venda: links com desconto (subaba "Divulgar") */
+
+  // O Stripe só cobra a partir de R$ 0,50: um valor final entre R$ 0,01 e R$ 0,49 não dá para pagar.
+  var MINIMO_COBRANCA = 50;
+  function hojeIso(agora) {
+    var h = agora ? new Date(agora) : new Date();
+    return h.getFullYear() + '-' + ('0' + (h.getMonth() + 1)).slice(-2) + '-' + ('0' + h.getDate()).slice(-2);
+  }
+  // 'AAAA-MM-DD' + n dias (calendário local).
+  function somarDias(iso, n) {
+    var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(iso || ''));
+    if (!m) return '';
+    return hojeIso(new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]) + Number(n || 0)));
+  }
+  // Preço que o cliente paga hoje: o de lançamento enquanto valer (menor que o cheio e sem data vencida).
+  function precoVigente(p, agora) {
+    if (!p) return { centavos: 0, cheio: null };
+    var lanc = p.precoLancamentoCentavos;
+    var vale = lanc != null && lanc < p.precoCentavos && (!p.lancamentoAte || p.lancamentoAte >= hojeIso(agora));
+    return vale ? { centavos: lanc, cheio: p.precoCentavos } : { centavos: p.precoCentavos, cheio: null };
+  }
+
+  // Do "quanto o cliente vai pagar" ao cupom. preco: centavos de hoje. escolha: { modo: 'gratis'|'teste'|'valor'|'percentual',
+  // valor (centavos, no modo 'valor') | percentual (1–100, no modo 'percentual') }.
+  // -> { ok, erro, abaixoMinimo, valorFinal (centavos ou null), tipo ('percentual'|'valor'), desconto (% ou centavos) }
+  // Grátis = 100%; valor final = cupom 'valor' com desconto = preço − valor final (mesma conta do criar_pedido).
+  function planoDesconto(preco, escolha) {
+    var e = escolha || {};
+    var p = Math.round(Number(preco) || 0);
+    function falha(msg, extra) { var r = { ok: false, erro: msg, abaixoMinimo: false, valorFinal: null, tipo: '', desconto: null }; for (var k in extra || {}) r[k] = extra[k]; return r; }
+    if (p <= 0) return falha('Escolha um pacote pago.');
+    if (e.modo === 'gratis') return { ok: true, erro: '', abaixoMinimo: false, valorFinal: 0, tipo: 'percentual', desconto: 100 };
+    var final;
+    if (e.modo === 'teste') final = MINIMO_COBRANCA;
+    else if (e.modo === 'valor') {
+      if (e.valor == null || e.valor === '' || !isFinite(Number(e.valor)) || Number(e.valor) < 0) return falha('Informe quanto o cliente vai pagar (ex.: 19,90).');
+      final = Math.round(Number(e.valor));
+    } else if (e.modo === 'percentual') {
+      var pct = Number(e.percentual);
+      if (e.percentual == null || e.percentual === '' || !isFinite(pct)) return falha('Informe o desconto em % (1 a 100).');
+      if (pct < 1 || pct > 100 || Math.round(pct) !== pct) return falha('O desconto em % vai de 1 a 100 (número inteiro).');
+      if (pct === 100) return { ok: true, erro: '', abaixoMinimo: false, valorFinal: 0, tipo: 'percentual', desconto: 100 };
+      final = Math.round(p * (100 - pct) / 100);
+      if (final > 0 && final < MINIMO_COBRANCA) return falha('O Stripe só cobra a partir de R$ 0,50. Com ' + pct + '% o cliente pagaria ' + formatarReais(final) + '. Use R$ 0,50 ou Grátis.', { abaixoMinimo: true, valorFinal: final });
+      return { ok: true, erro: '', abaixoMinimo: false, valorFinal: final, tipo: 'percentual', desconto: pct };
+    } else return falha('Escolha quanto o cliente vai pagar.');
+    if (final === 0) return { ok: true, erro: '', abaixoMinimo: false, valorFinal: 0, tipo: 'percentual', desconto: 100 };
+    if (final >= p) return falha('O valor precisa ser menor que o preço atual (' + formatarReais(p) + ').', { valorFinal: final });
+    if (final < MINIMO_COBRANCA) return falha('O Stripe só cobra a partir de R$ 0,50. Use R$ 0,50 ou Grátis.', { abaixoMinimo: true, valorFinal: final });
+    return { ok: true, erro: '', abaixoMinimo: false, valorFinal: final, tipo: 'valor', desconto: p - final };
+  }
+
+  // Código legível: PRO050-7K, CORTESIA-4QX, COMPLETO20-…; sufixo sem letras que confundem (0/O, 1/I/L).
+  var LETRAS_CODIGO = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+  function sufixoCodigo(n, aleatorio) {
+    var rnd = aleatorio || Math.random;
+    var s = '';
+    for (var i = 0; i < (n || 3); i++) s += LETRAS_CODIGO.charAt(Math.floor(rnd() * LETRAS_CODIGO.length) % LETRAS_CODIGO.length);
+    return s;
+  }
+  // pacote: 'completo' | 'completo_plus'; escolha como em planoDesconto; sufixo: 2–4 caracteres (gerado se faltar).
+  function codigoSugerido(pacote, escolha, sufixo) {
+    var e = escolha || {};
+    var nome = pacote === 'completo_plus' ? 'PRO' : 'COMPLETO';
+    var meio;
+    if (e.modo === 'gratis' || (e.modo === 'percentual' && Number(e.percentual) === 100) || (e.modo === 'valor' && Number(e.valor) === 0 && e.valor !== '' && e.valor != null)) meio = 'CORTESIA';
+    else if (e.modo === 'teste') meio = nome + '050';
+    else if (e.modo === 'valor' && isFinite(Number(e.valor)) && e.valor !== '' && e.valor != null) {
+      // Sempre com os centavos (R$ 19,90 -> 1990; R$ 19 -> 1900; R$ 0,20 -> 020), para não confundir com a porcentagem.
+      var v = Math.round(Number(e.valor));
+      meio = nome + (v < 100 ? ('00' + v).slice(-3) : String(v));
+    } else if (e.modo === 'percentual' && isFinite(Number(e.percentual)) && e.percentual !== '' && e.percentual != null) meio = nome + Math.round(Number(e.percentual));
+    else meio = nome;
+    var suf = String(sufixo || sufixoCodigo(3)).toUpperCase().replace(/[^A-Z0-9]/g, '');
+    return (meio.slice(0, 25) + '-' + suf).slice(0, 30);
+  }
+  // Texto do campo de código: maiúsculas, sem espaços nem acentos.
+  function limparCodigo(t) {
+    return semAcento(String(t || '')).toUpperCase().replace(/\s+/g, '').replace(/[^A-Z0-9_-]/g, '').slice(0, 30);
+  }
+
+  function textoPessoas(usosMax) {
+    if (usosMax == null) return 'quantas pessoas quiserem';
+    return usosMax === 1 ? '1 pessoa' : usosMax + ' pessoas';
+  }
+  function dataBr(iso) { return iso ? String(iso).slice(0, 10).split('-').reverse().join('/') : ''; }
+  // "O cliente paga R$ 0,50 em vez de R$ 49,00 no Completo + Parte 2. Vale para 1 pessoa até 05/11/2026."
+  function resumoLinkDesconto(d) {
+    var r = d.valorFinal === 0
+      ? 'O cliente recebe o ' + d.pacoteNome + ' de graça (em vez de ' + formatarReais(d.preco) + ').'
+      : 'O cliente paga ' + formatarReais(d.valorFinal) + ' em vez de ' + formatarReais(d.preco) + ' no ' + d.pacoteNome + '.';
+    return r + ' Vale para ' + textoPessoas(d.usosMax) + (d.validoAte ? ' até ' + dataBr(d.validoAte) : ', sem data de validade') + '.';
+  }
+  // Mensagem pronta para o WhatsApp. tipo: 'pagina' | 'pacote' | 'cupom'; d: { url, pacoteNome, valorFinal, preco, codigo }.
+  function mensagemDivulgar(tipo, d) {
+    d = d || {};
+    if (tipo === 'cupom') {
+      if (d.valorFinal === 0) return 'Olá! Liberei para você o ' + d.pacoteNome + ' do Mapa de Perfil DISC da Gestão sem Caos, sem custo. ' +
+        'Faça o teste por este link (o cupom ' + d.codigo + ' já vai aplicado):\n' + d.url;
+      return 'Olá! Segue o seu link do ' + d.pacoteNome + ' do Mapa de Perfil DISC da Gestão sem Caos por ' + formatarReais(d.valorFinal) +
+        ' (cupom ' + d.codigo + ' já aplicado):\n' + d.url;
+    }
+    if (tipo === 'pacote') return 'Conheça o Mapa de Perfil DISC da Gestão sem Caos. O ' + d.pacoteNome + ' sai por ' + formatarReais(d.preco) +
+      ': você faz o teste, vê o resumo grátis e libera o relatório completo.\n' + d.url;
+    return 'Conheça o Mapa de Perfil DISC da Gestão sem Caos: descubra o que está te travando e o que fazer a respeito. Comece grátis:\n' + d.url;
+  }
+  // "Grátis no Completo + Parte 2" / "Paga R$ 0,50 no Relatório completo" / "20% de desconto em todos os pacotes".
+  function textoLinkCupom(c, pacotes, agora) {
+    var um = c.pacotes && c.pacotes.length === 1 ? c.pacotes[0] : '';
+    var pac = um ? (pacotes || []).filter(function (p) { return p.chave === um; })[0] : null;
+    var onde = um ? ' no ' + nomePacote(um, pacotes) : ' em todos os pacotes';
+    if (c.tipo === 'percentual' && c.valor >= 100) return 'Grátis' + onde;
+    if (c.tipo === 'valor' && pac) return 'Paga ' + formatarReais(Math.max(0, precoVigente(pac, agora).centavos - c.valor)) + onde;
+    return textoCupom(c) + onde;
+  }
+  // Cupons ativos, os mais novos primeiro (criadoEm; sem data, mantém a ordem recebida), até n.
+  function linksRecentes(cupons, n) {
+    return (cupons || []).map(function (c, i) { return { c: c, i: i }; }).filter(function (x) { return x.c.ativo; })
+      .sort(function (a, b) { return String(b.c.criadoEm || '').localeCompare(String(a.c.criadoEm || '')) || a.i - b.i; })
+      .slice(0, n == null ? 8 : n).map(function (x) { return x.c; });
   }
   // Link do relatório comprado: meu-relatorio.html#t-<token>.
   function linkMeuRelatorio(href, token) {
@@ -1880,6 +2017,18 @@
     validarCupom: validarCupom,
     validarPacote: validarPacote,
     linkLandingCupom: linkLandingCupom,
+    linkPaginaVenda: linkPaginaVenda,
+    linkWhatsAppTexto: linkWhatsAppTexto,
+    MINIMO_COBRANCA: MINIMO_COBRANCA,
+    somarDias: somarDias,
+    precoVigente: precoVigente,
+    planoDesconto: planoDesconto,
+    codigoSugerido: codigoSugerido,
+    limparCodigo: limparCodigo,
+    resumoLinkDesconto: resumoLinkDesconto,
+    mensagemDivulgar: mensagemDivulgar,
+    textoLinkCupom: textoLinkCupom,
+    linksRecentes: linksRecentes,
     linkMeuRelatorio: linkMeuRelatorio,
     mensagemReenvio: mensagemReenvio,
     linkRecuperar: linkRecuperar,
@@ -2221,10 +2370,12 @@
       if (!resp || resp.ok !== true) {
         var e = new Error((resp && resp.erro) || 'O servidor recusou a solicitação.');
         e.sessaoExpirada = !!(resp && resp.sessaoExpirada);
+        e.naoConfigurado = !!(resp && resp.naoConfigurado);
         throw e;
       }
       return resp;
     }).catch(function (e) {
+      if (e && !e.naoConfigurado && e.resposta && e.resposta.naoConfigurado) e.naoConfigurado = true;
       if (e && e.sessaoExpirada) { sessaoExpirou(); e.tratado = true; }
       throw e;
     });
@@ -3308,9 +3459,11 @@
   }
 
   function janelaContratar(r, vinculo) {
+    // Lista de empresas ainda carregando: espera (sem ela, "+ Cadastrar" apareceria para empresas que já existem).
+    if (estado.emp.lista === null && empresasOk()) { carregarEmpresas().then(function () { janelaContratar(r, vinculo); }); return; }
     var empresas = (estado.emp.lista || []).filter(function (e) { return e.ativo !== false; });
     var esc = criarSeletorBusca({ id: 'contratar-empresa', rotulo: 'Empresa', rotuloId: 'contratar-empresa-rotulo', vazio: 'Escolher a empresa',
-      opcoes: empresas.map(function (e) { return { valor: e.id, rotulo: e.nome, sub: e.cidade || '' }; }) });
+      placeholder: 'Buscar ou cadastrar empresa…', criar: cadastroEmpresaRapido(), opcoes: empresas.map(function (e) { return { valor: e.id, rotulo: e.nome, sub: e.cidade || '' }; }) });
     var nome = r.nome || 'a pessoa';
     abrirJanela({
       id: 'janela-contratar',
@@ -3609,6 +3762,7 @@
     if (empresasOk()) {
       var empsForm = (estado.emp.lista || []).filter(function (e) { return e.ativo !== false || (p && e.id === p.empresaId); });
       escEmpresa = criarSeletorBusca({ id: 'proc-empresa-id', rotulo: 'Empresa cadastrada', rotuloId: 'proc-empresa-id-rotulo', vazio: 'Nenhuma (só o nome em texto)',
+        placeholder: 'Buscar ou cadastrar empresa…', criar: cadastroEmpresaRapido(),
         valor: (p && p.empresaId) || preset.empresaId || '', opcoes: empsForm.map(function (e) { return { valor: e.id, rotulo: e.nome, sub: e.cidade || '' }; }) });
     }
     var textoEquipe = el('p', { classe: 'form-secao__texto proc-equipe-texto', id: 'proc-equipe-texto', 'aria-live': 'polite' });
@@ -4112,6 +4266,7 @@
         el('div', { classe: 'gestao-card__acoes' }, [
           botao('botao--claro botao--pequeno', 'Abrir no editor', function () { abrirRelatorio(p, r); }, { 'data-acao': 'abrir-relatorio' }),
           pub ? botao('botao--claro botao--pequeno', 'Copiar link', function () { copiar(url, 'Link do relatório copiado.'); }, { 'data-acao': 'copiar-link-relatorio' }) : null,
+          pub ? botaoEnviarEmail({ token: r.token, modelo: 'processo', titulo: p.nome, para: '', nome: p.contratante || '' }, null, null, { 'data-acao': 'enviar-email-relatorio' }) : null,
           pub ? el('a', { classe: 'botao botao--claro botao--pequeno', href: url, target: '_blank', rel: 'noopener', texto: 'Ver publicado' }) : null
         ])
       ]);
@@ -4205,6 +4360,120 @@
     ]));
   }
 
+  /* ----- Prévia em nova aba e envio por e-mail (todos os modelos de relatório) ----- */
+
+  // Abre relatorio.html#previa-<id> numa aba nova com o snapshot do relatório (mesma renderização de
+  // js/relatorio-view.js), sem publicar nada: o snapshot vai para o localStorage (mesma origem), a página lê uma vez
+  // e apaga. Sobras com mais de 1 hora são limpas aqui.
+  var PREFIXO_PREVIA = 'disc_previa_';
+  var PREVIA_VALIDADE_MS = 3600000;
+  function idPrevia() {
+    var b = '';
+    try {
+      var a = new Uint8Array(16);
+      root.crypto.getRandomValues(a);
+      for (var i = 0; i < a.length; i++) b += ('0' + a[i].toString(16)).slice(-2);
+    } catch (e) { b = ''; }
+    while (b.length < 32) b += Math.floor(Math.random() * 16).toString(16);
+    return b;
+  }
+  function limparPreviasVelhas(armazem, agora) {
+    try {
+      var velhas = [];
+      for (var i = 0; i < armazem.length; i++) {
+        var k = armazem.key(i);
+        if (!k || k.indexOf(PREFIXO_PREVIA) !== 0) continue;
+        var em = 0;
+        try { em = Number(JSON.parse(armazem.getItem(k)).em) || 0; } catch (e) { em = 0; }
+        if (!em || agora - em > PREVIA_VALIDADE_MS) velhas.push(k);
+      }
+      velhas.forEach(function (k2) { armazem.removeItem(k2); });
+    } catch (e2) { /* sem armazenamento: nada a limpar */ }
+  }
+  function abrirPreviaNovaAba(dados) {
+    if (!dados || typeof dados !== 'object') { avisar('Gere o relatório antes de abrir a prévia.', 'erro'); return null; }
+    var id = idPrevia();
+    try {
+      var armazem = root.localStorage;
+      limparPreviasVelhas(armazem, Date.now());
+      armazem.setItem(PREFIXO_PREVIA + id, JSON.stringify({ v: 1, em: Date.now(), relatorio: dados }));
+    } catch (e) {
+      avisar('Não foi possível abrir a prévia: o navegador não deixou guardar o relatório (janela anônima ou espaço cheio).', 'erro');
+      return null;
+    }
+    var url = 'relatorio.html#previa-' + id;
+    try { root.open(url, '_blank', 'noopener'); } catch (e2) { /* bloqueado: o aviso abaixo orienta */ }
+    avisar('Prévia aberta em outra aba (ainda não publicada). Se não abriu, libere janelas novas para este site.', 'ok');
+    return id;
+  }
+  function botaoPreviaNovaAba(obterDados, id) {
+    return botao('botao--claro', 'Abrir prévia em nova aba', function () { abrirPreviaNovaAba(obterDados()); }, { id: id || 'btn-previa-nova-aba', title: 'Mostra o relatório como quem recebe vai ver, sem publicar' });
+  }
+
+  // E-mails enviados nesta sessão do painel (por token do relatório): mostrados ao lado do botão.
+  var enviosEmail = {};
+  function textoEnvios(token) {
+    var l = enviosEmail[token] || [];
+    if (!l.length) return '';
+    var u = l[l.length - 1];
+    return 'Enviado por e-mail para ' + u.para + ' em ' + formatarData(u.em) + (l.length > 1 ? ' (' + l.length + ' envios nesta sessão)' : '') + '.';
+  }
+  function emailDaPessoa(pessoaId) {
+    if (!pessoaId) return { email: '', nome: '' };
+    var regs = estado.registros.filter(function (x) { return String(x.pessoaId || '') === String(pessoaId); });
+    var comEmail = regs.filter(function (x) { return x.email; })[0];
+    return { email: comEmail ? String(comEmail.email) : '', nome: regs[0] ? String(regs[0].nome || '') : '' };
+  }
+
+  // Janela "Enviar por e-mail": destinatário, nome e mensagem -> só o link do relatório publicado (Resend).
+  // alvo = { token, modelo, titulo?, para?, nome? }; depois(resp) redesenha quem chamou.
+  function janelaEnviarEmail(alvo, depois) {
+    var aviso = el('div', { classe: 'aviso proc-aviso email-config', id: 'email-nao-configurado', hidden: true }, [
+      el('p', { texto: 'O envio usa o Resend (chave RESEND_API_KEY nas Edge Functions). A aba Conexões mostra o que falta e testa o envio.' }),
+      temConexoes() ? botao('botao--claro botao--pequeno', 'Abrir a aba Conexões', function () {
+        if (janela) janela.fechar();
+        mostrarAba('conexoes');
+      }, { id: 'btn-email-conexoes' }) : null
+    ]);
+    var janela = abrirJanela({
+      id: 'janela-enviar-email',
+      titulo: 'Enviar por e-mail',
+      texto: 'Vai só o link do relatório (sem anexo), num e-mail com a marca da Gestão sem Caos' + (alvo.titulo ? ': "' + alvo.titulo + '"' : '') + '.',
+      corpo: [
+        campoCom('email-para', 'E-mail do destinatário', alvo.para || '', { type: 'email', inputmode: 'email', maxlength: 120, autocomplete: 'off', placeholder: 'nome@empresa.com.br' }),
+        campoCom('email-nome', 'Nome do destinatário', alvo.nome || '', { maxlength: 80, placeholder: 'Opcional: usado no "Olá, …!"' }),
+        campoArea('email-mensagem', 'Mensagem (opcional)', '', { maxlength: 1000, rows: 3, placeholder: 'Ex.: Segue o relatório que combinamos. Qualquer dúvida, me chame.' }),
+        aviso
+      ],
+      botao: 'Enviar',
+      aoConfirmar: function () {
+        aviso.hidden = true;
+        var para = $('email-para').value.replace(/\s+/g, '').toLowerCase();
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(para)) throw new Error('Informe um e-mail válido para o destinatário.');
+        var envio = { para: para, nome: $('email-nome').value.trim(), mensagem: $('email-mensagem').value.trim() };
+        return api('relatorioEnviarEmail', alvo.token, envio).then(function (resp) {
+          (enviosEmail[alvo.token] = enviosEmail[alvo.token] || []).push({ para: resp.para || para, em: resp.enviadoEm || new Date().toISOString() });
+          avisar('Enviado para ' + (resp.para || para) + '.', 'ok');
+          if (typeof depois === 'function') depois(resp);
+        }, function (e) {
+          if (e && e.naoConfigurado) aviso.hidden = false;
+          if (e && e.message === 'Ação desconhecida.') {
+            aviso.hidden = false;
+            throw new Error('A função admin do servidor está desatualizada: publique de novo (veja Conexões).');
+          }
+          throw e;
+        });
+      }
+    });
+    if (alvo.para) { var n = $('email-nome'); if (n && !alvo.nome) n.focus(); }
+    return janela;
+  }
+  function podeEnviarEmail() { return MODO_API && papel() === 'admin' && !!metodoApi('relatorioEnviarEmail'); }
+  function botaoEnviarEmail(alvo, depois, classe, attrs) {
+    if (!podeEnviarEmail() || !alvo || !alvo.token) return null;
+    return botao(classe || 'botao--claro botao--pequeno', 'Enviar por e-mail', function () { janelaEnviarEmail(alvo, depois); }, attrs || null);
+  }
+
   /* ----- Editor do relatório ----- */
 
   function documentoPrevia(rel) {
@@ -4279,6 +4548,7 @@
         });
       }, { id: 'btn-despublicar' }));
     }
+    acoes.splice(1, 0, botaoPreviaNovaAba(function () { return ed.relatorio; }, 'btn-editor-previa-aba'));
     box.appendChild(cabecalhoVista('Relatório · ' + p.nome, publicado ? 'Relatório publicado' : 'Rascunho do relatório',
       'Revise cada texto. O que você mudar fica marcado como "Editado". Números e tabelas vêm do ClickUp e do DISC.', acoes));
 
@@ -4291,8 +4561,10 @@
         el('div', { classe: 'gestao-card__acoes' }, [
           botao('botao--principal botao--pequeno', 'Copiar link', function () { copiar(ed.url, 'Link do relatório copiado.'); }, { id: 'btn-copiar-link-relatorio' }),
           botao('botao--claro botao--pequeno', 'Copiar mensagem para WhatsApp', function () { copiar(msg, 'Mensagem copiada. Cole no WhatsApp do contratante.'); }, { id: 'btn-copiar-msg-relatorio' }),
+          botaoEnviarEmail({ token: ed.token, modelo: 'processo', titulo: p.nome, para: '', nome: p.contratante || '' }, function () { renderizarProcessos(); }, null, { id: 'btn-enviar-email-relatorio' }),
           el('a', { classe: 'botao botao--claro botao--pequeno', id: 'link-abrir-relatorio', href: ed.url, target: '_blank', rel: 'noopener', texto: 'Abrir relatório' })
-        ])
+        ]),
+        textoEnvios(ed.token) ? el('p', { classe: 'texto-suave t-rotulo rel-envio', id: 'rel-envio', texto: textoEnvios(ed.token) }) : null
       ]));
     }
 
@@ -4369,7 +4641,10 @@
   /* ---------- Seletor em pílula com busca (um ou vários; sem <select> nativo) ---------- */
 
   // cfg: { id, rotulo, rotuloId?, opcoes: [{valor, rotulo, sub?}], multiplo?, valor? (um), valores? (vários),
-  //        vazio? (rótulo da opção "nenhum", só no modo de um), placeholder?, textoBotao? (vários) }
+  //        vazio? (rótulo da opção "nenhum", só no modo de um), placeholder?, textoBotao? (vários),
+  //        criar? {fn(nome, cidade) -> Promise<{valor, rotulo, sub?}>, titulo?} (só no modo de um: quando o texto da
+  //        busca não é o nome de nenhuma opção, a lista termina com "+ Cadastrar “texto”"; cidade opcional + Confirmar
+  //        ali mesmo, sem fechar a janela; o item criado já fica escolhido) }
   // -> { caixa, valor(), valores(), definir(v), aoMudar(fn) }
   var buscas = [];
   function criarSeletorBusca(cfg) {
@@ -4393,7 +4668,11 @@
     var lista = el('ul', { role: 'listbox', id: id + '-lista', classe: 'busca-sel__lista', 'aria-label': cfg.rotulo, 'aria-multiselectable': multiplo ? 'true' : null });
     var nada = el('p', { classe: 'busca-sel__nada', texto: 'Nada encontrado.', hidden: true });
     var pronto = multiplo ? el('button', { type: 'button', id: id + '-pronto', classe: 'botao botao--claro botao--pequeno busca-sel__pronto', texto: 'Pronto', onclick: function () { fechar(true); } }) : null;
-    var painel = el('div', { id: id + '-painel', classe: 'busca-sel__painel vidro-janela', hidden: true }, [busca, lista, nada, pronto]);
+    var criar = !multiplo && cfg.criar && typeof cfg.criar.fn === 'function' ? cfg.criar : null;
+    var btnNovo = criar ? el('button', { type: 'button', id: id + '-novo', classe: 'busca-sel__novo', hidden: true }) : null;
+    var criarArea = criar ? el('div', { id: id + '-criar', classe: 'busca-sel__criar', hidden: true }) : null;
+    var criando = '';
+    var painel = el('div', { id: id + '-painel', classe: 'busca-sel__painel vidro-janela', hidden: true }, [busca, lista, nada, btnNovo, criarArea, pronto]);
     var fichas = multiplo ? el('ul', { classe: 'busca-sel__fichas', id: id + '-fichas', 'aria-label': cfg.rotulo + ': escolhidos' }) : null;
     var caixa = el('div', { classe: 'escolha busca-sel' + (multiplo ? ' busca-sel--multi' : '') + ' escolha--larga', id: id + '-caixa' }, [fichas, botao, painel]);
 
@@ -4433,12 +4712,72 @@
         ]));
       });
       nada.hidden = achadas.length > 0;
+      if (btnNovo) {
+        var t = busca.value.replace(/\s+/g, ' ').trim().slice(0, 120);
+        var igual = t && opcoes.some(function (o) { return o.valor !== '' && semAcento(o.rotulo) === semAcento(t); });
+        btnNovo.hidden = !t || igual;
+        btnNovo.textContent = t ? '+ Cadastrar “' + t + '”' : '';
+        btnNovo.setAttribute('data-nome', t);
+      }
+    }
+    // Cadastro rápido (cfg.criar): troca a busca pelo campo de cidade + Confirmar, no mesmo painel.
+    function mostrarCriar(nome) {
+      criando = nome;
+      limpar(criarArea);
+      var cidade = el('input', { id: id + '-criar-cidade', classe: 'entrada busca-sel__entrada', type: 'text', autocomplete: 'off', maxlength: 120, placeholder: 'Ex.: Boa Vista / RR' });
+      var erroCriar = el('p', { classe: 'campo__erro busca-sel__criar-erro', id: id + '-criar-erro', role: 'alert' });
+      var ok = el('button', { type: 'button', id: id + '-criar-ok', classe: 'botao botao--principal botao--pequeno', texto: 'Confirmar' });
+      var voltar = el('button', { type: 'button', id: id + '-criar-voltar', classe: 'botao botao--claro botao--pequeno', texto: 'Voltar' });
+      adicionar(criarArea, [
+        el('p', { classe: 'busca-sel__criar-titulo' }, [el('span', { classe: 'texto-suave', texto: (criar.titulo || 'Cadastrar') + ': ' }), el('span', { classe: 'seminegrito', id: id + '-criar-nome', texto: nome })]),
+        el('label', { classe: 'campo', for: id + '-criar-cidade' }, [el('span', { classe: 'campo__rotulo', texto: 'Cidade (opcional)' }), cidade]),
+        erroCriar,
+        el('div', { classe: 'busca-sel__criar-acoes' }, [voltar, ok])
+      ]);
+      function confirmarCriar() {
+        if (ok.disabled) return;
+        erroCriar.textContent = '';
+        ok.disabled = true; ok.textContent = 'Cadastrando…';
+        Promise.resolve().then(function () { return criar.fn(nome, cidade.value.replace(/\s+/g, ' ').trim()); }).then(function (o) {
+          if (!o || o.valor == null || o.valor === '') throw new Error('Não foi possível cadastrar. Tente de novo.');
+          var v = String(o.valor);
+          if (!porValor[v]) { opcoes.push(o); porValor[v] = o; }
+          sel = [v];
+          sairCriar();
+          desenharTopo();
+          fechar(true);
+          avisarMudanca();
+        }).catch(function (e) {
+          if (e && e.tratado) { fechar(false); return; }
+          erroCriar.textContent = (e && e.message) || 'Não foi possível cadastrar. Tente de novo.';
+          ok.disabled = false; ok.textContent = 'Confirmar';
+        });
+      }
+      ok.addEventListener('click', confirmarCriar);
+      voltar.addEventListener('click', function () { sairCriar(); busca.focus(); });
+      cidade.addEventListener('keydown', function (e) {
+        // Enter não envia a janela de fora; Esc volta para a busca sem fechar a janela.
+        if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); confirmarCriar(); }
+        else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); sairCriar(); busca.focus(); }
+      });
+      busca.hidden = true; lista.hidden = true; nada.hidden = true; btnNovo.hidden = true;
+      criarArea.hidden = false;
+      cidade.focus();
+    }
+    function sairCriar() {
+      if (!criarArea || criarArea.hidden) return;
+      criando = '';
+      criarArea.hidden = true;
+      limpar(criarArea);
+      busca.hidden = false; lista.hidden = false;
+      desenharLista();
     }
     function abrir() {
       escolhas.forEach(function (e) { e.fechar(false); });
       buscas.forEach(function (b) { if (b !== api3) b.fechar(false); });
       aberto = true;
       busca.value = '';
+      sairCriar();
       desenharLista();
       painel.hidden = false;
       botao.setAttribute('aria-expanded', 'true');
@@ -4447,6 +4786,7 @@
     function fechar(devolverFoco) {
       if (!aberto) return;
       aberto = false;
+      sairCriar();
       painel.hidden = true;
       botao.setAttribute('aria-expanded', 'false');
       if (devolverFoco) botao.focus();
@@ -4471,8 +4811,13 @@
     botao.addEventListener('keydown', function (e) { if (e.key === 'ArrowDown') { e.preventDefault(); abrir(); } });
     busca.addEventListener('input', desenharLista);
     busca.addEventListener('keydown', function (e) {
-      if (e.key === 'ArrowDown') { e.preventDefault(); var p = itens()[0]; if (p) p.focus(); }
-      else if (e.key === 'Enter') { e.preventDefault(); var u = itens(); if (u.length === 1) escolher(u[0]); }
+      if (e.key === 'ArrowDown') { e.preventDefault(); var p = itens()[0]; if (p) p.focus(); else if (btnNovo && !btnNovo.hidden) btnNovo.focus(); }
+      else if (e.key === 'Enter') {
+        e.preventDefault();
+        var u = itens();
+        if (u.length === 1) escolher(u[0]);
+        else if (!u.length && btnNovo && !btnNovo.hidden) mostrarCriar(btnNovo.getAttribute('data-nome'));
+      }
       else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); fechar(true); }
     });
     lista.addEventListener('click', function (e) {
@@ -4485,13 +4830,21 @@
       else if (e.key === 'ArrowUp') { e.preventDefault(); if (i <= 0) busca.focus(); else todos[i - 1].focus(); }
       else if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (i !== -1) escolher(todos[i]); }
       else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); fechar(true); }
-      else if (e.key === 'Tab') fechar(false);
+      else if (e.key === 'Tab' && !(btnNovo && !btnNovo.hidden && !e.shiftKey && i === todos.length - 1)) fechar(false);
     });
+    if (btnNovo) {
+      btnNovo.addEventListener('click', function () { mostrarCriar(btnNovo.getAttribute('data-nome')); });
+      btnNovo.addEventListener('keydown', function (e) {
+        if (e.key === 'ArrowUp') { e.preventDefault(); var t = itens(); if (t.length) t[t.length - 1].focus(); else busca.focus(); }
+        else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); fechar(true); }
+      });
+    }
     var api3 = {
       caixa: caixa, botao: botao, fechar: fechar,
       valor: function () { return sel[0] || ''; },
       valores: function () { return sel.slice(); },
       definir: function (v) { sel = multiplo ? (v || []).map(String) : [v == null ? '' : String(v)]; desenharTopo(); },
+      criando: function () { return criando; },
       aoMudar: function (fn) { ouvintes.push(fn); }
     };
     buscas = buscas.filter(function (b) { return b.botao.id !== id && document.body.contains(b.caixa); });
@@ -4627,6 +4980,28 @@
     }
     entrada.addEventListener('input', function () { estado.emp.busca = entrada.value; desenhar(); });
     desenhar();
+  }
+
+  // Cadastro rápido de empresa dentro de qualquer seletor de empresa (criarSeletorBusca cfg.criar): mesma API da
+  // aba Empresas (salvarEmpresa); a empresa entra na lista local e já fica escolhida.
+  function cadastroEmpresaRapido() {
+    if (!empresasOk() || !metodoApi('salvarEmpresa')) return null;
+    return {
+      titulo: 'Nova empresa',
+      fn: function (nome, cidade) {
+        nome = String(nome || '').trim();
+        if (!nome) throw new Error('Digite o nome da empresa.');
+        return api('salvarEmpresa', { nome: nome, cidade: cidade || '', observacoes: '', ativo: true }).then(function (resp) {
+          var e = resp.empresa || {};
+          if (!e.id) throw new Error('A empresa foi cadastrada, mas não voltou do servidor. Atualize a página e escolha de novo.');
+          e = { id: String(e.id), nome: e.nome || nome, cidade: e.cidade != null ? e.cidade : (cidade || ''), observacoes: e.observacoes || '',
+            ativo: e.ativo !== false, colaboradores: Number(e.colaboradores) || 0 };
+          estado.emp.lista = (estado.emp.lista || []).filter(function (x) { return x.id !== e.id; }).concat([e]);
+          avisar('Empresa "' + e.nome + '" cadastrada.', 'ok');
+          return { valor: e.id, rotulo: e.nome, sub: e.cidade || '' };
+        });
+      }
+    };
   }
 
   function dadosEmpresa(e, extra) {
@@ -5124,6 +5499,7 @@
   function janelaMover(emp, c) {
     var outras = (estado.emp.lista || []).filter(function (e) { return e.id !== emp.id && e.ativo !== false; });
     var escDestino = criarSeletorBusca({ id: 'mover-destino', rotulo: 'Empresa de destino', rotuloId: 'mover-destino-rotulo', vazio: 'Escolher a empresa',
+      placeholder: 'Buscar ou cadastrar empresa…', criar: cadastroEmpresaRapido(),
       opcoes: outras.map(function (e) { return { valor: e.id, rotulo: e.nome, sub: e.cidade || '' }; }) });
     abrirJanela({
       id: 'janela-mover',
@@ -5300,6 +5676,12 @@
     });
   }
 
+  // Destinatário sugerido: no relatório da pessoa, o e-mail que ela deu no teste (quando houver).
+  function alvoEmailModelo(rel) {
+    var p = rel.modelo === 'pessoa' ? emailDaPessoa(rel.pessoaId) : { email: '', nome: '' };
+    return { token: rel.token, modelo: rel.modelo, titulo: (rel.dados && rel.dados.titulo) || '', para: p.email, nome: p.email ? p.nome || (rel.ctx && rel.ctx.pessoa) || '' : '' };
+  }
+
   function renderizarRelatorioModelo(box, rel) {
     var publicado = rel.status === 'publicado';
     var titulo = (rel.dados && rel.dados.titulo) || MODELOS_REL[rel.modelo];
@@ -5322,6 +5704,7 @@
       }, { id: 'btn-rel-publicar' });
       acoes.push(btnPub);
     }
+    acoes.splice(1, 0, botaoPreviaNovaAba(function () { return rel.dados; }, 'btn-rel-previa-aba'));
     var sub = [MODELOS_REL[rel.modelo], rel.ctx && rel.ctx.empresa, publicado ? 'publicado' : (rel.status === 'rascunho' ? 'rascunho salvo' : 'ainda não salvo')].filter(Boolean).join(' · ');
     box.appendChild(cabecalhoVista(sub, titulo, 'Prévia do documento como quem recebe vai ver. Salve como rascunho ou publique para gerar o link.', acoes));
 
@@ -5351,8 +5734,10 @@
         el('div', { classe: 'gestao-card__acoes' }, [
           botao('botao--principal botao--pequeno', 'Copiar link', function () { copiar(rel.url, 'Link do relatório copiado.'); }, { id: 'btn-rel-copiar-link' }),
           botao('botao--claro botao--pequeno', 'Copiar mensagem para WhatsApp', function () { copiar(msg, 'Mensagem copiada. Cole no WhatsApp.'); }, { id: 'btn-rel-copiar-msg' }),
+          botaoEnviarEmail(alvoEmailModelo(rel), function () { redesenharRel(); }, null, { id: 'btn-rel-enviar-email' }),
           el('a', { classe: 'botao botao--claro botao--pequeno', href: rel.url, target: '_blank', rel: 'noopener', texto: 'Abrir relatório' })
-        ])
+        ]),
+        textoEnvios(rel.token) ? el('p', { classe: 'texto-suave t-rotulo rel-envio', id: 'rel-modelo-envio', texto: textoEnvios(rel.token) }) : null
       ]));
     }
 
@@ -5672,10 +6057,17 @@
         gerarRascunho(p, btn);
       };
     }
-    // Empresa (equipe) e colaborador (como liderar)
+    // Empresa (equipe) e colaborador (como liderar). Lista ainda carregando: espera (sem ela, "+ Cadastrar"
+    // apareceria para empresas que já existem).
+    if (estado.emp.lista === null && empresasOk()) {
+      sec.appendChild(el('p', { classe: 'texto-suave t-rotulo', id: 'assist-empresas-carregando', texto: 'Carregando as empresas…' }));
+      carregarEmpresas().then(function () { if (estado.aba === 'relatorios' && estado.rl.tela === 'assistente') renderizarRelatorios(); });
+      return function () { throw new Error('Espere carregar as empresas.'); };
+    }
     var empresas = (estado.emp.lista || []).filter(function (e) { return e.ativo !== false; });
     var alvo = estado.rl.alvo;
     var escEmp = criarSeletorBusca({ id: 'assist-empresa', rotulo: 'Empresa', rotuloId: 'assist-empresa-rotulo', vazio: 'Escolher a empresa', valor: alvo.empresaId || '',
+      placeholder: 'Buscar ou cadastrar empresa…', criar: cadastroEmpresaRapido(),
       opcoes: empresas.map(function (e) { return { valor: e.id, rotulo: e.nome, sub: [e.cidade, (Number(e.colaboradores) || 0) + ' colaboradores'].filter(Boolean).join(' · ') }; }) });
     sec.appendChild(campoEscolha('Empresa', escEmp, 'assist-empresa-rotulo'));
     var areaColab = el('div', { id: 'assist-colab-area' });
@@ -5794,15 +6186,23 @@
         el('span', { classe: 'selo ' + (pub ? 'selo--verde' : ''), texto: pub ? 'Publicado' : 'Rascunho' }),
         el('span', { classe: 'selo selo--noite', texto: NOMES_MODELO[r.modelo] || r.modelo }),
         el('span', { classe: 'seminegrito gerado__titulo', texto: r.titulo }),
-        el('span', { classe: 'texto-suave t-rotulo', texto: [r.empresa, formatarData(r.data)].filter(function (x) { return x && x !== '—'; }).join(' · ') })
+        el('span', { classe: 'texto-suave t-rotulo', texto: [r.empresa, formatarData(r.data)].filter(function (x) { return x && x !== '—'; }).join(' · ') }),
+        textoEnvios(r.token) ? el('span', { classe: 'texto-suave t-rotulo gerado__envio', texto: textoEnvios(r.token) }) : null
       ]),
       el('div', { classe: 'gestao-card__acoes' }, [
         botao('botao--claro botao--pequeno', 'Abrir', function () { abrirGerado(r); }, { 'data-acao': 'abrir' }),
         pub ? botao('botao--claro botao--pequeno', 'Copiar link', function () { copiar(r.url, 'Link do relatório copiado.'); }, { 'data-acao': 'copiar-link' }) : null,
         pub ? botao('botao--claro botao--pequeno', 'Copiar mensagem', function () { copiar(msg(), 'Mensagem copiada. Cole no WhatsApp.'); }, { 'data-acao': 'copiar-mensagem' }) : null,
+        pub ? botaoEnviarEmail(alvoEmailGerado(r), function () { if (estado.rl.tela === 'gerados') renderizarRelatorios(); }, null, { 'data-acao': 'enviar-email' }) : null,
         r.tipo === 'modelo' ? botao('botao--perigo botao--pequeno', 'Excluir', function () { excluirGerado(r); }, { 'data-acao': 'excluir' }) : null
       ])
     ]);
+  }
+
+  function alvoEmailGerado(r) {
+    var p = r.modelo === 'pessoa' ? emailDaPessoa(r.pessoaId) : { email: '', nome: '' };
+    var proc = r.tipo === 'processo' ? acharProcesso(r.processoId) : null;
+    return { token: r.token, modelo: r.modelo, titulo: r.titulo || '', para: p.email, nome: p.email ? p.nome : (proc && proc.contratante) || '' };
   }
 
   // Abrir: publicado abre o link; rascunho do processo vai para o editor; rascunho de modelo vai para onde ele nasceu.
@@ -6153,8 +6553,9 @@
     if (h) { h.setAttribute('tabindex', '-1'); h.focus(); }
   }
 
-  var SUBABAS_VENDAS = [{ id: 'resumo', rotulo: 'Resumo' }, { id: 'pedidos', rotulo: 'Pedidos' }, { id: 'cupons', rotulo: 'Cupons' }, { id: 'pacotes', rotulo: 'Pacotes' }];
+  var SUBABAS_VENDAS = [{ id: 'divulgar', rotulo: 'Divulgar' }, { id: 'resumo', rotulo: 'Resumo' }, { id: 'pedidos', rotulo: 'Pedidos' }, { id: 'cupons', rotulo: 'Cupons' }, { id: 'pacotes', rotulo: 'Pacotes' }];
   var TITULOS_VENDAS = {
+    divulgar: ['Página de venda', 'Copie o link da página de venda ou crie, em segundos, um link com desconto para enviar por WhatsApp.'],
     resumo: ['Vendas', 'Vendas do Mapa DISC e conversão do resumo grátis em compra.'],
     pedidos: ['Pedidos', 'Cada compra do site. Abra um pedido para reenviar o link, liberar como cortesia ou registrar um reembolso.'],
     cupons: ['Cupons', 'Descontos para campanhas e parceiros. O link da página de venda já leva o cupom aplicado.'],
@@ -6192,6 +6593,7 @@
     if (vd.sub === 'pedidos') return renderizarPedidos(box);
     if (vd.sub === 'cupons') return renderizarCupons(box);
     if (vd.sub === 'pacotes') return renderizarPacotes(box);
+    if (vd.sub === 'divulgar') return renderizarDivulgar(box);
     vd.sub = 'resumo';
     renderizarResumoVendas(box);
   }
@@ -6425,7 +6827,7 @@
     var ul = el('ul', { classe: 'gestao-lista vd-cupons', id: 'vd-lista-cupons' });
     if (!vd.cupons.length) ul.appendChild(el('li', { classe: 'caixa vazio' }, el('p', { classe: 'vazio__texto', texto: 'Nenhum cupom ainda. Crie um para a campanha de lançamento ou para parceiros.' })));
     vd.cupons.slice().sort(function (a, b) { return (b.ativo - a.ativo) || a.codigo.localeCompare(b.codigo); }).forEach(function (c) {
-      var link = linkLandingCupom(root.location.href, c.codigo);
+      var link = linkLandingCupom(root.location.href, c.codigo, c.pacotes.length === 1 ? c.pacotes[0] : '');
       var esgotado = c.usosMax != null && c.usos >= c.usosMax;
       var hoje = new Date(); var vencido = c.validoAte && c.validoAte < (hoje.getFullYear() + '-' + ('0' + (hoje.getMonth() + 1)).slice(-2) + '-' + ('0' + hoje.getDate()).slice(-2));
       ul.appendChild(el('li', { classe: 'caixa gestao-card vd-cupom' + (c.ativo ? '' : ' vd-cupom--inativo'), 'data-codigo': c.codigo, 'data-ativo': c.ativo ? 'sim' : 'nao' }, [
@@ -6457,10 +6859,12 @@
     return api('salvarCupom', dados).then(function (resp) {
       var c = normalizarCupom(resp && resp.cupom ? resp.cupom : dados);
       var achou = false;
-      estado.vd.cupons = estado.vd.cupons.map(function (x) { if (x.codigo === c.codigo) { achou = true; return c; } return x; });
+      estado.vd.cupons = estado.vd.cupons.map(function (x) { if (x.codigo === c.codigo) { achou = true; if (!c.criadoEm) c.criadoEm = x.criadoEm; return c; } return x; });
+      if (!c.criadoEm) c.criadoEm = new Date().toISOString();
       if (!achou) estado.vd.cupons.push(c);
       renderizarVendas();
       avisar(msgOk, 'ok');
+      return c;
     });
   }
 
@@ -6531,6 +6935,315 @@
         return salvarCupomApi(d, novo ? 'Cupom ' + d.codigo + ' criado.' : 'Cupom ' + d.codigo + ' salvo.');
       }
     });
+  }
+
+  /* Divulgar: a página de venda e os links com desconto (subaba "Divulgar" e item "Página de venda" do menu) */
+
+  var OPCOES_PAGAR = [
+    { id: 'gratis', titulo: 'Grátis', nota: 'cortesia' },
+    { id: 'teste', titulo: 'R$ 0,50', nota: 'para testar o pagamento' },
+    { id: 'valor', titulo: 'Outro valor', nota: 'o cliente paga' },
+    { id: 'percentual', titulo: 'Desconto em %', nota: 'sobre o preço atual' }
+  ];
+  var OPCOES_USOS = [{ id: '1', rotulo: '1 pessoa' }, { id: '5', rotulo: '5' }, { id: '10', rotulo: '10' }, { id: 'sem', rotulo: 'Sem limite' }, { id: 'outro', rotulo: 'Outro' }];
+
+  function pacotesVendaveis() {
+    var pagos = estado.vd.pacotes.filter(function (p) { return p.chave !== 'gratis'; });
+    var ativos = pagos.filter(function (p) { return p.ativo; });
+    return ativos.length ? ativos : pagos;
+  }
+  // Padrões que acompanham o "quanto paga" enquanto a pessoa não mexe: teste e cortesia = 1 pessoa, 30 dias.
+  function curtoPrazo(modo) { return modo === 'gratis' || modo === 'teste'; }
+  function novoFormDivulgar() {
+    var pac = pacotesVendaveis();
+    var pro = pac.filter(function (p) { return p.chave === 'completo_plus'; })[0] || pac[0];
+    return { pacote: pro ? pro.chave : '', modo: 'teste', valorTxt: '', pctTxt: '', codigo: '', codigoEditado: false, sufixo: sufixoCodigo(3),
+      usos: '1', usosTxt: '', usosEditado: false, validade: somarDias(hojeIso(), 30), validadeEditada: false, salvando: false, erro: '', criado: null };
+  }
+  function escolhaDivulgar(f) {
+    return { modo: f.modo, valor: f.modo === 'valor' ? centavosDeTexto(f.valorTxt) : null,
+      percentual: f.modo === 'percentual' && String(f.pctTxt).trim() !== '' ? Number(String(f.pctTxt).replace(',', '.')) : null };
+  }
+  // Estado calculado do formulário: pacote, preço, plano do cupom, limite de usos e erro (texto) para criar.
+  function calcularDivulgar(f) {
+    var pac = pacotesVendaveis().filter(function (p) { return p.chave === f.pacote; })[0] || null;
+    var preco = pac ? precoVigente(pac).centavos : 0;
+    var esc = escolhaDivulgar(f);
+    var plano = pac ? planoDesconto(preco, esc) : { ok: false, erro: 'Escolha o pacote.', abaixoMinimo: false };
+    if (!f.codigoEditado) f.codigo = pac ? codigoSugerido(pac.chave, esc, f.sufixo) : '';
+    var usosMax = f.usos === 'sem' ? null : (f.usos === 'outro' ? (String(f.usosTxt).trim() === '' ? NaN : Number(f.usosTxt)) : Number(f.usos));
+    var erro = '';
+    if (!plano.ok) erro = plano.erro;
+    else if (!/^[A-Z0-9_-]{3,30}$/.test(f.codigo)) erro = 'O código precisa ter de 3 a 30 letras, números, - ou _ (sem espaço).';
+    else if (usosMax !== null && (!isFinite(usosMax) || usosMax < 1 || Math.round(usosMax) !== usosMax)) erro = 'Diga quantas pessoas podem usar (1 ou mais).';
+    else if (f.validade && f.validade < hojeIso()) erro = 'A validade já passou. Escolha uma data a partir de hoje.';
+    return { pac: pac, preco: preco, plano: plano, usosMax: usosMax, erro: erro };
+  }
+
+  // Uma linha de link: título, nota, o endereço e Copiar / Abrir / Enviar por WhatsApp.
+  function linhaLinkVenda(id, titulo, nota, url, msg, extra) {
+    var a = { classe: 'dv-link', id: id };
+    for (var k in extra || {}) a[k] = extra[k];
+    return el('div', a, [
+      el('div', { classe: 'dv-link__topo' }, [
+        el('p', { classe: 'seminegrito dv-link__titulo', texto: titulo }),
+        nota ? el('p', { classe: 't-rotulo texto-suave tabular dv-link__nota', texto: nota }) : null
+      ]),
+      el('p', { classe: 'av-link dv-link__url', texto: url }),
+      el('div', { classe: 'gestao-card__acoes' }, [
+        botao('botao--claro botao--pequeno', 'Copiar', function () { copiar(url, 'Link copiado.'); }, { 'data-acao': 'copiar' }),
+        el('a', { classe: 'botao botao--claro botao--pequeno', href: url, target: '_blank', rel: 'noopener noreferrer', 'data-acao': 'abrir', texto: 'Abrir' }),
+        el('a', { classe: 'botao botao--contorno botao--pequeno', href: linkWhatsAppTexto(msg), target: '_blank', rel: 'noopener noreferrer', 'data-acao': 'whatsapp', texto: 'Enviar por WhatsApp' })
+      ])
+    ]);
+  }
+
+  function textoPreco(p) {
+    var pv = precoVigente(p);
+    return formatarReais(pv.centavos) + (pv.cheio != null ? ' · preço de lançamento (de ' + formatarReais(pv.cheio) + ')' : '');
+  }
+
+  function renderizarDivulgar(box) {
+    var vd = estado.vd;
+    if (!vd.dv) vd.dv = novoFormDivulgar();
+    var href = root.location.href;
+    var pacotes = pacotesVendaveis();
+
+    // a) Sua página de venda
+    var urlPagina = linkPaginaVenda(href);
+    box.appendChild(el('section', { classe: 'caixa dv-pagina', id: 'dv-pagina' }, [
+      el('h3', { classe: 'caixa__titulo', texto: 'Sua página de venda' }),
+      el('p', { classe: 'texto-medio t-corpo dv-intro', texto: 'Apresenta o Mapa DISC e leva ao teste grátis; no fim, a pessoa escolhe o relatório. Copie e mande para quem quiser.' }),
+      linhaLinkVenda('dv-link-pagina', 'Página de venda', 'Começa pelo resumo grátis', urlPagina, mensagemDivulgar('pagina', { url: urlPagina })),
+      pacotes.length ? el('div', { classe: 'dv-pacotes-links' }, pacotes.map(function (p) {
+        var url = linkPaginaVenda(href, { pacote: p.chave });
+        return linhaLinkVenda('dv-link-' + p.chave, p.nome + ' já escolhido', textoPreco(p), url,
+          mensagemDivulgar('pacote', { url: url, pacoteNome: p.nome, preco: precoVigente(p).centavos }), { 'data-pacote': p.chave });
+      })) : null
+    ]));
+
+    var grade = el('div', { classe: 'dv-grade' }, [vd.dv.criado ? caixaLinkCriado(vd.dv) : formLinkDesconto(vd.dv), caixaLinksCriados()]);
+    box.appendChild(grade);
+  }
+
+  // b) Criar link com desconto
+  function formLinkDesconto(f) {
+    var pacotes = pacotesVendaveis();
+    var caixa = el('section', { classe: 'caixa caixa--destaque dv-criar', id: 'dv-criar' }, [
+      el('h3', { classe: 'caixa__titulo', texto: 'Criar link com desconto' }),
+      el('p', { classe: 'texto-medio t-corpo dv-intro', texto: 'Para testar o pagamento, dar cortesia a um parceiro ou fazer uma campanha. O link já leva o pacote e o cupom aplicados.' })
+    ]);
+    function grupo(id, legenda, filhos, classe) {
+      return el('fieldset', { classe: 'dv-grupo', id: id }, [el('legend', { classe: 'campo__rotulo dv-grupo__legenda', texto: legenda }), el('div', { classe: classe }, filhos)]);
+    }
+    function radio(nome, valor, marcado, id) {
+      return el('input', { type: 'radio', classe: 'visualmente-oculto dv-opcao__radio', name: nome, value: valor, id: id, checked: marcado ? true : null });
+    }
+
+    // Pacote
+    caixa.appendChild(grupo('dv-pacotes', '1. Pacote', pacotes.map(function (p) {
+      var pv = precoVigente(p);
+      return el('label', { classe: 'dv-opcao', 'data-pacote': p.chave, for: 'dv-pac-' + p.chave }, [
+        radio('dv-pacote', p.chave, f.pacote === p.chave, 'dv-pac-' + p.chave),
+        el('span', { classe: 'seminegrito dv-opcao__titulo', texto: p.nome }),
+        el('span', { classe: 'dv-opcao__preco tabular' }, [
+          el('span', { classe: 'seminegrito', texto: formatarReais(pv.centavos) }),
+          pv.cheio != null ? el('s', { classe: 'texto-suave', texto: formatarReais(pv.cheio) }) : null
+        ])
+      ]);
+    }), 'dv-opcoes dv-opcoes--2'));
+
+    // Quanto paga
+    var campoValor = el('input', { id: 'dv-valor', classe: 'entrada dv-opcao__entrada', type: 'text', inputmode: 'decimal', autocomplete: 'off', placeholder: '19,90', value: f.valorTxt, 'aria-label': 'Valor que o cliente paga, em reais' });
+    var campoPct = el('input', { id: 'dv-pct', classe: 'entrada dv-opcao__entrada', type: 'text', inputmode: 'numeric', autocomplete: 'off', placeholder: '20', value: f.pctTxt, 'aria-label': 'Desconto em porcentagem' });
+    caixa.appendChild(grupo('dv-pagar', '2. Quanto o cliente vai pagar?', OPCOES_PAGAR.map(function (o) {
+      var entrada = o.id === 'valor' ? el('span', { classe: 'dv-opcao__campo' }, [el('span', { classe: 'texto-suave', texto: 'R$' }), campoValor])
+        : (o.id === 'percentual' ? el('span', { classe: 'dv-opcao__campo' }, [campoPct, el('span', { classe: 'texto-suave', texto: '%' })]) : null);
+      return el('label', { classe: 'dv-opcao', 'data-modo': o.id, for: 'dv-modo-' + o.id }, [
+        radio('dv-modo', o.id, f.modo === o.id, 'dv-modo-' + o.id),
+        el('span', { classe: 'seminegrito dv-opcao__titulo', texto: o.titulo }),
+        el('span', { classe: 't-nota texto-suave', texto: o.nota }),
+        entrada
+      ]);
+    }), 'dv-opcoes dv-opcoes--4'));
+
+    // Código, pessoas e validade
+    var campoCodigo = el('input', { id: 'dv-codigo', classe: 'entrada dv-codigo', type: 'text', autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', maxlength: '30', value: f.codigo });
+    var campoUsos = el('input', { id: 'dv-usos-outro', classe: 'entrada dv-usos-outro', type: 'number', min: '1', step: '1', inputmode: 'numeric', value: f.usosTxt, 'aria-label': 'Número de pessoas', placeholder: 'nº' });
+    var campoValidade = el('input', { id: 'dv-validade', classe: 'entrada', type: 'date', min: hojeIso(), value: f.validade });
+    caixa.appendChild(el('div', { classe: 'dv-linha-campos' }, [
+      el('label', { classe: 'campo dv-campo-codigo', for: 'dv-codigo' }, [
+        el('span', { classe: 'campo__rotulo', texto: '3. Código do cupom' }), campoCodigo,
+        el('span', { classe: 'campo__ajuda', texto: 'Criado automaticamente; pode trocar.' })
+      ]),
+      el('label', { classe: 'campo dv-campo-validade', for: 'dv-validade' }, [
+        el('span', { classe: 'campo__rotulo', texto: 'Válido até (opcional)' }), campoValidade,
+        el('span', { classe: 'campo__ajuda', texto: 'Vazio = sem validade.' })
+      ]),
+      el('fieldset', { classe: 'dv-grupo dv-campo-usos', id: 'dv-usos' }, [
+        el('legend', { classe: 'campo__rotulo dv-grupo__legenda', texto: 'Quantas pessoas podem usar' }),
+        el('div', { classe: 'dv-pilulas' }, OPCOES_USOS.map(function (o) {
+          return el('label', { classe: 'dv-pilula', 'data-usos': o.id, for: 'dv-usos-' + o.id }, [radio('dv-usos', o.id, f.usos === o.id, 'dv-usos-' + o.id), el('span', { texto: o.rotulo })]);
+        }).concat([campoUsos]))
+      ])
+    ]));
+
+    // Resumo ao vivo (ou o aviso do mínimo) no mesmo lugar, e o botão
+    var resumo = el('p', { classe: 'dv-resumo t-corpo', id: 'dv-resumo', 'aria-live': 'polite' });
+    var aviso = el('div', { classe: 'aviso aviso--erro dv-aviso', id: 'dv-aviso', role: 'alert', hidden: true }, [
+      el('p', { classe: 'dv-aviso__texto', id: 'dv-aviso-texto' }),
+      el('div', { classe: 'gestao-card__acoes' }, [
+        botao('botao--claro botao--pequeno', 'Usar R$ 0,50', function () { trocarModo('teste'); }, { id: 'btn-dv-usar-050' }),
+        botao('botao--claro botao--pequeno', 'Usar grátis', function () { trocarModo('gratis'); }, { id: 'btn-dv-usar-gratis' })
+      ])
+    ]);
+    var btCriar = botao('botao--laranja', 'Criar link', criar, { id: 'btn-dv-criar' });
+    var erro = el('p', { classe: 'campo__erro dv-erro', id: 'dv-erro', role: 'alert', texto: f.erro || '' });
+    caixa.appendChild(el('div', { classe: 'dv-resumo-area' }, [resumo, aviso]));
+    caixa.appendChild(el('div', { classe: 'dv-acoes' }, [btCriar, erro]));
+
+    function atualizar() {
+      var c = calcularDivulgar(f);
+      if (!f.codigoEditado && campoCodigo.value !== f.codigo) campoCodigo.value = f.codigo;
+      campoUsos.disabled = f.usos !== 'outro';
+      campoValor.tabIndex = f.modo === 'valor' ? 0 : -1;
+      campoPct.tabIndex = f.modo === 'percentual' ? 0 : -1;
+      var mostrarAviso = !!(c.plano && c.plano.abaixoMinimo);
+      aviso.hidden = !mostrarAviso;
+      resumo.hidden = mostrarAviso;
+      aviso.querySelector('.dv-aviso__texto').textContent = mostrarAviso ? c.plano.erro : '';
+      if (!mostrarAviso) {
+        resumo.classList.toggle('dv-resumo--pendente', !c.plano.ok);
+        resumo.textContent = c.plano.ok && c.pac
+          ? resumoLinkDesconto({ pacoteNome: c.pac.nome, preco: c.preco, valorFinal: c.plano.valorFinal, usosMax: isFinite(c.usosMax) ? c.usosMax : null, validoAte: f.validade })
+          : c.plano.erro;
+      }
+      btCriar.disabled = !!c.erro || f.salvando;
+      btCriar.textContent = f.salvando ? 'Criando…' : 'Criar link';
+      erro.textContent = f.erro || (c.plano.ok && c.erro ? c.erro : '');
+      return c;
+    }
+    function trocarModo(modo) {
+      f.modo = modo;
+      f.erro = '';
+      if (!f.usosEditado) f.usos = curtoPrazo(modo) ? '1' : 'sem';
+      if (!f.validadeEditada) f.validade = curtoPrazo(modo) ? somarDias(hojeIso(), 30) : '';
+      var r = caixa.querySelector('#dv-modo-' + modo); if (r) r.checked = true;
+      var ru = caixa.querySelector('#dv-usos-' + f.usos); if (ru) ru.checked = true;
+      campoValidade.value = f.validade;
+      atualizar();
+    }
+    caixa.addEventListener('change', function (e) {
+      var t = e.target;
+      if (t.name === 'dv-pacote') { f.pacote = t.value; f.erro = ''; atualizar(); }
+      else if (t.name === 'dv-modo') { trocarModo(t.value); if (t.value === 'valor') campoValor.focus(); if (t.value === 'percentual') campoPct.focus(); }
+      else if (t.name === 'dv-usos') { f.usos = t.value; f.usosEditado = true; atualizar(); if (t.value === 'outro') campoUsos.focus(); }
+      else if (t === campoValidade) { f.validade = campoValidade.value; f.validadeEditada = true; atualizar(); }
+    });
+    campoValor.addEventListener('focus', function () { if (f.modo !== 'valor') trocarModo('valor'); });
+    campoPct.addEventListener('focus', function () { if (f.modo !== 'percentual') trocarModo('percentual'); });
+    campoValor.addEventListener('input', function () { f.valorTxt = campoValor.value; f.erro = ''; atualizar(); });
+    campoPct.addEventListener('input', function () { f.pctTxt = campoPct.value; f.erro = ''; atualizar(); });
+    campoUsos.addEventListener('input', function () { f.usosTxt = campoUsos.value; atualizar(); });
+    campoValidade.addEventListener('input', function () { f.validade = campoValidade.value; f.validadeEditada = true; atualizar(); });
+    campoCodigo.addEventListener('input', function () {
+      var limpo = limparCodigo(campoCodigo.value);
+      if (campoCodigo.value !== limpo) campoCodigo.value = limpo;
+      f.codigo = limpo;
+      f.codigoEditado = limpo !== '';
+      f.erro = '';
+      atualizar();
+    });
+
+    function criar() {
+      var c = atualizar();
+      if (c.erro || f.salvando) return;
+      if (estado.vd.cupons.some(function (x) { return x.codigo === f.codigo; })) {
+        f.erro = 'Já existe um cupom com o código ' + f.codigo + '. Troque o código.';
+        atualizar();
+        campoCodigo.focus();
+        return;
+      }
+      var d = { codigo: f.codigo, tipo: c.plano.tipo, valor: c.plano.desconto, usosMax: c.usosMax, validoAte: f.validade || null, pacotes: [c.pac.chave], ativo: true };
+      var invalido = validarCupom(d);
+      if (invalido) { f.erro = invalido; atualizar(); return; }
+      f.salvando = true;
+      f.erro = '';
+      atualizar();
+      var url = linkPaginaVenda(root.location.href, { pacote: c.pac.chave, cupom: d.codigo });
+      var criado = { codigo: d.codigo, url: url, pacoteNome: c.pac.nome, valorFinal: c.plano.valorFinal,
+        resumo: resumoLinkDesconto({ pacoteNome: c.pac.nome, preco: c.preco, valorFinal: c.plano.valorFinal, usosMax: d.usosMax, validoAte: f.validade }) };
+      salvarCupomApi(d, 'Link criado com o cupom ' + d.codigo + '.').then(function () {
+        f.salvando = false;
+        f.criado = criado;
+        renderizarVendas();
+        var b = $('btn-dv-whatsapp'); if (b) b.focus();
+      }).catch(function (e) {
+        f.salvando = false;
+        if (e && e.tratado) throw e;
+        f.erro = (e && e.message) || 'Não foi possível criar o link.';
+        if ($('dv-criar')) renderizarVendas();
+      }).catch(falhou);
+    }
+
+    atualizar();
+    return caixa;
+  }
+
+  // Depois de criar: o link pronto para mandar.
+  function caixaLinkCriado(f) {
+    var cr = f.criado;
+    var msg = mensagemDivulgar('cupom', { url: cr.url, pacoteNome: cr.pacoteNome, valorFinal: cr.valorFinal, codigo: cr.codigo });
+    return el('section', { classe: 'caixa caixa--destaque dv-criar dv-criado', id: 'dv-criado', 'data-codigo': cr.codigo }, [
+      el('div', { classe: 'gestao-linha' }, [
+        el('h3', { classe: 'caixa__titulo', texto: 'Link pronto' }),
+        el('span', { classe: 'selo selo--verde', texto: 'Cupom ' + cr.codigo + ' criado' })
+      ]),
+      el('p', { classe: 't-corpo dv-resumo', id: 'dv-criado-resumo', texto: cr.resumo }),
+      el('p', { classe: 'av-link dv-criado__url', id: 'dv-link-criado', texto: cr.url }),
+      el('div', { classe: 'gestao-card__acoes' }, [
+        el('a', { classe: 'botao botao--principal', id: 'btn-dv-whatsapp', href: linkWhatsAppTexto(msg), target: '_blank', rel: 'noopener noreferrer', texto: 'Enviar por WhatsApp' }),
+        botao('botao--claro', 'Copiar link', function () { copiar(cr.url, 'Link copiado. Cole no WhatsApp ou onde quiser.'); }, { id: 'btn-dv-copiar' }),
+        el('a', { classe: 'botao botao--claro', id: 'btn-dv-abrir', href: cr.url, target: '_blank', rel: 'noopener noreferrer', texto: 'Abrir' }),
+        botao('botao--contorno', 'Criar outro', function () { estado.vd.dv = novoFormDivulgar(); renderizarVendas(); var c = $('dv-codigo'); if (c) c.focus(); }, { id: 'btn-dv-outro' })
+      ]),
+      el('p', { classe: 't-nota texto-suave dv-nota', texto: 'Quem abrir o link chega ao teste com o pacote e o cupom já escolhidos; o desconto aparece na hora de pagar. Se o preço do pacote mudar, o desconto em reais continua o mesmo.' })
+    ]);
+  }
+
+  // c) Links criados: os cupons ativos mais novos, com o link de cada um.
+  function caixaLinksCriados() {
+    var vd = estado.vd;
+    var lista = linksRecentes(vd.cupons, 8);
+    var hoje = hojeIso();
+    var ul = el('ul', { classe: 'dv-links', id: 'dv-lista-links' });
+    if (!lista.length) ul.appendChild(el('li', { classe: 'vazio' }, el('p', { classe: 'vazio__texto', texto: 'Nenhum link com desconto ainda. Crie o primeiro ao lado.' })));
+    lista.forEach(function (c) {
+      var url = linkLandingCupom(root.location.href, c.codigo, c.pacotes.length === 1 ? c.pacotes[0] : '');
+      var esgotado = c.usosMax != null && c.usos >= c.usosMax;
+      var vencido = c.validoAte && c.validoAte < hoje;
+      ul.appendChild(el('li', { classe: 'dv-links__item', 'data-codigo': c.codigo }, [
+        el('div', { classe: 'gestao-linha' }, [
+          el('p', { classe: 'seminegrito tabular dv-links__codigo', texto: c.codigo }),
+          el('span', { classe: 'selo ' + (esgotado || vencido ? 'selo--vermelho' : 'selo--verde'), texto: esgotado ? 'Esgotado' : (vencido ? 'Vencido' : 'Ativo') })
+        ]),
+        el('p', { classe: 't-rotulo dv-links__desconto', texto: textoLinkCupom(c, vd.pacotes) }),
+        el('p', { classe: 't-rotulo texto-suave tabular dv-links__usos', texto: c.usos + ' de ' + (c.usosMax != null ? c.usosMax + (c.usosMax === 1 ? ' uso' : ' usos') : '∞ usos') +
+          ' · ' + (c.validoAte ? 'até ' + dataBr(c.validoAte) : 'sem validade') }),
+        el('p', { classe: 'av-link dv-links__url', texto: url }),
+        el('div', { classe: 'gestao-card__acoes' }, [
+          botao('botao--claro botao--pequeno', 'Copiar', function () { copiar(url, 'Link com o cupom ' + c.codigo + ' copiado.'); }, { 'data-acao': 'copiar' }),
+          botao('botao--claro botao--pequeno', 'Desativar', function () { alternarCupom(c); }, { 'data-acao': 'desativar' })
+        ])
+      ]));
+    });
+    return el('section', { classe: 'caixa dv-criados', id: 'dv-criados' }, [
+      el('div', { classe: 'gestao-linha dv-criados__topo' }, [
+        el('h3', { classe: 'caixa__titulo', texto: 'Links criados' }),
+        botao('botao--link botao--pequeno', 'Ver todos os cupons', function () { irParaVendas('cupons'); }, { id: 'btn-dv-ver-cupons' })
+      ]),
+      ul
+    ]);
   }
 
   /* Pacotes */
@@ -6858,6 +7571,8 @@
 
   function abasPermitidas() { return abasDoPapel(papel(), MODO_API, temVendas(), temConexoes()); }
 
+  // Item "Página de venda" do menu (data-aba="divulgar") é um atalho para a subaba Divulgar de Vendas.
+  function abaDoBotao(b) { var a = b.getAttribute('data-aba'); return a === 'divulgar' ? 'vendas' : a; }
   function mostrarAba(aba) {
     var permitidas = abasPermitidas();
     if (permitidas.indexOf(aba) === -1) aba = 'lista';
@@ -6865,8 +7580,9 @@
     if (estado.abertoId) { estado.abertoId = null; $('vista-detalhe').hidden = true; }
     esconderVistas();
     $('vista-' + aba).hidden = false;
+    var marcada = aba === 'vendas' && estado.vd && estado.vd.sub === 'divulgar' ? 'divulgar' : aba;
     Array.prototype.forEach.call(document.querySelectorAll('.aba'), function (b) {
-      if (b.getAttribute('data-aba') === aba) b.setAttribute('aria-current', 'page');
+      if (b.getAttribute('data-aba') === marcada) b.setAttribute('aria-current', 'page');
       else b.removeAttribute('aria-current');
     });
     if (aba === 'conexoes') renderizarConexoes();
@@ -6883,7 +7599,7 @@
   function aplicarPapel() {
     var permitidas = abasPermitidas();
     Array.prototype.forEach.call(document.querySelectorAll('.aba'), function (b) {
-      b.hidden = permitidas.indexOf(b.getAttribute('data-aba')) === -1;
+      b.hidden = permitidas.indexOf(abaDoBotao(b)) === -1;
     });
     // Título do grupo do menu só aparece se o grupo tem algum item visível.
     Array.prototype.forEach.call(document.querySelectorAll('.menu-grupo'), function (g) {
@@ -7045,6 +7761,26 @@
     $('ns-senha').value = '';
     $('ns-confirmar').value = '';
     $('ns-senha').focus();
+    preencherContaNovaSenha();
+  }
+
+  // Campo "username" do formulário de nova senha = e-mail da sessão aberta pelo link (Chaves do iCloud/Safari
+  // salvam a senha ligada a ele). Sem e-mail conhecido, o campo fica no formulário, mas fora da vista.
+  function preencherContaNovaSenha() {
+    var campo = $('ns-email'), caixa = $('ns-conta');
+    if (!campo || !caixa) return;
+    function mostrar(email) {
+      email = String(email || '').trim();
+      campo.value = email;
+      campo.setAttribute('size', String(Math.max(10, Math.min(40, email.length || 10))));
+      caixa.classList.toggle('login__conta--vazia', !email);
+    }
+    mostrar('');
+    var fn = metodoApi('emailDaSessao');
+    if (!fn) return;
+    Promise.resolve().then(function () { return fn.call(root.DISC_API); }).then(function (r) {
+      if (r && r.ok && r.email) mostrar(r.email);
+    }).catch(function () { /* sem e-mail: segue sem o campo visível */ });
   }
 
   function sair() {
@@ -7133,7 +7869,12 @@
         if (aba === 'processos' && estado.proc.tela !== 'lista') { estado.proc = { tela: 'lista', id: null }; renderizarProcessos(); }
         if (aba === 'empresas' && estado.emp.tela !== 'lista') { estado.emp.tela = 'lista'; estado.emp.id = null; renderizarEmpresas(); }
         if (aba === 'relatorios' && estado.rl.tela !== 'modelos' && estado.rl.tela !== 'gerados') { estado.rl.tela = 'modelos'; estado.rl.rel = null; renderizarRelatorios(); }
-        if (aba === 'vendas' && estado.vd.pedidoId) { estado.vd.pedidoId = null; renderizarVendas(); }
+        if (aba === 'divulgar') { irParaVendas('divulgar'); fecharGaveta(); return; }
+        if (aba === 'vendas' && (estado.vd.pedidoId || estado.vd.sub === 'divulgar')) {
+          estado.vd.pedidoId = null;
+          if (estado.vd.sub === 'divulgar') estado.vd.sub = 'resumo';
+          renderizarVendas();
+        }
         mostrarAba(aba);
         fecharGaveta();
       });

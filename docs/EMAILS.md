@@ -18,6 +18,8 @@ hora e **só para e-mails da equipe do projeto Supabase** (convites para outras 
    - Host: `smtp.resend.com` · Port: `465` · Username: `resend` · Password: a chave do Resend
 5. Aproveite a mesma chave para o e-mail com o link do relatório comprado: Supabase → **Edge Functions → Secrets** →
    `RESEND_API_KEY` = a chave, e `EMAIL_REMETENTE` = `Gestão sem Caos <nao-responda@gestaosemcaos.com.br>`. A aba **Conexões** do painel testa o envio.
+   A mesma chave liga o botão **"Enviar por e-mail"** dos relatórios no painel (só o link, com o visual da marca, até 30
+   envios por hora por administrador; o link usa o `SITE_URL`) e o **"Enviar para meu e-mail"** do relatório comprado.
 
 ## 2. Modelos (assunto + conteúdo)
 

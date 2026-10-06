@@ -89,6 +89,13 @@ export function criarDb(sb) {
     async configGravar(chave, valor) {
       await dados(sb.from('configuracoes').upsert({ chave, valor }, { onConflict: 'chave' }));
     },
+    /** Anti-abuso (tabela limites_vendas): registra uma tentativa e devolve quantas houve desde "desdeIso" (inclui esta). */
+    async contarTentativa(tipo, chave, desdeIso, agoraIso) {
+      const c = String(chave).substring(0, 200);
+      await dados(sb.from('limites_vendas').insert({ tipo, chave: c, em: agoraIso }));
+      const linhas = await dados(sb.from('limites_vendas').select('id').eq('tipo', tipo).eq('chave', c).gte('em', desdeIso).limit(1000));
+      return (linhas || []).length;
+    },
     async adminsListar() {
       return (await dados(sb.from('admins').select('user_id, nome, criado_em, foto').order('criado_em', { ascending: true }))) || [];
     },

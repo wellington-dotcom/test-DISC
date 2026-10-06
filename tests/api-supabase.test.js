@@ -1244,3 +1244,27 @@ test('vendas no painel: pedidos, cupons, pacotes e resumo (tabelas com RLS e RPC
   const anon = nova();
   await assert.rejects(anon.api.listarPedidos('', {}), (err) => err.sessaoExpirada === true);
 });
+
+test('relatorioEnviarEmail (Edge Function "admin") e enviarLinkPorEmail ("pagamento"); emailDaSessao; api.js recusa', async () => {
+  const R = 'r'.repeat(64);
+  const { api, T, e } = await logado({ funcoes: {
+    admin: (b) => ({ data: b.para === 'semchave@x.com'
+      ? { ok: false, erro: 'O envio por e-mail ainda não está configurado (veja Conexões).', naoConfigurado: true }
+      : { ok: true, para: b.para, enviadoEm: '2026-10-06T12:00:00.000Z', assunto: 'Seu relatório DISC — Gestão sem Caos' }, error: null }),
+    pagamento: (b) => ({ data: b.acao === 'enviarLink' ? { ok: true, email: 'b**@exemplo.com' } : { ok: true }, error: null })
+  } });
+  await assert.rejects(api.relatorioEnviarEmail(T, R, { para: 'nada' }), /e-mail válido/);
+  await assert.rejects(api.relatorioEnviarEmail(T, '', { para: 'a@b.com' }), /Relatório não informado/);
+  const ok = await api.relatorioEnviarEmail(T, R, { para: ' Ana@Exemplo.com ', nome: 'Ana', mensagem: 'Oi' });
+  assert.equal(ok.ok, true);
+  assert.deepEqual(e.invocacoes.at(-1), { nome: 'admin', body: { acao: 'relatorio.enviarEmail', relatorioToken: R, para: 'ana@exemplo.com', nome: 'Ana', mensagem: 'Oi' }, comSessao: true });
+  await assert.rejects(api.relatorioEnviarEmail(T, R, { para: 'semchave@x.com' }),
+    (err) => /veja Conexões/.test(err.message) && err.resposta.naoConfigurado === true);
+  await assert.rejects(api.enviarLinkPorEmail('curto'), /link/i);
+  assert.deepEqual(await api.enviarLinkPorEmail('a'.repeat(64)), { ok: true, email: 'b**@exemplo.com' });
+  assert.deepEqual(e.invocacoes.at(-1).body, { acao: 'enviarLink', tokenAcesso: 'a'.repeat(64) });
+  assert.deepEqual(await api.emailDaSessao(), { ok: true, email: 'dona@empresa.com' });
+  for (const m of ['relatorioEnviarEmail', 'enviarLinkPorEmail']) {
+    await assert.rejects(API[m]('token', 'x'), (err) => err.message === 'Disponível só com o servidor Supabase.', m);
+  }
+});

@@ -125,6 +125,41 @@
     return /^[A-Za-z0-9_-]{8,200}$/.test(t) ? t : '';
   }
 
+  // Prévia antes de publicar (painel -> "Abrir prévia em nova aba"): relatorio.html#previa-<id>. O painel guarda o
+  // snapshot em localStorage ("disc_previa_<id>"); aqui ele é lido UMA vez, apagado e copiado para o sessionStorage
+  // desta aba (recarregar continua funcionando). Vale 1 hora. Nada vai ao servidor.
+  var PREFIXO_PREVIA = 'disc_previa_';
+  var PREVIA_VALIDADE_MS = 3600000;
+  var MENSAGEM_PREVIA = 'Prévia expirada ou já aberta em outra aba.';
+  function previaDaUrl(hash) {
+    var m = /^#previa-([a-z0-9]{16,64})$/.exec(String(hash || ''));
+    return m ? m[1] : '';
+  }
+  function armazem(nome) { try { return root[nome] || null; } catch (e) { return null; } }
+  // op (testes): {sessao, local} no lugar do sessionStorage/localStorage da página.
+  function lerPrevia(id, agora, op) {
+    var chave = PREFIXO_PREVIA + id, bruto = null;
+    var sessao = op ? op.sessao || null : armazem('sessionStorage'), local = op ? op.local || null : armazem('localStorage');
+    try { bruto = sessao ? sessao.getItem(chave) : null; } catch (e) { bruto = null; }
+    if (!bruto && local) {
+      try { bruto = local.getItem(chave); local.removeItem(chave); } catch (e2) { bruto = null; }
+      if (bruto && sessao) { try { sessao.setItem(chave, bruto); } catch (e3) { /* sem cópia: recarregar não reabre */ } }
+    }
+    if (!bruto) return null;
+    var obj = null;
+    try { obj = JSON.parse(bruto); } catch (e4) { obj = null; }
+    if (!obj || typeof obj !== 'object' || !obj.relatorio || typeof obj.relatorio !== 'object') return null;
+    var em = Number(obj.em) || 0;
+    if (!em || (agora || Date.now()) - em > PREVIA_VALIDADE_MS) {
+      try { if (sessao) sessao.removeItem(chave); } catch (e5) { /* ignora */ }
+      return null;
+    }
+    return obj.relatorio;
+  }
+  function faixaPreviaHtml() {
+    return '<div class="doc-previa-faixa" id="doc-previa-faixa" role="note">Prévia — ainda não publicado</div>';
+  }
+
   function texto(rel, id) {
     var t = rel && rel.textos && id ? rel.textos[id] : null;
     return t && t.texto ? String(t.texto) : '';
@@ -1479,6 +1514,17 @@
     var doc = root.document;
     var el = doc && doc.getElementById('relatorio');
     if (!el) return;
+    var idPrevia = previaDaUrl(root.location && root.location.hash);
+    if (idPrevia) {
+      var relPrevia = lerPrevia(idPrevia);
+      if (!relPrevia) { mostrarErro(el, MENSAGEM_PREVIA); return; }
+      render(relPrevia, el);
+      el.insertAdjacentHTML('afterbegin', faixaPreviaHtml());
+      el.setAttribute('data-estado', 'pronto');
+      el.setAttribute('data-previa', 'sim');
+      doc.title = 'Prévia · ' + (relPrevia.titulo || (relPrevia.processo && (relPrevia.processo.vaga || relPrevia.processo.nome)) || 'Relatório');
+      return;
+    }
     var token = tokenDaUrl(root.location && root.location.search, root.location && root.location.hash);
     var busca = buscarRelatorio(token);
     if (!busca) { mostrarErro(el); return; }
@@ -1512,6 +1558,10 @@
     rotuloAderencia: rotuloAderencia,
     rotuloConfiabilidade: rotuloConfiabilidade,
     tokenDaUrl: tokenDaUrl,
+    previaDaUrl: previaDaUrl,
+    lerPrevia: lerPrevia,
+    PREFIXO_PREVIA: PREFIXO_PREVIA,
+    PREVIA_VALIDADE_MS: PREVIA_VALIDADE_MS,
     texto: texto,
     montarHtml: montarHtml,
     organogramaHtml: organogramaHtml,

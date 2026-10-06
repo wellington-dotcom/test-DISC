@@ -56,6 +56,7 @@
         <div class="menu-grupo" data-grupo="vendas">
           <p class="menu-grupo__titulo" id="menu-grupo-vendas">Vendas</p>
           <button type="button" class="aba" data-aba="vendas" title="Vendas" hidden><svg class="icone menu-icone" viewBox="0 0 24 24" aria-hidden="true"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20M6 15h4"/></svg><span class="aba__texto">Vendas</span></button>
+          <button type="button" class="aba" data-aba="divulgar" title="Página de venda" hidden><svg class="icone menu-icone" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 14a4.5 4.5 0 0 0 6.4 0l3.2-3.2a4.5 4.5 0 0 0-6.4-6.4L12 5.6"/><path d="M14 10a4.5 4.5 0 0 0-6.4 0l-3.2 3.2a4.5 4.5 0 0 0 6.4 6.4l1.2-1.2"/></svg><span class="aba__texto">Página de venda</span></button>
         </div>
         <div class="menu-grupo" data-grupo="config">
           <p class="menu-grupo__titulo" id="menu-grupo-config">Configurações</p>
@@ -118,7 +119,7 @@
           <p class="login__nota login__previa" id="dica-previa" hidden>Prévia: <span class="negrito">admin@previa.com</span>, senha <span class="negrito">previa123</span></p>
         </form>
 
-        <form id="form-primeiro" class="login__form" novalidate hidden>
+        <form id="form-primeiro" class="login__form" method="post" action="#" novalidate hidden>
           <h1 class="login__h">Primeiro acesso</h1>
           <p class="login__texto">Crie o acesso de administrador com a chave de instalação. Serve também para recuperar a senha de um administrador.</p>
           <label class="login__rotulo" for="pa-chave">Chave de instalação</label>
@@ -126,9 +127,9 @@
           <label class="login__rotulo login__rotulo--junto" for="pa-nome">Seu nome</label>
           <input id="pa-nome" class="entrada" type="text" autocomplete="name" required>
           <label class="login__rotulo login__rotulo--junto" for="pa-email">E-mail</label>
-          <input id="pa-email" class="entrada" type="email" autocomplete="username" inputmode="email" required>
+          <input id="pa-email" name="email" class="entrada" type="email" autocomplete="username" inputmode="email" required>
           <label class="login__rotulo login__rotulo--junto" for="pa-senha">Senha (mínimo 8 caracteres)</label>
-          <input id="pa-senha" class="entrada" type="password" autocomplete="new-password" required>
+          <input id="pa-senha" name="new-password" class="entrada" type="password" autocomplete="new-password" required>
           <label class="login__rotulo login__rotulo--junto" for="pa-confirmar">Confirmar senha</label>
           <input id="pa-confirmar" class="entrada" type="password" autocomplete="new-password" required>
           <p class="login__erro" id="erro-primeiro" role="alert" hidden></p>
@@ -150,13 +151,18 @@
         </form>
 
         <!-- Só com o Supabase: volta do e-mail (redefinição ou convite) para definir a senha -->
-        <form id="form-nova-senha" class="login__form" novalidate hidden>
+        <form id="form-nova-senha" class="login__form" method="post" action="#" novalidate hidden>
           <h1 class="login__h" id="titulo-nova-senha">Defina sua nova senha</h1>
           <p class="login__texto" id="texto-nova-senha">Escolha uma senha com pelo menos 8 caracteres.</p>
+          <!-- E-mail da conta (do link recebido): o Safari/Chaves do iCloud salva a senha ligada a ele. -->
+          <div class="login__conta login__conta--vazia" id="ns-conta">
+            <label class="login__conta-rotulo" for="ns-email">Conta:</label>
+            <input id="ns-email" name="email" class="login__conta-campo" type="email" autocomplete="username" inputmode="email" readonly autocapitalize="off" spellcheck="false" value="">
+          </div>
           <label class="login__rotulo" for="ns-senha">Nova senha (mínimo 8 caracteres)</label>
-          <input id="ns-senha" class="entrada" type="password" autocomplete="new-password" required>
+          <input id="ns-senha" name="new-password" class="entrada" type="password" autocomplete="new-password" minlength="8" required>
           <label class="login__rotulo login__rotulo--junto" for="ns-confirmar">Confirmar nova senha</label>
-          <input id="ns-confirmar" class="entrada" type="password" autocomplete="new-password" required>
+          <input id="ns-confirmar" name="confirm-password" class="entrada" type="password" autocomplete="new-password" minlength="8" required>
           <p class="login__erro" id="erro-nova-senha" role="alert" hidden></p>
           <button type="submit" class="botao botao--branco botao--grande botao--bloco login__botao" id="btn-salvar-nova-senha">Salvar senha</button>
           <button type="button" class="login__link" id="btn-voltar-login-nova">Voltar para o login</button>

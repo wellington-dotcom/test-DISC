@@ -148,6 +148,12 @@ em { font-family: var(--ff-serif); font-style: italic; font-weight: 400; letter-
 .doc-carregando p { font-family: var(--ff-mono); font-size: var(--f-nota); letter-spacing: .14em; text-transform: uppercase; color: var(--mudo); }
 .doc-erro__tit { font-family: var(--ff-titulo); font-size: var(--f-h3); font-weight: 600; letter-spacing: -.02em; margin: 0; max-width: 520px; text-wrap: balance; }
 .doc-erro p { color: var(--mudo); }
+/* Prévia antes de publicar (aberta pelo painel): faixa fixa no topo (sai também na impressão) */
+.doc-previa-faixa {
+  position: sticky; top: 0; z-index: 20; padding: 10px var(--margem); text-align: center;
+  font-family: var(--ff-mono); font-size: var(--f-nota); letter-spacing: .14em; text-transform: uppercase;
+  background: var(--notus); color: var(--preto);
+}
 
 /* ---------- Marca ---------- */
 .marca-doc { display: inline-flex; align-items: center; flex: none; }

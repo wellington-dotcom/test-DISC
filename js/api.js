@@ -44,6 +44,7 @@
  *              recuperarAcesso, confirmarRetorno, listarPedidos, atualizarPedido, listarCupons, salvarCupom, excluirCupom, listarPacotes,
  *              salvarPacote, resumoVendas.
  *   Aba Conexões (só Supabase/prévia; aqui também recusam): diagnosticoConexoes, testarConexao.
+ *   E-mail (só Supabase/prévia; aqui também recusam): relatorioEnviarEmail, enviarLinkPorEmail.
  *   Utilitários: protocoloValido, normalizarProtocolo, normalizarCodigoAvaliacao, codigoAvaliacaoDaUrl.
  */
 (function (root) {
@@ -333,6 +334,9 @@
     // Aba Conexões: só no Supabase (e na prévia).
     diagnosticoConexoes: soSupabase,
     testarConexao: soSupabase,
+    // Enviar o link do relatório por e-mail (painel) e "Enviar para meu e-mail" (B2C): só no Supabase (e na prévia).
+    relatorioEnviarEmail: soSupabase,
+    enviarLinkPorEmail: soSupabase,
 
     // --- pública: página do relatório para o contratante ---
     relatorioPublico: seguro(function (relatorioToken) {
@@ -348,12 +352,12 @@
     'excluirUsuario', 'redefinirSenha',
     'processosListar', 'processosSalvar', 'processosExcluir', 'processoDados', 'clickupStatus', 'clickupListas',
     'relatorioRascunho', 'relatorioSalvar', 'relatorioPublicar', 'relatorioDespublicar', 'relatoriosListar',
-    'relatorioMelhorarTextos', 'relatorioPublico',
+    'relatorioMelhorarTextos', 'relatorioPublico', 'relatorioEnviarEmail',
     'listarEquipe', 'salvarColaborador', 'moverColaborador', 'desligarColaborador', 'salvarRelacoes',
     'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo', 'salvarMinhaFoto', 'removerFoto',
     'moverResposta', 'contratarPessoa', 'versaoBanco',
     'pacotesPublicos', 'enviarPessoal', 'resumoPessoal', 'criarPedido', 'iniciarPagamento', 'statusPedido', 'relatorioPessoal',
-    'salvarParte2Pessoal', 'recuperarAcesso', 'confirmarRetorno',
+    'salvarParte2Pessoal', 'recuperarAcesso', 'enviarLinkPorEmail', 'confirmarRetorno',
     'listarPedidos', 'atualizarPedido', 'listarCupons', 'salvarCupom', 'excluirCupom', 'listarPacotes', 'salvarPacote', 'resumoVendas',
     'diagnosticoConexoes', 'testarConexao'];
 

@@ -903,7 +903,8 @@ test('normalizarPedido aceita camelCase e colunas do banco', () => {
   const b = AD.normalizarPedido({ id: 'p2', respostaId: 'r2', valorCentavos: 4900, status: 'qualquer' });
   assert.equal(b.status, 'aguardando', 'status desconhecido vira aguardando');
   const c = AD.normalizarCupom({ codigo: 'lanc', tipo: 'percentual', valor: 20, usos_max: 50, valido_ate: '2026-12-31T00:00:00Z', pacotes: ['completo'] });
-  assert.deepEqual(c, { codigo: 'LANC', tipo: 'percentual', valor: 20, usosMax: 50, usos: 0, validoAte: '2026-12-31', ativo: true, pacotes: ['completo'] });
+  assert.deepEqual(c, { codigo: 'LANC', tipo: 'percentual', valor: 20, usosMax: 50, usos: 0, validoAte: '2026-12-31', ativo: true, pacotes: ['completo'], criadoEm: '' });
+  assert.equal(AD.normalizarCupom({ codigo: 'X1Y', criado_em: '2026-10-01T10:00:00Z' }).criadoEm, '2026-10-01T10:00:00Z');
   const k = AD.normalizarPacote({ chave: 'completo', nome: 'Relatório completo', preco_centavos: 3900, preco_lancamento_centavos: 2900, lancamento_ate: '2026-11-30', ativo: true, ordem: 1 });
   assert.equal(k.precoLancamentoCentavos, 2900);
   assert.equal(AD.normalizarPacote({ chave: 'x', preco_centavos: 100 }).precoLancamentoCentavos, null);
@@ -1001,6 +1002,108 @@ test('links de venda: landing com cupom, relatório comprado e mensagem de reenv
   assert.ok(ori.includes(rec) && ori.includes('davi@gmail.com') && ori.includes('Gestão sem Caos'));
   assert.equal(AD.textoCupom({ tipo: 'percentual', valor: 20 }), '20% de desconto');
   assert.equal(AD.textoCupom({ tipo: 'valor', valor: 1000 }), 'R$ 10,00 de desconto');
+});
+
+test('página de venda: links com pacote e cupom, WhatsApp sem número e mensagens da Gestão sem Caos', () => {
+  const href = 'https://site.com/disc/admin.html?x=1#vendas';
+  assert.equal(AD.linkPaginaVenda(href), 'https://site.com/disc/descubra.html');
+  assert.equal(AD.linkPaginaVenda(href, { pacote: 'completo_plus' }), 'https://site.com/disc/descubra.html?pacote=completo_plus');
+  assert.equal(AD.linkPaginaVenda(href, { pacote: 'completo_plus', cupom: 'pro050-7k' }), 'https://site.com/disc/descubra.html?pacote=completo_plus&cupom=PRO050-7K');
+  assert.equal(AD.linkPaginaVenda(href, { pacote: 'outro', cupom: 'A1B' }), 'https://site.com/disc/descubra.html?cupom=A1B', 'pacote desconhecido fica de fora');
+  assert.equal(AD.linkLandingCupom(href, 'LANC', 'completo'), 'https://site.com/disc/descubra.html?pacote=completo&cupom=LANC');
+  assert.equal(AD.linkLandingCupom(href, 'LANC', ''), 'https://site.com/disc/descubra.html?cupom=LANC');
+  assert.equal(AD.linkWhatsAppTexto('Olá!\nlink'), 'https://wa.me/?text=Ol%C3%A1!%0Alink');
+  const url = 'https://site.com/descubra.html?pacote=completo_plus&cupom=PRO050-7K';
+  for (const [tipo, d] of [['pagina', { url }], ['pacote', { url, pacoteNome: 'Completo + Parte 2', preco: 4900 }],
+    ['cupom', { url, pacoteNome: 'Completo + Parte 2', valorFinal: 50, codigo: 'PRO050-7K' }], ['cupom', { url, pacoteNome: 'Completo + Parte 2', valorFinal: 0, codigo: 'CORTESIA-4QX' }]]) {
+    const m = AD.mensagemDivulgar(tipo, d);
+    assert.ok(m.endsWith(url), tipo);
+    assert.match(m, /Gestão sem Caos/);
+    assert.doesNotMatch(m, /Notus/);
+  }
+  assert.match(AD.mensagemDivulgar('cupom', { url, pacoteNome: 'Completo + Parte 2', valorFinal: 50, codigo: 'PRO050-7K' }), /por R\$ 0,50 \(cupom PRO050-7K já aplicado\)/);
+  assert.match(AD.mensagemDivulgar('cupom', { url, pacoteNome: 'Completo + Parte 2', valorFinal: 0, codigo: 'CORTESIA-4QX' }), /sem custo/);
+});
+
+test('link com desconto: do valor final ao cupom (desconto em centavos) e o mínimo de R$ 0,50 do Stripe', () => {
+  assert.equal(AD.MINIMO_COBRANCA, 50);
+  assert.deepEqual(AD.planoDesconto(4900, { modo: 'teste' }), { ok: true, erro: '', abaixoMinimo: false, valorFinal: 50, tipo: 'valor', desconto: 4850 });
+  assert.deepEqual(AD.planoDesconto(4900, { modo: 'gratis' }), { ok: true, erro: '', abaixoMinimo: false, valorFinal: 0, tipo: 'percentual', desconto: 100 });
+  assert.deepEqual(AD.planoDesconto(2900, { modo: 'valor', valor: 1990 }), { ok: true, erro: '', abaixoMinimo: false, valorFinal: 1990, tipo: 'valor', desconto: 910 });
+  // Valor final 0 = cortesia (100%)
+  assert.equal(AD.planoDesconto(2900, { modo: 'valor', valor: 0 }).tipo, 'percentual');
+  assert.equal(AD.planoDesconto(2900, { modo: 'valor', valor: 0 }).desconto, 100);
+  // Abaixo do mínimo: R$ 0,01 a R$ 0,49 (por valor ou por %)
+  for (const v of [1, 20, 49]) {
+    const r = AD.planoDesconto(4900, { modo: 'valor', valor: v });
+    assert.equal(r.ok, false); assert.equal(r.abaixoMinimo, true); assert.match(r.erro, /a partir de R\$ 0,50/);
+  }
+  const pct = AD.planoDesconto(2900, { modo: 'percentual', percentual: 99 });   // 2900 × 1% = 29 centavos
+  assert.equal(pct.ok, false); assert.equal(pct.abaixoMinimo, true); assert.equal(pct.valorFinal, 29); assert.match(pct.erro, /R\$ 0,29/);
+  assert.deepEqual(AD.planoDesconto(2900, { modo: 'percentual', percentual: 20 }), { ok: true, erro: '', abaixoMinimo: false, valorFinal: 2320, tipo: 'percentual', desconto: 20 });
+  assert.equal(AD.planoDesconto(2900, { modo: 'percentual', percentual: 100 }).valorFinal, 0);
+  assert.match(AD.planoDesconto(2900, { modo: 'percentual', percentual: 0 }).erro, /1 a 100/);
+  assert.match(AD.planoDesconto(2900, { modo: 'percentual', percentual: 12.5 }).erro, /1 a 100/);
+  assert.match(AD.planoDesconto(2900, { modo: 'percentual', percentual: null }).erro, /Informe/);
+  // Valor final igual ou acima do preço atual = erro
+  assert.match(AD.planoDesconto(2900, { modo: 'valor', valor: 2900 }).erro, /menor que o preço atual \(R\$ 29,00\)/);
+  assert.equal(AD.planoDesconto(2900, { modo: 'valor', valor: 5000 }).abaixoMinimo, false);
+  assert.match(AD.planoDesconto(2900, { modo: 'valor', valor: null }).erro, /Informe quanto/);
+  assert.equal(AD.planoDesconto(40, { modo: 'teste' }).ok, false, 'pacote mais barato que R$ 0,50 não tem teste');
+  assert.equal(AD.planoDesconto(0, { modo: 'gratis' }).ok, false);
+  // O cupom gerado passa no validarCupom e dá o valor final na conta do criar_pedido (preço − desconto)
+  const p = AD.planoDesconto(4900, { modo: 'teste' });
+  assert.equal(AD.validarCupom({ codigo: 'PRO050-7K', tipo: p.tipo, valor: p.desconto, usosMax: 1, validoAte: '2026-11-05' }), '');
+  assert.equal(4900 - p.desconto, 50);
+});
+
+test('link com desconto: preço vigente, código legível, resumo ao vivo e lista dos links criados', () => {
+  const pac = { chave: 'completo_plus', nome: 'Completo + Parte 2', precoCentavos: 6900, precoLancamentoCentavos: 4900, lancamentoAte: '' };
+  const hoje = new Date(2026, 9, 6, 12);
+  assert.deepEqual(AD.precoVigente(pac, hoje), { centavos: 4900, cheio: 6900 });
+  assert.deepEqual(AD.precoVigente({ ...pac, lancamentoAte: '2026-10-06' }, hoje), { centavos: 4900, cheio: 6900 }, 'vale até o fim do dia');
+  assert.deepEqual(AD.precoVigente({ ...pac, lancamentoAte: '2026-10-05' }, hoje), { centavos: 6900, cheio: null });
+  assert.deepEqual(AD.precoVigente({ ...pac, precoLancamentoCentavos: null }, hoje), { centavos: 6900, cheio: null });
+  assert.equal(AD.somarDias('2026-10-06', 30), '2026-11-05');
+  assert.equal(AD.somarDias('2026-12-20', 30), '2027-01-19');
+
+  assert.equal(AD.codigoSugerido('completo_plus', { modo: 'teste' }, '7K'), 'PRO050-7K');
+  assert.equal(AD.codigoSugerido('completo', { modo: 'teste' }, 'AB2'), 'COMPLETO050-AB2');
+  assert.equal(AD.codigoSugerido('completo_plus', { modo: 'gratis' }, '4QX'), 'CORTESIA-4QX');
+  assert.equal(AD.codigoSugerido('completo', { modo: 'percentual', percentual: 20 }, 'XY3'), 'COMPLETO20-XY3');
+  assert.equal(AD.codigoSugerido('completo', { modo: 'percentual', percentual: 100 }, 'XY3'), 'CORTESIA-XY3');
+  assert.equal(AD.codigoSugerido('completo_plus', { modo: 'valor', valor: 1900 }, 'Z9Z'), 'PRO1900-Z9Z');
+  assert.equal(AD.codigoSugerido('completo_plus', { modo: 'valor', valor: 20 }, 'Z9Z'), 'PRO020-Z9Z', 'R$ 0,20 não vira "20" (que parece 20%)');
+  assert.equal(AD.codigoSugerido('completo_plus', { modo: 'valor', valor: 1990 }, 'Z9Z'), 'PRO1990-Z9Z');
+  assert.equal(AD.codigoSugerido('completo_plus', { modo: 'valor', valor: null }, 'Z9Z'), 'PRO-Z9Z');
+  for (let i = 0; i < 50; i++) {
+    const c = AD.codigoSugerido(i % 2 ? 'completo' : 'completo_plus', { modo: ['teste', 'gratis', 'percentual', 'valor'][i % 4], percentual: 15, valor: 2490 });
+    assert.match(c, /^[A-Z0-9_-]{3,30}$/, c);
+    assert.match(c, /-[2-9A-HJKMNP-Z]{3}$/, 'sufixo sem 0/O/1/I/L: ' + c);
+    assert.equal(AD.validarCupom({ codigo: c, tipo: 'percentual', valor: 10 }), '');
+  }
+  assert.equal(AD.limparCodigo(' pro 050-ção!'), 'PRO050-CAO');
+
+  assert.equal(AD.resumoLinkDesconto({ pacoteNome: 'Completo + Parte 2', preco: 4900, valorFinal: 50, usosMax: 1, validoAte: '2026-11-05' }),
+    'O cliente paga R$ 0,50 em vez de R$ 49,00 no Completo + Parte 2. Vale para 1 pessoa até 05/11/2026.');
+  assert.equal(AD.resumoLinkDesconto({ pacoteNome: 'Relatório completo', preco: 2900, valorFinal: 0, usosMax: null, validoAte: '' }),
+    'O cliente recebe o Relatório completo de graça (em vez de R$ 29,00). Vale para quantas pessoas quiserem, sem data de validade.');
+  assert.match(AD.resumoLinkDesconto({ pacoteNome: 'X', preco: 2900, valorFinal: 1990, usosMax: 10, validoAte: '' }), /Vale para 10 pessoas, sem data/);
+
+  const pacotes = [pac, { chave: 'completo', nome: 'Relatório completo', precoCentavos: 3900, precoLancamentoCentavos: 2900, lancamentoAte: '' }];
+  assert.equal(AD.textoLinkCupom({ tipo: 'valor', valor: 4850, pacotes: ['completo_plus'] }, pacotes, hoje), 'Paga R$ 0,50 no Completo + Parte 2');
+  assert.equal(AD.textoLinkCupom({ tipo: 'percentual', valor: 100, pacotes: ['completo'] }, pacotes, hoje), 'Grátis no Relatório completo');
+  assert.equal(AD.textoLinkCupom({ tipo: 'percentual', valor: 20, pacotes: [] }, pacotes, hoje), '20% de desconto em todos os pacotes');
+
+  const cupons = [
+    { codigo: 'VELHO', ativo: true, criadoEm: '' },
+    { codigo: 'B', ativo: true, criadoEm: '2026-10-02T10:00:00Z' },
+    { codigo: 'OFF', ativo: false, criadoEm: '2026-10-05T10:00:00Z' },
+    { codigo: 'C', ativo: true, criadoEm: '2026-10-04T10:00:00Z' }
+  ];
+  assert.deepEqual(AD.linksRecentes(cupons).map((c) => c.codigo), ['C', 'B', 'VELHO']);
+  assert.deepEqual(AD.linksRecentes(cupons, 1).map((c) => c.codigo), ['C']);
+  assert.equal(AD.linksRecentes(Array.from({ length: 12 }, (_, i) => ({ codigo: 'X' + i, ativo: true, criadoEm: '' }))).length, 8);
 });
 
 test('participantes: origem "pessoal" aparece como venda direta e o e-mail entra na busca', () => {
@@ -1132,4 +1235,29 @@ test('Conexões: nenhum texto dos cartões traz valor de segredo (só "existe"/"
   const txt = JSON.stringify(AD.cartoesConexoes(diagConexoes()));
   assert.ok(!/sk-ant-[A-Za-z0-9]{4}|pk_[A-Za-z0-9]{4}|re_[A-Za-z0-9]{4}|\$aact_|sb_secret/.test(txt));
   assert.ok(!/Notus/i.test(txt));
+});
+
+test('nova senha (recuperação/convite) e primeiro acesso: <form> com submit, e-mail "username" e senha "new-password" (Safari salva a senha)', () => {
+  const html = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'admin.html'), 'utf8');
+  const form = (id) => { const m = new RegExp('<form id="' + id + '"[\\s\\S]*?</form>').exec(html); assert.ok(m, id); return m[0]; };
+  const ns = form('form-nova-senha');
+  assert.match(ns, /<input id="ns-email" name="email"[^>]*type="email"[^>]*autocomplete="username"[^>]*readonly/);
+  assert.ok(ns.indexOf('id="ns-email"') < ns.indexOf('id="ns-senha"'), 'o e-mail vem antes da senha');
+  assert.match(ns, /id="ns-senha"[^>]*autocomplete="new-password"/);
+  assert.match(ns, /id="ns-confirmar"[^>]*autocomplete="new-password"/);
+  assert.match(ns, /<button type="submit"[^>]*id="btn-salvar-nova-senha"/);
+  assert.ok(!/id="ns-email"[^>]*\shidden/.test(ns) && !/type="hidden"/.test(ns), 'o campo existe de verdade (não é type=hidden)');
+  const pa = form('form-primeiro');
+  assert.match(pa, /id="pa-email"[^>]*autocomplete="username"/);
+  assert.match(pa, /id="pa-senha"[^>]*autocomplete="new-password"/);
+  assert.match(pa, /<button type="submit"/);
+});
+
+test('seletores de empresa do painel oferecem "+ Cadastrar" (cadastro rápido com a API da aba Empresas)', () => {
+  const js = require('node:fs').readFileSync(require('node:path').join(__dirname, '..', 'js', 'admin.js'), 'utf8');
+  for (const id of ['contratar-empresa', 'proc-empresa-id', 'mover-destino', 'assist-empresa']) {
+    const m = new RegExp("criarSeletorBusca\\(\\{ id: '" + id + "'[^;]*?criar: cadastroEmpresaRapido\\(\\)").exec(js);
+    assert.ok(m, id);
+  }
+  assert.match(js, /function cadastroEmpresaRapido\(\)[\s\S]*?api\('salvarEmpresa'/);
 });

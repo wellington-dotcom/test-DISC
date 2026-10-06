@@ -909,7 +909,7 @@ test.describe('Admin na prévia (API_URL "simulada")', () => {
     // A prévia mostra Vendas (depois de Relatórios) quando a API simulada tem a venda direta.
     const temVendas = await page.evaluate(() => typeof window.DISC_API.listarPedidos === 'function');
     // Menu lateral agrupado: Seleção, Empresas, Vendas (se houver) e Configurações.
-    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'comparativo', 'importar', 'empresas', 'relatorios'].concat(temVendas ? ['vendas'] : []).concat(['usuarios', 'conexoes']));
+    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'comparativo', 'importar', 'empresas', 'relatorios'].concat(temVendas ? ['vendas', 'divulgar'] : []).concat(['usuarios', 'conexoes']));
 
     // Processo novo
     await abrirAba(page, 'processos');
@@ -2242,7 +2242,7 @@ test.describe('Vendas (venda direta, API falsa)', () => {
     await simularVendas(page);
     await page.goto('/admin.html');
     await entrar(page, 'dona@empresa.com', 'senha-boa-1');
-    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'comparativo', 'importar', 'empresas', 'relatorios', 'vendas', 'usuarios', 'conexoes']);
+    expect(await abasVisiveis(page)).toEqual(['lista', 'processos', 'comparativo', 'importar', 'empresas', 'relatorios', 'vendas', 'divulgar', 'usuarios', 'conexoes']);
 
     // Resumo: receita com centavos, vendas, ticket médio, aguardando, conversão e últimos pedidos
     await abrirAba(page, 'vendas');
@@ -2355,9 +2355,11 @@ test.describe('Vendas (venda direta, API falsa)', () => {
     await expect(amigo).toContainText('R$ 10,50 de desconto');
     await expect(amigo).toContainText('0 de 30');
     await expect(amigo).toContainText('Relatório completo');
-    await expect(amigo.locator('.vd-cupom__link')).toHaveText(/\/descubra\.html\?cupom=AMIGO10$/);
+    // Cupom de um pacote só: o link já leva o pacote escolhido
+    await expect(amigo.locator('.vd-cupom__link')).toHaveText(/\/descubra\.html\?pacote=completo&cupom=AMIGO10$/);
+    await expect(page.locator('#vd-lista-cupons > li[data-codigo="LANC20"] .vd-cupom__link')).toHaveText(/\/descubra\.html\?cupom=LANC20$/);
     await amigo.locator('[data-acao="copiar-link"]').click();
-    expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(/\/descubra\.html\?cupom=AMIGO10$/);
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(/\/descubra\.html\?pacote=completo&cupom=AMIGO10$/);
     await capturarVendas(page, 'cupons');
     await page.locator('#vd-lista-cupons > li[data-codigo="LANC20"] [data-acao="desativar"]').click();
     await expect(page.locator('#vd-lista-cupons > li[data-codigo="LANC20"]')).toHaveAttribute('data-ativo', 'nao');
@@ -2445,7 +2447,219 @@ test.describe('Vendas (venda direta, API falsa)', () => {
     await page.goto('/admin.html');
     await entrar(page, 'dona@empresa.com', 'senha-boa-1');
     expect(await abasVisiveis(page)).not.toContain('vendas');
+    expect(await abasVisiveis(page)).not.toContain('divulgar');
     await expect(page.locator('#filtro-origem')).toHaveCount(0);
+    expect(erros).toEqual([]);
+  });
+});
+
+/* ---------- Página de venda (subaba "Divulgar"): links da página e links com desconto ---------- */
+
+// Capturas da subaba Divulgar (1366 px): só quando CAPTURAS_DIVULGAR aponta uma pasta.
+async function capturarDivulgar(page, nome) {
+  if (!process.env.CAPTURAS_DIVULGAR) return;
+  await page.waitForTimeout(450);
+  await page.evaluate(() => { document.getElementById('aviso-geral').hidden = true; });
+  // Janela da altura da página (o menu lateral fixo sai inteiro na captura) e de volta a 1366×900.
+  const altura = await page.evaluate(() => document.documentElement.scrollHeight);
+  await page.setViewportSize({ width: 1366, height: Math.max(900, altura) });
+  await page.screenshot({ path: require('node:path').join(process.env.CAPTURAS_DIVULGAR, 'divulgar-' + nome + '.png') });
+  await page.setViewportSize({ width: 1366, height: 900 });
+}
+// Data local (dd/mm/aaaa e aaaa-mm-dd) daqui a n dias, calculada no navegador.
+async function daquiA(page, n) {
+  return page.evaluate((dias) => {
+    const h = new Date(); const d = new Date(h.getFullYear(), h.getMonth(), h.getDate() + dias);
+    const p = (x) => String(x).padStart(2, '0');
+    return { br: p(d.getDate()) + '/' + p(d.getMonth() + 1) + '/' + d.getFullYear(), iso: d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) };
+  }, n);
+}
+
+test.describe('Página de venda (Divulgar)', () => {
+  test('menu "Página de venda": links da página, link de R$ 0,50 do Completo + Parte 2, aviso abaixo do mínimo e cortesia', async ({ page, context }) => {
+    const erros = coletarErros(page);
+    await page.setViewportSize({ width: 1366, height: 900 });
+    await context.grantPermissions(['clipboard-read', 'clipboard-write']);
+    await simularVendas(page);
+    await page.goto('/admin.html');
+    await entrar(page, 'dona@empresa.com', 'senha-boa-1');
+
+    // Abre pelo menu lateral; "Divulgar" é a primeira subaba
+    await expect(page.locator('.aba[data-aba="divulgar"]')).toHaveText('Página de venda');
+    await abrirAba(page, 'divulgar');
+    await expect(page.locator('#vista-vendas h2')).toHaveText('Página de venda');
+    await expect(page.locator('.aba[data-aba="divulgar"]')).toHaveAttribute('aria-current', 'page');
+    await expect(page.locator('.aba[data-aba="vendas"]')).not.toHaveAttribute('aria-current', 'page');
+    expect(await page.locator('#vd-subabas .subaba').evaluateAll((els) => els.map((e) => e.getAttribute('data-subaba')))).toEqual(['divulgar', 'resumo', 'pedidos', 'cupons', 'pacotes']);
+    await expect(page.locator('#vd-subaba-divulgar')).toHaveAttribute('aria-current', 'page');
+
+    // a) Sua página de venda + um link por pacote, com o preço de hoje
+    await expect(page.locator('#dv-link-pagina .dv-link__url')).toHaveText(/^http:\/\/localhost:\d+\/descubra\.html$/);
+    await expect(page.locator('#dv-link-completo .dv-link__url')).toHaveText(/\/descubra\.html\?pacote=completo$/);
+    await expect(page.locator('#dv-link-completo')).toContainText('R$ 29,00');
+    await expect(page.locator('#dv-link-completo_plus .dv-link__url')).toHaveText(/\/descubra\.html\?pacote=completo_plus$/);
+    await expect(page.locator('#dv-link-completo_plus')).toContainText('R$ 49,00');
+    const waPagina = await page.locator('#dv-link-pagina [data-acao="whatsapp"]').getAttribute('href');
+    expect(waPagina).toMatch(/^https:\/\/wa\.me\/\?text=/);
+    expect(decodeURIComponent(waPagina.split('text=')[1])).toContain('Gestão sem Caos');
+    expect(decodeURIComponent(waPagina)).not.toContain('Notus');
+    await expect(page.locator('#dv-link-completo_plus [data-acao="abrir"]')).toHaveAttribute('target', '_blank');
+    await page.locator('#dv-link-completo_plus [data-acao="copiar"]').click();
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toMatch(/\/descubra\.html\?pacote=completo_plus$/);
+
+    // b) Formulário: já vem com o Completo + Parte 2 e R$ 0,50 (1 pessoa, 30 dias)
+    const em30 = await daquiA(page, 30);
+    await expect(page.locator('#dv-pac-completo_plus')).toBeChecked();
+    await expect(page.locator('#dv-modo-teste')).toBeChecked();
+    await expect(page.locator('#dv-usos-1')).toBeChecked();
+    await expect(page.locator('#dv-validade')).toHaveValue(em30.iso);
+    await expect(page.locator('#dv-codigo')).toHaveValue(/^PRO050-[A-Z0-9]{3}$/);
+    await expect(page.locator('#dv-resumo')).toHaveText('O cliente paga R$ 0,50 em vez de R$ 49,00 no Completo + Parte 2. Vale para 1 pessoa até ' + em30.br + '.');
+    await expect(page.locator('#dv-lista-links > li[data-codigo="LANC20"]')).toContainText('20% de desconto em todos os pacotes');
+    await capturarDivulgar(page, 'inicial');
+
+    // Abaixo do mínimo do Stripe: aviso e botão bloqueado, sem os botões mudarem de lugar
+    const topoCriar = () => page.locator('#btn-dv-criar').evaluate((e) => Math.round(e.getBoundingClientRect().top + window.scrollY));
+    const antes = await topoCriar();
+    await page.locator('label[data-modo="valor"]').click();
+    await page.fill('#dv-valor', '0,20');
+    await expect(page.locator('#dv-aviso')).toBeVisible();
+    await expect(page.locator('#dv-aviso')).toContainText('O Stripe só cobra a partir de R$ 0,50');
+    await expect(page.locator('#dv-resumo')).toBeHidden();
+    await expect(page.locator('#btn-dv-criar')).toBeDisabled();
+    expect(Math.abs((await topoCriar()) - antes)).toBeLessThanOrEqual(1);
+    await capturarDivulgar(page, 'aviso-minimo');
+    // Por porcentagem também: 99% de R$ 49,00 = R$ 0,49
+    await page.locator('label[data-modo="percentual"]').click();
+    await page.fill('#dv-pct', '99');
+    await expect(page.locator('#dv-aviso')).toContainText('R$ 0,49');
+    await page.fill('#dv-pct', '20');
+    await expect(page.locator('#dv-resumo')).toContainText('O cliente paga R$ 39,20 em vez de R$ 49,00');
+    await expect(page.locator('#dv-codigo')).toHaveValue(/^PRO20-/);
+    // Valor maior que o preço: erro
+    await page.locator('label[data-modo="valor"]').click();
+    await page.fill('#dv-valor', '60');
+    await expect(page.locator('#dv-resumo')).toContainText('menor que o preço atual (R$ 49,00)');
+    await expect(page.locator('#btn-dv-criar')).toBeDisabled();
+    await page.fill('#dv-valor', '0,20');
+    await page.click('#btn-dv-usar-050');
+    await expect(page.locator('#dv-aviso')).toBeHidden();
+    await expect(page.locator('#dv-modo-teste')).toBeChecked();
+    await expect(page.locator('#dv-resumo')).toContainText('O cliente paga R$ 0,50 em vez de R$ 49,00');
+
+    // Criar link -> cupom de valor (R$ 49,00 − R$ 0,50) só para o Completo + Parte 2
+    const codigo = await page.locator('#dv-codigo').inputValue();
+    expect(codigo).toMatch(/^PRO050-/);
+    await page.click('#btn-dv-criar');
+    await expect(page.locator('#dv-criado')).toBeVisible();
+    await expect(page.locator('#aviso-geral')).toHaveText('Link criado com o cupom ' + codigo + '.');
+    expect((await chamadasSb(page, 'salvarCupom'))[0]).toEqual(['tk-dona', { codigo, tipo: 'valor', valor: 4850, usosMax: 1, validoAte: em30.iso, pacotes: ['completo_plus'], ativo: true }]);
+    const link = await page.locator('#dv-link-criado').textContent();
+    expect(link).toMatch(new RegExp('/descubra\\.html\\?pacote=completo_plus&cupom=' + codigo + '$'));
+    await expect(page.locator('#dv-criado-resumo')).toHaveText('O cliente paga R$ 0,50 em vez de R$ 49,00 no Completo + Parte 2. Vale para 1 pessoa até ' + em30.br + '.');
+    const wa = await page.locator('#btn-dv-whatsapp').getAttribute('href');
+    expect(wa).toMatch(/^https:\/\/wa\.me\/\?text=/);
+    const msgWa = decodeURIComponent(wa.split('text=')[1]);
+    expect(msgWa).toContain(link);
+    expect(msgWa).toContain('Gestão sem Caos');
+    expect(msgWa).toContain('R$ 0,50');
+    await expect(page.locator('#btn-dv-abrir')).toHaveAttribute('href', link);
+    await page.click('#btn-dv-copiar');
+    expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(link);
+    // c) Links criados: o novo primeiro, com usos e o desconto em texto
+    const novo = page.locator('#dv-lista-links > li').first();
+    await expect(novo).toHaveAttribute('data-codigo', codigo);
+    await expect(novo).toContainText('Paga R$ 0,50 no Completo + Parte 2');
+    await expect(novo).toContainText('0 de 1 uso');
+    await expect(novo.locator('.dv-links__url')).toHaveText(link);
+    await capturarDivulgar(page, 'link-criado');
+
+    // Mesmo código de novo: recusado antes de chamar o servidor
+    await page.click('#btn-dv-outro');
+    await expect(page.locator('#dv-criar')).toBeVisible();
+    await page.fill('#dv-codigo', codigo.toLowerCase());
+    await expect(page.locator('#dv-codigo')).toHaveValue(codigo);
+    await page.click('#btn-dv-criar');
+    await expect(page.locator('#dv-erro')).toContainText('Já existe um cupom com o código ' + codigo);
+    expect(await chamadasSb(page, 'salvarCupom')).toHaveLength(1);
+
+    // Cortesia para um parceiro: 100%, código CORTESIA-…, Relatório completo, 5 pessoas
+    await page.fill('#dv-codigo', '');
+    await page.locator('label[data-pacote="completo"]').click();
+    await page.locator('label[data-modo="gratis"]').click();
+    await page.locator('label[data-usos="5"]').click();
+    await expect(page.locator('#dv-codigo')).toHaveValue(/^CORTESIA-[A-Z0-9]{3}$/);
+    await expect(page.locator('#dv-resumo')).toHaveText('O cliente recebe o Relatório completo de graça (em vez de R$ 29,00). Vale para 5 pessoas até ' + em30.br + '.');
+    const cortesia = await page.locator('#dv-codigo').inputValue();
+    await page.click('#btn-dv-criar');
+    await expect(page.locator('#dv-link-criado')).toHaveText(new RegExp('/descubra\\.html\\?pacote=completo&cupom=' + cortesia + '$'));
+    expect((await chamadasSb(page, 'salvarCupom'))[1]).toEqual(['tk-dona', { codigo: cortesia, tipo: 'percentual', valor: 100, usosMax: 5, validoAte: em30.iso, pacotes: ['completo'], ativo: true }]);
+    await expect(page.locator('#dv-lista-links > li[data-codigo="' + cortesia + '"]')).toContainText('Grátis no Relatório completo');
+
+    // Desativar um link na lista; "Ver todos os cupons" leva à subaba Cupons (link com o pacote)
+    await page.locator('#dv-lista-links > li[data-codigo="' + cortesia + '"] [data-acao="desativar"]').click();
+    await expect(page.locator('#dv-lista-links > li[data-codigo="' + cortesia + '"]')).toHaveCount(0);
+    expect((await chamadasSb(page, 'salvarCupom'))[2][1]).toMatchObject({ codigo: cortesia, ativo: false });
+    await page.click('#btn-dv-ver-cupons');
+    await expect(page.locator('#vd-subaba-cupons')).toHaveAttribute('aria-current', 'page');
+    await expect(page.locator('.aba[data-aba="vendas"]')).toHaveAttribute('aria-current', 'page');
+    await expect(page.locator('#vd-lista-cupons > li[data-codigo="' + codigo + '"] .vd-cupom__link')).toHaveText(link);
+
+    // "Vendas" no menu continua abrindo o Resumo
+    await page.click('#vd-subaba-divulgar');
+    await expect(page.locator('.aba[data-aba="divulgar"]')).toHaveAttribute('aria-current', 'page');
+    await abrirAba(page, 'vendas');
+    await expect(page.locator('#vd-subaba-resumo')).toHaveAttribute('aria-current', 'page');
+    await expect(page.locator('.aba[data-aba="vendas"]')).toHaveAttribute('aria-current', 'page');
+
+    expect(await page.locator('#vista-vendas select').count()).toBe(0);
+    expect(erros).toEqual([]);
+  });
+
+  test('prévia: o link de R$ 0,50 criado no painel abre a landing e chega ao checkout com o pacote e o cupom aplicados', async ({ page }) => {
+    const erros = coletarErros(page);
+    await page.setViewportSize({ width: 1366, height: 900 });
+    await configurar(page, { API_URL: 'simulada', GRUPOS_DEMONSTRACAO: 3 });
+    await page.goto('/admin.html');
+    await entrar(page, 'admin@previa.com', 'previa123');
+    const temVendas = await page.evaluate(() => typeof window.DISC_API.listarPedidos === 'function');
+    test.skip(!temVendas, 'API simulada sem a venda direta');
+    await abrirAba(page, 'divulgar');
+    await expect(page.locator('#dv-resumo')).toContainText('O cliente paga R$ 0,50 em vez de R$ 49,00 no Completo + Parte 2');
+    const codigo = await page.locator('#dv-codigo').inputValue();
+    await page.click('#btn-dv-criar');
+    const link = await page.locator('#dv-link-criado').textContent();
+    expect(link).toContain('descubra.html?pacote=completo_plus&cupom=' + codigo);
+
+    // Landing: o card do Completo + Parte 2 em destaque e os CTAs levam pacote e cupom ao teste
+    await page.goto(link);
+    await expect(page.locator('.pacote--destaque')).toHaveAttribute('data-pacote', 'completo_plus');
+    await expect(page.locator('a[data-cta="heroi"]')).toHaveAttribute('href', 'index.html?modo=pessoal&pacote=completo_plus&cupom=' + codigo);
+    await page.locator('a[data-cta="heroi"]').click();
+    await expect(page).toHaveURL(new RegExp('index\\.html\\?modo=pessoal&pacote=completo_plus&cupom=' + codigo + '$'));
+
+    // Teste (modo demonstração: 3 grupos) até o resumo grátis
+    await expect(page.locator('h1')).toHaveText('Antes de começar');
+    await page.fill('#nome', 'Paulo Link Teste');
+    await page.fill('#email', 'paulo.link@exemplo.com');
+    await page.check('#consentimento');
+    await page.locator('#form-identificacao button[type="submit"]').click();
+    for (let i = 0; i < 3; i++) {
+      await expect(page.locator('.progresso-topo')).toContainText('Grupo ' + (i + 1) + ' de 3');
+      await page.locator('[data-acao="confirmar-ordem"]').click();
+      await page.locator('[data-acao="proximo"]').click();
+    }
+    await expect(page.locator('.resumo-gratis')).toBeVisible();
+    // O pacote do link vem escolhido; no checkout, o cupom já vem preenchido e o valor cai para R$ 0,50
+    await expect(page.locator('.pacote--destaque')).toHaveAttribute('data-pacote', 'completo_plus');
+    await expect(page.locator('.pacote--destaque .pacote-selo')).toHaveText('Sua escolha');
+    await page.locator('[data-acao="comprar"][data-pacote="completo_plus"]').click();
+    await expect(page.locator('#ck-cupom')).toHaveValue(codigo);
+    await expect(page.locator('#ck-cupom')).toBeVisible();
+    await page.locator('[data-ck="continuar"]').click();
+    await expect(page.locator('[data-ck-tela="pagamento"]')).toBeVisible();
+    await expect(page.locator('#ck-valor')).toHaveText('R$ 0,50');
+    await expect(page.locator('[data-ck-tela="pagamento"] .ck-pacote-nome')).toHaveText('Completo + Parte 2');
     expect(erros).toEqual([]);
   });
 });
@@ -2469,4 +2683,152 @@ test('prévia (API simulada): aba Vendas abre as quatro subabas sem erro', async
   await expect(page.locator('#vd-lista-pacotes > li')).toHaveCount(3);
   await capturarVendas(page, 'previa-pacotes');
   expect(erros).toEqual([]);
+});
+
+/* ----- Criar empresa sem sair da janela, prévia em nova aba e envio por e-mail (prévia, API simulada) ----- */
+
+const PRINTS_PAINEL2 = process.env.PRINTS_PAINEL2 || '';
+async function print2(page, nome) {
+  if (!PRINTS_PAINEL2) return;
+  await page.waitForTimeout(450);
+  fs.mkdirSync(PRINTS_PAINEL2, { recursive: true });
+  await page.screenshot({ path: require('node:path').join(PRINTS_PAINEL2, nome + '.png') });
+}
+async function entrarPrevia(page, context) {
+  await page.setViewportSize({ width: 1366, height: 900 });
+  // No contexto (e não só na página): a aba nova da prévia também usa a API simulada.
+  await context.route('**/js/config.js', (route) => route.fulfill({ status: 200, contentType: 'text/javascript; charset=utf-8',
+    body: 'window.CONFIG = ' + JSON.stringify({ API_URL: 'simulada', WHATSAPP_RECRUTADOR: '', EMPRESA: '', MOSTRAR_RESULTADO_AO_CANDIDATO: false, GRUPOS_DEMONSTRACAO: 0 }) + ';' }));
+  await page.goto('/admin.html');
+  await entrar(page, 'admin@previa.com', 'previa123');
+}
+
+test.describe('Painel: empresa nova na hora, prévia em nova aba e envio por e-mail (prévia)', () => {
+  test('"Adicionar à empresa": "+ Cadastrar" cria a empresa ali mesmo (erro sem fechar) e segue no fluxo', async ({ page, context }) => {
+    const erros = coletarErros(page);
+    await entrarPrevia(page, context);
+    await page.locator('#lista-candidatos > li', { hasText: 'Bruno Teste Fictício' }).getByRole('button', { name: /Ver detalhes/ }).click();
+    await page.click('#btn-contratar');
+    await expect(page.locator('#janela-contratar')).toBeVisible();
+    await page.click('#contratar-empresa');
+    // Texto que já é uma empresa: sem "Cadastrar"
+    await page.fill('#contratar-empresa-busca', 'clinica exemplo');
+    await expect(page.locator('#contratar-empresa-lista [role="option"]', { hasText: 'Clínica Exemplo' })).toBeVisible();
+    await expect(page.locator('#contratar-empresa-novo')).toBeHidden();
+    // Nome inválido: o erro do servidor aparece no painel, a janela continua aberta
+    await page.fill('#contratar-empresa-busca', 'X');
+    await expect(page.locator('#contratar-empresa-novo')).toHaveText('+ Cadastrar “X”');
+    await page.click('#contratar-empresa-novo');
+    await page.click('#contratar-empresa-criar-ok');
+    await expect(page.locator('#contratar-empresa-criar-erro')).toHaveText('Informe o nome da empresa.');
+    await expect(page.locator('#janela-contratar')).toBeVisible();
+    await page.click('#contratar-empresa-criar-voltar');
+    // Nome novo: cidade opcional + Confirmar -> cadastra, já escolhe e fecha só o painel
+    await page.fill('#contratar-empresa-busca', 'Padaria Nova Era');
+    await expect(page.locator('#contratar-empresa-lista [role="option"]')).toHaveCount(0);
+    await expect(page.locator('#contratar-empresa-novo')).toHaveText('+ Cadastrar “Padaria Nova Era”');
+    await page.click('#contratar-empresa-novo');
+    await expect(page.locator('#contratar-empresa-criar-nome')).toHaveText('Padaria Nova Era');
+    await page.fill('#contratar-empresa-criar-cidade', 'Boa Vista / RR');
+    await print2(page, '1-cadastrar-empresa-na-janela');
+    await page.keyboard.press('Enter'); // Enter na cidade confirma o cadastro (não envia a janela)
+    await expect(page.locator('#contratar-empresa-painel')).toBeHidden();
+    await expect(page.locator('#janela-contratar')).toBeVisible();
+    await expect(page.locator('#contratar-empresa-texto')).toHaveText('Padaria Nova Era');
+    await expect(page.locator('#aviso-geral')).toHaveText('Empresa "Padaria Nova Era" cadastrada.');
+    await print2(page, '2-empresa-cadastrada-e-escolhida');
+    await page.click('#janela-ok');
+    await expect(page.locator('#janela-contratar')).toHaveCount(0);
+    await expect(page.locator('#aviso-geral')).toContainText('agora é colaborador(a) em Padaria Nova Era');
+    const emp = await page.evaluate(async () => {
+      const t = sessionStorage.getItem('disc_admin_token');
+      return (await window.DISC_API.listarEmpresas(t)).empresas.find((e) => e.nome === 'Padaria Nova Era');
+    });
+    expect(emp).toMatchObject({ nome: 'Padaria Nova Era', cidade: 'Boa Vista / RR' });
+    expect(erros).toEqual([]);
+  });
+
+  test('assistente: "Abrir prévia em nova aba" mostra o relatório sem publicar; publicado, "Enviar por e-mail" mostra "Enviado"', async ({ page, context }) => {
+    const erros = coletarErros(page);
+    await entrarPrevia(page, context);
+    await abrirAba(page, 'relatorios');
+    await page.click('#btn-rel-novo');
+    await page.click('#assist-modelo-equipe');
+    // A empresa também pode nascer aqui
+    await page.click('#assist-empresa');
+    await page.fill('#assist-empresa-busca', 'Clínica Exemplo');
+    await page.locator('#assist-empresa-lista [role="option"]', { hasText: 'Clínica Exemplo' }).click();
+    await page.click('#btn-assist-gerar');
+    await expect(page.locator('#rel-modelo-previa')).toBeVisible();
+    await expect(page.locator('#btn-rel-previa-aba')).toHaveText('Abrir prévia em nova aba');
+    await print2(page, '3-assistente-previa');
+
+    const [aba] = await Promise.all([context.waitForEvent('page'), page.click('#btn-rel-previa-aba')]);
+    const errosAba = coletarErros(aba);
+    await aba.waitForLoadState();
+    expect(aba.url()).toMatch(/\/relatorio\.html#previa-[0-9a-f]{32}$/);
+    await expect(aba.locator('#doc-previa-faixa')).toHaveText('Prévia — ainda não publicado');
+    await expect(aba.locator('#relatorio')).toHaveAttribute('data-estado', 'pronto');
+    await expect(aba.locator('#relatorio')).toContainText('Clínica Exemplo');
+    await expect(aba).toHaveTitle(/^Prévia · /);
+    // O snapshot sai do localStorage depois de lido; recarregar a aba continua mostrando (sessionStorage da aba)
+    expect(await page.evaluate(() => Object.keys(localStorage).filter((k) => k.indexOf('disc_previa_') === 0))).toEqual([]);
+    await aba.reload();
+    await expect(aba.locator('#doc-previa-faixa')).toBeVisible();
+    await aba.setViewportSize({ width: 1366, height: 900 });
+    await print2(aba, '4-previa-em-nova-aba');
+    expect(errosAba).toEqual([]);
+    await aba.close();
+    // Nada foi publicado
+    await expect(page.locator('#btn-rel-publicar')).toBeVisible();
+    await expect(page.locator('#rel-modelo-publicado')).toHaveCount(0);
+
+    await page.click('#btn-rel-publicar');
+    await expect(page.locator('#rel-modelo-link')).toBeVisible();
+    await page.click('#btn-rel-enviar-email');
+    await expect(page.locator('#janela-enviar-email')).toBeVisible();
+    await page.click('#janela-ok');
+    await expect(page.locator('#janela-erro')).toHaveText('Informe um e-mail válido para o destinatário.');
+    await page.fill('#email-para', 'dono@clinica-exemplo.com');
+    await page.fill('#email-nome', 'Marta');
+    await page.fill('#email-mensagem', 'Segue o relatório da equipe.');
+    await print2(page, '5-enviar-por-email');
+    await page.click('#janela-ok');
+    await expect(page.locator('#janela-enviar-email')).toHaveCount(0);
+    await expect(page.locator('#aviso-geral')).toHaveText('Enviado para dono@clinica-exemplo.com.');
+    await expect(page.locator('#rel-modelo-envio')).toContainText('Enviado por e-mail para dono@clinica-exemplo.com');
+    await print2(page, '6-enviado');
+
+    // Lista "Gerados": o publicado também tem "Enviar por e-mail"
+    await page.click('#btn-voltar-relatorio');
+    const linha = page.locator('#lista-gerados > li[data-status="publicado"]').first();
+    await expect(linha.locator('[data-acao="enviar-email"]')).toBeVisible();
+    await expect(page.locator('#lista-gerados')).toContainText('Enviado por e-mail para dono@clinica-exemplo.com');
+    await print2(page, '7-gerados');
+    // A prévia embutida (iframe sandbox, já existente) avisa que não roda scripts: não é erro desta tela.
+    expect(erros.filter((e) => !/about:srcdoc/.test(e))).toEqual([]);
+  });
+
+  test('sem o Resend configurado, a janela explica e leva à aba Conexões', async ({ page, context }) => {
+    await entrarPrevia(page, context);
+    await page.evaluate(() => {
+      window.DISC_API.relatorioEnviarEmail = () => Promise.resolve({ ok: false, erro: 'O envio por e-mail ainda não está configurado (veja Conexões).', naoConfigurado: true });
+    });
+    await abrirAba(page, 'relatorios');
+    await page.click('#btn-rel-novo');
+    await page.click('#assist-modelo-equipe');
+    await page.click('#assist-empresa');
+    await page.locator('#assist-empresa-lista [role="option"]', { hasText: 'Clínica Exemplo' }).click();
+    await page.click('#btn-assist-gerar');
+    await page.click('#btn-rel-publicar');
+    await page.click('#btn-rel-enviar-email');
+    await page.fill('#email-para', 'dono@clinica-exemplo.com');
+    await page.click('#janela-ok');
+    await expect(page.locator('#janela-erro')).toHaveText('O envio por e-mail ainda não está configurado (veja Conexões).');
+    await expect(page.locator('#email-nao-configurado')).toBeVisible();
+    await print2(page, '8-email-nao-configurado');
+    await page.click('#btn-email-conexoes');
+    await expect(page.locator('#janela-enviar-email')).toHaveCount(0);
+    await expect(page.locator('#vista-conexoes')).toBeVisible();
+  });
 });

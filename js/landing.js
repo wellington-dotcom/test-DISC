@@ -6,7 +6,8 @@
  *   chama a RPC pública pacotes_publicos direto pelo REST (sem carregar o supabase-js, para a página ficar leve).
  *   Qualquer falha mantém os valores padrão, em silêncio.
  * - CTAs: "Começar meu mapa grátis" -> index.html?modo=pessoal; cada pacote -> index.html?modo=pessoal&pacote=<chave>.
- *   Parâmetros de campanha (utm_*, gclid, fbclid) que chegam na landing seguem para o teste.
+ *   Parâmetros de campanha (utm_*, gclid, fbclid, ref, cupom) que chegam na landing seguem para o teste; ?pacote=<chave>
+ *   (link do painel "Página de venda") vai nos CTAs gerais e destaca o card desse pacote.
  * - Contato "Para empresas": CONFIG.WHATSAPP_SUPORTE (só dígitos com DDI) vira link de WhatsApp.
  * - Rodapé: CONFIG.EMPRESA_LEGAL (razão social e CNPJ) quando preenchido.
  * - Barra fixa de CTA no celular quando o botão do herói sai da tela.
@@ -37,7 +38,8 @@
     }
   ];
   var DESTAQUE = 'completo';
-  var PARAMS_CAMPANHA = /^(utm_[a-z]+|gclid|fbclid|ref|cupom|demo)$/;
+  var PARAMS_CAMPANHA = /^(utm_[a-z]+|gclid|fbclid|ref|cupom|demo|pacote)$/;
+  var PACOTES_URL = ['gratis', 'completo', 'completo_plus'];   // ?pacote= aceito (link do painel: descubra.html?pacote=…&cupom=…)
 
   function escapar(t) {
     return String(t == null ? '' : t).replace(/[&<>"']/g, function (c) {
@@ -122,15 +124,27 @@
     return saida;
   }
 
+  // CTA do teste: index.html?modo=pessoal[&pacote=<chave>] + parâmetros de campanha. Sem chave (CTAs gerais), vale o
+  // ?pacote= da landing; o pacote do card clicado ganha do da URL (nunca dois "pacote=").
   function hrefTeste(chave, busca) {
     var params = [];
     params.push('modo=pessoal');
-    if (chave) params.push('pacote=' + encodeURIComponent(chave));
     var extra = paramsCampanha(busca);
+    var doLink = extra.filter(function (par) { return par.indexOf('pacote=') === 0; });
+    extra = extra.filter(function (par) { return par.indexOf('pacote=') !== 0; });
+    if (chave) params.push('pacote=' + encodeURIComponent(chave));
+    else if (doLink.length) params.push(doLink[0]);
     return 'index.html?' + params.concat(extra).join('&');
   }
 
-  // Repassa utm_*, gclid, fbclid, ref e cupom da URL da landing para o teste.
+  // Pacote pedido na URL da landing (?pacote=completo|completo_plus|gratis) ou ''.
+  function pacoteDaBusca(busca) {
+    var m = /[?&]pacote=([^&#]*)/.exec(String(busca || ''));
+    var v = m ? m[1].toLowerCase() : '';
+    return PACOTES_URL.indexOf(v) !== -1 ? v : '';
+  }
+
+  // Repassa utm_*, gclid, fbclid, ref, cupom e pacote (só os válidos) da URL da landing para o teste.
   function paramsCampanha(busca) {
     if (!busca) return [];
     var saida = [];
@@ -139,6 +153,11 @@
       var k = par.split('=')[0];
       var nome;
       try { nome = decodeURIComponent(k); } catch (e) { return; }
+      if (nome === 'pacote') {
+        var v = (par.split('=')[1] || '').toLowerCase();
+        if (PACOTES_URL.indexOf(v) === -1 || saida.some(function (x) { return x.indexOf('pacote=') === 0; })) return;
+        par = 'pacote=' + v;
+      }
       if (PARAMS_CAMPANHA.test(nome) && saida.length < 8 && par.length <= 200) saida.push(par);
     });
     return saida;
@@ -168,10 +187,13 @@
     return h;
   }
 
+  // Destaque: o pacote pago pedido na URL (?pacote=), senão o padrão (completo).
   function htmlPacotes(lista, busca, agora) {
-    var temDestaque = lista.some(function (p) { return p.chave === DESTAQUE; });
+    var pedido = pacoteDaBusca(busca);
+    var alvo = pedido && pedido !== 'gratis' && lista.some(function (p) { return p.chave === pedido; }) ? pedido : DESTAQUE;
+    var temDestaque = lista.some(function (p) { return p.chave === alvo; });
     return lista.map(function (p, i) {
-      var destaque = temDestaque ? p.chave === DESTAQUE : (lista.length === 3 && i === 1);
+      var destaque = temDestaque ? p.chave === alvo : (lista.length === 3 && i === 1);
       return htmlPacote(p, destaque, busca, agora);
     }).join('');
   }
@@ -271,7 +293,7 @@
 
   var LANDING = {
     PADRAO: PADRAO, formatarPreco: formatarPreco, precoAtual: precoAtual, normalizarPacotes: normalizarPacotes,
-    hrefTeste: hrefTeste, paramsCampanha: paramsCampanha, linkWhatsApp: linkWhatsApp, htmlPacotes: htmlPacotes
+    hrefTeste: hrefTeste, paramsCampanha: paramsCampanha, pacoteDaBusca: pacoteDaBusca, linkWhatsApp: linkWhatsApp, htmlPacotes: htmlPacotes
   };
   if (typeof module !== 'undefined' && module.exports) { module.exports = LANDING; return; }
   root.DISC_LANDING = LANDING;

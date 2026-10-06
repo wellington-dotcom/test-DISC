@@ -1,6 +1,6 @@
 // Edge Function "admin" — painel do recrutador (só administradores). Corpo {acao, ...}; resposta {ok, ...}.
 // Ações: clickup.status, clickup.listas, processo.dados, relatorio.rascunho, relatorio.salvar,
-// relatorio.publicar, relatorio.despublicar, relatorios.listar, relatorio.melhorarTextos,
+// relatorio.publicar, relatorio.despublicar, relatorios.listar, relatorio.melhorarTextos, relatorio.enviarEmail,
 // usuarios.listar, usuarios.convidar, usuarios.remover, conexoes.diagnostico, conexoes.testar (aba Conexões).
 // Lógica em supabase/funcoes-compartilhadas/.
 // Para colar no painel do Supabase use dist/funcoes/admin/index.ts (gerado por npm run montar:funcoes).

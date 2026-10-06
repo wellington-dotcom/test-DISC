@@ -192,8 +192,10 @@
         '<div class="ck-link-botoes">' +
           '<button type="button" class="botao botao--claro" data-acao="copiar-link">Copiar link</button>' +
           (wa ? '<a class="botao botao--claro" href="' + esc(wa) + '" target="_blank" rel="noopener noreferrer">Enviar no WhatsApp</a>' : '') +
+          (podeEnviarEmail() ? '<button type="button" class="botao botao--claro" id="btn-enviar-meu-email" data-acao="enviar-email">Enviar para meu e-mail</button>' : '') +
         '</div>' +
         '<p class="sucesso" id="copiado" role="status" aria-live="polite"></p>' +
+        '<p class="campo__erro erro" id="erro-meu-email" role="alert"></p>' +
       '</section>';
   }
 
@@ -285,6 +287,27 @@
     if (foco) { foco.setAttribute('tabindex', '-1'); try { foco.focus({ preventScroll: true }); } catch (e) { /* ignora */ } }
   }
 
+  // "Enviar para meu e-mail": o link vai para o e-mail usado na compra (o servidor sabe qual; aqui só o token).
+  function podeEnviarEmail() { return temApi() && typeof api().enviarLinkPorEmail === 'function' && !!token; }
+  function enviarMeuEmail(btn) {
+    var st = el.querySelector('#copiado'), er = el.querySelector('#erro-meu-email');
+    if (st) st.textContent = '';
+    if (er) er.textContent = '';
+    btn.disabled = true;
+    btn.textContent = 'Enviando…';
+    Promise.resolve().then(function () { return api().enviarLinkPorEmail(token); }).then(function (r) {
+      if (!r || r.ok !== true) throw new Error((r && r.erro) || 'Não foi possível enviar agora.');
+      var msg = 'Enviamos o link para ' + (r.email || 'o e-mail da compra') + '. Confira também o spam.';
+      if (st) st.textContent = msg;
+      anunciar(msg);
+      btn.textContent = 'Enviado';
+    }).catch(function (e) {
+      if (er) er.textContent = (e && e.message) || 'Não foi possível enviar agora. Tente de novo em instantes.';
+      btn.disabled = false;
+      btn.textContent = 'Enviar para meu e-mail';
+    });
+  }
+
   function copiar(texto) {
     var st = el.querySelector('#copiado');
     function ok() { if (st) st.textContent = 'Link copiado!'; anunciar('Link copiado.'); }
@@ -306,6 +329,7 @@
     if (acao === 'ir-capitulo') { ev.preventDefault(); irPara(alvo.getAttribute('data-alvo')); return; }
     if (acao === 'imprimir') { try { root.print(); } catch (e) { /* sem impressão */ } }
     else if (acao === 'copiar-link') copiar(link());
+    else if (acao === 'enviar-email') enviarMeuEmail(alvo);
     else if (acao === 'sem-parte2') { verSemParte2 = true; telaRelatorio(); }
     else if (acao === 'ja-paguei' && espera) {
       espera.inicio = Date.now();

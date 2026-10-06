@@ -419,3 +419,24 @@ test('fotos: data:image/jpeg válida vira <img>; inválida ou URL externa vira i
   assert.match(h, /avatar--analise/);
   assert.ok(!h.includes('https://x/y.jpg'));
 });
+
+test('prévia em nova aba: #previa-<id>, lê do localStorage uma vez (apaga), copia para a aba e expira em 1 hora', () => {
+  const V = require('../js/relatorio-view.js');
+  const arm = () => { const d = {}; return { d, getItem: (k) => (k in d ? d[k] : null), setItem: (k, v) => { d[k] = String(v); }, removeItem: (k) => { delete d[k]; } }; };
+  assert.equal(V.previaDaUrl('#previa-0123456789abcdef0123'), '0123456789abcdef0123');
+  assert.equal(V.previaDaUrl('#previa-curto'), '');
+  assert.equal(V.previaDaUrl('#previa-<script>aaaaaaaaaaaaaaa'), '');
+  assert.equal(V.previaDaUrl('#r-abc'), '');
+  const id = 'a'.repeat(32);
+  const agora = Date.parse('2026-10-06T12:00:00Z');
+  const local = arm(), sessao = arm();
+  const rel = { modelo: 'equipe', titulo: 'Equipe X' };
+  local.setItem(V.PREFIXO_PREVIA + id, JSON.stringify({ v: 1, em: agora - 1000, relatorio: rel }));
+  assert.deepEqual(V.lerPrevia(id, agora, { local, sessao }), rel);
+  assert.equal(local.getItem(V.PREFIXO_PREVIA + id), null, 'apagado do localStorage depois de lido');
+  assert.deepEqual(V.lerPrevia(id, agora, { local, sessao }), rel, 'recarregar a aba: vem do sessionStorage');
+  assert.equal(V.lerPrevia(id, agora + V.PREVIA_VALIDADE_MS, { local, sessao }), null, 'depois de 1 hora não abre');
+  assert.equal(V.lerPrevia('b'.repeat(32), agora, { local: arm(), sessao: arm() }), null);
+  const ruim = arm(); ruim.setItem(V.PREFIXO_PREVIA + id, '{quebrado');
+  assert.equal(V.lerPrevia(id, agora, { local: ruim, sessao: arm() }), null);
+});
