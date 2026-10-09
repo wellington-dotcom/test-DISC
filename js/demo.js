@@ -18,13 +18,25 @@
     el.dispatchEvent(new Event('input', { bubbles: true }));
     el.dispatchEvent(new Event('change', { bubbles: true }));
   }
+  // URL atual trocando demo=1 por demo=0 (e tirando o "#demo" do hash), sem perder o resto da busca nem o hash.
+  function hrefSair(loc) {
+    var busca = String((loc && loc.search) || '').replace(/^\?/, '').split('&').filter(function (p) { return p && !/^demo(=|$)/.test(p); });
+    busca.push('demo=0');
+    var hash = String((loc && loc.hash) || '').replace(/(^#|[&?])demo\b(=[^&]*)?/, '$1').replace(/^#&/, '#');
+    if (hash === '#') hash = '';
+    return String((loc && loc.pathname) || '').replace(/^.*\//, '') + '?' + busca.join('&') + hash;
+  }
   function faixa() {
     if (doc.getElementById('faixa-demo') || !doc.body) return;
     var f = doc.createElement('div');
     f.id = 'faixa-demo';
     f.setAttribute('role', 'note');
     f.className = 'faixa-demo';
-    f.innerHTML = '<strong>Demonstração</strong> · dados fictícios, 3 grupos e pagamento simulado (cupom ou botão "Simular pagamento"). Nada é salvo. <a href="?demo=0">Sair da demonstração</a>';
+    f.innerHTML = '<strong>Demonstração</strong> · dados fictícios, 3 grupos e pagamento simulado (cupom ou botão "Simular pagamento"). Nada é salvo. <a href="">Sair da demonstração</a>';
+    // Sai do modo continuando na mesma página: mantém ?modo=pessoal, o pacote, o cupom e o #t-<token> do relatório.
+    var sair = f.querySelector('a');
+    sair.setAttribute('href', hrefSair(root.location));
+    sair.addEventListener('click', function () { sair.setAttribute('href', hrefSair(root.location)); });
     doc.body.insertBefore(f, doc.body.firstChild);
   }
   function aplicar() {

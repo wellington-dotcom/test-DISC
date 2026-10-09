@@ -32,10 +32,12 @@ test('montar: perfil, 4 fatores, seções na ordem e aviso', () => {
   d.fatores.forEach((f) => assert.ok(f.descricao));
   assert.deepEqual(d.secoes.map((s) => s.id), ['fortes', 'atencao', 'pressao', 'comunicacao', 'plano']);
   const sec = Object.fromEntries(d.secoes.map((s) => [s.id, s]));
-  assert.deepEqual(sec.fortes.caracteristicas, DATA.perfis.C.positivos);
+  // Características em substantivos (linguagem neutra): "Cuidadoso" vira "Cuidado".
+  assert.deepEqual(sec.fortes.caracteristicas, R.neutros(DATA.perfis.C.positivos));
+  assert.ok(sec.fortes.caracteristicas.includes('Cuidado'));
   assert.ok(sec.fortes.itens.length >= 3);
   assert.ok(sec.atencao.itens.every((it) => /quando exagerad/i.test(it.texto)), 'tom construtivo');
-  assert.deepEqual(sec.pressao.sinais, DATA.perfis.C.sobPressao);
+  assert.deepEqual(sec.pressao.sinais, R.neutros(DATA.perfis.C.sobPressao));
   assert.ok(sec.pressao.itens.length >= 3);
   assert.deepEqual(sec.comunicacao.perfis.map((p) => p.letra), ['D', 'I', 'S'], 'os 3 outros perfis');
   sec.comunicacao.perfis.forEach((p) => assert.equal(p.texto, R.COMUNICACAO[p.letra]));
@@ -266,4 +268,32 @@ test('Com a Parte 2: travas começa pelo esforço de adaptação e há o plano d
   assert.equal(d.plano90.id, 'plano90');
   assert.deepEqual(d.plano90.itens.map((i) => i.prazo), ['Dias 1 a 30', 'Dias 31 a 60', 'Dias 61 a 90', 'Toda semana']);
   assert.doesNotMatch(JSON.stringify([d.travas, d.plano90]), /vaga|aderência|nota final|empresa|liderança/i);
+});
+
+test('linguagem neutra: nada de adjetivo no masculino ligado a "você" (frase, características, sinais, títulos)', () => {
+  const MASC = /\b(Aventureiro|Competitivo|Determinado|Direto|Ousado|Pioneiro|Nervoso|Agressivo|Atencioso|Caloroso|Encantador|Inspirador|Persuasivo|Político|Calmo|Compreensivo|Descontraído|Apaziguador|Planejador|Sincero|Despreocupado|Indeciso|Reservado|Acabador|Analítico|Cuidadoso|Diplomático|Exato|Maduro|Preciso|Meticuloso|Muito crítico|sobrecarregado|sozinho|ser ouvido|ser lembrado|Ser acompanhado)\b/;
+  for (const codigo of ['DI', 'DS', 'DC', 'ID', 'IS', 'IC', 'SD', 'SI', 'SC', 'CD', 'CI', 'CS']) {
+    const p = { D: 15, I: 15, S: 15, C: 15 };
+    p[codigo[0]] = 35; p[codigo[1]] = 20;
+    const d = R.montar({ percentuais: p, codigo }, 'Bia', DATA, { exigido: '4321'.repeat(10) });
+    assert.match(d.frase, /^Você tende a ser uma pessoa /);
+    const textos = [d.frase].concat(d.secoes[0].caracteristicas, d.secoes[2].sinais,
+      ...d.secoes.concat(d.aprofundamento).map((s) => (s.itens || []).map((it) => it.titulo + ' ' + it.texto)),
+      d.travas.itens.map((it) => it.titulo + ' ' + it.texto));
+    for (const t of textos) assert.doesNotMatch(String(t), MASC, codigo + ': ' + t);
+  }
+});
+
+test('régua de intensidade com vírgula e "esticando" com o fator no título (sem repetir o mesmo título)', () => {
+  const d = R.montar({ percentuais: { D: 20.4, I: 19.6, S: 30, C: 30 }, codigo: 'SC' }, 'Bia', DATA, { exigido: '4321'.repeat(10) });
+  const reg = d.aprofundamento.find((s) => s.id === 'intensidade');
+  if (reg) {
+    assert.ok(reg.itens.some((it) => /\(20,4%\)/.test(it.titulo)), reg.itens.map((i) => i.titulo).join(' | '));
+    assert.ok(reg.itens.every((it) => !/\d\.\d%/.test(it.titulo)));
+  }
+  const est = d.aprofundamento.find((s) => s.id === 'esticando');
+  assert.ok(est);
+  const titulos = est.itens.map((i) => i.titulo);
+  assert.equal(new Set(titulos).size, titulos.length, titulos.join(' | '));
+  assert.ok(titulos.includes('O trabalho pede mais Dominância'), titulos.join(' | '));
 });

@@ -115,6 +115,16 @@ body[data-etapa="boasvindas"] .conteudo { max-width: 1120px; }
 }
 .lista-info strong { color: var(--branco); }
 .boasvindas-noite .acoes { margin-top: 28px; }
+.boasvindas-vaga { margin-top: 8px; font-size: var(--t-rotulo); color: var(--sobre-notus); }
+/* Botão principal da capa (Começar / Continuar). No celular fica fixo na base, como a barra dos grupos. */
+.boasvindas-cta { display: grid; gap: 10px; margin-top: 28px; }
+.boasvindas-cta .botao { width: 100%; }
+.boasvindas-cta-nota { font-size: var(--t-rotulo); line-height: 1.45; color: color-mix(in srgb, var(--branco) 82%, transparent); text-align: center; }
+.boasvindas-noite .boasvindas-recomecar { margin-top: 12px; }
+.nota-recomecar { margin-top: 8px; font-size: var(--t-nota); line-height: 1.45; text-align: center; color: var(--suave); }
+.boasvindas .nota-recomecar { color: color-mix(in srgb, var(--branco) 78%, transparent); }
+/* "Começar do zero" armado (2º toque apaga): destaque laranja para não passar despercebido */
+[data-acao="recomecar"][data-confirmar="sim"] { border-color: var(--notus); }
 
 /* ---------- Identificação ---------- */
 .formulario { display: grid; gap: 18px; margin-top: 24px; }
@@ -125,6 +135,8 @@ body[data-etapa="boasvindas"] .conteudo { max-width: 1120px; }
 .consentimento .marcar { font-size: var(--t-rotulo); line-height: 1.55; color: var(--medio); }
 .consentimento strong { color: var(--tinta); }
 .formulario .acoes { margin-top: 6px; }
+.vaga-processo { margin-top: 12px; padding: 10px 14px; border-radius: 12px; background: var(--nevoa); font-size: var(--t-rotulo); color: var(--medio); }
+.vaga-processo strong { color: var(--tinta); }
 /* Dois campos lado a lado no computador (telefone + idade; função + empresa); empilhados no celular.
    align-items: start — um erro num campo não desloca o vizinho. */
 .campos-dupla { display: grid; gap: 18px; align-items: start; }
@@ -174,6 +186,7 @@ textarea.entrada--texto { min-height: 88px; line-height: 1.45; }
 }
 .instrucao { font-size: var(--t-rotulo); color: var(--suave); margin-top: 6px; }
 .instrucao strong { color: var(--tinta); }
+.instrucao--nota { margin-top: 4px; font-size: var(--t-nota); }
 
 .ordenar {
   --linha-alt: 54px;           /* altura fixa de cada cartão (compacto no celular; toque >= 44px) */
@@ -447,6 +460,12 @@ body[data-etapa="confirmacao"] .conteudo { padding-bottom: calc(132px + env(safe
 
 /* ---------- Link de avaliação ---------- */
 .link-invalido .subtitulo { margin-top: 10px; }
+.link-invalido-dicas { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 10px; }
+.link-invalido-dicas li { position: relative; padding-left: 18px; font-size: var(--t-rotulo); line-height: 1.5; color: var(--medio); }
+.link-invalido-dicas li::before { content: ''; position: absolute; left: 0; top: .55em; width: 8px; height: 8px; border-radius: 50%; background: var(--notus); }
+.link-invalido-dicas strong { color: var(--tinta); }
+.link-invalido-progresso, .link-invalido-suporte { margin-top: 14px; }
+.envio-encerrado .subtitulo { margin-top: 14px; }
 
 /* Resumo do perfil ao participante (link com resultado) */
 .perfil-retrato { margin-top: 16px; padding: 14px 16px; border-radius: 16px; background: var(--nevoa); color: var(--medio); font-size: var(--t-corpo); line-height: 1.55; }
@@ -496,6 +515,12 @@ body[data-etapa="confirmacao"] .conteudo { padding-bottom: calc(132px + env(safe
   margin-bottom: 18px;
 }
 .agradecimento .destaque { margin-top: 10px; font-size: var(--t-corpo); color: var(--medio); max-width: 48ch; }
+/* "Seu relatório fica só nesta aba": aviso + Salvar em PDF logo no topo */
+.guardar-relatorio { margin-top: 20px; padding-top: 16px; border-top: 1px solid var(--linha); display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.guardar-relatorio-texto { flex: 1 1 240px; font-size: var(--t-rotulo); line-height: 1.5; color: var(--medio); }
+.guardar-relatorio-texto strong { color: var(--tinta); }
+.guardar-relatorio .botao { flex: none; }
+.guardar-relatorio--solto { margin-top: 0; border-top: 0; }
 
 /* Protocolo curto (envio confirmado) dentro do card de agradecimento */
 .protocolo-bloco { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--linha); }
@@ -553,6 +578,9 @@ body[data-etapa="confirmacao"] .conteudo { padding-bottom: calc(132px + env(safe
 .rel-item-titulo { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; font-size: var(--t-corpo); font-weight: 600; color: var(--tinta); }
 .rel-item-texto { margin-top: 4px; font-size: var(--t-rotulo); color: var(--medio); line-height: 1.5; }
 .rel-item .perfil-sub { display: inline; }
+.rel-com-texto { flex: 1; min-width: 0; }
+/* Cabeçalho que só aparece no PDF ("Salvar em PDF") */
+.rel-impressao { display: none; }
 .letra-disc--mini { width: 24px; height: 24px; font-size: var(--t-eixo); }
 .rel-itens--plano .rel-item { background: var(--branco); box-shadow: inset 0 0 0 1px var(--linha); }
 .rel-prazo { display: inline-block; margin-bottom: 6px; font-size: var(--t-eixo); font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--notus-forte); font-variant-numeric: tabular-nums; }
@@ -694,8 +722,85 @@ body[data-etapa="confirmacao"] .conteudo { padding-bottom: calc(132px + env(safe
   .tela-grupo .confirmar .botao { min-height: 44px; }
 }
 
+@media (max-width: 639px) {
+  .boasvindas-cta {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; margin: 0;
+    padding: 10px 16px calc(12px + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--tinta) 94%, transparent);
+    -webkit-backdrop-filter: blur(16px) saturate(150%); backdrop-filter: blur(16px) saturate(150%);
+    border-top: 1px solid color-mix(in srgb, var(--branco) 14%, transparent);
+  }
+  .boasvindas-cta > * { width: 100%; max-width: 640px; margin-left: auto; margin-right: auto; }
+  /* A entrada da capa anima só a opacidade: um transform no ancestral prenderia a barra fixa dentro da capa. */
+  .boasvindas.surgir { animation-name: surgir-opacidade; }
+  .boasvindas-cta-nota { font-size: var(--t-nota); }
+  body[data-etapa="boasvindas"] .conteudo { padding-bottom: calc(132px + env(safe-area-inset-bottom)); }
+}
+
+@keyframes surgir-opacidade { from { opacity: 0; } to { opacity: 1; } }
+
+/* Celular baixo (375x667, iPhone SE/8): cartões e espaços um pouco menores para "Esta ordem está certa" não ficar
+   atrás da barra fixa, também na Parte 2 (que tem o selo) e nas perguntas de 2 linhas. */
+@media (max-width: 639px) and (max-height: 700px) {
+  .ordenar { --linha-alt: 48px; --vao: 5px; --passo: 53px; --rotulo-alt: 18px; --rotulo-vao: 4px; margin-top: 8px; }
+  .tela-grupo .titulo-grupo { margin-top: 8px; }
+  .tela-grupo .selo-parte2 { margin-top: 6px; }
+  .tela-grupo .selo-parte2 + .titulo-grupo { margin-top: 4px; }
+  .tela-grupo .confirmar { margin-top: 6px; }
+  .tela-grupo .faixa-demo { margin-bottom: 8px; }
+}
+/* A faixa da demonstração já aparece no topo da página: a do card sai (sobra espaço no celular). */
+body:has(#faixa-demo) .tela-grupo .faixa-demo { display: none; }
+
+/* Celular deitado (paisagem, até 559px de altura): continua o layout compacto do celular, com a barra fixa. */
+@media (min-width: 640px) and (max-height: 559px) {
+  body[data-etapa="teste"] .topo-interno,
+  body[data-etapa="parte2"] .topo-interno,
+  body[data-etapa="parte2-intro"] .topo-interno,
+  body[data-etapa="confirmacao"] .topo-interno { padding-top: 4px; padding-bottom: 4px; }
+  body[data-etapa="teste"] .topo .logo-gsc,
+  body[data-etapa="parte2"] .topo .logo-gsc,
+  body[data-etapa="parte2-intro"] .topo .logo-gsc,
+  body[data-etapa="confirmacao"] .topo .logo-gsc { height: 18px; }
+  body[data-etapa="teste"] .conteudo,
+  body[data-etapa="parte2"] .conteudo,
+  body[data-etapa="parte2-intro"] .conteudo,
+  body[data-etapa="confirmacao"] .conteudo { padding-top: 6px; padding-bottom: calc(72px + env(safe-area-inset-bottom)); }
+  .tela-grupo .progresso-topo, .tela-confirmacao .progresso-topo { line-height: 1.2; }
+  .tela-grupo .progresso-num, .tela-confirmacao .progresso-num { font-size: var(--t-titulo); }
+  .tela-grupo .progresso-barra, .tela-confirmacao .progresso-barra { height: 16px; margin-top: 4px; }
+  .tela-grupo .progresso-ponto, .tela-confirmacao .progresso-ponto { width: 22px; height: 22px; }
+  .tela-grupo .titulo-grupo, .tela-confirmacao .titulo-grupo { font-size: var(--t-indicador); margin-top: 6px; min-height: 0; }
+  .ordenar { --linha-alt: 44px; --vao: 4px; --passo: 48px; --rotulo-alt: 18px; --rotulo-vao: 4px; margin-top: 6px; }
+  .tela-grupo .confirmar { margin-top: 4px; min-height: 44px; }
+  /* Grupo em duas colunas: progresso, pergunta e "Esta ordem está certa" à esquerda; os 4 cartões à direita.
+     Assim tudo cabe nos ~300 px de altura que sobram acima da barra fixa. */
+  body[data-etapa="teste"] .topo, body[data-etapa="parte2"] .topo { display: none; }
+  .tela-grupo:not(.tela-parte2) {
+    display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); column-gap: 24px; align-content: start;
+    padding-top: 14px; padding-bottom: 14px;
+  }
+  .tela-grupo:not(.tela-parte2) > * { grid-column: 1; }
+  .tela-grupo:not(.tela-parte2) > .ordenar { grid-column: 2; grid-row: 1 / span 8; margin-top: 0; align-self: start; }
+  .tela-grupo:not(.tela-parte2) > .confirmar { justify-content: flex-start; }
+  .barra-dica { display: none; }
+  .barra-nav { justify-content: flex-end; }
+  .barra-nav {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; margin: 0;
+    padding: 8px 24px calc(8px + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--branco) 88%, transparent);
+    -webkit-backdrop-filter: blur(16px) saturate(150%); backdrop-filter: blur(16px) saturate(150%);
+    border-top: 1px solid var(--linha);
+  }
+}
+
 @media (max-width: 360px) {
   .barra-botoes .botao { font-size: var(--t-rotulo); }
+}
+
+/* Computador com mouse: "Tirar foto" abriria o mesmo seletor de arquivos que "Da galeria". */
+@media (hover: hover) and (pointer: fine) {
+  .campo-foto label[for="foto-camera"] { display: none; }
 }
 
 @media (max-width: 340px) {
@@ -723,8 +828,13 @@ body[data-etapa="confirmacao"] .conteudo { padding-bottom: calc(132px + env(safe
   @page { margin: 14mm; }
   body[data-etapa="concluido"] .pilha-telas > :not(.relatorio-candidato) { display: none !important; }
   body[data-etapa="concluido"] .conteudo { max-width: none; padding: 0; }
-  .relatorio-candidato .caixa { animation: none; border: 1px solid var(--linha); padding: 20px; break-inside: avoid; page-break-inside: avoid; }
-  .relatorio-candidato .rel-item, .relatorio-candidato .barra-linha { break-inside: avoid; page-break-inside: avoid; }
+  /* As seções quebram entre páginas (antes, a seção inteira "sem quebrar" deixava a 1ª página meio vazia);
+     cada cartão, barra e título continua inteiro. */
+  .relatorio-candidato .caixa { animation: none; border: 1px solid var(--linha); padding: 20px; }
+  .relatorio-candidato .rel-item, .relatorio-candidato .barra-linha, .relatorio-candidato .trava, .relatorio-candidato .estica-fator { break-inside: avoid; page-break-inside: avoid; }
+  .relatorio-candidato .rel-secao-titulo, .relatorio-candidato .rel-h3, .relatorio-candidato .rel-nota { break-after: avoid; page-break-after: avoid; }
+  .relatorio-candidato .rel-impressao { display: flex; align-items: center; gap: 12px; padding: 0 0 10px; border-bottom: 1px solid var(--linha); font-size: 12px; color: var(--medio); }
+  .relatorio-candidato .rel-impressao .logo-gsc { height: 20px; width: auto; }
   .relatorio-candidato, .relatorio-candidato * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .rel-itens { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 }
@@ -748,10 +858,38 @@ body[data-modo="pessoal"] .topo-empresa { background: var(--branco); border: 1px
 .pessoal-lembrete { font-size: var(--t-rotulo); color: var(--suave); line-height: 1.5; }
 .consentimento a { color: var(--tinta); }
 .pessoal-retomar .acoes .botao--link { align-self: center; }
+/* Veio do card de um pacote ou de um link com cupom: o que foi escolhido e quando paga */
+.pessoal-escolha { margin-top: 14px; padding: 12px 16px; border-radius: 16px; background: var(--branco); box-shadow: inset 0 0 0 1px rgba(243, 68, 5, .35); font-size: var(--t-rotulo); line-height: 1.5; color: var(--medio); }
+.pessoal-escolha strong { color: var(--tinta); }
+.sugestao-email { color: var(--tinta); }
+.sugestao-email-botao { display: inline; min-height: 0; padding: 0; font-size: inherit; font-weight: 600; vertical-align: baseline; }
+/* Relatórios já comprados neste aparelho (sobrevivem a "Refazer o teste") */
+.minhas-compras-lista { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 8px; font-size: var(--t-rotulo); }
+.minhas-compras-lista a { color: var(--tinta); font-weight: 600; text-underline-offset: 3px; }
 
 /* Resumo grátis (o card de vidro da tela) */
 .resumo-gratis .resumo-titulo { font-size: var(--t-indicador); line-height: 1.2; }
 .resumo-gratis .rel-h3 { margin-top: 24px; }
+/* Atalho para a oferta logo no topo do resumo e a mesma chamada fixa na base (celular) */
+.resumo-atalho { margin-top: 16px; display: grid; gap: 8px; }
+.resumo-atalho .botao { width: 100%; }
+.resumo-cupom { font-size: var(--t-rotulo); line-height: 1.45; color: var(--medio); }
+.resumo-cupom strong { color: var(--notus-forte); }
+.resumo-cupom--oferta { margin-top: 10px; padding: 10px 14px; border-radius: 12px; background: var(--nevoa); }
+.resumo-cta-fixo { display: none; }
+@media (max-width: 639px) {
+  .resumo-cta-fixo {
+    display: block; position: fixed; left: 0; right: 0; bottom: 0; z-index: 20;
+    padding: 10px 16px calc(12px + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--branco) 88%, transparent);
+    -webkit-backdrop-filter: blur(16px) saturate(150%); backdrop-filter: blur(16px) saturate(150%);
+    border-top: 1px solid var(--linha);
+    transform: translateY(110%); transition: transform .3s var(--curva); pointer-events: none;
+  }
+  .resumo-cta-fixo--visivel { transform: none; pointer-events: auto; }
+  .pessoal-resumo { padding-bottom: 72px; }
+}
+@media (prefers-reduced-motion: reduce) { .resumo-cta-fixo { transition: none; } }
 
 /* Prévia borrada do que é pago: títulos reais, texto como linhas borradas */
 .previa-paga .titulo-secao { margin-bottom: 4px; }
@@ -815,6 +953,21 @@ body[data-modo="pessoal"] .topo-empresa { background: var(--branco); border: 1px
 .ck-cupom-campo { margin-top: 4px; }
 .ck-cpf { margin-top: 12px; }
 .ck-cupom-campo .entrada { text-transform: uppercase; }
+/* Trocar o pacote na revisão (dois botões de opção) */
+.ck-pacotes { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px; margin-top: 18px; }
+.ck-pacote-opcao {
+  display: grid; gap: 2px; min-height: 56px; padding: 10px 12px; text-align: left; cursor: pointer;
+  border: 1px solid var(--linha); border-radius: 16px; background: var(--branco); color: var(--medio); font: inherit;
+}
+.ck-pacote-opcao[aria-checked="true"] { border-color: var(--notus); box-shadow: inset 0 0 0 1px var(--notus); color: var(--tinta); }
+.ck-pacote-opcao-nome { font-size: var(--t-rotulo); font-weight: 600; line-height: 1.3; }
+.ck-pacote-opcao-preco { font-size: var(--t-nota); color: var(--suave); font-variant-numeric: tabular-nums; }
+.ck-cupom-linha { margin-top: 6px; font-size: var(--t-rotulo); color: var(--notus-forte); font-weight: 600; font-variant-numeric: tabular-nums; }
+.ck-cupom-ativo { margin-top: 12px; padding: 10px 14px; border-radius: 12px; background: var(--branco); box-shadow: inset 0 0 0 1px rgba(243, 68, 5, .35); font-size: var(--t-rotulo); line-height: 1.45; color: var(--medio); }
+.ck-cupom-ativo strong { color: var(--tinta); }
+.ck-email { margin-top: 14px; font-size: var(--t-rotulo); line-height: 1.45; color: var(--medio); overflow-wrap: anywhere; }
+.ck-email strong { color: var(--tinta); }
+.ck-letra-miuda a, .ck-garantia a { color: var(--tinta); }
 .ck-acoes { margin-top: 18px; }
 .ck-erro { margin-top: 12px; }
 .ck-letra-miuda { margin-top: 12px; font-size: var(--t-nota); color: var(--suave); }
@@ -878,6 +1031,10 @@ body[data-modo="pessoal"] .topo-empresa { background: var(--branco); border: 1px
 .meu-link .ck-link-texto { margin-top: 10px; }
 .meu-rodape { text-align: center; padding: 4px 8px 0; }
 .recuperar .formulario { margin-top: 18px; }
+/* "Guardar meu acesso" logo depois da capa (versão curta do bloco do fim) */
+.meu-link--topo .caixa__titulo { font-size: var(--t-corpo); }
+.meu-link--topo .ck-link-botoes { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+.pagamento-falhou .acoes { margin-top: 18px; }
 .recuperar-ok { text-align: left; }
 .recuperar-suporte, .recuperar .rodape-nota { margin-top: 12px; }
 .parte2-pedido .destaque { margin-top: 10px; font-size: var(--t-corpo); color: var(--medio); }
@@ -950,6 +1107,8 @@ body[data-modo="pessoal"] .topo-empresa { background: var(--branco); border: 1px
 .av-capa-fatores li { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .av-capa-pct { font-size: var(--t-corpo); font-weight: 600; color: var(--branco); font-variant-numeric: tabular-nums; }
 .av-capa-fatores .letra-disc { box-shadow: 0 0 0 1.5px rgba(255, 255, 255, .55); }
+/* 375 px: "25,6%" encostava no círculo seguinte; abaixo de 400 px os fatores vão em 2 × 2 */
+@media (max-width: 399px) { .av-capa-fatores { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 16px; } }
 .av-capa-data { font-size: var(--t-rotulo); color: rgba(255, 255, 255, .7); }
 .av-capa-acoes { margin: 0; }
 
@@ -1095,17 +1254,19 @@ body[data-modo="pessoal"] .topo-empresa { background: var(--branco); border: 1px
     @top-left { font-family: 'Plus Jakarta Sans Variable', sans-serif; font-size: 11px; color: #6b7586; }
     @bottom-right { content: counter(page); font-family: 'Plus Jakarta Sans Variable', sans-serif; font-size: 11px; color: #6b7586; }
   }
-  @page capa { margin: 0; @top-left { content: none; } @bottom-right { content: none; } }
+  /* Capa: mesma margem das outras páginas (uma página com outra margem fazia o Chromium montar o documento
+     inteiro na largura da capa e cortar a lateral direita das páginas seguintes). Só o cabeçalho e o número saem. */
+  @page capa { margin: 14mm; @top-left { content: none; } @bottom-right { content: none; } }
   body[data-etapa="meu-relatorio"] .meu-rodape { display: none !important; }
   .meu-relatorio:has(.relatorio-avancado) { max-width: none; }
   .relatorio-avancado { display: block; }
   .relatorio-avancado, .relatorio-avancado * { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
   .relatorio-avancado .surgir { animation: none; }
   .relatorio-avancado > style { display: none; }
-  .av-capa { page: capa; display: block; height: 100vh; min-height: 0; margin: 0; border-radius: 0; padding: 22mm 18mm; break-after: page; break-inside: avoid; }
-  .av-capa-centro { display: block; margin-top: 70mm; }
+  .av-capa { page: capa; display: block; height: 264mm; min-height: 0; margin: 0; border-radius: 16px; padding: 16mm 14mm; break-after: page; break-inside: avoid; }
+  .av-capa-centro { display: block; margin-top: 58mm; }
   .av-capa-centro > * + * { margin-top: 14px; }
-  .av-capa-data { position: absolute; left: 18mm; bottom: 22mm; }
+  .av-capa-data { position: absolute; left: 14mm; bottom: 16mm; }
   .av-capa-titulo { font-size: var(--t-numero-grande); }
   .av-sumario { break-after: page; padding: 0; }
   .relatorio-avancado .caixa { padding: 0; border-radius: 0; box-shadow: none; }

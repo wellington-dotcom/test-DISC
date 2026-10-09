@@ -157,3 +157,35 @@ test('pacotes padrão: os 3 do contrato, com o completo em destaque', () => {
   assert.equal((html.match(/pacote--destaque/g) || []).length, 1);
   assert.match(html, /data-pacote="completo" [^>]*>|class="pacote pacote--destaque" data-pacote="completo"/);
 });
+
+test('cupomDaBusca: o link com desconto mostra o cupom desde a landing (normalizado como no teste)', () => {
+  assert.equal(L.cupomDaBusca('?pacote=completo&cupom=previa100'), 'PREVIA100');
+  assert.equal(L.cupomDaBusca('?cupom=%20lanca10%20'), 'LANCA10');
+  assert.equal(L.cupomDaBusca('?cupom=<b>'), '');
+  assert.equal(L.cupomDaBusca('?cupom=ab'), '');
+  assert.equal(L.cupomDaBusca(''), '');
+});
+
+test('contatoSuporte: WhatsApp primeiro, depois e-mail; sem nenhum, nada é prometido', () => {
+  assert.equal(L.contatoSuporte({ WHATSAPP_SUPORTE: '5511999998888', EMAIL_SUPORTE: 'oi@gsc.com.br' }).tipo, 'whatsapp');
+  assert.match(L.contatoSuporte({ WHATSAPP_SUPORTE: '5511999998888' }).href, /^https:\/\/wa\.me\/5511999998888/);
+  assert.deepEqual(L.contatoSuporte({ EMAIL_SUPORTE: 'oi@gsc.com.br' }), { href: 'mailto:oi@gsc.com.br', texto: 'oi@gsc.com.br', tipo: 'email' });
+  assert.equal(L.contatoSuporte({ WHATSAPP_SUPORTE: '', EMAIL_SUPORTE: '' }), null);
+  assert.equal(L.contatoSuporte({ EMAIL_SUPORTE: 'sem-arroba' }), null);
+});
+
+test('landing: faixa do cupom e textos de suporte existem e começam escondidos/neutros', () => {
+  const html = ler('descubra.html');
+  assert.equal((html.match(/data-cupom-ativo role="note" hidden/g) || []).length, 2);
+  assert.match(html, /data-suporte-lead>Se a sua não estiver aqui, fale com a Gestão sem Caos pelo canal em que você nos conheceu\./);
+  assert.doesNotMatch(html, /pelo canal de suporte\./, 'sem canal configurado, não promete um "canal de suporte" que não existe');
+});
+
+for (const pagina of ['termos.html', 'privacidade.html']) {
+  test(pagina + ': sem "a preencher" visível quando falta a razão social; Voltar inteligente', () => {
+    const html = ler(pagina);
+    assert.match(html, /n\.textContent = legal \|\| 'Gestão sem Caos'/);
+    assert.match(html, /data-voltar/);
+    assert.match(html, /history\.back\(\)/);
+  });
+}

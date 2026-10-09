@@ -493,10 +493,50 @@
 
   // Mensagem de erro de envio para o candidato: falhas de conexão/tempo são mostradas;
   // erros técnicos (configuração, servidor) viram uma orientação genérica.
-  function mensagemErroEnvio(msg) {
+  // pessoal (venda direta): não há recrutador nem código de segurança, só "tentar de novo".
+  function mensagemErroEnvio(msg, pessoal) {
     msg = String(msg || '');
     if (/conex|conectar|internet|demorou|ocupado|Muitos envios|link de avalia/i.test(msg)) return msg;
+    if (pessoal) return 'Não conseguimos gerar o seu resultado agora. Suas respostas estão salvas neste aparelho; tente de novo em instantes.';
     return 'Não conseguimos enviar agora. Toque em "Gerar código de segurança" e envie o código ao recrutador.';
+  }
+
+  // O link do processo foi desativado (avaliação encerrada) no meio do teste: tentar de novo não adianta.
+  function avaliacaoEncerrada(msg) {
+    return /link de avalia[çc][ãa]o n[ãa]o est[áa] mais ativo|avalia[çc][ãa]o encerrada/i.test(String(msg || ''));
+  }
+
+  // Sugestão para e-mail com domínio digitado errado ("ana@gmial.com" -> "ana@gmail.com"); '' se não houver.
+  var DOMINIOS_COMUNS = ['gmail.com', 'hotmail.com', 'outlook.com', 'yahoo.com', 'yahoo.com.br', 'icloud.com', 'live.com',
+    'uol.com.br', 'bol.com.br', 'terra.com.br', 'hotmail.com.br', 'outlook.com.br', 'msn.com', 'globo.com'];
+  function distancia(a, b) {
+    var m = a.length, n = b.length, d = [], i, j;
+    for (i = 0; i <= m; i++) { d[i] = [i]; }
+    for (j = 1; j <= n; j++) d[0][j] = j;
+    for (i = 1; i <= m; i++) {
+      for (j = 1; j <= n; j++) {
+        var c = a.charAt(i - 1) === b.charAt(j - 1) ? 0 : 1;
+        d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + c);
+        // troca de duas letras vizinhas ("gmial") conta como um erro só
+        if (i > 1 && j > 1 && a.charAt(i - 1) === b.charAt(j - 2) && a.charAt(i - 2) === b.charAt(j - 1)) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+      }
+    }
+    return d[m][n];
+  }
+  function sugestaoEmail(email) {
+    var e = String(email || '').trim().toLowerCase();
+    var m = /^([^\s@]+)@([^\s@]+)$/.exec(e);
+    if (!m) return '';
+    var dom = m[2];
+    if (DOMINIOS_COMUNS.indexOf(dom) !== -1) return '';
+    if (dom === 'gmail.com.br' || dom === 'icloud.com.br') return m[1] + '@' + dom.replace(/\.br$/, '');
+    var melhor = '', menor = 3;
+    DOMINIOS_COMUNS.forEach(function (c) {
+      var dist = distancia(dom, c);
+      if (dist > 0 && dist < menor) { menor = dist; melhor = c; }
+    });
+    // ".con", ".cm", "gmail.co" etc. já entram pela distância; domínio próprio (ex.: empresa.com.br) fica como está
+    return melhor ? m[1] + '@' + melhor : '';
   }
 
   // Protocolo curto gerado pelo servidor: 2 dígitos + 1 letra maiúscula (sem I e O), ex.: "47K".
@@ -552,7 +592,8 @@
     var av = avaliacao && typeof avaliacao === 'object' ? avaliacao : null;
     var equipe = !!(av && av.tipo === 'equipe');
     var empresa = av ? String(av.empresaNome || '') : String(empresaConfig || '');
-    var daEmpresa = empresa ? ' da ' + empresa : '';
+    // "da empresa X": sem artigo que dependa do nome ("da Cartório" soaria errado).
+    var daEmpresa = empresa ? ' da empresa ' + empresa : '';
     return {
       comLink: !!av,
       tipo: equipe ? 'equipe' : 'selecao',
@@ -767,7 +808,7 @@
       corpo = '<ul class="rel-itens">' + (sec.perfis || []).map(function (pf) {
         return '<li class="rel-item rel-com" data-letra="' + escapar(pf.letra) + '">' +
           '<p class="rel-item-titulo"><span class="letra-disc letra-disc--mini disc-' + escapar(pf.letra) + '" aria-hidden="true">' + escapar(pf.letra) + '</span>' +
-            'Com pessoas de perfil ' + escapar(pf.rotulo) + ' <span class="perfil-sub">' + escapar(pf.nome) + '</span></p>' +
+            '<span class="rel-com-texto">Com pessoas de perfil ' + escapar(pf.rotulo) + ' <span class="perfil-sub">' + escapar(pf.nome) + '</span></span></p>' +
           '<p class="rel-item-texto">' + escapar(pf.texto) + '</p>' +
         '</li>';
       }).join('') + '</ul>';
@@ -845,8 +886,14 @@
     var faixas = {};
     (d.intensidade || []).forEach(function (f) { if (f && f.letra) faixas[f.letra] = f; });
     var barras = barrasFatores(d.fatores, faixas, true);
-    var titulo = (d.nome ? escapar(d.nome) + ', seu' : 'Seu') + ' estilo é ' + escapar(d.primario.rotulo) + ', com traços de ' + escapar(d.secundario.rotulo);
-    return relatorioPessoaCorpo(d, foto, op, barras, titulo);
+    return relatorioPessoaCorpo(d, foto, op, barras, tituloEstilo(d));
+  }
+  // "Bia, seu estilo é de Dominância, com traços de Conformidade": nomes dos fatores (substantivos), sem adjetivo
+  // que concorde com a pessoa ("Cauteloso"). Já escapado.
+  function tituloEstilo(d) {
+    var pri = (d.primario && (d.primario.nome || d.primario.rotulo)) || '';
+    var sec = (d.secundario && (d.secundario.nome || d.secundario.rotulo)) || '';
+    return (d.nome ? escapar(d.nome) + ', seu' : 'Seu') + ' estilo é de ' + escapar(pri) + ', com traços de ' + escapar(sec);
   }
   // Barras dos 4 fatores (com a faixa de intensidade, se houver). descricao: inclui a frase de cada fator.
   function barrasFatores(fatores, faixas, descricao) {
@@ -874,8 +921,12 @@
     var extras = Array.isArray(d.aprofundamento) ? d.aprofundamento : [];
     var est = extras.filter(function (x) { return x && x.id === 'esticando'; })[0] || d.esticando || null;
     var outras = extras.filter(function (x) { return x && x.id !== 'esticando'; });
+    var emitido = dataExtenso(op.emitidoEm || d.emitidoEm || new Date().toISOString());
     return '' +
       '<div class="relatorio-candidato relatorio-pessoa" data-codigo="' + escapar(d.codigo) + '">' +
+        // Só na impressão ("Salvar em PDF"): marca, nome e data no topo da 1ª página.
+        '<div class="rel-impressao" aria-hidden="true"><img class="logo-gsc" src="assets/marca/gsc-logo.svg" alt="" width="171" height="24">' +
+          '<span class="rel-impressao-texto">Relatório DISC' + (d.nome ? ' de ' + escapar(d.nome) : '') + (emitido ? ' · ' + escapar(emitido) : '') + '</span></div>' +
         '<section class="caixa rel-caixa surgir" aria-labelledby="titulo-relatorio">' +
           '<div class="rel-cabeca">' + avatarHtml(foto, d.nome) + '<p class="sobretitulo">Seu relatório DISC</p></div>' +
           '<h2 id="titulo-relatorio" class="rel-titulo">' + titulo + '</h2>' +
@@ -1170,7 +1221,8 @@
     return html;
   }
 
-  // opcoes: { botaoPdf } (texto do botão de imprimir). Sem DOM: só HTML (escape em tudo que vem dos dados).
+  // opcoes: { botaoPdf (texto do botão de imprimir), aposCapa (HTML logo depois da capa, ex.: "guardar meu acesso") }.
+  // Sem DOM: só HTML (escape em tudo que vem dos dados).
   function relatorioAvancadoHtml(d, foto, opcoes) {
     var op = opcoes || {};
     var caps = d.capitulos || [];
@@ -1205,8 +1257,10 @@
       '</nav>';
     return '' +
       '<div class="relatorio-pessoa relatorio-avancado" data-codigo="' + escapar(d.codigo) + '" data-combinacao="' + escapar(cb.codigo || '') + '">' +
-        '<style>@media print { @page { @top-left { content: ' + cssTexto(cabecalho) + '; } } }</style>' +
-        capa + sumario +
+        // Cabeçalho das páginas impressas (menos a capa, a 1ª página).
+        // (o @page capa vem depois aqui também: o Chromium resolve margem de página pela ordem, não pela especificidade)
+        '<style>@media print { @page { @top-left { content: ' + cssTexto(cabecalho) + '; } } @page capa { @top-left { content: none; } } }</style>' +
+        capa + (op.aposCapa || '') + sumario +
         caps.map(function (c) { return capituloAvancado(c, d); }).join('') +
         '<p class="rel-aviso av-aviso">' + escapar(d.aviso) + '</p>' +
         '<footer class="av-rodape"><img class="logo-gsc logo-gsc--pequeno" src="assets/marca/gsc-logo.svg" alt="' + escapar(EMPRESA_B2C) + '" width="171" height="24">' +
@@ -1293,7 +1347,8 @@
   }
 
   // Resumo grátis (montarSimples): perfil em uma frase, combinação, 4 fatores com barras e 3 forças.
-  function resumoGratisHtml(s) {
+  // aposFrase (opcional): HTML logo depois da frase do perfil (ex.: o atalho para a oferta).
+  function resumoGratisHtml(s, aposFrase) {
     if (!s) return '';
     var barras = s.fatores.map(function (f) {
       return '' +
@@ -1310,8 +1365,9 @@
     return '' +
       '<section class="caixa caixa--vidro rel-caixa resumo-gratis surgir" aria-labelledby="titulo" data-codigo="' + escapar(s.codigo) + '">' +
         '<p class="sobretitulo">Seu resumo grátis</p>' +
-        '<h1 id="titulo" class="rel-titulo resumo-titulo">' + (s.nome ? escapar(s.nome) + ', seu' : 'Seu') + ' estilo é ' + escapar(s.primario.rotulo) + ', com traços de ' + escapar(s.secundario.rotulo) + '</h1>' +
+        '<h1 id="titulo" class="rel-titulo resumo-titulo">' + tituloEstilo(s) + '</h1>' +
         '<p class="rel-intro rel-frase">' + escapar(s.frase) + '</p>' +
+        (aposFrase || '') +
         (cb && cb.nome
           ? '<p class="rel-combinacao"><span class="rel-combinacao-rotulo">Sua combinação</span><strong class="rel-combinacao-nome">' + escapar(cb.nome) + '</strong>' +
               (cb.frase ? '<span class="rel-combinacao-frase">' + escapar(cb.frase) + '</span>' : '') + '</p>'
@@ -1367,19 +1423,21 @@
       '</section>';
   }
 
-  // Cards dos pacotes pagos (o escolhido, ou o Completo + Parte 2, em destaque com o único botão laranja).
+  // Cards dos pacotes pagos (o escolhido, ou o Relatório completo, em destaque com o único botão laranja).
+  // Sem escolha, o destaque é o mesmo da landing (js/landing.js, DESTAQUE = 'completo'): a recomendação não muda no caminho.
+  var DESTAQUE_PADRAO = 'completo';
   function pacotesHtml(pacotes, escolhido, hoje) {
     var CK = modCheckout();
     var pagos = (pacotes || []).filter(function (p) { return PACOTES_PAGOS.indexOf(p.chave) !== -1; });
     if (!pagos.length || !CK) return '';
     var destaque = escolhido && pagos.some(function (p) { return p.chave === escolhido; }) ? escolhido
-      : (pagos.some(function (p) { return p.chave === 'completo_plus'; }) ? 'completo_plus' : pagos[0].chave);
+      : (pagos.some(function (p) { return p.chave === DESTAQUE_PADRAO; }) ? DESTAQUE_PADRAO : pagos[0].chave);
     return '<ul class="pacotes" id="pacotes">' + pagos.map(function (p) {
       var pv = CK.precoVigente(p, hoje);
       var em = p.chave === destaque;
       return '' +
         '<li class="pacote' + (em ? ' pacote--destaque' : '') + '" data-pacote="' + escapar(p.chave) + '">' +
-          (em ? '<span class="selo selo--laranja pacote-selo">' + (escolhido === p.chave ? 'Sua escolha' : 'Mais completo') + '</span>' : '') +
+          (em ? '<span class="selo selo--laranja pacote-selo">' + (escolhido === p.chave ? 'Sua escolha' : 'Recomendado') + '</span>' : '') +
           '<h3 class="pacote-nome">' + escapar(p.nome) + '</h3>' +
           '<p class="pacote-preco">' +
             (pv.lancamento ? '<s class="pacote-cheio">' + escapar(CK.formatarPreco(pv.cheioCentavos)) + '</s>' : '') +
@@ -1393,6 +1451,59 @@
     }).join('') + '</ul>';
   }
 
+  // Resumo do progresso salvo para a capa: quantos grupos já foram respondidos (as duas partes) e onde a pessoa parou.
+  // n: grupos da parte 1; temValidacao: se a etapa de confirmação existe; n2: grupos da Parte 2 (0 sem ela).
+  function resumoRetomada(p, n, temValidacao, n2) {
+    var m = migrarProgresso(p) || {};
+    var total = Math.max(1, Math.min(TOTAL, Math.floor(Number(n) || TOTAL)));
+    var t2 = Math.max(0, Math.min(TOTAL2, Math.floor(Number(n2) || 0)));
+    var feitos = 0;
+    for (var i = 0; i < total; i++) if (m.respondidos && m.respondidos[i] && ordemValida(m.ordens[i])) feitos++;
+    for (var k = 0; k < t2; k++) if (m.respondidos2 && m.respondidos2[k] && ordemValida(m.ordens2[k])) feitos++;
+    var dest = etapaRetomada(m, total, !!temValidacao, t2 ? { n: t2 } : null);
+    var texto;
+    if (dest.etapa === 'identificacao') texto = 'Você começou a preencher os seus dados.';
+    else if (dest.etapa === 'teste') texto = 'Você parou no grupo ' + (dest.grupo + 1) + ' de ' + total + (t2 ? ' da parte 1' : '') + '.';
+    else if (dest.etapa === 'parte2-intro') texto = 'A primeira parte está pronta. Falta a parte 2.';
+    else if (dest.etapa === 'parte2') texto = 'Você parou no grupo ' + ((dest.grupo2 || 0) + 1) + ' de ' + t2 + ' da parte 2.';
+    else texto = 'Falta só a confirmação final.';
+    return { grupos: feitos, texto: texto, etapa: dest.etapa };
+  }
+
+  // "Já enviado neste aparelho": por link (código da avaliação; '' = fluxo geral) guarda só a data e o protocolo curto,
+  // nada de nome, telefone ou respostas. registrarEnviado devolve o mapa novo (no máximo 20 links, os mais recentes).
+  var MAX_ENVIADOS = 20;
+  function chaveEnviado(codigo) { return 'a:' + String(codigo || '').replace(/\s+/g, '').toUpperCase(); }
+  function registrarEnviado(mapa, codigo, protocolo, agora) {
+    var m = mapa && typeof mapa === 'object' && !Array.isArray(mapa) ? mapa : {};
+    var chave = chaveEnviado(codigo);
+    var outros = Object.keys(m).filter(function (k) { return k !== chave && /^a:/.test(k) && m[k] && typeof m[k].em === 'string'; })
+      .sort(function (a, b) { return String(m[b].em).localeCompare(String(m[a].em)); }).slice(0, MAX_ENVIADOS - 1);
+    var out = {};
+    out[chave] = { em: (agora || new Date()).toISOString(), protocolo: normalizarProtocolo(protocolo) };
+    outros.forEach(function (k) { out[k] = { em: String(m[k].em), protocolo: normalizarProtocolo(m[k].protocolo) }; });
+    return out;
+  }
+  // -> { em: Date, protocolo } ou null.
+  function lerEnviados(mapa, codigo) {
+    var r = mapa && typeof mapa === 'object' ? mapa[chaveEnviado(codigo)] : null;
+    if (!r || typeof r !== 'object') return null;
+    var em = new Date(r.em);
+    if (isNaN(em.getTime())) return null;
+    return { em: em, protocolo: normalizarProtocolo(r.protocolo) };
+  }
+
+  // "Voltar" da identificação da venda direta: volta para a landing com os parâmetros de campanha (cupom, pacote, utm_*…).
+  var RE_PARAMS_LANDING = /^(utm_[a-z]+|gclid|fbclid|ref|cupom|pacote|demo)$/;
+  function hrefVoltarLanding(search) {
+    var params = String(search || '').replace(/^\?/, '').split('&').filter(function (par) {
+      if (!par || par.length > 200) return false;
+      var nome;
+      try { nome = decodeURIComponent(par.split('=')[0]); } catch (e) { return false; }
+      return RE_PARAMS_LANDING.test(nome);
+    }).slice(0, 10);
+    return 'descubra.html' + (params.length ? '?' + params.join('&') : '');
+  }
 
   var PURAS = {
     modoPessoalDaUrl: modoPessoalDaUrl,
@@ -1407,6 +1518,13 @@
     resumoGratisHtml: resumoGratisHtml,
     previaPagaHtml: previaPagaHtml,
     pacotesHtml: pacotesHtml,
+    tituloEstilo: tituloEstilo,
+    sugestaoEmail: sugestaoEmail,
+    avaliacaoEncerrada: avaliacaoEncerrada,
+    resumoRetomada: resumoRetomada,
+    lerEnviados: lerEnviados,
+    registrarEnviado: registrarEnviado,
+    hrefVoltarLanding: hrefVoltarLanding,
     EMPRESA_B2C: EMPRESA_B2C,
     deveMostrarDemo: deveMostrarDemo,
     validarNome: validarNome,
@@ -1567,6 +1685,25 @@
   }
 
   function T() { return textosAvaliacao(AVAL, CONFIG.EMPRESA); }
+
+  // Há servidor para enviar (senão o fim é sempre o código de segurança)?
+  function temServidor() { return !!(CONFIG.API_URL && String(CONFIG.API_URL).trim() && root.DISC_API); }
+
+  // Contato de suporte da Gestão sem Caos (CONFIG.WHATSAPP_SUPORTE / CONFIG.EMAIL_SUPORTE): { href, texto } ou null.
+  // Sem nenhum configurado, a tela não promete um canal que não existe.
+  function contatoSuporte(mensagem) {
+    var wa = String(CONFIG.WHATSAPP_SUPORTE || '').replace(/\D/g, '');
+    if (wa.length >= 10 && wa.length <= 15) return { href: 'https://wa.me/' + wa + (mensagem ? '?text=' + encodeURIComponent(mensagem) : ''), texto: 'Fale com a ' + EMPRESA_B2C + ' no WhatsApp' };
+    var email = String(CONFIG.EMAIL_SUPORTE || '').trim();
+    if (emailValido(email)) return { href: 'mailto:' + email + (mensagem ? '?subject=' + encodeURIComponent(mensagem) : ''), texto: 'Escreva para ' + email };
+    return null;
+  }
+  function linkSuporteHtml(mensagem, classe) {
+    var c = contatoSuporte(mensagem);
+    if (!c) return '';
+    var nova = /^https:/.test(c.href) ? ' target="_blank" rel="noopener noreferrer"' : '';
+    return '<a class="' + (classe || '') + '" href="' + escapar(c.href) + '"' + nova + ' data-suporte>' + escapar(c.texto) + '</a>';
+  }
 
   // Formulário de identificação que vale agora (o do link ou o padrão).
   function FORM() { return formularioEfetivo(AVAL && AVAL.formulario, AVAL ? AVAL.tipo : 'selecao'); }
@@ -1826,6 +1963,8 @@
     }
     app.innerHTML = html;
     if (!telaLink && !telaP2 && estado.etapa === 'checkout') montarCheckout();
+    if (!telaLink && !telaP2 && estado.etapa === 'resumo') ligarCtaResumo();
+    else if (obsCtaResumo) { obsCtaResumo.disconnect(); obsCtaResumo = null; }
     // Layout da página depende da tela (boas-vindas é mais larga, como o login do BI).
     try {
       document.body.setAttribute('data-etapa', telaLink ? 'link' : (telaP2 ? 'resumo' : (estado.etapa || 'boasvindas')));
@@ -1842,6 +1981,50 @@
       }
       try { root.scrollTo(0, 0); } catch (e) { /* ignora */ }
     }
+    marcarHistorico();
+  }
+
+  /* ---- Botão/gesto "Voltar" do aparelho: volta um passo dentro do teste (não sai do site) ----
+   * Nas etapas do caminho há sempre uma entrada extra no histórico ({disc: 1}, mesma URL). O "Voltar" do navegador
+   * cai na entrada de baixo (popstate): fazemos o mesmo que o botão "Voltar" da tela e marcamos de novo. Na capa,
+   * no resumo e na conclusão nada é marcado: dali o "Voltar" sai do site normalmente. */
+  var ETAPAS_COM_VOLTAR = ['identificacao', 'teste', 'parte2-intro', 'parte2', 'confirmacao', 'checkout'];
+  function etapaComVoltar() {
+    if (telaLink || telaP2 || !estado) return false;
+    var e = estado.etapa;
+    if (ETAPAS_COM_VOLTAR.indexOf(e) === -1) return false;
+    if (PESSOAL && e === 'identificacao') return false;   // a identificação é a 1ª tela da venda: "Voltar" volta à landing
+    if (e === 'parte2-intro' && P2_TOKEN) return false;    // Parte 2 comprada: "Voltar" volta ao relatório
+    if (e === 'checkout' && !PESSOAL) return false;
+    return true;
+  }
+  var marcouNestaPagina = false;
+  function marcarHistorico() {
+    try {
+      var s = root.history.state;
+      if (!etapaComVoltar()) {
+        // Saiu do caminho (resumo, conclusão, capa) com a marca ainda no histórico: consome a marca, para o próximo
+        // "Voltar" sair do site de primeira. Só a marca criada nesta carga da página (depois de recarregar, não).
+        if (s && s.disc && marcouNestaPagina) { marcouNestaPagina = false; root.history.back(); }
+        return;
+      }
+      if (s && s.disc) return;
+      root.history.pushState({ disc: 1 }, '');
+      marcouNestaPagina = true;
+    } catch (e) { /* sem history: o "Voltar" da tela continua funcionando */ }
+  }
+  function aoVoltarNavegador(ev) {
+    if (ev && ev.state && ev.state.disc) return;   // "Avançar" do navegador de volta à marca: nada a fazer
+    if (!etapaComVoltar()) return;
+    voltarUmPasso();
+  }
+  function voltarUmPasso() {
+    var e = estado.etapa;
+    if (e === 'checkout') { voltarDoCheckout(); return; }
+    if (e === 'identificacao') { guardarCamposForm(); estado.reenviar = false; irPara('boasvindas'); return; }
+    if (e === 'teste' || e === 'parte2') { grupoAnterior(); return; }
+    if (e === 'parte2-intro') { estado.grupo = N - 1; irPara('teste'); return; }
+    if (e === 'confirmacao') confirmacaoAnterior();
   }
 
   // Logo da Gestão sem Caos (assets/marca/). Na moldura laranja vai a versão preta (#141414, texto sobre o laranja);
@@ -1854,7 +2037,19 @@
   }
 
   // Passos do processo em mini-cartões numerados (1º azul-escuro, demais brancos), como no login do BI.
-  var PASSOS = ['Seus dados', 'Ordene ' + TOTAL + ' grupos de palavras', 'Pronto, cerca de 10 minutos'];
+  var PASSOS = ['Seus dados', 'Ordene ' + TOTAL + ' grupos de palavras', 'Confirme o resultado'];
+  var CHAVE_ENVIADOS = 'disc_enviados_v1';   // "já enviado neste aparelho": só data e protocolo, por link
+
+  function plural(n, um, varios) { return n + ' ' + (n === 1 ? um : varios); }
+  function dataCurta(d) { return (d.getDate() < 10 ? '0' : '') + d.getDate() + '/' + (d.getMonth() < 9 ? '0' : '') + (d.getMonth() + 1) + '/' + d.getFullYear(); }
+
+  // Botão "Começar do zero" com confirmação em dois toques (o texto do aviso diz quanto se perde).
+  function botaoRecomecarHtml(classe, grupos) {
+    return '<button type="button" class="botao ' + classe + ' botao--grande" data-acao="recomecar" aria-describedby="nota-recomecar">Começar do zero</button>' +
+      '<p class="nota-recomecar" id="nota-recomecar" role="status" hidden>' +
+        (grupos > 0 ? 'Isso apaga ' + plural(grupos, 'grupo respondido', 'grupos respondidos') + ' neste aparelho.' : 'Isso apaga os dados que você já preencheu.') +
+        ' Toque de novo para confirmar.</p>';
+  }
 
   function telaBoasVindas() {
     var salvo = lerStorage(CHAVE_PROGRESSO);
@@ -1862,17 +2057,36 @@
     var t = T();
     var empresa = t.empresa;
     var p2 = P2();
-    var passos = PASSOS.map(function (t, k) {
-      if (k === 1) t = p2 ? 'Ordene os grupos de palavras, em 2 partes' : 'Ordene ' + N + ' grupos de palavras';
-      if (k === 2 && p2) t = 'Pronto, cerca de 15 minutos';
-      return '<li class="passo' + (k === 0 ? ' passo--noite' : '') + '"><span class="passo-num" aria-hidden="true">' + (k + 1) + '</span><span class="passo-texto">' + t + '</span></li>';
+    var comValidacao = !!modValidacao();
+    var retomada = continuar ? resumoRetomada(salvo, N, comValidacao, p2 ? N2 : 0) : null;
+    var enviado = continuar ? null : lerEnviados(lerStorage(CHAVE_ENVIADOS), AVAL ? AVAL.codigo : '');
+    var passos = PASSOS.map(function (txt, k) {
+      if (k === 1) txt = p2 ? 'Ordene os grupos de palavras, em 2 partes' : 'Ordene ' + N + ' grupos de palavras';
+      if (k === 2 && !comValidacao) txt = 'Pronto, cerca de ' + (p2 ? 15 : 10) + ' minutos';
+      return '<li class="passo' + (k === 0 ? ' passo--noite' : '') + '"><span class="passo-num" aria-hidden="true">' + (k + 1) + '</span><span class="passo-texto">' + txt + '</span></li>';
     }).join('');
+    // No celular o botão principal fica fixo na base (sem rolar a capa inteira); com progresso salvo, diz onde parou.
+    var cta = continuar
+      ? '<div class="boasvindas-cta">' +
+          '<p class="boasvindas-cta-nota" id="nota-retomada">' + escapar(retomada.texto) + '</p>' +
+          '<button type="button" class="botao botao--laranja botao--grande" data-acao="continuar" aria-describedby="nota-retomada">Continuar de onde parei</button>' +
+        '</div>' +
+        '<div class="acoes acoes-coluna boasvindas-recomecar">' + botaoRecomecarHtml('botao--sobre-noite', retomada.grupos) + '</div>'
+      : '<div class="boasvindas-cta">' +
+          (enviado
+            ? '<p class="boasvindas-cta-nota boasvindas-ja-enviado" id="nota-enviado">Você já enviou este teste neste aparelho em ' + escapar(dataCurta(enviado.em)) +
+                (enviado.protocolo ? ' (código ' + escapar(enviado.protocolo) + ')' : '') + '. Não precisa responder de novo.</p>'
+            : '') +
+          '<button type="button" class="botao ' + (enviado ? 'botao--sobre-noite' : 'botao--laranja') + ' botao--grande" data-acao="comecar"' + (enviado ? ' aria-describedby="nota-enviado"' : '') + '>' +
+            (enviado ? 'Responder de novo' : 'Começar') + '</button>' +
+        '</div>';
     return '' +
-      '<section class="boasvindas surgir" aria-labelledby="titulo">' +
+      '<section class="boasvindas surgir' + (continuar ? ' boasvindas--retomar' : '') + '" aria-labelledby="titulo">' +
         '<div class="boasvindas-laranja moldura-laranja">' +
           logo('laranja', 'logo-gsc--grande') +
           '<div class="boasvindas-corpo">' +
             '<p class="boasvindas-sobre">' + escapar(t.contexto) + (empresa ? ' · ' + escapar(empresa) : '') + '</p>' +
+            (AVAL && AVAL.vaga ? '<p class="boasvindas-vaga">Vaga: <strong>' + escapar(AVAL.vaga) + '</strong></p>' : '') +
             '<h1 id="titulo" class="boasvindas-titulo">Teste de Perfil Comportamental DISC</h1>' +
             '<p class="frase-impacto">Conhecer seu jeito de trabalhar é o primeiro passo.</p>' +
             '<ol class="passos" aria-label="Como funciona">' + passos + '</ol>' +
@@ -1887,15 +2101,11 @@
             '<li><strong>Não entendeu uma palavra?</strong> Toque no i ao lado dela.</li>' +
             '<li><strong>Não há respostas certas ou erradas.</strong> Responda pensando em como você realmente é, e não em como gostaria de ser.</li>' +
             '<li><strong>No fim, uma confirmação rápida.</strong> Você diz o quanto o resultado combina com você.</li>' +
-            '<li>Seu progresso fica salvo neste aparelho por até 7 dias caso a página seja fechada, e é apagado ao concluir.</li>' +
+            '<li>Seu progresso fica salvo neste navegador por até 7 dias caso a página seja fechada, e é apagado ao concluir. Para continuar depois, abra o link no mesmo navegador.</li>' +
           '</ul>' +
-          (continuar
-            ? '<div class="acoes acoes-coluna">' +
-                '<button type="button" class="botao botao--laranja botao--grande" data-acao="continuar">Continuar de onde parei</button>' +
-                '<button type="button" class="botao botao--sobre-noite botao--grande" data-acao="recomecar">Começar do zero</button>' +
-              '</div>'
-            : '<div class="acoes acoes-coluna"><button type="button" class="botao botao--laranja botao--grande" data-acao="comecar">Começar</button></div>') +
-          '<p class="acesso-recrutador"><a href="admin.html">Área do recrutador</a></p>' +
+          cta +
+          // Quem chega por um link de processo (candidato ou colaborador) não precisa do acesso ao painel.
+          (AVAL ? '' : '<p class="acesso-recrutador"><a href="admin.html">Área do recrutador</a></p>') +
         '</div>' +
       '</section>';
   }
@@ -2019,7 +2229,11 @@
   function telaIdentificacao() {
     var t = T();
     var f = FORM();
-    var campoVaga = t.mostrarVaga
+    // Processo com a vaga cadastrada (avaliacaoPublica com `vaga`): mostra a vaga em vez de pedir.
+    var vagaDoProcesso = AVAL && AVAL.vaga ? AVAL.vaga : '';
+    var campoVaga = vagaDoProcesso
+      ? '<p class="vaga-processo">Vaga: <strong>' + escapar(vagaDoProcesso) + '</strong></p>'
+      : t.mostrarVaga
       ? '<div class="campo">' +
           '<label class="campo__rotulo" for="vaga">Vaga pretendida neste processo <span class="texto-suave">(opcional)</span></label>' +
           '<input class="entrada" id="vaga" name="vaga" type="text" autocomplete="off" maxlength="80" aria-describedby="dica-vaga" value="' + escapar(estado.vaga) + '">' +
@@ -2045,7 +2259,7 @@
     var idadeNota = f.campos.idade !== 'oculto' ? '; a idade é usada só para fins cadastrais' : '';
     return '' +
       '<section class="caixa surgir" aria-labelledby="titulo">' +
-        '<p class="sobretitulo etapa">Etapa 1 de 3</p>' +
+        '<p class="sobretitulo etapa">Antes de começar</p>' +
         '<h1 id="titulo" class="titulo-pagina">Sua identificação</h1>' +
         '<p class="subtitulo">' + escapar(t.finalidade) + '</p>' +
         avisoHtml() +
@@ -2166,7 +2380,7 @@
   }
 
   function dicaHtml(completo) {
-    return completo ? 'Tudo certo. Toque em Avançar quando quiser.' : 'Arraste as palavras para ordenar';
+    return completo ? 'Tudo certo. Avance quando quiser.' : 'Arraste as palavras para ordenar';
   }
 
   function telaGrupo() {
@@ -2275,7 +2489,7 @@
   }
 
   function dicaConfirmacao(tela, completo) {
-    if (completo) return tela === 1 ? 'Tudo certo. Toque em Avançar quando quiser.' : 'Tudo certo. Toque em Enviar e finalizar.';
+    if (completo) return tela === 1 ? 'Tudo certo. Avance quando quiser.' : 'Tudo certo. Agora é só enviar.';
     return tela === 1 ? 'Escolha um jeito em cada rodada' : 'Marque uma opção em cada frase';
   }
 
@@ -2340,14 +2554,15 @@
         barraProgressoHtml('Confirmação', tela, TELAS_CONFIRMACAO, feitos) +
         '<h1 id="titulo" class="titulo-grupo">' + titulo + '</h1>' +
         '<p class="instrucao">Para confirmar seu resultado, responda com sinceridade. <strong>Não existe resposta certa.</strong></p>' +
+        (tela === 1 ? '<p class="instrucao instrucao--nota">Alguns jeitos aparecem mais de uma vez, em duplas diferentes. Escolha pensando só na dupla de cada rodada.</p>' : '') +
         corpo +
         '<div class="barra-nav">' +
           '<p class="barra-dica" id="dica-avancar">' + dicaConfirmacao(tela, completo) + '</p>' +
-          // Tela 1: sem "Voltar" aos grupos (não há revisão); o espaço fica reservado para o botão não mudar de lugar.
+          // Tela 1: "Voltar" leva ao último grupo (para corrigir o que acabou de ordenar; não há tela de revisão).
           // Tela 2: "Enviar e finalizar" envia direto.
           '<div class="barra-botoes">' +
             (tela === 1
-              ? '<span class="barra-vazio" aria-hidden="true"></span>'
+              ? '<button type="button" class="botao botao--claro botao--grande" data-acao="conf-voltar-grupo">Voltar</button>'
               : '<button type="button" class="botao botao--claro botao--grande" data-acao="conf-anterior">Voltar</button>') +
             '<button type="button" class="botao botao--principal botao--grande" data-acao="' + (tela === 1 ? 'conf-proximo' : 'enviar') + '" data-avancar aria-describedby="dica-avancar"' + (completo ? '' : ' disabled') + '>' +
               (tela === 1 ? 'Avançar' : 'Enviar e finalizar') +
@@ -2388,6 +2603,20 @@
           '<div class="giro giro--grande" aria-hidden="true"></div>' +
           '<h1 id="titulo" class="titulo-pagina">Enviando suas respostas…</h1>' +
           '<p class="subtitulo">Isso leva só alguns segundos. Não feche esta página.</p>' +
+        '</section>';
+    }
+    if (avaliacaoEncerrada(envio.erro)) {
+      // Processo desativado no meio do teste: "Tentar novamente" nunca daria certo.
+      var suporte = linkSuporteHtml('Olá! A avaliação foi encerrada enquanto eu respondia o teste DISC' + (AVAL ? ' (código ' + AVAL.codigo + ')' : '') + '.');
+      return '' +
+        '<section class="caixa surgir envio-encerrado" aria-labelledby="titulo">' +
+          '<h1 id="titulo" class="titulo-pagina">Esta avaliação foi encerrada</h1>' +
+          '<div class="aviso alerta" role="alert">Quem conduz o processo encerrou o link enquanto você respondia, por isso as respostas não podem ser enviadas por aqui.</div>' +
+          '<p class="subtitulo">Suas respostas continuam salvas neste aparelho por até 7 dias. Fale com quem enviou o link: se a avaliação for reaberta, é só abrir o link de novo e enviar. Se pedirem, gere o código de segurança e envie ' + escapar(T().aoResponsavel) + '.</p>' +
+          (suporte ? '<p class="rodape-nota">Precisa de ajuda? ' + suporte + '.</p>' : '') +
+          '<div class="acoes acoes-coluna">' +
+            '<button type="button" class="botao botao--claro botao--grande" data-acao="usar-codigo">Gerar código de segurança</button>' +
+          '</div>' +
         '</section>';
     }
     return '' +
@@ -2498,14 +2727,21 @@
         '<p class="rodape-nota">' + escapar(t.usoDados) + '</p>' +
         '<button type="button" class="botao botao--link" data-acao="novo-teste">Iniciar um novo teste neste aparelho</button>' +
       '</div>';
+    // Relatório na tela: ele fica só nesta aba, então o aviso e o "Salvar em PDF" vêm logo no topo.
+    var guardarConteudo = resultado
+      ? '<p class="guardar-relatorio-texto"><strong>Seu relatório está logo abaixo.</strong> Ele fica só nesta aba: para guardar, salve em PDF antes de fechar.</p>' +
+        '<button type="button" class="botao botao--claro" data-acao="imprimir">Salvar em PDF</button>'
+      : '';
+    var guardar = resultado ? '<div class="guardar-relatorio">' + guardarConteudo + '</div>' : '';
     // O único card "vidro" da tela.
-    function agradecimento(texto, extra) {
+    function agradecimento(texto, extra, semGuardar) {
       return '' +
         '<section class="caixa caixa--vidro agradecimento surgir" aria-labelledby="titulo">' +
           '<div class="icone-ok" aria-hidden="true">✓</div>' +
           '<h1 id="titulo" class="titulo-pagina">' + titulo + '</h1>' +
           '<p class="destaque">' + texto + '</p>' +
           (extra || '') +
+          (semGuardar ? '' : guardar) +
         '</section>';
     }
 
@@ -2547,25 +2783,63 @@
     for (var k in payload) if (Object.prototype.hasOwnProperty.call(payload, k) && k !== 'foto') paraCodigo[k] = payload[k];
     var codigo = root.DISC_CODEC.encode(paraCodigo);
     var wa = linkWhatsApp(codigo, payload);
+    // Com servidor (o envio falhou): dá para tentar de novo daqui, e o progresso só é apagado quando o envio der certo.
+    var podeReenviar = temServidor();
+    // O código vem logo depois do agradecimento (antes do relatório, que é longo): é o que a pessoa precisa fazer agora.
     return '' +
       '<div class="pilha-telas">' +
-        agradecimento('Você concluiu o teste. Falta só um passo: enviar o código abaixo ' + escapar(t.aoResponsavel) + '.') +
-        resultado +
+        agradecimento('Você concluiu o teste. Falta só um passo: enviar o código abaixo ' + escapar(t.aoResponsavel) + '.', '', true) +
         '<section class="caixa codigo-bloco surgir" aria-label="Código de segurança">' +
           '<label class="caixa__titulo" for="codigo">Código de segurança</label>' +
-          '<p class="codigo-texto" id="texto-codigo">Não conseguimos enviar suas respostas. Envie este código ' + escapar(t.aoResponsavel) + ' pelo WhatsApp.</p>' +
+          '<p class="codigo-texto" id="texto-codigo">Não conseguimos enviar suas respostas. ' +
+            (wa ? 'Envie este código ' + escapar(t.aoResponsavel) + ' pelo WhatsApp.'
+              : 'Copie este código e envie ' + escapar(t.aoResponsavel) + ' pelo mesmo canal em que você recebeu o link do teste.') + '</p>' +
           '<p class="campo__ajuda dica" id="dica-codigo">' +
             'Copie o código' + (wa ? ' ou use o botão do WhatsApp' : '') + '.' +
-            ' Por segurança, ele deixa de aparecer quando esta aba for fechada.</p>' +
+            ' Por segurança, ele deixa de aparecer quando esta aba for fechada.' +
+            (podeReenviar ? ' Se a internet voltar, toque em Tentar enviar de novo: aí o código não é mais necessário.' : '') + '</p>' +
           '<textarea id="codigo" class="entrada codigo" readonly rows="4" aria-describedby="texto-codigo dica-codigo" spellcheck="false">' + escapar(codigo) + '</textarea>' +
           '<div class="acoes acoes-coluna">' +
             (wa ? '<a class="botao botao--laranja botao--grande btn-whatsapp" href="' + escapar(wa) + '" target="_blank" rel="noopener noreferrer">Enviar pelo WhatsApp</a>' : '') +
             '<button type="button" class="botao ' + (wa ? 'botao--claro' : 'botao--principal') + ' botao--grande" data-acao="copiar">Copiar código</button>' +
+            (podeReenviar ? '<button type="button" class="botao botao--claro botao--grande" data-acao="reenviar">Tentar enviar de novo</button>' : '') +
           '</div>' +
           '<p class="sucesso" id="copiado" role="status" aria-live="polite"></p>' +
+          '<p class="campo__erro erro" id="erro-reenvio" role="alert"></p>' +
         '</section>' +
+        (resultado ? '<div class="caixa guardar-relatorio guardar-relatorio--solto">' + guardarConteudo + '</div>' : '') +
+        resultado +
         rodape +
       '</div>';
+  }
+
+  // Plano B com servidor: tenta enviar de novo o mesmo payload (mesmo id; o servidor não duplica).
+  function reenviarDoCodigo(botao) {
+    var dados = estado.concluido || lerSessao(CHAVE_CONCLUIDO);
+    var payload = dados && dados.payload;
+    var api = root.DISC_API;
+    if (!payload || !temServidor() || envio.carregando) return;
+    var erroEl = app.querySelector('#erro-reenvio');
+    if (erroEl) erroEl.textContent = '';
+    envio = { carregando: true, erro: '' };
+    botao.disabled = true;
+    botao.setAttribute('aria-busy', 'true');
+    botao.textContent = 'Enviando…';
+    Promise.resolve().then(function () { return api.enviar(payload); }).then(function (resp) {
+      envio = { carregando: false, erro: '' };
+      finalizar(payload, true, resp && resp.protocolo);
+    }, function (erro) {
+      envio = { carregando: false, erro: '' };
+      var msg = (erro && erro.message) || '';
+      if (/duplicad|já (foi )?(recebid|registrad|enviad|existe)/i.test(msg)) { finalizar(payload, true); return; }
+      if (!app.contains(botao)) return;
+      botao.disabled = false;
+      botao.removeAttribute('aria-busy');
+      botao.textContent = 'Tentar enviar de novo';
+      if (erroEl) erroEl.textContent = avaliacaoEncerrada(msg)
+        ? 'Esta avaliação foi encerrada e não recebe mais respostas. Envie o código acima ' + T().aoResponsavel + '.'
+        : 'Ainda não deu para enviar. ' + mensagemErroEnvio(msg).replace(/Toque em "Gerar código de segurança" e envie o código ao recrutador\./, 'Use o código acima ou tente de novo mais tarde.');
+    });
   }
 
   // Link de avaliação: abrindo, inválido/encerrado ou sem conexão.
@@ -2578,10 +2852,21 @@
         '</section>';
     }
     if (telaLink === 'invalido') {
+      // O servidor responde igual para código inexistente e processo desativado: a tela cobre os dois casos.
+      var salvo = lerStorage(CHAVE_PROGRESSO);
+      var tinhaProgresso = !!(CODIGO_LINK && progressoValido(salvo) && String(salvo.avaliacaoCodigo || '') === CODIGO_LINK);
+      var suporte = linkSuporteHtml('Olá! O link do teste DISC não abre' + (CODIGO_LINK ? ' (código ' + CODIGO_LINK + ')' : '') + '.');
       return '' +
         '<section class="caixa surgir link-invalido" aria-labelledby="titulo">' +
           '<h1 id="titulo" class="titulo-pagina">Link inválido ou avaliação encerrada</h1>' +
           '<p class="subtitulo">Fale com quem enviou o link.</p>' +
+          '<ul class="link-invalido-dicas">' +
+            '<li><strong>Link digitado ou copiado pela metade?</strong> Abra de novo pela mensagem original, tocando no link inteiro.</li>' +
+            '<li><strong>Avaliação encerrada?</strong> Quem enviou o link pode reabrir a avaliação ou mandar um link novo.</li>' +
+          '</ul>' +
+          (tinhaProgresso ? '<div class="aviso link-invalido-progresso">Suas respostas deste link continuam salvas neste aparelho por até 7 dias. Se a avaliação for reaberta, é só abrir o link de novo e continuar.</div>' : '') +
+          (suporte ? '<p class="rodape-nota link-invalido-suporte">Precisa de ajuda? ' + suporte + '.</p>' : '') +
+          (CODIGO_LINK ? '<div class="acoes"><button type="button" class="botao botao--claro botao--grande" data-acao="link-retentar">Tentar abrir de novo</button></div>' : '') +
         '</section>';
     }
     return '' +
@@ -2605,7 +2890,9 @@
         tipo: av.tipo === 'equipe' ? 'equipe' : 'selecao',
         empresaNome: String(av.empresaNome || ''),
         mostrarResultado: av.mostrarResultado === true,
-        formulario: normalizarFormulario(av.formulario)   // ausente = padrão (comportamento de antes)
+        formulario: normalizarFormulario(av.formulario),  // ausente = padrão (comportamento de antes)
+        // Vaga do processo (quando o servidor a manda): aparece na capa e substitui o campo "Vaga pretendida".
+        vaga: av.tipo === 'equipe' ? '' : limparTextoCurto(av.vaga || '')
       };
       telaLink = '';
       if (estado.etapa === 'boasvindas') estado.avaliacaoCodigo = AVAL.codigo;
@@ -2667,6 +2954,21 @@
           estado[campo] = campo === 'telefone' ? limparTelefone(this.value) : campo === 'idade' ? limparIdade(this.value) : this.value;
           salvar();
         });
+        // Campo marcado com erro: assim que a pessoa corrige, o aviso vermelho some (sem esperar o próximo envio).
+        el.addEventListener('input', function () { if (el.getAttribute('aria-invalid') === 'true') revalidarCampo(form, campo); });
+        el.addEventListener('blur', function () { if (el.getAttribute('aria-invalid') === 'true') revalidarCampo(form, campo); });
+      });
+      var cons = form.querySelector('#consentimento');
+      if (cons) cons.addEventListener('change', function () { if (cons.checked) mostrarErro(form, 'consentimento', ''); });
+      Array.prototype.forEach.call(form.querySelectorAll('textarea[data-extra]'), function (ta) {
+        ta.addEventListener('input', function () { if (ta.getAttribute('aria-invalid') === 'true') revalidarCampo(form, 'extra-' + ta.getAttribute('data-extra')); });
+      });
+      // Venda direta: a sugestão de domínio ("gmial.com" -> "gmail.com") aparece no envio (no "blur" ela empurraria
+      // o consentimento bem na hora do toque). Corrigir o e-mail esconde a sugestão antiga.
+      var emailP = PESSOAL ? form.querySelector('#email') : null;
+      if (emailP) emailP.addEventListener('input', function () {
+        var sug = form.querySelector('#sugestao-email');
+        if (sug && !sug.hidden && sug.getAttribute('data-para') !== limparEmail(emailP.value)) { sug.hidden = true; sug.innerHTML = ''; }
       });
       Array.prototype.forEach.call(form.querySelectorAll('.foto-arquivo'), function (inp) {
         inp.addEventListener('change', function () { aoEscolherFoto(inp); });
@@ -2689,6 +2991,22 @@
       lista.addEventListener('pointerdown', aoPressionar);
       lista.addEventListener('keydown', aoTeclar);
     }
+  }
+
+  // Revalida um só campo (o que a pessoa está corrigindo) e atualiza o aviso dele.
+  function revalidarCampo(form, campo) {
+    var v = valorCampo(form, campo);
+    var msg = '';
+    if (campo === 'nome') msg = validarNome(v);
+    else if (campo === 'telefone') msg = PESSOAL ? (limparTelefone(v) ? validarTelefone(v) : '') : validarTelefone(v);
+    else if (campo === 'email' && PESSOAL) msg = validarIdentificacaoPessoal({ nome: 'Ok Ok', email: v, consentimento: true }).email || '';
+    else if (campo === 'vaga') msg = '';
+    else {
+      var dados = { idade: valorCampo(form, 'idade'), funcao: valorCampo(form, 'funcao'), empresa: valorCampo(form, 'empresa'),
+        email: valorCampo(form, 'email'), cidade: valorCampo(form, 'cidade'), foto: estado.foto, extras: extrasDoForm(form) };
+      msg = validarCamposFormulario(dados, FORM())[campo] || '';
+    }
+    mostrarErro(form, campo, msg);
   }
 
   function mostrarErro(form, campo, msg) {
@@ -2754,7 +3072,7 @@
     if (form.querySelector('#email')) estado.email = limparEmail(dados.email);
     if (form.querySelector('#cidade')) estado.cidade = limparTextoCurto(dados.cidade);
     estado.extras = dados.extras;
-    estado.vaga = String(vaga || '').trim();
+    estado.vaga = AVAL && AVAL.vaga ? AVAL.vaga : String(vaga || '').trim();
     estado.consentimento = true;
     if (!estado.id) estado.id = gerarId();
     if (!estado.permutacoes) estado.permutacoes = gerarPermutacoes();
@@ -2799,6 +3117,21 @@
       case 'comprar':
         abrirCheckout(alvo.getAttribute('data-pacote'));
         break;
+      case 'ir-pacotes':
+        irParaPacotes();
+        break;
+      case 'usar-sugestao':
+        var campoEmail = app.querySelector('#email');
+        if (campoEmail) {
+          campoEmail.value = alvo.getAttribute('data-email') || campoEmail.value;
+          estado.email = limparEmail(campoEmail.value);
+          salvar();
+          var sug = app.querySelector('#sugestao-email');
+          if (sug) { sug.hidden = true; sug.innerHTML = ''; }
+          try { campoEmail.focus({ preventScroll: true }); } catch (e) { campoEmail.focus(); }
+          anunciar('E-mail corrigido para ' + campoEmail.value + '.');
+        }
+        break;
       case 'refazer':
         if (alvo.getAttribute('data-confirmar') !== 'sim') {
           alvo.setAttribute('data-confirmar', 'sim');
@@ -2835,6 +3168,14 @@
         render(true);
         break;
       case 'recomecar':
+        // Confirmação em dois toques (como "Iniciar um novo teste"): apagar o progresso não pode ser um toque errado.
+        if (alvo.getAttribute('data-confirmar') !== 'sim') {
+          alvo.setAttribute('data-confirmar', 'sim');
+          alvo.textContent = 'Toque de novo para apagar';
+          var notaR = app.querySelector('#nota-recomecar');
+          if (notaR) notaR.hidden = false;
+          return;
+        }
         apagarStorage(CHAVE_PROGRESSO);
         estado = estadoInicial();
         irPara('identificacao');
@@ -2862,11 +3203,7 @@
         anunciar('Ordem registrada. Você já pode avançar.');
         break;
       case 'anterior':
-        if (naParte2()) {
-          if (estado.grupo2 === 0) irPara('parte2-intro');
-          else { estado.grupo2--; irPara('parte2'); }
-        } else if (estado.grupo === 0) irPara('identificacao');
-        else { estado.grupo--; irPara('teste'); }
+        grupoAnterior();
         break;
       case 'parte2-voltar':
         estado.grupo = N - 1;
@@ -2915,8 +3252,8 @@
         atualizarConfirmacao();
         break;
       case 'conf-anterior':
-        // Só a 2ª tela volta (para a 1ª); da confirmação não se volta aos grupos.
-        if (estado.confTela === 2) { estado.confTela = 1; irPara('confirmacao'); }
+      case 'conf-voltar-grupo':
+        confirmacaoAnterior();
         break;
       case 'conf-proximo':
         if (!telaValidacaoCompleta(estado.validacao, 1)) return;
@@ -2935,6 +3272,9 @@
         break;
       case 'retentar':
         concluir();
+        break;
+      case 'reenviar':
+        reenviarDoCodigo(alvo);
         break;
       case 'usar-codigo':
         completarDemonstracao();
@@ -2964,10 +3304,31 @@
         apagarSessao(CHAVE_CONCLUIDO);
         apagarStorage(CHAVE_CONCLUIDO);
         apagarStorage(CHAVE_PROGRESSO);
+        // Outra pessoa vai usar o aparelho: o aviso "você já enviou" deste link sai também.
+        var enviados = lerStorage(CHAVE_ENVIADOS);
+        if (enviados && typeof enviados === 'object') { delete enviados['a:' + (AVAL ? AVAL.codigo : '')]; gravarStorage(CHAVE_ENVIADOS, enviados); }
         estado = estadoInicial();
         render(true);
         break;
     }
+  }
+
+  // "Voltar" de um grupo (botão da tela e "Voltar" do aparelho).
+  function grupoAnterior() {
+    if (naParte2()) {
+      if (estado.grupo2 === 0) irPara('parte2-intro');
+      else { estado.grupo2--; irPara('parte2'); }
+    } else if (estado.grupo === 0) irPara('identificacao');
+    else { estado.grupo--; irPara('teste'); }
+  }
+
+  // "Voltar" na confirmação: da 2ª tela para a 1ª; da 1ª para o último grupo (Parte 2, se houver). Se o resultado mudar,
+  // a confirmação é montada de novo (irDepoisDosGrupos).
+  function confirmacaoAnterior() {
+    if (estado.confTela === 2) { estado.confTela = 1; irPara('confirmacao'); return; }
+    if (P2() && N2 > 0) { estado.grupo2 = N2 - 1; irPara('parte2'); return; }
+    estado.grupo = N - 1;
+    irPara('teste');
   }
 
   function guardarCamposForm() {
@@ -3269,8 +3630,9 @@
   function aoPressionar(ev) {
     if (arraste) return;
     if (ev.pointerType === 'mouse' && ev.button !== 0) return;
-    if (ev.target.closest('[data-sem-arraste]')) return; // botão "i": abre a dica, nunca arrasta
-    if (ev.target.closest('button')) return;
+    // Botão "i": um toque parado abre a dica; se o dedo puxar (é onde o polegar direito pousa), vira arraste do cartão.
+    var noInfo = !!ev.target.closest('[data-sem-arraste]');
+    if (!noInfo && ev.target.closest('button')) return;
     var cartao = ev.target.closest('.cartao');
     var lista = app.querySelector('.cartoes');
     if (!cartao || !lista) return;
@@ -3279,9 +3641,20 @@
     arraste = {
       cartao: cartao, lista: lista, letra: letra, ordem: ordem,
       de: ordem.indexOf(letra), para: ordem.indexOf(letra),
-      y0: ev.clientY, passo: lerPasso(lista), ativo: false, id: ev.pointerId
+      y0: ev.clientY, passo: lerPasso(lista), ativo: false, id: ev.pointerId, noInfo: noInfo
     };
-    try { cartao.setPointerCapture(ev.pointerId); } catch (e) { /* ignora */ }
+    // No "i" a captura só começa quando o arraste começa: assim o toque parado continua sendo um clique no "i".
+    if (!noInfo) { try { cartao.setPointerCapture(ev.pointerId); } catch (e) { /* ignora */ } }
+    else {
+      // Sem captura, o dedo/mouse pode soltar fora do cartão: limpa o arraste que nem começou.
+      var limpar = function (e2) {
+        document.removeEventListener('pointerup', limpar, true);
+        document.removeEventListener('pointercancel', limpar, true);
+        if (arraste && !arraste.ativo && e2.pointerId === arraste.id) encerrarArraste();
+      };
+      document.addEventListener('pointerup', limpar, true);
+      document.addEventListener('pointercancel', limpar, true);
+    }
     cartao.addEventListener('pointermove', aoArrastar);
     cartao.addEventListener('pointerup', aoSoltar);
     cartao.addEventListener('pointercancel', aoCancelar);
@@ -3294,6 +3667,7 @@
     if (!a.ativo) {
       if (Math.abs(dy) < 6) return;
       a.ativo = true;
+      if (a.noInfo) { try { a.cartao.setPointerCapture(a.id); } catch (e) { /* ignora */ } }
       fecharDica(false);
       a.cartao.classList.add('arrastando');
       a.lista.classList.add('ordenando');
@@ -3364,7 +3738,11 @@
     }
     gravarSessao(CHAVE_CONCLUIDO, sessao);
     apagarStorage(CHAVE_CONCLUIDO);
-    apagarStorage(CHAVE_PROGRESSO);
+    // O progresso só some quando o envio é confirmado (ou quando não há servidor e o código é o único caminho):
+    // se o envio falhou, quem fechar a aba ainda pode abrir o link de novo e enviar.
+    if (enviado || !temServidor()) apagarStorage(CHAVE_PROGRESSO);
+    // "Já enviado neste aparelho" (só a data e o protocolo): ao reabrir o link, a capa avisa.
+    if (enviado) gravarStorage(CHAVE_ENVIADOS, registrarEnviado(lerStorage(CHAVE_ENVIADOS), AVAL ? AVAL.codigo : '', protocolo));
     estado.concluido = concluido;
     envio = { carregando: false, erro: '' };
     estado.etapa = 'concluido';
@@ -3484,25 +3862,65 @@
 
   function telaBoasVindasPessoal() {
     var ps = lerPessoal();
+    var r = resumoRetomada(lerStorage(CHAVE_PROGRESSO), N, false, 0);
     return '' +
       '<section class="caixa surgir pessoal-retomar" aria-labelledby="titulo">' +
         '<p class="sobretitulo">' + escapar(EMPRESA_B2C) + ' · Mapa de Perfil</p>' +
         '<h1 id="titulo" class="titulo-pagina">Você tem um teste em andamento</h1>' +
-        '<p class="subtitulo">Suas respostas ficaram salvas neste aparelho. Continue de onde parou ou comece de novo.</p>' +
+        '<p class="subtitulo">Suas respostas ficaram salvas neste aparelho. ' + escapar(r.texto) + ' Continue de onde parou ou comece de novo.</p>' +
         '<div class="acoes acoes-coluna">' +
           '<button type="button" class="botao botao--principal botao--grande" data-acao="continuar">Continuar de onde parei</button>' +
-          '<button type="button" class="botao botao--claro botao--grande" data-acao="recomecar">Começar do zero</button>' +
+          botaoRecomecarHtml('botao--claro', r.grupos) +
           (ps ? '<button type="button" class="botao botao--link" data-acao="ver-resumo">Ver o meu último resumo</button>' : '') +
         '</div>' +
       '</section>';
   }
 
+  /* ---- "Meus relatórios" neste aparelho: compras liberadas sobrevivem a "Refazer o teste" ---- */
+  var CHAVE_COMPRAS = 'disc_pessoal_compras_v1';
+  function lerCompras() {
+    var l = lerStorage(CHAVE_COMPRAS);
+    return Array.isArray(l) ? l.filter(function (c) { return c && typeof c.token === 'string' && /^[A-Za-z0-9_-]{16,128}$/.test(c.token); }) : [];
+  }
+  function lembrarCompra(ps) {
+    if (!pedidoLiberado(ps)) return;
+    var token = ps.pedido.tokenAcesso;
+    var lista = lerCompras().filter(function (c) { return c.token !== token; });
+    lista.unshift({ token: token, pacote: String(ps.pedido.pacote || ''), em: new Date().toISOString() });
+    gravarStorage(CHAVE_COMPRAS, lista.slice(0, 10));
+  }
+  function nomePacote(chave) {
+    var p = pacotesAtuais().filter(function (x) { return x.chave === chave; })[0];
+    return p ? p.nome : (chave === 'completo_plus' ? 'Completo + Parte 2' : 'Relatório completo');
+  }
+  // Lista de links comprados (menos o do resumo atual, que já aparece na caixa "liberado").
+  function comprasHtml(tokenAtual) {
+    var l = lerCompras().filter(function (c) { return c.token !== tokenAtual; });
+    if (!l.length) return '';
+    return '<section class="caixa minhas-compras surgir" aria-labelledby="titulo-compras">' +
+      '<h2 id="titulo-compras" class="titulo-secao">Seus relatórios neste aparelho</h2>' +
+      '<ul class="minhas-compras-lista">' + l.map(function (c) {
+        var d = new Date(c.em);
+        return '<li><a href="' + escapar(linkMeuRelatorio(c.token)) + '">' + escapar(nomePacote(c.pacote)) + '</a>' +
+          (isNaN(d.getTime()) ? '' : ' <span class="texto-suave">· comprado em ' + escapar(dataCurta(d)) + '</span>') + '</li>';
+      }).join('') + '</ul></section>';
+  }
+
   function telaIdentificacaoPessoal() {
+    // Veio do card de um pacote na landing: diz que primeiro vem o teste e o pagamento só depois do resumo.
+    var pac = MODO.pacote ? pacotesAtuais().filter(function (p) { return p.chave === MODO.pacote; })[0] : null;
+    var ck = CK();
+    var escolha = pac && ck
+      ? '<p class="pessoal-escolha" role="note">Você escolheu: <strong>' + escapar(pac.nome) + ' (' + escapar(ck.formatarPreco(ck.precoVigente(pac).centavos)) + ')</strong>. ' +
+          'Primeiro o teste, cerca de 10 minutos; o pagamento vem depois do seu resumo grátis.' +
+          (MODO.cupom ? ' Cupom <strong>' + escapar(MODO.cupom) + '</strong> ativo: o desconto entra na hora de pagar.' : '') + '</p>'
+      : (MODO.cupom ? '<p class="pessoal-escolha" role="note">Cupom <strong>' + escapar(MODO.cupom) + '</strong> ativo: o desconto entra na hora de pagar, depois do seu resumo grátis.</p>' : '');
     return '' +
       '<section class="caixa surgir pessoal-id" aria-labelledby="titulo">' +
         '<p class="sobretitulo etapa">Seu Mapa de Perfil</p>' +
         '<h1 id="titulo" class="titulo-pagina">Antes de começar</h1>' +
         '<p class="subtitulo">São 25 grupos de 4 palavras, cerca de 10 minutos. No fim, você vê o seu resumo grátis na hora.</p>' +
+        escolha +
         avisoHtml() +
         '<form id="form-identificacao" class="formulario" novalidate>' +
           '<div class="campo">' +
@@ -3516,6 +3934,7 @@
             '<input class="entrada" id="email" name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" required maxlength="' + LIMITE_EMAIL + '" ' +
               'aria-describedby="dica-email erro-email" value="' + escapar(estado.email) + '">' +
             '<p class="campo__ajuda" id="dica-email">É por ele que você recebe e recupera o seu relatório.</p>' +
+            '<p class="campo__ajuda sugestao-email" id="sugestao-email" role="status" hidden></p>' +
             '<p class="campo__erro erro" id="erro-email" role="alert"></p>' +
           '</div>' +
           '<div class="campo">' +
@@ -3530,17 +3949,33 @@
               '<input id="consentimento" name="consentimento" type="checkbox" required aria-describedby="erro-consentimento"' + (estado.consentimento ? ' checked' : '') + '>' +
               '<span>Autorizo a <strong>' + escapar(EMPRESA_B2C) + '</strong> a usar meus dados (nome, e-mail, WhatsApp e respostas) <strong>para gerar o meu relatório</strong> e me enviar o acesso a ele. ' +
                 'Eles <strong>não são compartilhados com empresas</strong> e posso pedir a exclusão quando quiser, conforme a LGPD. ' +
-                '<a href="privacidade.html" target="_blank" rel="noopener">Política de privacidade</a>.</span>' +
+                '<a href="privacidade.html" target="_blank" rel="noopener">Política de privacidade</a> e <a href="termos.html" target="_blank" rel="noopener">Termos de uso</a>.</span>' +
             '</label>' +
             '<p class="campo__erro erro" id="erro-consentimento" role="alert"></p>' +
           '</div>' +
           '<p class="pessoal-lembrete">Não há respostas certas ou erradas, nem perfil melhor ou pior. Responda pensando em como você realmente é.</p>' +
           '<div class="acoes">' +
-            '<a class="botao botao--claro botao--grande" href="descubra.html">Voltar</a>' +
+            '<a class="botao botao--claro botao--grande" href="' + escapar(hrefVoltarLanding(root.location.search)) + '">Voltar</a>' +
             '<button type="submit" class="botao botao--principal botao--grande">' + (estado.reenviar ? 'Salvar e ver meu resultado' : 'Começar o teste') + '</button>' +
           '</div>' +
         '</form>' +
-      '</section>';
+      '</section>' +
+      comprasHtml('');
+  }
+
+  // "Você quis dizer ana@gmail.com?" (domínio digitado errado). Não bloqueia: o 1º envio mostra a sugestão,
+  // o 2º com o mesmo e-mail segue. -> true se mostrou uma sugestão nova.
+  function mostrarSugestaoEmail(form, valor, noEnvio) {
+    var el = form.querySelector('#sugestao-email');
+    if (!el) return false;
+    var sug = sugestaoEmail(limparEmail(valor));
+    if (!sug) { el.hidden = true; el.innerHTML = ''; return false; }
+    var nova = el.getAttribute('data-para') !== limparEmail(valor);
+    el.setAttribute('data-para', limparEmail(valor));
+    el.innerHTML = 'Você quis dizer <button type="button" class="botao botao--link sugestao-email-botao" data-acao="usar-sugestao" data-email="' + escapar(sug) + '">' + escapar(sug) + '</button>?' +
+      (noEnvio ? ' Se o seu e-mail estiver certo, toque em Começar o teste de novo.' : '');
+    el.hidden = false;
+    return nova && !!noEnvio;
   }
 
   function enviarIdentificacaoPessoal(form) {
@@ -3556,6 +3991,12 @@
     if (!ok) {
       var primeiro = form.querySelector('[aria-invalid="true"]');
       if (primeiro) primeiro.focus();
+      return;
+    }
+    // E-mail é a "conta": um domínio com cara de erro de digitação pede uma conferida antes de seguir.
+    if (mostrarSugestaoEmail(form, dados.email, true)) {
+      var campoEmail = form.querySelector('#email');
+      if (campoEmail) campoEmail.focus();
       return;
     }
     estado.nome = normalizarNome(dados.nome);
@@ -3615,6 +4056,7 @@
       telefone: limparTelefone(estado.telefone),
       relatorio: R ? R.dadosDoResultado(payload.resultado.percentuais, payload.resultado.codigo) : payload.resultado,
       pacoteEscolhido: MODO.pacote || '',
+      pacoteDoLink: MODO.pacote || '',   // pacote do link com desconto (o cupom pode valer só para ele)
       cupom: MODO.cupom || '',
       etapa: 'resumo',
       criadoEm: new Date().toISOString()
@@ -3641,7 +4083,7 @@
     }, function (erro) {
       var msg = (erro && erro.message) || 'Erro desconhecido.';
       if (root.console && root.console.warn) root.console.warn('Falha no envio do Mapa de Perfil:', msg);
-      envio = { carregando: false, erro: erro && erro.resposta ? msg : mensagemErroEnvio(msg) };
+      envio = { carregando: false, erro: erro && erro.resposta ? msg : mensagemErroEnvio(msg, true) };
       estado.etapa = 'enviando';
       render(true);
     });
@@ -3654,10 +4096,14 @@
     var s = null, d = null;
     try { s = R.montarSimples(ps.relatorio, ps.primeiroNome, DATA); d = R.montar(ps.relatorio, ps.primeiroNome, DATA); } catch (e) { s = null; }
     if (!s) { estado.etapa = 'identificacao'; return telaIdentificacaoPessoal(); }
-    var venda;
+    var venda = '', liberado = '', atalho = '', barraFixa = '';
+    var ck = CK();
+    var suporte = linkSuporteHtml('Olá! Tenho uma dúvida sobre o Mapa de Perfil.');
     if (pedidoLiberado(ps)) {
+      lembrarCompra(ps);
       var url = linkMeuRelatorio(ps.pedido.tokenAcesso);
-      venda = '' +
+      // Quem já pagou e volta ao site vê primeiro o acesso, não o resumo grátis inteiro.
+      liberado = '' +
         '<section class="caixa caixa--destaque liberado surgir" aria-labelledby="titulo-liberado">' +
           '<h2 id="titulo-liberado" class="titulo-secao">Seu relatório completo está liberado</h2>' +
           '<p class="subtitulo">Abra quando quiser pelo seu link. Ele não expira.</p>' +
@@ -3670,33 +4116,82 @@
           '<div class="aviso">A compra do relatório completo fica disponível em breve.</div>' +
         '</section>';
     } else {
+      var escolhido = ps.pacoteEscolhido || MODO.pacote || DESTAQUE_PADRAO;
+      var pac = pacotesAtuais().filter(function (p) { return p.chave === escolhido; })[0];
+      var preco = pac && ck ? ' · ' + ck.formatarPreco(ck.precoVigente(pac).centavos) : '';
+      // Atalho para a oferta logo no topo (a oferta fica depois de ~3 telas no celular) e a mesma chamada fixa na base.
+      atalho = '<div class="resumo-atalho"><button type="button" class="botao botao--principal botao--grande resumo-cta" data-acao="ir-pacotes">Ver o relatório completo' + escapar(preco) + '</button>' +
+        (ps.cupom ? '<p class="resumo-cupom">Cupom <strong>' + escapar(ps.cupom) + '</strong> ativo: o desconto entra na hora de pagar.</p>' : '') + '</div>';
+      barraFixa = '<div class="resumo-cta-fixo" id="resumo-cta-fixo" aria-hidden="true">' +
+        '<button type="button" class="botao botao--principal botao--grande botao--bloco" data-acao="ir-pacotes" tabindex="-1">Desbloquear o relatório completo' + escapar(preco) + '</button></div>';
       venda = previaPagaHtml(d) +
         '<section class="caixa paywall surgir" aria-labelledby="titulo-paywall">' +
           '<p class="sobretitulo">Destrave o seu relatório</p>' +
           '<h2 id="titulo-paywall" class="titulo-secao">Escolha o seu relatório</h2>' +
           '<p class="subtitulo">Pagamento único, por Pix ou cartão. O acesso abre na hora e fica no seu link.</p>' +
+          (ps.cupom ? '<p class="resumo-cupom resumo-cupom--oferta" role="note">Cupom <strong>' + escapar(ps.cupom) + '</strong> ativo: o desconto aparece no pagamento.</p>' : '') +
           '<div id="pacotes-caixa">' + pacotesHtml(pacotesAtuais(), ps.pacoteEscolhido || MODO.pacote) + '</div>' +
           '<p class="ck-garantia"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3l8 3v6c0 4.5-3.4 8-8 9-4.6-1-8-4.5-8-9V6z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></svg>' +
-            '<span><strong>Garantia de 7 dias.</strong> Não gostou? Devolvemos o valor, sem perguntas.</span></p>' +
+            '<span><strong>Garantia de 7 dias.</strong> Não gostou? Devolvemos o valor, sem perguntas.' + (suporte ? ' Dúvidas ou reembolso? ' + suporte + '.' : '') + '</span></p>' +
+          '<p class="ck-letra-miuda">Ao comprar, você concorda com os <a href="termos.html" target="_blank" rel="noopener">Termos de uso</a>.</p>' +
         '</section>';
     }
     return '' +
       '<div class="pilha-telas pessoal-resumo">' +
-        resumoGratisHtml(s) +
+        liberado +
+        resumoGratisHtml(s, atalho) +
         venda +
+        comprasHtml(pedidoLiberado(ps) ? ps.pedido.tokenAcesso : '') +
         '<div class="rodape">' +
           '<p class="rodape-nota">O DISC descreve estilo de comportamento, não competência. Não existe perfil melhor ou pior.</p>' +
           '<a class="botao botao--link" href="meu-relatorio.html#recuperar">Já comprei: recuperar meu relatório</a>' +
+          (suporte ? '<p class="rodape-nota">Dúvidas? ' + suporte + '.</p>' : '') +
           '<button type="button" class="botao botao--link" data-acao="refazer">Refazer o teste</button>' +
-          '<p class="rodape-nota" id="nota-refazer" hidden>Um relatório já comprado continua no seu link, ligado a este resultado. Um novo resultado precisa de uma nova compra.</p>' +
+          '<p class="rodape-nota" id="nota-refazer" hidden>Um relatório já comprado continua no seu link (e na lista deste aparelho), ligado a este resultado. Um novo resultado precisa de uma nova compra.</p>' +
         '</div>' +
+        barraFixa +
       '</div>';
   }
+
+  // Barra fixa "Desbloquear o relatório completo" (celular): aparece quando nem o atalho do topo nem a oferta estão à vista.
+  var obsCtaResumo = null;
+  function ligarCtaResumo() {
+    if (obsCtaResumo) { obsCtaResumo.disconnect(); obsCtaResumo = null; }
+    var fixo = app.querySelector('#resumo-cta-fixo');
+    var atalho = app.querySelector('.resumo-atalho');
+    var oferta = app.querySelector('.paywall');
+    if (!fixo || !atalho || !oferta || typeof root.IntersectionObserver !== 'function') return;
+    var ofertaVisivel = false;
+    obsCtaResumo = new root.IntersectionObserver(function (entradas) {
+      entradas.forEach(function (e) { if (e.target === oferta) ofertaVisivel = e.isIntersecting; });
+      // Aparece depois que o atalho do topo saiu da tela (para cima) e some quando a oferta entra.
+      var mostrar = atalho.getBoundingClientRect().bottom < 0 && !ofertaVisivel;
+      fixo.classList.toggle('resumo-cta-fixo--visivel', mostrar);
+      fixo.setAttribute('aria-hidden', mostrar ? 'false' : 'true');
+      var b = fixo.querySelector('button');
+      if (b) b.tabIndex = mostrar ? 0 : -1;
+    });
+    obsCtaResumo.observe(atalho);
+    obsCtaResumo.observe(oferta);
+  }
+
+  function irParaPacotes() {
+    var alvo = app.querySelector('#pacotes-caixa') || app.querySelector('.paywall');
+    if (!alvo) return;
+    var reduzir = false;
+    try { reduzir = root.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { reduzir = false; }
+    try { alvo.scrollIntoView({ behavior: reduzir ? 'auto' : 'smooth', block: 'start' }); } catch (e) { alvo.scrollIntoView(); }
+    var b = alvo.querySelector('.pacote--destaque [data-acao="comprar"]') || alvo.querySelector('[data-acao="comprar"]');
+    if (b) { try { b.focus({ preventScroll: true }); } catch (e) { /* ignora */ } }
+  }
+
 
   function abrirCheckout(chave) {
     var ps = lerPessoal();
     if (!ps || !ps.tokenResumo) return;
     ps.pacoteEscolhido = PACOTES_PAGOS.indexOf(chave) !== -1 ? chave : 'completo';
+    // Escolheu outro pacote: o pedido aberto do anterior não vale mais (o checkout cria outro).
+    if (ps.pedido && ps.pedido.pacote !== ps.pacoteEscolhido && !pedidoLiberado(ps)) delete ps.pedido;
     ps.etapa = 'checkout';
     gravarPessoal(ps);
     estado.etapa = 'checkout';
@@ -3708,15 +4203,21 @@
     var el = app.querySelector('#checkout-raiz');
     var ps = lerPessoal();
     if (!ck || !el || !ps) return;
-    var pac = pacotesAtuais().filter(function (p) { return p.chave === ps.pacoteEscolhido; })[0] ||
-      ck.PACOTES_PADRAO.filter(function (p) { return p.chave === ps.pacoteEscolhido; })[0] || ck.PACOTES_PADRAO[1];
+    // Pedido aberto manda no pacote (a URL ou um estado antigo não trocam o pedido no meio do pagamento).
+    var chave = ps.pedido && ps.pedido.pedidoId && PACOTES_PAGOS.indexOf(ps.pedido.pacote) !== -1 ? ps.pedido.pacote : ps.pacoteEscolhido;
+    var pac = pacotesAtuais().filter(function (p) { return p.chave === chave; })[0] ||
+      ck.PACOTES_PADRAO.filter(function (p) { return p.chave === chave; })[0] || ck.PACOTES_PADRAO[1];
     var salvo = ps.pedido && ps.pedido.pacote === pac.chave ? ps.pedido : null;
     checkout = ck.criar({
       api: root.DISC_API,
       tokenResumo: ps.tokenResumo,
       pacote: pac,
+      pacotes: pacotesAtuais().filter(function (p) { return PACOTES_PAGOS.indexOf(p.chave) !== -1; }),
       pedido: salvo,
       cupom: ps.cupom || '',
+      pacoteDoLink: ps.pacoteDoLink || '',
+      email: ps.email || '',
+      suporte: contatoSuporte('Olá! Tenho uma dúvida sobre a compra do Mapa de Perfil.'),
       telefone: ps.telefone,
       aoAnunciar: anunciar,
       aoMudar: function (pedido) {
@@ -3724,13 +4225,12 @@
         if (!atual) return;
         if (pedido) atual.pedido = pedido; else delete atual.pedido;
         gravarPessoal(atual);
+        lembrarCompra(atual);
       },
-      aoVoltar: function () {
+      aoVoltar: voltarDoCheckout,
+      aoTrocarPacote: function (chave) {
         var atual = lerPessoal();
-        if (atual) { atual.etapa = 'resumo'; gravarPessoal(atual); }
-        checkout = null;
-        estado.etapa = 'resumo';
-        render(true);
+        if (atual && PACOTES_PAGOS.indexOf(chave) !== -1) { atual.pacoteEscolhido = chave; gravarPessoal(atual); }
       },
       aoParte2: function (pedido) {
         checkout = null;
@@ -3740,8 +4240,18 @@
     checkout.montar(el);
   }
 
+  // Do checkout de volta ao resumo (botão "Voltar ao meu resumo" e "Voltar" do aparelho). O pedido aberto fica salvo.
+  function voltarDoCheckout() {
+    if (checkout) { checkout.parar(); checkout = null; }
+    var atual = lerPessoal();
+    if (atual) { atual.etapa = 'resumo'; gravarPessoal(atual); }
+    estado.etapa = 'resumo';
+    render(true);
+  }
+
   function refazerPessoal() {
     var ps = lerPessoal() || {};
+    lembrarCompra(ps);   // o link comprado continua na lista "Seus relatórios neste aparelho"
     apagarStorage(CHAVE_PESSOAL);
     apagarStorage(CHAVE_PROGRESSO);
     estado = estadoInicial();
@@ -3842,8 +4352,11 @@
     if (MODO.parte2Token) { carregarParte2(MODO.parte2Token); return; }
     var ps = lerPessoal();
     var salvo = lerStorage(CHAVE_PROGRESSO);
-    if (MODO.pacote && ps && !pedidoLiberado(ps)) { ps.pacoteEscolhido = MODO.pacote; gravarPessoal(ps); }
-    if (MODO.cupom && ps) { ps.cupom = MODO.cupom; gravarPessoal(ps); }
+    // Pedido aberto no checkout (ex.: Pix gerado e a página recarregou na volta do app do banco): o pacote e o cupom
+    // da URL não trocam o pedido; a tela volta para o pagamento dele.
+    var pedidoAberto = !!(ps && ps.etapa === 'checkout' && ps.pedido && ps.pedido.pedidoId && !pedidoLiberado(ps));
+    if (MODO.pacote && ps && !pedidoLiberado(ps) && !pedidoAberto) { ps.pacoteEscolhido = MODO.pacote; ps.pacoteDoLink = MODO.pacote; gravarPessoal(ps); }
+    if (MODO.cupom && ps && !pedidoAberto) { ps.cupom = MODO.cupom; gravarPessoal(ps); }
     if (temProgresso(salvo)) estado.etapa = 'boasvindas';
     else if (ps) estado.etapa = ps.etapa === 'checkout' && ps.tokenResumo && !pedidoLiberado(ps) ? 'checkout' : 'resumo';
     else estado.etapa = 'identificacao';
@@ -3885,6 +4398,18 @@
     app.addEventListener('click', aoClicar);
     ligarDicasGlobais();
     ligarDemoGlobal();
+    // "Voltar" do aparelho volta um passo dentro do teste (veja marcarHistorico).
+    root.addEventListener('popstate', aoVoltarNavegador);
+    // Outro link colado na mesma aba (#a-CRT1 -> #a-EQP1, ou o link da Parte 2): recarrega para abrir o processo certo.
+    var hashInicial = String(root.location.hash || '');
+    root.addEventListener('hashchange', function () {
+      var h = String(root.location.hash || '');
+      var novoCodigo = '';
+      try { novoCodigo = api && api.codigoAvaliacaoDaUrl ? api.codigoAvaliacaoDaUrl(root.location.search, h) : ''; } catch (e) { novoCodigo = ''; }
+      var mudouLink = /^#a-/.test(h) && novoCodigo !== CODIGO_LINK;
+      var mudouP2 = /^#p2-/.test(h) && h !== hashInicial;
+      if (mudouLink || mudouP2) { try { root.location.reload(); } catch (e) { /* ignora */ } }
+    });
     // Tempo por grupo: pausa com a aba escondida e grava o que já passou.
     document.addEventListener('visibilitychange', function () {
       if (!estado) return;

@@ -227,3 +227,12 @@ test('lidera substitui direto do mesmo par (sem duplicar)', () => {
   assert.equal(s.pares.length, 1);
   assert.equal(s.pares[0].tipo, 'lidera');
 });
+
+test('texto dos riscos se lê como frase: "Ana S., com Influência alta, e Bruno L., com Conformidade alta" (sem rótulo entre parênteses)', () => {
+  const ic = C.analisarPar({ id: 1, nome: 'Ana Souza', percentuais: P.I }, { id: 2, nome: 'Bruno Lima', percentuais: P.C }, 'direto');
+  const t = ic.riscos.find((x) => /detalhe/.test(x));
+  assert.match(t, /^Ana S\., com Influência alta, e Bruno L\., com Conformidade alta: /);
+  const ds = C.analisarPar({ id: 1, nome: 'Gabriela Rocha', percentuais: P.D }, { id: 2, nome: 'Sérgio Silva', percentuais: P.S }, 'direto');
+  assert.ok(ds.riscos.some((x) => /^Gabriela R\., com Dominância alta, e Sérgio S\., com Estabilidade alta: /.test(x)));
+  for (const r of [ic, ds]) assert.ok(!r.riscos.some((x) => /\((Influência|Conformidade|Dominância|Estabilidade)\)/.test(x)));
+});

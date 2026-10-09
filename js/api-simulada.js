@@ -74,7 +74,7 @@
 (function (root) {
   'use strict';
 
-  var VERSAO_BANCO = 20261014120000;                     // última migração (supabase/migrations)
+  var VERSAO_BANCO = 20261015120000;                     // última migração (supabase/migrations)
   var CHAVE_ARMAZENAMENTO = 'disc_planilha_simulada';     // respostas (mesma chave das versões anteriores)
   var CHAVES = {
     usuarios: 'disc_simulada_usuarios',
@@ -139,6 +139,9 @@
   var PREFIXO_IA = '[IA] ';
   var MSG_REL_NAO_ENCONTRADO = 'Relatório não encontrado ou fora do ar.';
   var MSG_CU_SEM_LISTA = 'Este processo ainda não está ligado a uma lista do ClickUp.';
+  // O Stripe só cobra a partir de R$ 0,50: preço final entre R$ 0,01 e R$ 0,49 não é aceito (cupom, pacote, pedido).
+  var MINIMO_COBRANCA = 50;
+  var MSG_ABAIXO_MINIMO = 'Com este cupom o valor ficaria abaixo de R$ 0,50, o mínimo para pagar. Fale com quem enviou o cupom.';
   var AVISO_PREVIA = 'Prévia: candidatos fictícios de exemplo. Com o servidor de verdade eles vêm da lista do ClickUp.';
   // Ações que, no navegador, precisam do motor do relatório e da fixture (carregados sob demanda).
   var ACOES_COM_MOTOR = ['processo.dados', 'relatorio.rascunho', 'relatorio.salvar', 'relatorio.publicar',
@@ -1638,6 +1641,22 @@
         if (repetida) repetida.tipo = tipo; // repetida: vale a última
         else novas.push({ empresaId: empresaId, de: de, para: para, tipo: tipo });
       }
+      // Ciclo de liderança (A lidera B, B lidera… A): recusa, como o organograma de arrastar.
+      var lideres = {};
+      novas.forEach(function (n) { if (n.tipo === 'lidera') (lideres[n.para] = lideres[n.para] || []).push(n.de); });
+      var emCiclo = Object.keys(lideres).some(function (inicio) {
+        var vistos = {}, fila = [inicio];
+        while (fila.length) {
+          var x = fila.shift();
+          var acima = lideres[x] || [];
+          for (var k = 0; k < acima.length; k++) {
+            if (acima[k] === inicio) return true;
+            if (!vistos[acima[k]]) { vistos[acima[k]] = true; fila.push(acima[k]); }
+          }
+        }
+        return false;
+      });
+      if (emCiclo) return erro('Ciclo de liderança: uma pessoa não pode liderar quem está acima dela.');
       gravarChave(CHAVES.relacoes, relacoesTodas().filter(function (r) { return r.empresaId !== empresaId; }).concat(novas));
       var lsEmp = empresas();
       var emp = buscarPor(lsEmp, 'id', empresaId);
@@ -1716,6 +1735,16 @@
         return r.modelo && r.modelo !== 'processo' && (!empresaId || r.empresaId === empresaId) && (!pessoaId || r.pessoaId === pessoaId);
       }).map(relModeloPublico).sort(function (a, b) { return String(b.criadoEm).localeCompare(String(a.criadoEm)); });
       return { ok: true, relatorios: lista };
+    }
+
+    // Reabre um relatório de modelo salvo, com os dados gravados (o painel continua o rascunho ou revê o publicado).
+    function acaoRelatorioModeloAbrir(idBruto) {
+      var id = limparTexto(idBruto, 40);
+      var reg = id && buscarPor(relatoriosSalvos(), 'id', id);
+      if (!reg || !reg.modelo || reg.modelo === 'processo') return erro('Relatório não encontrado.');
+      var r = relModeloPublico(reg);
+      r.dados = copiar(reg.relatorio || {});
+      return { ok: true, relatorio: r };
     }
 
     function acaoRelatorioModeloExcluir(idBruto) {
@@ -2311,6 +2340,7 @@
       'relatorioModelo.salvar': { soAdmin: true, fn: function (u, c) { return acaoRelatorioModeloSalvar(c.relatorio); } },
       'relatoriosModelo.listar': { soAdmin: true, fn: function (u, c) { return acaoRelatoriosModeloListar(c.filtro); } },
       'relatorioModelo.excluir': { soAdmin: true, fn: function (u, c) { return acaoRelatorioModeloExcluir(c.id); } },
+      'relatorioModelo.abrir': { soAdmin: true, fn: function (u, c) { return acaoRelatorioModeloAbrir(c.id); } },
       'empresas.salvar': { soAdmin: true, fn: function (u, c) { return acaoEmpresasSalvar(c.empresa); } },
       'empresas.excluir': { soAdmin: true, fn: function (u, c) { return acaoEmpresasExcluir(c.id); } },
       'avaliacoes.listar': { fn: function (u) { return acaoAvaliacoesListar(u); } },
@@ -2541,7 +2571,9 @@
             ((c.pacotes || []).length && (c.pacotes || []).indexOf(pa.chave) < 0)) {
           return erro('Cupom inválido ou expirado.');
         }
-        valor = c.tipo === 'percentual' ? Math.round(base * (100 - c.valor) / 100) : Math.max(0, base - c.valor);
+        valor = precoComCupom(base, c);
+        // Rede de segurança (preço do pacote mudou depois do cupom): o Stripe não cobra menos de R$ 0,50.
+        if (valor > 0 && valor < MINIMO_COBRANCA) return erro(MSG_ABAIXO_MINIMO);
       } else {
         cod = '';
       }
@@ -2733,15 +2765,41 @@
       if (usosMax !== null && (!isFinite(usosMax) || usosMax < 1)) usosMax = null;
       var validoAte = c.validoAte ? String(c.validoAte).slice(0, 10) : '';
       if (validoAte && (!/^\d{4}-\d{2}-\d{2}$/.test(validoAte) || isNaN(Date.parse(validoAte)))) return erro('Data de validade inválida.');
+      var pacotesCupom = (Array.isArray(c.pacotes) ? c.pacotes : []).map(String).filter(function (x) { return /^[a-z0-9_]{2,30}$/.test(x); });
+      // Mesma regra do painel e do banco: o preço final de cada pacote em que o cupom vale fica em R$ 0,50 ou mais
+      // (o mínimo do Stripe) ou zero (grátis). Cupom desativado não é conferido (não gera pedido).
+      if (c.ativo !== false) {
+        var abaixo = abaixoDoMinimo({ tipo: tipo, valor: valor, pacotes: pacotesCupom });
+        if (abaixo) return erro('O Stripe só cobra a partir de R$ 0,50: com este cupom o ' + abaixo.nome + ' sairia por ' + reais(abaixo.final) + '. Use um desconto menor ou 100% (grátis).');
+      }
       var lista = cuponsSalvos();
       var atual = buscarPor(lista, 'codigo', codigo);
       if (!atual) { atual = { codigo: codigo, usos: 0, criadoEm: agoraIso() }; lista.push(atual); }
       atual.tipo = tipo; atual.valor = valor; atual.usosMax = usosMax; atual.validoAte = validoAte; atual.ativo = c.ativo !== false;
-      atual.pacotes = (Array.isArray(c.pacotes) ? c.pacotes : []).map(String).filter(function (x) { return /^[a-z0-9_]{2,30}$/.test(x); });
+      atual.pacotes = pacotesCupom;
       atual.descricao = limparTexto(c.descricao, 200);
       gravarChave(CHAVES.cupons, lista);
       return { ok: true, cupom: cupomSaida(atual) };
     }
+
+    // Preço com cupom de um pacote (mesma conta do criar_pedido).
+    function precoComCupom(base, c) {
+      return c.tipo === 'percentual' ? Math.round(base * (100 - c.valor) / 100) : Math.max(0, base - c.valor);
+    }
+    // Primeiro pacote pago em que o cupom deixaria o preço entre R$ 0,01 e R$ 0,49 ({nome, final}) ou null.
+    // pacotes: a lista a conferir (padrão: a gravada).
+    function abaixoDoMinimo(c, pacotes) {
+      var achado = null;
+      (pacotes || pacotesSalvos()).forEach(function (p) {
+        if (achado || p.chave === 'gratis' || ((c.pacotes || []).length && c.pacotes.indexOf(p.chave) < 0)) return;
+        var base = precoHoje(p);
+        if (base <= 0) return;
+        var final = precoComCupom(base, c);
+        if (final > 0 && final < MINIMO_COBRANCA) achado = { nome: p.nome, chave: p.chave, final: final };
+      });
+      return achado;
+    }
+    function reais(c) { var n = Math.round(Number(c) || 0); return 'R$ ' + Math.floor(n / 100) + ',' + ('0' + (n % 100)).slice(-2); }
 
     function acaoCupomExcluir(codigoBruto) {
       var codigo = String(codigoBruto == null ? '' : codigoBruto).replace(/\s+/g, '').toUpperCase();
@@ -2759,15 +2817,18 @@
       if (!p) return erro('Pacote não encontrado.');
       var veio = function (k) { return Object.prototype.hasOwnProperty.call(d, k) && d[k] !== undefined; };
       var mudou = false;
+      var precoAntes = [p.precoCentavos, p.precoLancamentoCentavos, p.lancamentoAte || ''].join('|');
       if (veio('nome')) { var n = limparTexto(d.nome, 80); if (!n) return erro('Informe o nome do pacote.'); p.nome = n; mudou = true; }
       if (veio('precoCentavos')) {
         var pr = Math.round(Number(d.precoCentavos));
         if (!isFinite(pr) || pr < 0 || pr > 10000000) return erro('Preço inválido.');
+        if (pr > 0 && pr < MINIMO_COBRANCA) return erro('O Stripe só cobra a partir de R$ 0,50: use R$ 0,50 ou mais (ou 0 para grátis).');
         p.precoCentavos = pr; mudou = true;
       }
       if (veio('precoLancamentoCentavos')) {
         var lc = d.precoLancamentoCentavos === null || d.precoLancamentoCentavos === '' ? null : Math.round(Number(d.precoLancamentoCentavos));
         if (lc !== null && (!isFinite(lc) || lc < 0 || lc > 10000000)) return erro('Preço de lançamento inválido.');
+        if (lc !== null && lc > 0 && lc < MINIMO_COBRANCA) return erro('O preço de lançamento precisa ser de pelo menos R$ 0,50 (o mínimo que o Stripe cobra).');
         p.precoLancamentoCentavos = lc; mudou = true;
       }
       if (veio('lancamentoAte')) {
@@ -2784,6 +2845,12 @@
         mudou = true;
       }
       if (!mudou) return erro('Nada para salvar.');
+      // Com o preço novo, algum cupom ativo deixaria este pacote entre R$ 0,01 e R$ 0,49? Recusa (nada é gravado).
+      var cupomRuim = null;
+      if ([p.precoCentavos, p.precoLancamentoCentavos, p.lancamentoAte || ''].join('|') !== precoAntes) {
+        cuponsSalvos().forEach(function (c) { if (!cupomRuim && c.ativo !== false && abaixoDoMinimo(c, [p])) cupomRuim = c; });
+      }
+      if (cupomRuim) return erro('Com esse preço, o cupom ' + cupomRuim.codigo + ' deixaria o ' + p.nome + ' por ' + reais(abaixoDoMinimo(cupomRuim, [p]).final) + ' (o Stripe só cobra a partir de R$ 0,50). Ajuste ou desative o cupom antes.');
       p.atualizadoEm = agoraIso();
       gravarChave(CHAVES.pacotes, lista);
       var saida = pacoteSaida(p);
@@ -2807,7 +2874,7 @@
       var periodoB = bloco(ini);
       var resumos = ler().filter(function (l) { return l.origem === 'pessoal' && Date.parse(l.recebidoEm) >= ini; }).length;
       var compradores = {};
-      ps.forEach(function (p) { if ((p.status === 'pago' || p.status === 'cortesia') && desde(p.pagoEm, ini)) compradores[p.respostaId || p.id] = true; });
+      ps.forEach(function (p) { if (p.status === 'pago' && desde(p.pagoEm, ini)) compradores[p.respostaId || p.id] = true; }); // cortesia não é compra
       var compras = Object.keys(compradores).length;
       var porPacote = {};
       ps.forEach(function (p) {
@@ -3445,6 +3512,11 @@
         exigirToken(token);
         exigir(id, 'Relatório não informado.');
         return comSessao('relatorioModelo.excluir', token, { id: id });
+      }),
+      abrirRelatorioModelo: seguro(function (token, id) {
+        exigirToken(token);
+        exigir(id, 'Relatório não informado.');
+        return comSessao('relatorioModelo.abrir', token, { id: id });
       })
     };
   }
@@ -3457,7 +3529,7 @@
     'relatorioRascunho', 'relatorioSalvar', 'relatorioPublicar', 'relatorioDespublicar', 'relatoriosListar',
     'relatorioMelhorarTextos', 'relatorioPublico', 'relatorioEnviarEmail',
     'listarEquipe', 'salvarColaborador', 'moverColaborador', 'desligarColaborador', 'salvarRelacoes',
-    'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo', 'salvarMinhaFoto', 'removerFoto',
+    'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo', 'abrirRelatorioModelo', 'salvarMinhaFoto', 'removerFoto',
     'moverResposta', 'contratarPessoa', 'versaoBanco',
     'pacotesPublicos', 'enviarPessoal', 'resumoPessoal', 'criarPedido', 'iniciarPagamento', 'statusPedido', 'relatorioPessoal',
     'salvarParte2Pessoal', 'recuperarAcesso', 'enviarLinkPorEmail', 'confirmarRetorno',

@@ -440,3 +440,14 @@ test('prévia em nova aba: #previa-<id>, lê do localStorage uma vez (apaga), co
   const ruim = arm(); ruim.setItem(V.PREFIXO_PREVIA + id, '{quebrado');
   assert.equal(V.lerPrevia(id, agora, { local: ruim, sessao: arm() }), null);
 });
+
+test('título da aba sem "Relatório · Relatório…" e botão "Salvar em PDF" fora da impressão', () => {
+  assert.equal(V.tituloDaAba('Relatório do processo Vendedor'), 'Relatório do processo Vendedor');
+  assert.equal(V.tituloDaAba('relatorio de equipe'), 'relatorio de equipe');
+  assert.equal(V.tituloDaAba('Equipe da Clínica'), 'Relatório · Equipe da Clínica');
+  assert.equal(V.tituloDaAba('  '), 'Relatório · Gestão sem Caos');
+  const h = V.botaoPdfHtml();
+  assert.match(h, /id="btn-salvar-pdf"/);
+  assert.match(h, /nao-imprimir/);
+  assert.ok(!/Notus/i.test(h));
+});

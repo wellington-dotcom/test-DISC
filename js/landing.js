@@ -8,7 +8,10 @@
  * - CTAs: "Começar meu mapa grátis" -> index.html?modo=pessoal; cada pacote -> index.html?modo=pessoal&pacote=<chave>.
  *   Parâmetros de campanha (utm_*, gclid, fbclid, ref, cupom) que chegam na landing seguem para o teste; ?pacote=<chave>
  *   (link do painel "Página de venda") vai nos CTAs gerais e destaca o card desse pacote.
- * - Contato "Para empresas": CONFIG.WHATSAPP_SUPORTE (só dígitos com DDI) vira link de WhatsApp.
+ * - Contato "Para empresas", dúvidas e garantia: CONFIG.WHATSAPP_SUPORTE (só dígitos com DDI) vira link de WhatsApp;
+ *   sem ele, CONFIG.EMAIL_SUPORTE vira mailto. Sem nenhum dos dois, o texto não promete um canal que não existe.
+ * - ?cupom=X (link com desconto do painel): faixa "Cupom X ativo" no herói e acima dos pacotes.
+ * - Celular: enquanto a barra fixa "Começar" está à vista, o botão do topo vira "Ver preços" (um só CTA de começar).
  * - Rodapé: CONFIG.EMPRESA_LEGAL (razão social e CNPJ) quando preenchido.
  * - Barra fixa de CTA no celular quando o botão do herói sai da tela.
  *
@@ -198,6 +201,24 @@
     }).join('');
   }
 
+  // ?cupom=X da landing (normalizado como no teste: maiúsculas, 3 a 30 letras/números/-/_) ou ''.
+  function cupomDaBusca(busca) {
+    var m = /[?&]cupom=([^&#]*)/.exec(String(busca || ''));
+    var v = '';
+    try { v = m ? decodeURIComponent(m[1].replace(/\+/g, ' ')) : ''; } catch (e) { v = ''; }
+    v = v.replace(/\s+/g, '').toUpperCase();
+    return /^[A-Z0-9_-]{3,30}$/.test(v) ? v : '';
+  }
+
+  // Canal de suporte: { href, texto } (WhatsApp primeiro, depois e-mail) ou null.
+  function contatoSuporte(cfg, texto) {
+    var wa = linkWhatsApp(cfg && cfg.WHATSAPP_SUPORTE, texto);
+    if (wa) return { href: wa, texto: 'WhatsApp', tipo: 'whatsapp' };
+    var email = String((cfg && cfg.EMAIL_SUPORTE) || '').trim();
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return { href: 'mailto:' + email, texto: email, tipo: 'email' };
+    return null;
+  }
+
   function linkWhatsApp(numero, texto) {
     var dig = String(numero || '').replace(/\D/g, '');
     if (dig.length < 10 || dig.length > 15) return '';
@@ -235,7 +256,7 @@
     // CTAs gerais com parâmetros de campanha
     var extra = paramsCampanha(busca);
     if (extra.length) {
-      Array.prototype.forEach.call(doc.querySelectorAll('a[data-cta]'), function (a) { a.setAttribute('href', hrefTeste('', busca)); });
+      Array.prototype.forEach.call(doc.querySelectorAll('a[data-cta]'), function (a) { a.setAttribute('href', hrefTeste('', busca)); a.setAttribute('data-href-teste', hrefTeste('', busca)); });
     }
 
     // Pacotes: padrão na hora; servidor quando responder
@@ -248,13 +269,48 @@
       }).catch(function () { /* mantém os valores padrão */ });
     }
 
-    // Para empresas: WhatsApp de suporte
-    var wa = linkWhatsApp(cfg.WHATSAPP_SUPORTE, 'Olá! Vim pela página do Mapa DISC e quero saber sobre o mapeamento para empresas.');
-    if (wa) {
+    // Para empresas: WhatsApp (ou e-mail) de suporte
+    var contatoEmp = contatoSuporte(cfg, 'Olá! Vim pela página do Mapa DISC e quero saber sobre o mapeamento para empresas.');
+    if (contatoEmp) {
       var botao = doc.querySelector('[data-contato-empresas]');
       var nota = doc.querySelector('[data-contato-empresas-nota]');
-      if (botao) { botao.href = wa; botao.target = '_blank'; botao.rel = 'noopener'; botao.hidden = false; }
+      if (botao) {
+        botao.href = contatoEmp.href;
+        if (contatoEmp.tipo === 'whatsapp') { botao.target = '_blank'; botao.rel = 'noopener'; }
+        else botao.textContent = 'Falar por e-mail';
+        botao.hidden = false;
+      }
       if (nota) nota.hidden = true;
+    }
+
+    // Dúvidas e garantia: o canal de suporte, quando existe
+    var contato = contatoSuporte(cfg, 'Olá! Tenho uma dúvida sobre o Mapa DISC.');
+    if (contato) {
+      var lead = doc.querySelector('[data-suporte-lead]');
+      if (lead) {
+        lead.textContent = contato.tipo === 'whatsapp' ? 'Se a sua não estiver aqui, fale com a gente pelo ' : 'Se a sua não estiver aqui, escreva para ';
+        var a = doc.createElement('a');
+        a.href = contato.href;
+        a.textContent = contato.texto;
+        if (contato.tipo === 'whatsapp') { a.target = '_blank'; a.rel = 'noopener'; }
+        lead.appendChild(a);
+        lead.appendChild(doc.createTextNode('.'));
+      }
+      var gar = doc.querySelector('[data-suporte-garantia]');
+      if (gar) gar.textContent = contato.tipo === 'whatsapp' ? ' pelo WhatsApp de suporte' : ' pelo e-mail ' + contato.texto;
+    }
+
+    // Link com desconto: o cupom aparece desde a landing (ele segue nos CTAs até o pagamento)
+    var cupom = cupomDaBusca(busca);
+    if (cupom) {
+      Array.prototype.forEach.call(doc.querySelectorAll('[data-cupom-ativo]'), function (f) {
+        f.textContent = '';
+        var b = doc.createElement('strong');
+        b.textContent = 'Cupom ' + cupom + ' ativo.';
+        f.appendChild(b);
+        f.appendChild(doc.createTextNode(' O desconto entra na hora de pagar, depois do seu resumo grátis.'));
+        f.hidden = false;
+      });
     }
 
     // Rodapé legal
@@ -270,12 +326,23 @@
     var pacotesSec = doc.getElementById('pacotes');
     if (fixo && heroiCta && typeof root.IntersectionObserver === 'function') {
       var visiveis = { heroi: true, final: false, pacotes: false };
+      var topoCta = doc.querySelector('a[data-cta="topo"]');
+      var topoOriginal = topoCta ? { href: topoCta.getAttribute('href'), texto: topoCta.textContent } : null;
+      var celular = typeof root.matchMedia === 'function' ? root.matchMedia('(max-width: 899px)') : null;
       var atualizar = function () {
         var mostrar = !visiveis.heroi && !visiveis.final && !visiveis.pacotes;
         fixo.classList.toggle('cta-fixo--visivel', mostrar);
         fixo.setAttribute('aria-hidden', mostrar ? 'false' : 'true');
         var link = fixo.querySelector('a');
         if (link) link.tabIndex = mostrar ? 0 : -1;
+        // Com a barra fixa à vista (só no celular), o botão do topo vira o atalho para os preços: um CTA de começar por vez.
+        if (topoCta && topoOriginal) {
+          var precos = mostrar && (!celular || celular.matches);
+          topoCta.setAttribute('href', precos ? '#pacotes' : (topoCta.getAttribute('data-href-teste') || topoOriginal.href));
+          topoCta.textContent = precos ? 'Ver preços' : topoOriginal.texto;
+          topoCta.classList.toggle('botao--principal', !precos);
+          topoCta.classList.toggle('botao--claro', precos);
+        }
       };
       var obs = new root.IntersectionObserver(function (entradas) {
         entradas.forEach(function (e) {
@@ -293,7 +360,8 @@
 
   var LANDING = {
     PADRAO: PADRAO, formatarPreco: formatarPreco, precoAtual: precoAtual, normalizarPacotes: normalizarPacotes,
-    hrefTeste: hrefTeste, paramsCampanha: paramsCampanha, pacoteDaBusca: pacoteDaBusca, linkWhatsApp: linkWhatsApp, htmlPacotes: htmlPacotes
+    hrefTeste: hrefTeste, paramsCampanha: paramsCampanha, pacoteDaBusca: pacoteDaBusca, linkWhatsApp: linkWhatsApp, htmlPacotes: htmlPacotes,
+    cupomDaBusca: cupomDaBusca, contatoSuporte: contatoSuporte
   };
   if (typeof module !== 'undefined' && module.exports) { module.exports = LANDING; return; }
   root.DISC_LANDING = LANDING;

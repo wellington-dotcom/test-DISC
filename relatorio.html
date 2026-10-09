@@ -16,6 +16,12 @@
   <link rel="preload" href="assets/fonts/instrument-sans-latin-wght-normal.woff2" as="font" type="font/woff2" crossorigin>
   <link rel="stylesheet" href="assets/notus.css">
   <link rel="stylesheet" href="assets/relatorio.css">
+  <style>
+    /* "Salvar em PDF": fixo no canto (computador e celular), fora da impressão. */
+    .doc-pdf { position: fixed; right: max(16px, env(safe-area-inset-right)); bottom: max(16px, env(safe-area-inset-bottom)); z-index: 30; }
+    .doc-pdf__botao { box-shadow: 0 12px 28px -12px rgba(19, 40, 63, .45); }
+    @media print { .doc-pdf, .nao-imprimir { display: none !important; } }
+  </style>
 </head>
 <body class="corpo-doc">
   <main id="relatorio" class="relatorio" aria-busy="true" aria-live="polite">

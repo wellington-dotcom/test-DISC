@@ -18,7 +18,7 @@
   <header class="topo-landing vidro-cabecalho">
     <div class="envoltorio topo-landing__interno">
       <a class="marca-link" href="descubra.html" aria-label="Gestão sem Caos, voltar para a página do Mapa DISC"><img class="logo-gsc" src="assets/marca/gsc-logo.svg" alt="Gestão sem Caos" width="199" height="28"></a>
-      <a class="botao botao--claro" href="descubra.html">Voltar</a>
+      <a class="botao botao--claro" href="descubra.html" data-voltar>Voltar</a>
     </div>
   </header>
   <main id="conteudo" class="legal" tabindex="-1">
@@ -47,7 +47,7 @@
         <p>Os preços aparecem na página antes da compra. O pagamento é único (não é assinatura), por Pix ou cartão, processado por uma empresa de pagamentos parceira. A Gestão sem Caos não recebe nem guarda os dados do seu cartão.</p>
 
         <h2>5. Garantia de 7 dias e reembolso</h2>
-        <p>Você pode pedir o reembolso em até 7 dias corridos da compra, sem precisar justificar, pelos canais de suporte. Devolvemos o valor integral pelo mesmo meio de pagamento, e o relatório completo volta a ficar bloqueado.</p>
+        <p>Você pode pedir o reembolso em até 7 dias corridos da compra, sem precisar justificar, pelos canais de suporte<span data-suporte></span>. Devolvemos o valor integral pelo mesmo meio de pagamento, e o relatório completo volta a ficar bloqueado.</p>
 
         <h2>6. Uso adequado</h2>
         <ul>
@@ -63,7 +63,7 @@
         <p>Podemos atualizar estes termos. A versão em vigor fica sempre nesta página, com a data de atualização.</p>
 
         <h2>9. Contato e foro</h2>
-        <p>Dúvidas, reembolso ou pedidos sobre os seus dados: fale com o suporte da Gestão sem Caos. Fica eleito o foro do domicílio do consumidor, conforme o Código de Defesa do Consumidor.</p>
+        <p>Dúvidas, reembolso ou pedidos sobre os seus dados: fale com o suporte da Gestão sem Caos<span data-suporte></span>. Fica eleito o foro do domicílio do consumidor, conforme o Código de Defesa do Consumidor.</p>
       </article>
     </div>
   </main>
@@ -84,7 +84,36 @@
       var legal = String(cfg.EMPRESA_LEGAL || '').trim();
       var el = document.getElementById('empresa-legal');
       if (el) el.textContent = '© ' + new Date().getFullYear() + ' ' + (legal || 'Gestão sem Caos') + '. Todos os direitos reservados.';
-      Array.prototype.forEach.call(document.querySelectorAll('[data-empresa-legal]'), function (n) { if (legal) n.textContent = legal; });
+      // Sem a razão social configurada, mostra só o nome (nada de "a preencher" para quem lê).
+      Array.prototype.forEach.call(document.querySelectorAll('[data-empresa-legal]'), function (n) { n.textContent = legal || 'Gestão sem Caos'; });
+      // Canal de suporte (CONFIG.WHATSAPP_SUPORTE ou CONFIG.EMAIL_SUPORTE) onde o texto fala em "suporte".
+      var wa = String(cfg.WHATSAPP_SUPORTE || '').replace(/\D/g, '');
+      var email = String(cfg.EMAIL_SUPORTE || '').trim();
+      var canal = wa.length >= 10 && wa.length <= 15 ? { href: 'https://wa.me/' + wa, texto: 'WhatsApp' }
+        : (/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) ? { href: 'mailto:' + email, texto: email } : null);
+      Array.prototype.forEach.call(document.querySelectorAll('[data-suporte]'), function (n) {
+        if (!canal) return;
+        var a = document.createElement('a');
+        a.href = canal.href;
+        a.textContent = canal.texto;
+        if (/^https:/.test(canal.href)) { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+        n.textContent = ' (';
+        n.appendChild(a);
+        n.appendChild(document.createTextNode(')'));
+      });
+      // "Voltar": aberta em outra aba pelo teste ou pelo checkout, fecha a aba (volta para onde a pessoa estava);
+      // com histórico, volta uma página; senão, vai para a landing.
+      var voltar = document.querySelector('[data-voltar]');
+      if (voltar) voltar.addEventListener('click', function (ev) {
+        var mesmoSite = false;
+        try { mesmoSite = !!document.referrer && new URL(document.referrer).origin === location.origin; } catch (e) { mesmoSite = false; }
+        if (history.length > 1 && mesmoSite) { ev.preventDefault(); history.back(); return; }
+        if (history.length <= 1) {
+          ev.preventDefault();
+          try { window.close(); } catch (e) { /* não deu para fechar */ }
+          setTimeout(function () { location.href = voltar.getAttribute('href'); }, 300);
+        }
+      });
     })();
   </script>
 </body>

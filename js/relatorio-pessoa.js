@@ -35,12 +35,39 @@
   };
 
   // Perfil em uma frase: "<principal> ... <secundário acrescenta>".
+  // Linguagem neutra: os adjetivos concordam com "uma pessoa" (nunca com "você"), para servir a qualquer leitor.
   var FRASE_PRINCIPAL = {
-    D: 'Você tende a ser direto, decidido e movido por desafios',
-    I: 'Você tende a ser comunicativo, otimista e bom de envolver as pessoas',
-    S: 'Você tende a ser calmo, paciente e alguém com quem os outros podem contar',
-    C: 'Você tende a ser cuidadoso, analítico e atento à qualidade'
+    D: 'Você tende a ser uma pessoa direta, decidida e movida por desafios',
+    I: 'Você tende a ser uma pessoa comunicativa, otimista e boa em envolver os outros',
+    S: 'Você tende a ser uma pessoa calma, paciente e com quem os outros podem contar',
+    C: 'Você tende a ser uma pessoa cuidadosa, analítica e atenta à qualidade'
   };
+
+  // Características e sinais de pressão de DISC_DATA (escritos no masculino: "Calmo", "Nervoso") viram substantivos.
+  // Palavra que não estiver aqui passa como veio.
+  var NEUTRO = {
+    'Aventureiro': 'Espírito de aventura', 'Com iniciativa': 'Iniciativa', 'Competitivo': 'Competitividade', 'Determinado': 'Determinação',
+    'Direto': 'Objetividade', 'Responsável': 'Responsabilidade', 'Exigente': 'Exigência', 'Líder': 'Capacidade de liderar', 'Ousado': 'Ousadia',
+    'Persistente': 'Persistência', 'Pioneiro': 'Pioneirismo', 'Superador': 'Superação', 'Resolve problemas': 'Resolver problemas',
+    'Nervoso': 'Nervosismo', 'Agressivo': 'Agressividade', 'Egoísta': 'Egoísmo',
+    'Atencioso': 'Atenção às pessoas', 'Caloroso': 'Calor humano', 'Confiante': 'Confiança', 'Confidente': 'Discrição com confidências',
+    'Convincente': 'Poder de convencer', 'Encantador': 'Encanto', 'Entusiasta': 'Entusiasmo', 'Inspirador': 'Inspiração',
+    'Otimista': 'Otimismo', 'Persuasivo': 'Persuasão', 'Político': 'Habilidade política', 'Popular': 'Popularidade', 'Sociável': 'Sociabilidade',
+    'Falante': 'Falar demais', 'Muito otimista': 'Otimismo em excesso', 'Pouco realista': 'Pouco realismo', 'Se autopromove': 'Autopromoção',
+    'Amável': 'Amabilidade', 'Amigável': 'Simpatia', 'Apaziguador': 'Capacidade de apaziguar', 'Calmo': 'Calma', 'Compreensivo': 'Compreensão',
+    'Confiável': 'Confiabilidade', 'Consciente': 'Consciência', 'Descontraído': 'Descontração', 'Grande ouvinte': 'Escuta atenta',
+    'Leal': 'Lealdade', 'Paciente': 'Paciência', 'Planejador': 'Planejamento', 'Sabe escutar': 'Saber escutar', 'Sincero': 'Sinceridade',
+    'Despreocupado': 'Despreocupação', 'Indeciso': 'Indecisão', 'Inflexível': 'Inflexibilidade', 'Reservado': 'Retraimento',
+    'Acabador': 'Capricho no acabamento', 'Analítico': 'Análise', 'Cuidadoso': 'Cuidado', 'Diplomático': 'Diplomacia', 'Exato': 'Exatidão',
+    'Firme': 'Firmeza', 'Maduro': 'Maturidade', 'Pensa objetivamente': 'Pensamento objetivo', 'Preciso': 'Precisão',
+    'Procura realizações': 'Busca de realizações', 'Difícil de agradar': 'Dificuldade de se satisfazer', 'Meticuloso': 'Meticulosidade',
+    'Muito crítico': 'Crítica em excesso', 'Pessimista': 'Pessimismo'
+  };
+  function neutros(lista) {
+    var vistos = {};
+    return (lista || []).map(function (t) { return Object.prototype.hasOwnProperty.call(NEUTRO, t) ? NEUTRO[t] : t; })
+      .filter(function (t) { if (vistos[t]) return false; vistos[t] = true; return true; });
+  }
   var FRASE_SECUNDARIO = {
     D: 'com um toque de iniciativa e foco em resultado',
     I: 'com um toque de entusiasmo e facilidade para se relacionar',
@@ -106,7 +133,7 @@
     I: [
       { titulo: 'Escreva antes de falar', texto: 'Liste os fatos em três tópicos antes de uma conversa difícil, para não se perder.' },
       { titulo: 'Olhe para os números', texto: 'Confira prazos e dados reais antes de prometer uma solução.' },
-      { titulo: 'Peça ajuda cedo', texto: 'Avise quando estiver sobrecarregado, antes que o prazo aperte.' }
+      { titulo: 'Peça ajuda cedo', texto: 'Avise quando a carga passar do que cabe, antes que o prazo aperte.' }
     ],
     S: [
       { titulo: 'Diga o que está sentindo', texto: 'Ficar em silêncio não resolve: conte a alguém de confiança o que está pesando.' },
@@ -115,7 +142,7 @@
     ],
     C: [
       { titulo: 'Aceite o suficiente', texto: 'Pergunte: "isto resolve o que precisa ser resolvido agora?" Se sim, entregue.' },
-      { titulo: 'Converse, não só analise', texto: 'Compartilhe a preocupação com alguém em vez de remoê-la sozinho.' },
+      { titulo: 'Converse, não só analise', texto: 'Compartilhe a preocupação com alguém em vez de remoê-la em silêncio.' },
       { titulo: 'Cuide do tom', texto: 'Sob tensão a crítica sai mais dura: releia mensagens antes de enviar.' }
     ]
   };
@@ -244,19 +271,19 @@
   var ESTILO_COMUNICACAO = {
     PRI: {
       D: [
-        { titulo: 'Direto e objetivo', texto: 'Você costuma ir ao ponto, com frases curtas e foco no que precisa acontecer. Isso economiza tempo e deixa claro o que você espera.' },
+        { titulo: 'Objetividade', texto: 'Você costuma ir ao ponto, com frases curtas e foco no que precisa acontecer. Isso economiza tempo e deixa claro o que você espera.' },
         { titulo: 'Ajuste para quem precisa de contexto', texto: 'Algumas pessoas precisam entender o cenário antes da conclusão. Acrescente uma frase de contexto e uma de reconhecimento às suas mensagens.' }
       ],
       I: [
-        { titulo: 'Expressivo e próximo', texto: 'Você se comunica com energia, histórias e exemplos, e costuma deixar as pessoas à vontade.' },
+        { titulo: 'Expressão e proximidade', texto: 'Você se comunica com energia, histórias e exemplos, e costuma deixar as pessoas à vontade.' },
         { titulo: 'Ajuste para quem quer o essencial', texto: 'Com pessoas mais objetivas, comece pela conclusão e deixe a história para depois, se houver interesse.' }
       ],
       S: [
-        { titulo: 'Calmo e atento', texto: 'Você escuta mais do que fala, escolhe bem as palavras e evita tons agressivos. As pessoas costumam se sentir ouvidas ao seu lado.' },
-        { titulo: 'Ajuste para ser ouvido', texto: 'Em grupos acelerados, a sua opinião pode ficar de fora. Prepare antes o ponto principal que você quer dizer e peça a palavra.' }
+        { titulo: 'Calma e atenção', texto: 'Você escuta mais do que fala, escolhe bem as palavras e evita tons agressivos. As pessoas costumam se sentir ouvidas ao seu lado.' },
+        { titulo: 'Ajuste para a sua voz chegar ao grupo', texto: 'Em grupos acelerados, a sua opinião pode ficar de fora. Prepare antes o ponto principal que você quer dizer e peça a palavra.' }
       ],
       C: [
-        { titulo: 'Preciso e fundamentado', texto: 'Você prefere comunicar com fatos e boa organização, e se preocupa em não dizer nada incorreto.' },
+        { titulo: 'Precisão e fundamento', texto: 'Você prefere comunicar com fatos e boa organização, e se preocupa em não dizer nada incorreto.' },
         { titulo: 'Ajuste para quem quer o resumo', texto: 'Nem todos precisam de todos os detalhes. Comece com um resumo de três linhas e ofereça o restante para quem quiser aprofundar.' }
       ]
     },
@@ -275,7 +302,7 @@
         { titulo: 'O que costuma acumular', texto: 'Tarefas pequenas e administrativas tendem a ficar para trás. Separe um horário fixo na semana só para elas.' }
       ],
       I: [
-        { titulo: 'Flexível e aberto ao imprevisto', texto: 'Você costuma se organizar de forma mais livre, encaixando conversas e oportunidades que surgem ao longo do dia.' },
+        { titulo: 'Flexibilidade e abertura ao imprevisto', texto: 'Você costuma se organizar de forma mais livre, encaixando conversas e oportunidades que surgem ao longo do dia.' },
         { titulo: 'Agenda à vista', texto: 'Um quadro ou aplicativo simples, revisado toda manhã, ajuda a não perder prazos no meio de tantas frentes.' }
       ],
       S: [
@@ -326,7 +353,7 @@
     PRI: {
       D: [
         { titulo: 'Lentidão e burocracia', texto: 'Processos demorados, decisões que não saem e muitas aprovações para coisas simples.' },
-        { titulo: 'Pouca autonomia', texto: 'Ser acompanhado em cada passo ou precisar pedir permissão para tudo.' }
+        { titulo: 'Pouca autonomia', texto: 'Ter cada passo acompanhado de perto ou precisar pedir permissão para tudo.' }
       ],
       I: [
         { titulo: 'Isolamento', texto: 'Passar longos períodos sem contato com pessoas ou sem poder trocar ideias.' },
@@ -384,7 +411,7 @@
    * reagir sob pressão. Cada item traz UMA ação prática. Nada de rótulo, diagnóstico ou promessa. */
   var TRAVA_EXCESSO = {
     D: { titulo: 'Querer resolver tudo do seu jeito e na sua hora',
-      texto: 'Dominância é o que mais aparece no seu jeito. A mesma energia que destrava decisões pode fazer você atropelar o tempo dos outros e carregar sozinho o que poderia ser dividido.',
+      texto: 'Dominância é o que mais aparece no seu jeito. A mesma energia que destrava decisões pode fazer você atropelar o tempo dos outros e carregar sem ajuda o que poderia ser dividido.',
       acao: 'Nesta semana, antes de decidir algo que afeta outras pessoas, pergunte a opinião de uma delas e espere a resposta.' },
     I: { titulo: 'Começar muita coisa e terminar pouca',
       texto: 'Influência é o que mais aparece no seu jeito. O entusiasmo abre portas, mas pode espalhar a sua atenção e deixar compromissos pela metade.',
@@ -410,7 +437,7 @@
   var TRAVA_FALTA = {
     D: { titulo: 'Demorar a se posicionar', texto: 'Dominância aparece pouco no seu jeito. Em momentos que pedem uma resposta firme, você pode esperar demais pelos outros e deixar decisões paradas.',
       acao: 'Escolha uma decisão pequena desta semana e assuma por inteiro, com prazo marcado.' },
-    I: { titulo: 'Deixar o seu trabalho invisível', texto: 'Influência aparece pouco no seu jeito. Você pode fazer um bom trabalho e, ainda assim, não ser lembrado, porque falar de si e criar contatos não sai naturalmente.',
+    I: { titulo: 'Deixar o seu trabalho invisível', texto: 'Influência aparece pouco no seu jeito. Você pode fazer um bom trabalho e, ainda assim, ninguém se lembrar dele, porque falar de si e criar contatos não sai naturalmente.',
       acao: 'Uma vez por semana, conte a alguém um resultado seu em duas frases.' },
     S: { titulo: 'Perder o fôlego no meio do caminho', texto: 'Estabilidade aparece pouco no seu jeito. Rotinas longas e tarefas repetidas cansam rápido, e projetos podem ficar sem acompanhamento até o fim.',
       acao: 'Marque na agenda um horário fixo por semana para revisar o que está em andamento.' },
@@ -421,7 +448,7 @@
     D: 'Quando o dia aperta, o seu jeito tende a ficar mais exigente e impaciente, e as pessoas podem se fechar justo quando você precisa delas.',
     I: 'Quando o dia aperta, você tende a falar mais e prometer além do que cabe, e os detalhes ficam para trás.',
     S: 'Quando o dia aperta, você tende a se fechar, guardar o que sente e travar diante de mudanças de última hora.',
-    C: 'Quando o dia aperta, você tende a ficar mais crítico e exigente com os detalhes, e a conversa pode soar fria.'
+    C: 'Quando o dia aperta, você tende a criticar mais e a exigir mais dos detalhes, e a conversa pode soar fria.'
   };
   var TRAVA_PRESSAO_ACAO = {
     D: 'Na próxima situação tensa, troque a primeira ordem por uma pergunta: "como podemos resolver isso?".',
@@ -523,6 +550,22 @@
     return { percentuais: p, codigo: c };
   }
 
+  // 25.6 -> "25,6%" (vírgula, como nas barras do relatório).
+  function pctTexto(v) { return String(Math.round(Number(v) * 10) / 10).replace('.', ',') + '%'; }
+
+  // Título dos textos do meio de "Onde você está se esticando": o fator de que o texto fala, para não repetir o mesmo título.
+  function tituloEsticando(texto) {
+    var m = /^O trabalho pede mais (Dominância|Influência|Estabilidade|Conformidade)\b/.exec(texto);
+    if (m) return 'O trabalho pede mais ' + m[1];
+    m = /^O trabalho usa menos a sua (Dominância|Influência|Estabilidade|Conformidade)\b/.exec(texto);
+    if (m) return 'O trabalho usa menos a sua ' + m[1];
+    m = /o trabalho pede um ritmo mais (acelerado|cauteloso)/.exec(texto);
+    if (m) return 'Ritmo mais ' + m[1];
+    m = /pede mais atenção a (tarefas|pessoas)/.exec(texto);
+    if (m) return 'Mais foco em ' + m[1];
+    return 'O que o trabalho pede de diferente';
+  }
+
   function copia(lista) { return (lista || []).map(function (x) { return typeof x === 'object' ? JSON.parse(JSON.stringify(x)) : x; }); }
 
   function perfilResumo(letra, perfis) {
@@ -611,7 +654,7 @@
         var titulo = t && typeof t === 'object' && t.titulo ? String(t.titulo)
           : i === 0 ? 'Esforço de adaptação: ' + rotulo.toLowerCase()
           : (i === textos.length - 1 && textos.length > 2) ? 'Como usar esta leitura'
-          : 'O que o trabalho pede de diferente';
+          : tituloEsticando(texto);
         return { titulo: titulo, texto: texto };
       }).filter(function (t) { return t.texto; });
       if (!itens.length) return null;
@@ -644,7 +687,7 @@
         'Além de saber qual fator vem primeiro, importa o quanto cada um aparece. Veja em que faixa está cada fator e o que isso costuma significar.',
         regua.map(function (f) {
           var extra = f.excesso || f.falta;
-          return { titulo: f.nome + ': ' + f.rotulo.toLowerCase() + ' (' + f.pct + '%)', texto: f.resumo + ' ' + f.comportamento + (extra ? ' ' + extra : '') };
+          return { titulo: f.nome + ': ' + f.rotulo.toLowerCase() + ' (' + pctTexto(f.pct) + ')', texto: f.resumo + ' ' + f.comportamento + (extra ? ' ' + extra : '') };
         }),
         { fatores: copia(regua) }));
     }
@@ -724,7 +767,7 @@
           id: 'fortes',
           titulo: 'Seus pontos fortes e como usá-los mais',
           intro: 'Características que costumam acompanhar o seu estilo e jeitos práticos de aproveitá-las no dia a dia.',
-          caracteristicas: copia(perfis[pri].positivos),
+          caracteristicas: neutros(perfis[pri].positivos),
           itens: copia(FORTES[pri])
         },
         {
@@ -737,7 +780,7 @@
           id: 'pressao',
           titulo: 'Como você reage sob pressão',
           intro: 'Todo mundo muda um pouco sob pressão. No seu estilo, isso pode aparecer assim:',
-          sinais: copia(perfis[pri].sobPressao),
+          sinais: neutros(perfis[pri].sobPressao),
           itens: copia(PRESSAO[pri])
         },
         {
@@ -808,6 +851,7 @@
     AVISO_SIMPLES: AVISO_SIMPLES,
     LIMITE_RITMO: LIMITE_RITMO,
     dadosDoResultado: dadosDoResultado,
+    neutros: neutros,
     montar: montar,
     montarSimples: montarSimples
   };

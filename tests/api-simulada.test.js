@@ -1132,7 +1132,7 @@ test('topoIds do organograma: salvarRelacoes guarda na empresa; listarEquipe dev
   assert.deepEqual((await api.listarEquipe(T, clinica.id)).topoIds, [a.pessoaId]);
   await assert.rejects(api.salvarRelacoes(T, clinica.id, [], { topoIds: 'x' }), /Relações inválidas\./);
 
-  assert.deepEqual(await api.versaoBanco(), { ok: true, versao: 20261014120000, faltando: [] });
+  assert.deepEqual(await api.versaoBanco(), { ok: true, versao: 20261015120000, faltando: [] });
 });
 
 // ---------------------------------------------------------------------------
@@ -1288,4 +1288,68 @@ test('e-mail (prévia): relatorioEnviarEmail simula o envio (só publicado, e-ma
   await assert.rejects(v.enviarLinkPorEmail(p.tokenAcesso), /Pedido não encontrado/);
   await v.simularPagamento(p.pedidoId);
   assert.deepEqual(await v.enviarLinkPorEmail(p.tokenAcesso), { ok: true, email: 'b**@x.com' });
+});
+
+// ---------------------------------------------------------------------------
+// Correção do painel (out/2026): preço mínimo R$ 0,50, ciclo de liderança e reabrir relatório de modelo.
+// ---------------------------------------------------------------------------
+
+test('preço mínimo (R$ 0,50 ou grátis): cupom, pacote e pedido seguem a mesma regra do painel e do banco', async () => {
+  const { api, armazenamento, T } = nova();
+  // "completo" hoje custa R$ 29,00 (lançamento).
+  await assert.rejects(api.salvarCupom(T, { codigo: 'QUASE', tipo: 'valor', valor: 2880 }), /a partir de R\$ 0,50: com este cupom o .* sairia por R\$ 0,20/);
+  await assert.rejects(api.salvarCupom(T, { codigo: 'P99', tipo: 'percentual', valor: 99 }), /R\$ 0,50/);
+  assert.equal((await api.salvarCupom(T, { codigo: 'TUDO', tipo: 'percentual', valor: 100 })).cupom.codigo, 'TUDO', '100% = grátis');
+  assert.equal((await api.salvarCupom(T, { codigo: 'CERTO', tipo: 'valor', valor: 2850, pacotes: ['completo'] })).cupom.codigo, 'CERTO', 'R$ 0,50 exatos');
+  assert.equal((await api.salvarCupom(T, { codigo: 'DESLIGADO', tipo: 'valor', valor: 2880, ativo: false })).cupom.ativo, false, 'desativado não é conferido');
+  assert.ok(!(await api.listarCupons(T)).cupons.some((c) => c.codigo === 'QUASE'), 'recusado não é gravado');
+
+  // Pacote: R$ 0,01 a R$ 0,49 nunca; preço novo que deixaria um cupom ativo abaixo do mínimo: recusa e nada muda.
+  await assert.rejects(api.salvarPacote(T, { chave: 'completo', precoCentavos: 30 }), /a partir de R\$ 0,50/);
+  await assert.rejects(api.salvarPacote(T, { chave: 'completo', precoLancamentoCentavos: 10 }), /pelo menos R\$ 0,50/);
+  await assert.rejects(api.salvarPacote(T, { chave: 'completo', precoLancamentoCentavos: 2860 }), /cupom CERTO deixaria o .* por R\$ 0,10/);
+  assert.equal((await api.pacotesPublicos()).pacotes.find((p) => p.chave === 'completo').valorCentavos, 2900);
+  assert.equal((await api.salvarPacote(T, { chave: 'completo', precoCentavos: 0 })).pacote.chave, 'completo', '0 = grátis vale');
+
+  // Cupom antigo (gravado antes da regra) só trava mudança de PREÇO; mudar o nome continua possível.
+  const cupons = JSON.parse(armazenamento.dados.disc_simulada_cupons);
+  cupons.push({ codigo: 'ANTIGO', tipo: 'valor', valor: 2880, usos: 0, ativo: true, pacotes: [] });
+  armazenamento.setItem('disc_simulada_cupons', JSON.stringify(cupons));
+  assert.equal((await api.salvarPacote(T, { chave: 'completo_plus', nome: 'Completo Plus novo' })).pacote.nome, 'Completo Plus novo');
+  await assert.rejects(api.salvarPacote(T, { chave: 'completo_plus', precoLancamentoCentavos: 2900 }), /cupom ANTIGO deixaria/);
+
+  // Pedido: rede de segurança com o cupom antigo ("completo" segue em lançamento a R$ 29,00 -> R$ 0,20 é recusado).
+  const e = await api.enviarPessoal(payloadValido({ id: 'pessoal-min', email: 'min@x.com' }));
+  await assert.rejects(api.criarPedido(e.tokenResumo, 'completo', 'ANTIGO'), /abaixo de R\$ 0,50/);
+  assert.equal((await api.criarPedido(e.tokenResumo, 'completo', 'CERTO')).valor, 50);
+});
+
+test('salvarRelacoes recusa ciclo de liderança (A lidera B, B lidera A) e não grava nada', async () => {
+  const { api, T } = nova();
+  const emp = (await api.salvarEmpresa(T, { nome: 'Ciclo Ltda' })).empresa;
+  const c = [];
+  for (const [n, tel] of [['Ana Alta Souza', '11933330001'], ['Bia Baixa Souza', '11933330002'], ['Caio Cruz Souza', '11933330003']]) {
+    c.push((await api.salvarColaborador(T, { empresaId: emp.id, nome: n, telefone: tel })).colaborador);
+  }
+  const L = (a, b) => ({ de: c[a].pessoaId, para: c[b].pessoaId, tipo: 'lidera' });
+  await api.salvarRelacoes(T, emp.id, [L(0, 1), L(1, 2)]);
+  await assert.rejects(api.salvarRelacoes(T, emp.id, [L(0, 1), L(1, 2), L(2, 0)]), /Ciclo de liderança/);
+  await assert.rejects(api.salvarRelacoes(T, emp.id, [L(0, 1), L(1, 0)]), /Ciclo de liderança/);
+  assert.deepEqual((await api.listarEquipe(T, emp.id)).relacoes.map((r) => [r.de, r.para]),
+    [[c[0].pessoaId, c[1].pessoaId], [c[1].pessoaId, c[2].pessoaId]]);
+  // "direto"/"indireto" nos dois sentidos não é ciclo de liderança
+  await api.salvarRelacoes(T, emp.id, [L(0, 1), { de: c[1].pessoaId, para: c[0].pessoaId, tipo: 'direto' }]);
+});
+
+test('abrirRelatorioModelo devolve os dados gravados (continuar rascunho) e recusa relatório de processo', async () => {
+  const { api, T } = await previa();
+  const clinica = (await api.listarEmpresas(T)).empresas.find((x) => x.nome === 'Clínica Exemplo');
+  const dados = { modelo: 'equipe', versao: 1, titulo: 'Rascunho da equipe', geradoEm: '2026-10-05T10:00:00.000Z' };
+  const r = (await api.salvarRelatorioModelo(T, { modelo: 'equipe', empresaId: clinica.id, dados })).relatorio;
+  const ab = await api.abrirRelatorioModelo(T, r.id);
+  assert.deepEqual([ab.ok, ab.relatorio.id, ab.relatorio.status, ab.relatorio.modelo], [true, r.id, 'rascunho', 'equipe']);
+  assert.deepEqual(ab.relatorio.dados, dados);
+  await assert.rejects(api.abrirRelatorioModelo(T, 'rm_nao_existe'), /Relatório não encontrado/);
+  await assert.rejects(api.abrirRelatorioModelo('token-errado', r.id), /Sessão|login|expirou/i);
+  assert.ok(SIM.METODOS.includes('abrirRelatorioModelo'));
 });

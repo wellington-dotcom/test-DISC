@@ -18,7 +18,7 @@
   <header class="topo-landing vidro-cabecalho">
     <div class="envoltorio topo-landing__interno">
       <a class="marca-link" href="descubra.html" aria-label="Gestão sem Caos, voltar para a página do Mapa DISC"><img class="logo-gsc" src="assets/marca/gsc-logo.svg" alt="Gestão sem Caos" width="199" height="28"></a>
-      <a class="botao botao--claro" href="descubra.html">Voltar</a>
+      <a class="botao botao--claro" href="descubra.html" data-voltar>Voltar</a>
     </div>
   </header>
   <main id="conteudo" class="legal" tabindex="-1">
@@ -55,7 +55,7 @@
         <p>Enquanto o seu relatório estiver ativo ou até você pedir a exclusão. Dados de compra podem ser mantidos pelo prazo exigido por lei (obrigações fiscais).</p>
 
         <h2>6. Seus direitos</h2>
-        <p>Você pode pedir, a qualquer momento: confirmação e acesso aos dados, correção, exclusão, informação sobre compartilhamento e revogação do consentimento. Fale com o suporte da Gestão sem Caos; respondemos em até 15 dias.</p>
+        <p>Você pode pedir, a qualquer momento: confirmação e acesso aos dados, correção, exclusão, informação sobre compartilhamento e revogação do consentimento. Fale com o suporte da Gestão sem Caos<span data-suporte></span>; respondemos em até 15 dias.</p>
 
         <h2>7. Segurança</h2>
         <p>Usamos conexão criptografada, acesso restrito e links de relatório difíceis de adivinhar. Mesmo assim, guarde o seu link com cuidado e não o publique.</p>
@@ -82,7 +82,36 @@
       var legal = String(cfg.EMPRESA_LEGAL || '').trim();
       var el = document.getElementById('empresa-legal');
       if (el) el.textContent = '© ' + new Date().getFullYear() + ' ' + (legal || 'Gestão sem Caos') + '. Todos os direitos reservados.';
-      Array.prototype.forEach.call(document.querySelectorAll('[data-empresa-legal]'), function (n) { if (legal) n.textContent = legal; });
+      // Sem a razão social configurada, mostra só o nome (nada de "a preencher" para quem lê).
+      Array.prototype.forEach.call(document.querySelectorAll('[data-empresa-legal]'), function (n) { n.textContent = legal || 'Gestão sem Caos'; });
+      // Canal de suporte (CONFIG.WHATSAPP_SUPORTE ou CONFIG.EMAIL_SUPORTE) onde o texto fala em "suporte".
+      var wa = String(cfg.WHATSAPP_SUPORTE || '').replace(/\D/g, '');
+      var email = String(cfg.EMAIL_SUPORTE || '').trim();
+      var canal = wa.length >= 10 && wa.length <= 15 ? { href: 'https://wa.me/' + wa, texto: 'WhatsApp' }
+        : (/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) ? { href: 'mailto:' + email, texto: email } : null);
+      Array.prototype.forEach.call(document.querySelectorAll('[data-suporte]'), function (n) {
+        if (!canal) return;
+        var a = document.createElement('a');
+        a.href = canal.href;
+        a.textContent = canal.texto;
+        if (/^https:/.test(canal.href)) { a.target = '_blank'; a.rel = 'noopener noreferrer'; }
+        n.textContent = ' (';
+        n.appendChild(a);
+        n.appendChild(document.createTextNode(')'));
+      });
+      // "Voltar": aberta em outra aba pelo teste ou pelo checkout, fecha a aba (volta para onde a pessoa estava);
+      // com histórico, volta uma página; senão, vai para a landing.
+      var voltar = document.querySelector('[data-voltar]');
+      if (voltar) voltar.addEventListener('click', function (ev) {
+        var mesmoSite = false;
+        try { mesmoSite = !!document.referrer && new URL(document.referrer).origin === location.origin; } catch (e) { mesmoSite = false; }
+        if (history.length > 1 && mesmoSite) { ev.preventDefault(); history.back(); return; }
+        if (history.length <= 1) {
+          ev.preventDefault();
+          try { window.close(); } catch (e) { /* não deu para fechar */ }
+          setTimeout(function () { location.href = voltar.getAttribute('href'); }, 300);
+        }
+      });
     })();
   </script>
 </body>

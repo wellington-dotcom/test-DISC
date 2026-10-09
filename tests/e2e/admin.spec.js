@@ -788,7 +788,7 @@ test.describe('Admin com API (servidor simulado por page.route)', () => {
     await expect(page.locator('#det-consistencia')).toContainText('O perfil mudou entre as respostas: vale conversar sobre o momento de cada uma.');
     await expect(page.locator('#det-consistencia')).toHaveAttribute('data-igual', 'nao');
     await page.click('#btn-excluir-participante');
-    await expect(page.locator('#confirmar-desc')).toContainText('As outras 1 resposta de Daniela Reis Prado continuam.');
+    await expect(page.locator('#confirmar-desc')).toContainText('A outra resposta de Daniela Reis Prado continua.');
     await page.click('#confirmar-ok');
     await expect(page.locator('#aviso-geral')).toContainText('Resposta excluída');
     await expect(page.locator('#det-protocolo')).toHaveText('Código 44D');
@@ -1187,7 +1187,9 @@ test.describe('Admin com Supabase (DISC_API.MODO "supabase", API falsa)', () => 
     await expect(page.locator('#btn-ir-primeiro')).toBeHidden();
     await expect(page.locator('#nota-esqueceu')).toBeHidden();
     await expect(page.locator('#nota-primeiro-supabase')).toBeVisible();
-    await expect(page.locator('#nota-primeiro-supabase')).toContainText('quem entrar primeiro vira o administrador');
+    // Texto para quem foi convidado (sem detalhe técnico do Supabase na tela de entrada).
+    await expect(page.locator('#nota-primeiro-supabase')).toContainText('Recebeu um convite?');
+    await expect(page.locator('#nota-primeiro-supabase')).not.toContainText('Supabase');
     await expect(page.locator('#dica-previa')).toBeHidden();
 
     // Esqueci minha senha: e-mail inválido, depois envio com o endereço do painel
@@ -1343,7 +1345,8 @@ const API_EMPRESAS_FALSA = `
       exigido: { percentuais: { D: 34, I: 30, S: 16, C: 20 }, codigo: 'DI' } },
     'p-diego': { nome: 'Diego Rocha', telefone: '5511955554444', resultado: { percentuais: { D: 40, I: 30, S: 20, C: 10 }, codigo: 'DI' } }
   };
-  sb.fotoBruno = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ==';
+  // JPEG válido de 2×2 (uma foto quebrada agora mostra as iniciais, sem o ícone de imagem quebrada).
+  sb.fotoBruno = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/4gHYSUNDX1BST0ZJTEUAAQEAAAHIAAAAAAQwAABtbnRyUkdCIFhZWiAH4AABAAEAAAAAAABhY3NwAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAQAA9tYAAQAAAADTLQAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAlkZXNjAAAA8AAAACRyWFlaAAABFAAAABRnWFlaAAABKAAAABRiWFlaAAABPAAAABR3dHB0AAABUAAAABRyVFJDAAABZAAAAChnVFJDAAABZAAAAChiVFJDAAABZAAAAChjcHJ0AAABjAAAADxtbHVjAAAAAAAAAAEAAAAMZW5VUwAAAAgAAAAcAHMAUgBHAEJYWVogAAAAAAAAb6IAADj1AAADkFhZWiAAAAAAAABimQAAt4UAABjaWFlaIAAAAAAAACSgAAAPhAAAts9YWVogAAAAAAAA9tYAAQAAAADTLXBhcmEAAAAAAAQAAAACZmYAAPKnAAANWQAAE9AAAApbAAAAAAAAAABtbHVjAAAAAAAAAAEAAAAMZW5VUwAAACAAAAAcAEcAbwBvAGcAbABlACAASQBuAGMALgAgADIAMAAxADb/2wBDABALDA4MChAODQ4SERATGCgaGBYWGDEjJR0oOjM9PDkzODdASFxOQERXRTc4UG1RV19iZ2hnPk1xeXBkeFxlZ2P/2wBDARESEhgVGC8aGi9jQjhCY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2P/wAARCAACAAIDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAb/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFAEBAAAAAAAAAAAAAAAAAAAAA//EABQRAQAAAAAAAAAAAAAAAAAAAAD/2gAMAwEAAhEDEQA/AJEA4X//2Q==';
   var seq = 0;
   function id(p) { seq++; return p + seq; }
   function ok(x) { return Promise.resolve(Object.assign({ ok: true }, x || {})); }
@@ -1644,11 +1647,13 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await expect(page.locator('#lista-empresas > li')).toHaveCount(1);
     await page.fill('#busca-empresas', '');
 
-    // Excluir empresa com colaborador ativo é recusado; arquivar vai para o fim
+    // Excluir empresa com colaborador ativo: a janela já explica (sem o "não dá para desfazer") e oferece arquivar,
+    // que vai para o fim da lista
     await page.locator('#lista-empresas li[data-nome="Filial Norte"] [data-acao="excluir"]').click();
-    await page.click('#confirmar-ok');
-    await expect(page.locator('#aviso-geral')).toHaveText('Desligue ou mova os colaboradores antes.');
-    await page.locator('#lista-empresas li[data-nome="Filial Norte"] [data-acao="arquivar"]').click();
+    await expect(page.locator('#confirmar-desc')).toContainText('tem 1 colaborador ativo');
+    await expect(page.locator('#confirmar-ok')).toHaveCount(0);
+    await page.click('#escolha-arquivar');
+    expect(await chamadasSb(page, 'excluirEmpresa')).toHaveLength(0);
     await expect(page.locator('#lista-empresas li[data-nome="Filial Norte"] .emp-arquivada')).toHaveText('Arquivada');
     await expect(page.locator('#lista-empresas > li').last()).toHaveAttribute('data-nome', 'Filial Norte');
 
@@ -1673,7 +1678,12 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await expect(page.locator('#btn-det-como-liderar')).toBeVisible();
     await page.click('#btn-det-rel-pessoa');
     await expect(page.locator('#rel-modelo-previa')).toBeVisible();
+    // O menu continua em "Participantes" (o relatório foi aberto a partir do detalhe)
+    await expect(page.locator('.aba[aria-current="page"]')).toHaveAttribute('data-aba', 'lista');
+    // Prévia não salva: "← Voltar" pergunta antes de descartar
     await page.click('#btn-voltar-relatorio');
+    await expect(page.locator('#confirmar-desc')).toContainText('A prévia do relatório ainda não foi salva');
+    await page.click('#escolha-descartar');
     await expect(page.locator('#vista-detalhe h2')).toHaveText('Bruno Lima Costa');
     await page.keyboard.press('Escape');
     await page.locator('#lista-candidatos > li', { hasText: 'Diego Rocha' }).getByRole('button', { name: /Ver detalhes/ }).click();
@@ -1843,8 +1853,10 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await escolherBusca(page, 'proc-empresa-id', 'Loja');
     await expect(page.locator('#proc-equipe-texto')).toContainText('cadastro da empresa Loja Modelo');
 
-    // Página da empresa mostra o link do teste da equipe
+    // Página da empresa mostra o link do teste da equipe (o formulário preenchido pergunta antes de sair)
     await abrirAba(page, 'empresas');
+    await expect(page.locator('#confirmar-titulo')).toHaveText('Sair sem salvar?');
+    await page.click('#escolha-descartar');
     await page.locator('#lista-empresas li[data-nome="Loja Modelo"] [data-acao="abrir"]').click();
     await expect(page.locator('#emp-link-teste')).toContainText('index.html?a=EQ');
     expect(erros).toEqual([]);
@@ -2000,7 +2012,8 @@ test.describe('Empresas (Supabase, API falsa)', () => {
     await page.click('#janela-ok');
     await expect(page.locator('#janela-erro')).toHaveText('Escolha o processo de destino.');
     await page.click('#mover-processo');
-    await expect(page.locator('#mover-processo-lista [role="option"]')).toHaveText([/Escolher o processo/, /Sem processo/, /Vendedor Shopping \(SEL2\)/]);
+    // "Escolher o processo" é só o texto do botão: não aparece como opção clicável
+    await expect(page.locator('#mover-processo-lista [role="option"]')).toHaveText([/Sem processo/, /Vendedor Shopping \(SEL2\)/]);
     await page.fill('#mover-processo-busca', 'shopping');
     await page.locator('#mover-processo-lista [role="option"]', { hasText: 'Vendedor Shopping' }).click();
     await page.click('#janela-ok');

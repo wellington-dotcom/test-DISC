@@ -97,6 +97,11 @@ body.landing { background: var(--fundo); overflow-x: hidden; overflow-x: clip; }
   .heroi__grade { grid-template-columns: 1.08fr .92fr; gap: 56px; }
 }
 .heroi__selo { display: inline-flex; align-items: center; gap: 8px; font-size: var(--t-rotulo); color: var(--branco); background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); padding: 6px 14px 6px 8px; border-radius: var(--raio-pilula); margin-bottom: 20px; }
+/* Link com desconto (?cupom=): o desconto aparece desde a landing */
+.faixa-cupom { display: block; width: fit-content; max-width: 100%; margin: 0 0 20px; padding: 8px 14px; border-radius: 14px; font-size: var(--t-rotulo); line-height: 1.45; color: var(--branco); background: rgba(243,68,5,.18); border: 1px solid rgba(243,68,5,.55); }
+.faixa-cupom strong { color: var(--branco); }
+.faixa-cupom--pacotes { margin: 0 auto 24px; color: var(--tinta); background: var(--branco); border-color: rgba(243,68,5,.45); }
+.faixa-cupom--pacotes strong { color: var(--notus-forte); }
 .heroi__selo-ponto { width: 8px; height: 8px; border-radius: 50%; background: var(--notus); box-shadow: 0 0 0 4px rgba(243,68,5,.25); margin-left: 4px; }
 .heroi__titulo { font-family: var(--display); font-size: var(--l-heroi); font-weight: 600; line-height: 1.02; letter-spacing: -0.035em; max-width: 14ch; }
 .heroi__titulo em { color: var(--ambar); }
@@ -319,6 +324,7 @@ body.landing { background: var(--fundo); overflow-x: hidden; overflow-x: clip; }
 .cta-fixo { position: fixed; left: 0; right: 0; bottom: 0; z-index: 40; padding: 12px var(--gutter) calc(12px + env(safe-area-inset-bottom)); transform: translateY(110%); transition: transform .25s var(--curva); }
 .cta-fixo.cta-fixo--visivel { transform: none; }
 .cta-fixo .botao { width: 100%; }
+.lead a, .garantia__texto a { color: inherit; text-underline-offset: 3px; }
 .cta-fixo__nota { text-align: center; font-size: var(--t-eixo); color: var(--medio); margin-top: 6px; }
 @media (min-width: 900px) { .cta-fixo { display: none; } }
 

@@ -14,6 +14,10 @@
   font-family: var(--fonte);
 }
 .orgx--editar { grid-template-columns: 264px minmax(0, 1fr); }
+/* Todos no organograma: a coluna "Sem posição" encolhe e o quadro ganha a largura. */
+.orgx--editar.orgx--sem-vazio { grid-template-columns: 168px minmax(0, 1fr); }
+.orgx--sem-vazio .orgx-sem__dica { display: none; }
+.orgx--sem-vazio .orgx-sem__vazio { padding: 14px 6px; }
 @media (max-width: 899px) { .orgx--editar { grid-template-columns: minmax(0, 1fr); } }
 
 /* ---------- Coluna "Sem posição" ---------- */
@@ -105,10 +109,10 @@
 }
 .orgx-quadro[data-org-alvo="topo"] { transition: box-shadow .15s var(--curva); }
 .orgx-moldura { position: relative; min-width: 0; }
+/* Aviso acima do quadro (não cobre o cartão que acabou de voltar para o lugar). */
 .orgx-aviso {
-  position: absolute; left: 50%; top: 14px; z-index: 5; transform: translateX(-50%); width: max-content; max-width: calc(100% - 32px);
-  padding: 10px 16px; border-radius: 12px; background: var(--erro-fundo); color: var(--erro);
-  box-shadow: inset 0 0 0 1px rgba(220, 38, 38, .25), 0 12px 28px -16px rgba(19, 40, 63, .45);
+  margin: 0; padding: 10px 16px; border-radius: 12px; background: var(--erro-fundo); color: var(--erro);
+  box-shadow: inset 0 0 0 1px rgba(220, 38, 38, .25);
   font-size: var(--t-rotulo); line-height: 1.4;
 }
 .orgx-aviso[hidden], .orgx-vazio[hidden] { display: none; }

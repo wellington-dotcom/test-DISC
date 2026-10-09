@@ -412,6 +412,11 @@ test.describe('Venda B2C com Stripe (pagamento dentro do site, Payment Element s
     await page.goto('/meu-relatorio.html?pedido=' + dados.id + '&payment_intent=' + pi + '&payment_intent_client_secret=' + dados.cs + '&redirect_status=failed#t-' + dados.token);
     await expect(page.locator('h1').first()).toHaveText('Pagamento não concluído');
     await expect(page.locator('.alerta')).toContainText('nada foi cobrado');
+    // Tela própria com o caminho de volta ao pagamento (antes só havia "Recuperar meu relatório", que não tem a ver com o caso)
+    await expect(page.locator('#form-recuperar')).toHaveCount(0);
+    await expect(page.locator('[data-acao="tentar-pagar"]')).toHaveText('Tentar pagar de novo');
+    await page.locator('[data-acao="tentar-pagar"]').click();
+    await expect(page.locator('[data-ck-tela="pagamento"][data-provedor="stripe"]')).toBeVisible();
     // Aprovado (o Stripe acrescenta payment_intent, payment_intent_client_secret e redirect_status ao return_url).
     await page.goto('about:blank');
     await page.goto('/meu-relatorio.html?pedido=' + dados.id + '&payment_intent=' + pi + '&payment_intent_client_secret=' + dados.cs + '&redirect_status=succeeded#t-' + dados.token);
@@ -432,4 +437,145 @@ test('modo pessoal sem servidor: resumo grátis na hora e compra "em breve"', as
   await expect(page.locator('[data-acao="comprar"]')).toHaveCount(0);
   await semRolagemLateral(page);
   expect(erros).toEqual([]);
+});
+
+// Varredura de UX (área "cliente"): correções dos itens Crítico e Alto da jornada de compra.
+test.describe('Venda B2C: correções da varredura de UX', () => {
+  test.beforeEach(async ({ page }) => {
+    await configurar(page, { API_URL: 'simulada', GRUPOS_DEMONSTRACAO: GRUPOS });
+  });
+
+  test('[Alto] recarregar com o Pix gerado volta ao mesmo pedido (pacote, QR e copia e cola); botão diz "Gerar o Pix"', async ({ page }) => {
+    const erros = coletarErros(page);
+    await fazerTestePessoal(page, { nome: 'Pedro Pix Reload', email: 'pedro.reload@exemplo.com' }, '/index.html?modo=pessoal&pacote=completo');
+    await page.locator('[data-acao="comprar"][data-pacote="completo_plus"]').click();
+    await page.locator('[data-ck="continuar"]').click();
+    const tela = page.locator('[data-ck-tela="pagamento"][data-provedor="stripe"]');
+    await expect(tela).toBeVisible();
+    // "Já paguei" só depois de gerar o Pix (o cartão é aprovado na hora)
+    await expect(tela.locator('[data-ck="verificar"]')).toBeHidden();
+    await tela.locator('[data-pe-metodo="pix"]').click();
+    await expect(tela.locator('[data-ck="pagar"]')).toHaveText('Gerar o Pix de R$ 49');
+    await tela.locator('[data-ck="pagar"]').click();
+    await expect(tela.locator('#ck-pix-stripe .ck-qr img')).toBeVisible();
+    await expect(tela.locator('[data-ck="pagar"]')).toBeHidden();
+    await expect(tela.locator('[data-ck="verificar"]')).toBeVisible();
+    const copia = await tela.locator('#ck-pix').inputValue();
+    // Volta do app do banco = recarregar (o ?pacote=completo da URL não troca o pedido aberto)
+    await page.reload();
+    const de_novo = page.locator('[data-ck-tela="pagamento"][data-provedor="stripe"]');
+    await expect(de_novo).toBeVisible();
+    await expect(de_novo.locator('.ck-pacote-nome')).toHaveText('Completo + Parte 2');
+    await expect(de_novo.locator('#ck-valor')).toHaveText('R$ 49');
+    await expect(de_novo.locator('#ck-pix-stripe .ck-qr img')).toBeVisible();
+    await expect(de_novo.locator('#ck-pix')).toHaveValue(copia);
+    // e continua consultando: o "banco" confirma e libera
+    const pedidoId = await page.evaluate(() => JSON.parse(localStorage.getItem('disc_pessoal_v1')).pedido.pedidoId);
+    await page.evaluate((id) => window.DISC_API.simularPagamento(id), pedidoId);
+    await expect(page.locator('[data-ck-tela="confirmado"] h1')).toHaveText('Pagamento confirmado', { timeout: 10000 });
+    expect(erros).toEqual([]);
+  });
+
+  test('[Alto] cartão recusado: o aviso aparece inteiro na tela (sem precisar rolar)', async ({ page }) => {
+    const erros = coletarErros(page);
+    await fazerTestePessoal(page, { nome: 'Sara Recusa Visivel', email: 'sara.recusa@exemplo.com' });
+    await page.locator('[data-acao="comprar"][data-pacote="completo"]').click();
+    await page.locator('[data-ck="continuar"]').click();
+    const tela = page.locator('[data-ck-tela="pagamento"][data-provedor="stripe"]');
+    await tela.locator('#pe-sim-numero').fill('4000 0000 0000 0002');
+    await tela.locator('#pe-sim-validade').fill('12 / 34');
+    await tela.locator('#pe-sim-cvc').fill('123');
+    await tela.locator('[data-ck="pagar"]').click();
+    await expect(tela.locator('#ck-erro')).toHaveText('O cartão foi recusado. Tente outro cartão ou pague com Pix.');
+    await expect.poll(() => tela.locator('#ck-erro').evaluate((e) => { const r = e.getBoundingClientRect(); return r.top >= 0 && r.bottom <= window.innerHeight; }), { timeout: 3000 }).toBe(true);
+    expect(erros).toEqual([]);
+  });
+
+  test('[Alto] link com desconto: o cupom aparece na identificação, no resumo e na revisão; oferta logo no topo do resumo', async ({ page }) => {
+    const erros = coletarErros(page);
+    await page.goto('/index.html?modo=pessoal&pacote=completo&cupom=previa100');
+    await expect(page.locator('.pessoal-escolha')).toContainText('Você escolheu: Relatório completo (R$ 29)');
+    await expect(page.locator('.pessoal-escolha')).toContainText('Cupom PREVIA100 ativo');
+    // "Voltar" leva cupom e pacote de volta para a landing
+    await expect(page.locator('.pessoal-id a.botao--claro')).toHaveAttribute('href', 'descubra.html?pacote=completo&cupom=previa100');
+    await page.evaluate(() => localStorage.clear());
+    await fazerTestePessoal(page, { nome: 'Hana Cupom Visivel', email: 'hana.visivel@exemplo.com' }, '/index.html?modo=pessoal&pacote=completo&cupom=previa100');
+    // Atalho para a oferta logo abaixo do título do resumo (antes o 1º botão de compra ficava a ~3 telas)
+    const atalho = page.locator('.resumo-atalho [data-acao="ir-pacotes"]');
+    await expect(atalho).toHaveText('Ver o relatório completo · R$ 29');
+    const y = await atalho.evaluate((e) => e.getBoundingClientRect().top + window.scrollY);
+    expect(y).toBeLessThan(page.viewportSize().height);
+    await expect(page.locator('.resumo-atalho .resumo-cupom')).toContainText('PREVIA100');
+    await expect(page.locator('.botao--laranja')).toHaveCount(1);   // o único laranja continua sendo o do pacote em destaque
+    await atalho.click();
+    await expect(page.locator('.paywall')).toBeInViewport();
+    await page.locator('[data-acao="comprar"][data-pacote="completo"]').click();
+    await expect(page.locator('.ck-cupom-ativo')).toContainText('Cupom PREVIA100 ativo');
+    await expect(page.locator('[data-ck-tela="revisao"] a[href="termos.html"]')).toHaveCount(1);
+    // Trocar o pacote na própria revisão
+    await page.locator('[data-ck="pacote"][data-pacote="completo_plus"]').click();
+    await expect(page.locator('#ck-valor')).toHaveText('R$ 49');
+    await page.locator('[data-ck="pacote"][data-pacote="completo"]').click();
+    await page.locator('[data-ck="continuar"]').click();
+    await expect(page.locator('[data-ck-tela="confirmado"] h1')).toHaveText('Acesso liberado');
+    // Sem o telefone da pessoa: "Enviar no WhatsApp" (não "para meu"); e há "Enviar para meu e-mail"
+    await expect(page.locator('[data-ck-tela="confirmado"] a[href^="https://wa.me/?text="]')).toHaveText('Enviar no WhatsApp');
+    await expect(page.locator('[data-ck="enviar-email"]')).toBeVisible();
+    expect(erros).toEqual([]);
+  });
+
+  test('[Alto] depois de pagar: acesso no topo do resumo e lista "Seus relatórios" sobrevive a "Refazer o teste"', async ({ page }) => {
+    const erros = coletarErros(page);
+    await fazerTestePessoal(page, { nome: 'Lia Liberado Topo', email: 'lia.topo@exemplo.com' });
+    await cupomCem(page, 'TOPO100');
+    await page.locator('[data-acao="comprar"][data-pacote="completo"]').click();
+    await page.locator('[data-ck="cupom-abrir"]').click();
+    await page.fill('#ck-cupom', 'TOPO100');
+    await page.locator('[data-ck="continuar"]').click();
+    const link = await page.locator('#ck-link').inputValue();
+    await page.goto('/index.html?modo=pessoal');
+    const ordem = await page.locator('.pessoal-resumo > *').evaluateAll((els) => els.map((e) => e.className));
+    expect(ordem[0]).toMatch(/liberado/);
+    await page.locator('[data-acao="refazer"]').click();
+    await page.locator('[data-acao="refazer"]').click();
+    await expect(page.locator('h1')).toHaveText('Antes de começar');
+    await expect(page.locator('.minhas-compras a')).toHaveAttribute('href', link);
+    expect(erros).toEqual([]);
+  });
+
+  test('[Alto] canal de suporte configurado aparece no pagamento e no resumo; sem ele, nada é prometido', async ({ page }) => {
+    await configurar(page, { API_URL: 'simulada', GRUPOS_DEMONSTRACAO: GRUPOS, WHATSAPP_SUPORTE: '5511999998888' });
+    const erros = coletarErros(page);
+    await fazerTestePessoal(page, { nome: 'Sueli Suporte Teste', email: 'sueli@exemplo.com' });
+    await expect(page.locator('.paywall a[data-suporte]')).toHaveAttribute('href', /^https:\/\/wa\.me\/5511999998888/);
+    await page.locator('[data-acao="comprar"][data-pacote="completo"]').click();
+    await expect(page.locator('[data-ck-tela="revisao"] .ck-garantia a')).toHaveAttribute('href', /^https:\/\/wa\.me\/5511999998888/);
+    expect(erros).toEqual([]);
+  });
+
+  test('erro genérico no envio da venda direta não fala de recrutador', async ({ page }) => {
+    const erros = coletarErros(page);
+    await page.addInitScript(() => {
+      document.addEventListener('DOMContentLoaded', () => { if (window.DISC_API) window.DISC_API.enviarPessoal = () => Promise.reject(new Error('Resposta inesperada do servidor.')); });
+    });
+    await page.goto('/index.html?modo=pessoal');
+    await page.fill('#nome', 'Rui Erro Generico'); await page.fill('#email', 'rui@exemplo.com'); await page.check('#consentimento');
+    await page.locator('#form-identificacao button[type="submit"]').click();
+    for (let i = 0; i < GRUPOS; i++) { await page.locator('[data-acao="confirmar-ordem"]').click(); await page.locator('[data-acao="proximo"]').click(); }
+    await expect(page.locator('.alerta')).toContainText('Não conseguimos gerar o seu resultado agora');
+    await expect(page.locator('main')).not.toContainText(/recrutador|código de segurança/);
+    expect(erros.filter((e) => !/Falha no envio/.test(e))).toEqual([]);
+  });
+
+  test('e-mail com domínio digitado errado: sugere a correção antes de começar', async ({ page }) => {
+    await page.goto('/index.html?modo=pessoal');
+    await page.fill('#nome', 'Ana Email Errado'); await page.fill('#email', 'ana@gmial.com'); await page.check('#consentimento');
+    await page.locator('#form-identificacao button[type="submit"]').click();
+    await expect(page.locator('#sugestao-email')).toContainText('Você quis dizer ana@gmail.com?');
+    await expect(page.locator('h1')).toHaveText('Antes de começar');
+    await page.locator('[data-acao="usar-sugestao"]').click();
+    await expect(page.locator('#email')).toHaveValue('ana@gmail.com');
+    await page.locator('#form-identificacao button[type="submit"]').click();
+    await expect(page.locator('.progresso-topo')).toContainText('Grupo 1 de ' + GRUPOS);
+  });
 });

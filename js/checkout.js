@@ -10,7 +10,10 @@
  *   pagamentoIndisponivel(erroOuResp), resumoPedido(resp)
  * Parte do navegador: criar(opcoes) -> { montar(el), parar() }
  *   opcoes: { api, tokenResumo, pacote (normalizado), pedido (salvo, opcional), cupom (pré-preenchido), telefone, aoMudar(pedido),
- *             aoVoltar(), aoParte2(pedido), aoAnunciar(msg), intervaloMs (padrão 4000) }
+ *             aoVoltar(), aoParte2(pedido), aoAnunciar(msg), intervaloMs (padrão 4000),
+ *             pacotes (os pagos, normalizados: dá para trocar o pacote na revisão), aoTrocarPacote(chave),
+ *             email (o da compra, mostrado na revisão), pacoteDoLink (pacote do link com desconto: dica se o cupom for de outro),
+ *             suporte ({ href, texto } do canal de suporte, ou null) }
  * Usa só as funções públicas da API B2C: criarPedido, iniciarPagamento, statusPedido, confirmarRetorno (e simularPagamento
  * na prévia). O client_secret do Stripe fica só na memória desta tela (não vai para o localStorage).
  * Só texto puro na tela: tudo passa por escapar().
@@ -240,7 +243,8 @@
     var inicioEspera = 0;
     var stripeDados = null;    // {clientSecret, publicavel, simulado}: só na memória
     var stripeSessao = null;   // Payment Element montado (DISC_STRIPE)
-    var stripePix = null;      // Pix gerado pelo Stripe (QR + copia e cola), mostrado também na nossa tela
+    var stripePix = pixSalvo(pedido);   // Pix gerado pelo Stripe (QR + copia e cola): fica no pedido salvo até expirar
+    var metodoStripe = '';     // aba escolhida no Payment Element ('card', 'pix', ...): muda o rótulo do botão
     var st = {
       tela: pedido ? (liberado(pedido.status) ? 'confirmado' : (pedido.pagamento ? 'pagamento' : 'revisao')) : 'revisao',
       metodo: 'pix',
@@ -253,6 +257,19 @@
     };
 
     function aviso(msg) { if (op.aoAnunciar) op.aoAnunciar(msg); }
+    // Pix já gerado neste pedido (volta do app do banco recarrega a página): QR e copia e cola continuam até expirar.
+    function pixSalvo(p) {
+      var px = p && p.pagamento && p.pagamento.pix;
+      if (!px || typeof px !== 'object' || !(px.qr || px.copiaECola)) return null;
+      var exp = Date.parse(px.expira || '');
+      if (!isNaN(exp) && exp < Date.now()) return null;
+      return { qr: String(px.qr || ''), copiaECola: String(px.copiaECola || ''), expira: String(px.expira || '') };
+    }
+    function pagos() { return (op.pacotes || []).filter(function (p) { return p && p.chave && p.chave !== 'gratis'; }); }
+    function nomePacote(chave) {
+      var p = pagos().filter(function (x) { return x.chave === chave; })[0] || PACOTES_PADRAO.filter(function (x) { return x.chave === chave; })[0];
+      return p ? p.nome : chave;
+    }
     function mudou() { if (op.aoMudar) op.aoMudar(pedido); }
     function preco() { return precoVigente(pacote); }
     function link() { return pedido ? linkRelatorio(root.location.href, pedido.tokenAcesso) : ''; }
@@ -260,15 +277,42 @@
     function resumoPacoteHtml() {
       var pv = preco();
       var valor = pedido && pedido.valorCentavos !== null && pedido.valorCentavos !== undefined ? pedido.valorCentavos : pv.centavos;
-      var riscado = pv.lancamento || (pedido && valor < pv.centavos) ? '<s class="ck-preco-cheio">' + escapar(formatarPreco(pv.lancamento ? pv.cheioCentavos : pv.centavos)) + '</s>' : '';
+      var comCupom = !!(pedido && pedido.cupom && valor < pv.centavos);
+      // Com cupom, o riscado é o preço de hoje (o que a pessoa viu na oferta), e a linha do cupom diz quanto saiu.
+      var riscado = comCupom || pv.lancamento ? '<s class="ck-preco-cheio">' + escapar(formatarPreco(comCupom ? pv.centavos : pv.cheioCentavos)) + '</s>' : '';
       return '' +
         '<div class="ck-pacote">' +
           '<div class="ck-pacote-topo">' +
             '<p class="ck-pacote-nome">' + escapar(pacote.nome) + '</p>' +
             '<p class="ck-preco">' + riscado + '<strong class="ck-preco-valor" id="ck-valor">' + escapar(formatarPreco(valor)) + '</strong></p>' +
           '</div>' +
+          (comCupom
+            ? '<p class="ck-cupom-linha" id="ck-cupom-linha">' + escapar(formatarPreco(pv.centavos)) + ' · Cupom ' + escapar(pedido.cupom) + ' −' +
+                escapar(formatarPreco(pv.centavos - valor)).replace('Grátis', 'R$ 0') + ' · Total ' + escapar(formatarPreco(valor)) + '</p>'
+            : '') +
           '<p class="ck-pacote-nota">Pagamento único. Acesso pelo seu link, sem mensalidade.</p>' +
         '</div>';
+    }
+
+    // Revisão: trocar entre os pacotes pagos sem voltar ao resumo.
+    function seletorPacoteHtml() {
+      var lista = pagos();
+      if (lista.length < 2) return '';
+      return '<div class="ck-pacotes" role="radiogroup" aria-label="Pacote">' + lista.map(function (p) {
+        var sel = p.chave === pacote.chave;
+        return '<button type="button" class="ck-pacote-opcao" role="radio" aria-checked="' + sel + '" data-ck="pacote" data-pacote="' + escapar(p.chave) + '">' +
+          '<span class="ck-pacote-opcao-nome">' + escapar(p.nome) + '</span>' +
+          '<span class="ck-pacote-opcao-preco">' + escapar(formatarPreco(precoVigente(p).centavos)) + '</span></button>';
+      }).join('') + '</div>';
+    }
+
+    // Cupom que veio no link (landing ou painel) e ainda não foi recusado: aparece como "ativo" na revisão.
+    function cupomDoLinkAtivo() {
+      return !!st.cupom && st.cupom === String(op.cupom || '').replace(/\s+/g, '').toUpperCase() && !st.indisponivel && !/cupom/i.test(st.erro);
+    }
+
+    function termosHtml(verbo) {
+      return 'Ao ' + verbo + ', você concorda com os <a href="termos.html" target="_blank" rel="noopener">Termos de uso</a>.';
     }
 
     function erroHtml() {
@@ -282,13 +326,20 @@
           '<div class="campo ck-cupom-campo" id="ck-cupom-campo"' + (st.cupomAberto ? '' : ' hidden') + '>' +
             '<label class="campo__rotulo" for="ck-cupom">Cupom de desconto</label>' +
             '<input class="entrada" id="ck-cupom" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" maxlength="40" value="' + escapar(st.cupom) + '">' +
-            '<p class="campo__ajuda">O desconto aparece no próximo passo.</p>' +
+            (cupomDoLinkAtivo() ? '' : '<p class="campo__ajuda">O desconto é aplicado quando você toca em Ir para o pagamento.</p>') +
           '</div>' +
         '</div>';
     }
 
+    function suporteHtml() {
+      var c = op.suporte;
+      if (!c || !c.href) return '';
+      return '<a href="' + escapar(c.href) + '"' + (/^https:/.test(c.href) ? ' target="_blank" rel="noopener noreferrer"' : '') + '>' + escapar(c.texto) + '</a>';
+    }
     function garantiaHtml() {
-      return '<p class="ck-garantia">' + ICONE_ESCUDO + '<span><strong>Garantia de 7 dias.</strong> Não gostou? Devolvemos o valor, sem perguntas.</span></p>';
+      var sup = suporteHtml();
+      return '<p class="ck-garantia">' + ICONE_ESCUDO + '<span><strong>Garantia de 7 dias.</strong> Não gostou? Devolvemos o valor, sem perguntas.' +
+        (sup ? ' Dúvidas ou reembolso? ' + sup + '.' : '') + '</span></p>';
     }
 
     function telaRevisao() {
@@ -296,7 +347,11 @@
         '<section class="caixa ck' + surgir() + '" aria-labelledby="ck-titulo" data-ck-tela="revisao">' +
           '<p class="sobretitulo">Seu pedido</p>' +
           '<h1 id="ck-titulo" class="titulo-pagina">Finalizar compra</h1>' +
+          seletorPacoteHtml() +
           resumoPacoteHtml() +
+          (cupomDoLinkAtivo()
+            ? '<p class="ck-cupom-ativo" role="note"><strong>Cupom ' + escapar(st.cupom) + ' ativo.</strong> O desconto entra no valor quando você toca em Ir para o pagamento.</p>'
+            : '') +
           (st.indisponivel
             ? '<div class="aviso ck-indisponivel" role="status"><strong>Compra disponível em breve.</strong> Se você tem um cupom, use-o abaixo para liberar o relatório.</div>'
             : '') +
@@ -314,8 +369,9 @@
             '<button type="button" class="botao botao--claro botao--grande" data-ck="voltar">Voltar ao meu resumo</button>' +
           '</div>' +
           erroHtml() +
+          (op.email ? '<p class="ck-email">E-mail da compra: <strong>' + escapar(op.email) + '</strong>. É por ele que você recupera o relatório se perder o link.</p>' : '') +
           garantiaHtml() +
-          '<p class="ck-letra-miuda">Pagamento único, em ambiente seguro. Vendido por ' + escapar(EMPRESA) + '.</p>' +
+          '<p class="ck-letra-miuda">Pagamento único, em ambiente seguro. Vendido por ' + escapar(EMPRESA) + '. ' + termosHtml('continuar') + '</p>' +
         '</section>';
     }
 
@@ -371,18 +427,35 @@
           '</div>' +
           pixStripeHtml() +
           '<div class="acoes acoes-coluna ck-acoes">' +
-            '<button type="button" class="botao botao--laranja botao--grande botao--bloco ck-pagar" data-ck="pagar" disabled>Pagar ' + escapar(formatarPreco(valor)) + '</button>' +
+            '<button type="button" class="botao botao--laranja botao--grande botao--bloco ck-pagar" data-ck="pagar" disabled' + (pixNaTela() ? ' hidden' : '') + '>' + escapar(rotuloPagar(valor)) + '</button>' +
           '</div>' +
           erroHtml() +
-          '<div class="ck-espera ck-espera--discreta" role="status" aria-live="polite"><span id="ck-status">Cartão, Apple Pay, Google Pay ou Pix. O relatório abre assim que o pagamento é aprovado.</span></div>' +
+          '<div class="ck-espera ck-espera--discreta" role="status" aria-live="polite"><span id="ck-status">' +
+            (stripePix ? 'Pague o Pix no app do seu banco. A liberação é automática.' : 'Cartão, Apple Pay, Google Pay ou Pix. O relatório abre assim que o pagamento é aprovado.') + '</span></div>' +
           '<div class="acoes acoes-coluna ck-acoes">' +
-            '<button type="button" class="botao botao--claro botao--grande" data-ck="verificar">Já paguei</button>' +
+            // "Já paguei" só faz sentido depois de gerar o Pix (o cartão é aprovado na hora, na própria tela).
+            '<button type="button" class="botao botao--claro botao--grande" data-ck="verificar"' + (stripePix ? '' : ' hidden') + '>Já paguei</button>' +
             (simular ? '<button type="button" class="botao botao--contorno botao--grande" data-ck="simular">Simular pagamento aprovado (prévia)</button>' : '') +
             '<button type="button" class="botao botao--link" data-ck="trocar">Trocar o pacote ou o cupom</button>' +
           '</div>' +
           garantiaHtml() +
-          '<p class="ck-letra-miuda">Pagamento processado com segurança pelo Stripe. Os dados do cartão não passam pelo nosso servidor. Vendido por ' + escapar(EMPRESA) + '.</p>' +
+          '<p class="ck-letra-miuda">Pagamento processado com segurança pelo Stripe. Os dados do cartão não passam pelo nosso servidor. Vendido por ' + escapar(EMPRESA) + '. ' + termosHtml('pagar') + '</p>' +
         '</section>';
+    }
+
+    // Rótulo do botão laranja: no Pix ele gera o código (não cobra nada ainda).
+    function rotuloPagar(valor) { return (metodoStripe === 'pix' ? 'Gerar o Pix de ' : 'Pagar ') + formatarPreco(valor); }
+    function valorAtual() {
+      return pedido && pedido.valorCentavos !== null && pedido.valorCentavos !== undefined ? pedido.valorCentavos : preco().centavos;
+    }
+    // Pix já gerado e a aba do Pix escolhida: o botão some (o QR está na tela; "Já paguei" consulta).
+    function pixNaTela() { return !!stripePix && metodoStripe === 'pix'; }
+    function aoMudarMetodo(m) {
+      metodoStripe = m && m.tipo ? String(m.tipo) : metodoStripe;
+      var b = el && el.querySelector('[data-ck="pagar"]');
+      if (!b || st.ocupado) return;
+      b.textContent = rotuloPagar(valorAtual());
+      b.hidden = pixNaTela();
     }
 
     function pixStripeHtml() {
@@ -447,6 +520,9 @@
       var plus = pedido && pedido.pacote === 'completo_plus';
       var url = link();
       var wa = linkWhatsApp('Meu Mapa de Perfil (' + EMPRESA + '): ' + url, op.telefone);
+      // Sem o número da pessoa o WhatsApp abre a lista de contatos: aí não é "para meu WhatsApp".
+      var temTel = /^https:\/\/wa\.me\/\d/.test(wa);
+      var podeEmail = !!(api && typeof api.enviarLinkPorEmail === 'function' && pedido && pedido.tokenAcesso);
       var cortesia = pedido && pedido.status === 'cortesia';
       return '' +
         '<section class="caixa caixa--vidro ck ck-ok' + surgir() + '" aria-labelledby="ck-titulo" data-ck-tela="confirmado">' +
@@ -460,9 +536,11 @@
             '<input class="entrada ck-link-texto" id="ck-link" type="text" readonly value="' + escapar(url) + '">' +
             '<div class="ck-link-botoes">' +
               '<button type="button" class="botao botao--claro" data-ck="copiar-link">Copiar link</button>' +
-              '<a class="botao botao--claro" href="' + escapar(wa) + '" target="_blank" rel="noopener noreferrer">Enviar para meu WhatsApp</a>' +
+              '<a class="botao botao--claro" href="' + escapar(wa) + '" target="_blank" rel="noopener noreferrer">' + (temTel ? 'Enviar para meu WhatsApp' : 'Enviar no WhatsApp') + '</a>' +
+              (podeEmail ? '<button type="button" class="botao botao--claro" data-ck="enviar-email">Enviar para meu e-mail</button>' : '') +
             '</div>' +
             '<p class="sucesso" id="ck-copiado" role="status" aria-live="polite"></p>' +
+            '<p class="campo__erro erro" id="ck-erro-email" role="alert"></p>' +
           '</div>' +
           '<div class="acoes acoes-coluna ck-acoes">' +
             (plus
@@ -524,12 +602,12 @@
         };
         var piId = String(d.clientSecret).split('_secret_')[0];
         if (d.simulado) {
-          return { sessao: S.montarSimulado({ el: caixa, aoPronto: pronto, paymentIntent: piId,
+          return { sessao: S.montarSimulado({ el: caixa, aoPronto: pronto, paymentIntent: piId, aoMudar: aoMudarMetodo, metodo: stripePix ? 'pix' : '',
             simularPago: function () { return api.simularPagamento(pedido.pedidoId, pedido.tokenAcesso); },
             pixFicticio: { qr: QR_FICTICIO, copiaECola: 'PREVIA-NAO-PAGUE-' + pedido.pedidoId } }), caixa: caixa };
         }
         caixa.innerHTML = '';
-        return S.montar({ el: caixa, publicavel: d.publicavel, clientSecret: d.clientSecret, aoPronto: pronto, aoErro: mostrarErro })
+        return S.montar({ el: caixa, publicavel: d.publicavel, clientSecret: d.clientSecret, aoPronto: pronto, aoErro: mostrarErro, aoMudar: aoMudarMetodo })
           .then(function (sessao) { return { sessao: sessao, caixa: caixa }; });
       }).then(function (x) {
         if (!x) return;
@@ -550,13 +628,38 @@
     }
 
     function mostrarPixStripe(px) {
-      stripePix = px;
+      // Sem data de expiração (prévia): vale por 1 hora neste aparelho.
+      stripePix = { qr: String(px.qr || ''), copiaECola: String(px.copiaECola || ''), expira: px.expira || new Date(Date.now() + 60 * 60 * 1000).toISOString() };
+      if (pedido && pedido.pagamento) { pedido.pagamento.pix = stripePix; mudou(); }
       var caixa = el.querySelector('#ck-pix-stripe');
       if (!caixa) return;
       var tmp = document.createElement('div');
       tmp.innerHTML = pixStripeHtml();
       caixa.innerHTML = tmp.firstChild.innerHTML;
       caixa.hidden = false;
+      metodoStripe = metodoStripe || 'pix';
+      var b = el.querySelector('[data-ck="pagar"]');
+      if (b) b.hidden = pixNaTela();
+      var ja = el.querySelector('[data-ck="verificar"]');
+      if (ja) ja.hidden = false;
+      var dica = el.querySelector('[data-pe-pix-dica]');
+      if (dica) dica.textContent = 'Pix gerado: o QR Code e o copia e cola estão logo abaixo.';
+      rolarAte(caixa, 'start');
+    }
+
+    // Rola só se o elemento estiver fora da tela (aviso de erro, QR do Pix).
+    // bloco 'start': o topo do elemento vai para perto do topo da tela; senão, rola o mínimo (com 16 px de folga).
+    function rolarAte(alvo, bloco) {
+      if (!alvo || !alvo.getBoundingClientRect) return;
+      var r = alvo.getBoundingClientRect();
+      var alto = root.innerHeight || document.documentElement.clientHeight;
+      var folga = 16;
+      if (r.top >= folga && r.bottom <= alto - folga && bloco !== 'start') return;
+      var delta = bloco === 'start' ? r.top - folga : (r.bottom > alto - folga ? Math.min(r.bottom - alto + folga, r.top - folga) : r.top - folga);
+      if (Math.abs(delta) < 1) return;
+      var suave = true;
+      try { suave = !root.matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { suave = true; }
+      try { root.scrollBy({ top: delta, behavior: suave ? 'smooth' : 'auto' }); } catch (e) { root.scrollBy(0, delta); }
     }
 
     function pagarStripe(botao) {
@@ -607,6 +710,8 @@
       st.erro = msg || '';
       var p = el && el.querySelector('#ck-erro');
       if (p) { p.textContent = st.erro; p.hidden = !st.erro; }
+      // No celular o aviso nasce abaixo do botão: traz para a tela sem mexer no botão de lugar.
+      if (p && st.erro) rolarAte(p, 'nearest');
     }
 
     function pararTimer() { if (timer) { root.clearTimeout(timer); timer = null; } }
@@ -646,7 +751,9 @@
         }
         // Stripe recusou a última tentativa: avisa (o mesmo formulário aceita outro cartão) e segue esperando.
         if (r && r.recusado === true && !st.ocupado) mostrarErro(r.mensagem || 'O pagamento não foi aprovado. Tente de novo ou use outra forma de pagamento.');
-        if (s) s.textContent = manual ? 'Ainda não recebemos a confirmação. Pix costuma levar segundos; cartão, alguns minutos.' : 'Aguardando a confirmação do pagamento…';
+        if (s) s.textContent = manual
+          ? (ehStripe() ? 'Ainda não recebemos a confirmação do Pix. Depois de pagar no app do banco, ela costuma chegar em segundos.' : 'Ainda não recebemos a confirmação. Pix costuma levar segundos; cartão, alguns minutos.')
+          : 'Aguardando a confirmação do pagamento…';
         agendar();
       }, function () {
         if (st.parado) return;
@@ -703,7 +810,7 @@
       st.ocupado = true;
       st.erro = '';
       desenhar(false);
-      var reaproveita = pedido && pedido.pedidoId && !liberado(pedido.status) && (pedido.cupom || '') === cupom;
+      var reaproveita = pedido && pedido.pedidoId && !liberado(pedido.status) && (pedido.cupom || '') === cupom && (!pedido.pacote || pedido.pacote === pacote.chave);
       Promise.resolve().then(function () { return reaproveita ? null : api.criarPedido(op.tokenResumo, pacote.chave, cupom); }).then(function (r) {
         if (!reaproveita) {
           if (r && r.ok === false) throw Object.assign(new Error(r.erro || 'Não foi possível criar o pedido.'), { resposta: r });
@@ -740,7 +847,32 @@
           return;
         }
         st.erro = (e && e.message) || 'Não foi possível continuar. Verifique a conexão e tente de novo.';
+        // Cupom do link com desconto, que é de um pacote só: "inválido" engana; diz para qual pacote ele veio.
+        var doLink = String(op.cupom || '').replace(/\s+/g, '').toUpperCase();
+        if (/cupom/i.test(st.erro) && cupom && cupom === doLink && op.pacoteDoLink && op.pacoteDoLink !== pacote.chave) {
+          st.erro += ' Este cupom veio no link do ' + nomePacote(op.pacoteDoLink) + ' e pode valer só para ele: escolha esse pacote acima.';
+        }
         desenhar(false);
+      });
+    }
+
+    // "Enviar para meu e-mail" na confirmação: o servidor manda o link para o e-mail da compra.
+    function enviarEmail(btn) {
+      var ok = el.querySelector('#ck-copiado'), er = el.querySelector('#ck-erro-email');
+      if (ok) ok.textContent = '';
+      if (er) er.textContent = '';
+      btn.disabled = true;
+      btn.textContent = 'Enviando…';
+      Promise.resolve().then(function () { return api.enviarLinkPorEmail(pedido.tokenAcesso); }).then(function (r) {
+        if (!r || r.ok !== true) throw new Error((r && r.erro) || 'Não foi possível enviar agora.');
+        var msg = 'Enviamos o link para ' + (r.email || 'o e-mail da compra') + '. Confira também o spam.';
+        if (ok) ok.textContent = msg;
+        aviso(msg);
+        btn.textContent = 'Enviado';
+      }).catch(function (e) {
+        if (er) er.textContent = (e && e.message) || 'Não foi possível enviar agora. Tente de novo em instantes.';
+        btn.disabled = false;
+        btn.textContent = 'Enviar para meu e-mail';
       });
     }
 
@@ -784,6 +916,21 @@
           break;
         case 'copiar-pix': copiar(stripePix && stripePix.copiaECola ? stripePix.copiaECola : (pedido && pedido.pagamento ? pedido.pagamento.copiaECola : ''), 'Código Pix copiado!'); break;
         case 'pagar': pagarStripe(alvo); break;
+        case 'pacote':
+          var nova = pagos().filter(function (p) { return p.chave === alvo.getAttribute('data-pacote'); })[0];
+          if (!nova || nova.chave === pacote.chave) break;
+          pacote = nova;
+          var campoC = el.querySelector('#ck-cupom');
+          if (campoC) st.cupom = String(campoC.value || '').replace(/\s+/g, '').toUpperCase();
+          st.erro = '';
+          if (pedido && !liberado(pedido.status) && pedido.pacote && pedido.pacote !== nova.chave) { pedido = null; stripeDados = null; stripePix = null; mudou(); }
+          if (op.aoTrocarPacote) op.aoTrocarPacote(nova.chave);
+          desenhar(false);
+          var marcado = el.querySelector('[data-ck="pacote"][aria-checked="true"]');
+          if (marcado) marcado.focus();
+          aviso(nova.nome + ' escolhido.');
+          break;
+        case 'enviar-email': enviarEmail(alvo); break;
         case 'copiar-link': copiar(link(), 'Link copiado!'); break;
         case 'verificar': verificar(true); break;
         case 'simular':

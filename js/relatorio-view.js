@@ -156,6 +156,22 @@
     }
     return obj.relatorio;
   }
+  // Botão "Salvar em PDF" (a mensagem enviada ao cliente promete que dá para salvar): fixo no canto, fora da impressão.
+  function botaoPdfHtml() {
+    return '<div class="doc-pdf nao-imprimir" id="doc-pdf"><button type="button" class="botao botao--laranja doc-pdf__botao" id="btn-salvar-pdf" ' +
+      'title="Abre a janela de impressão: escolha &quot;Salvar como PDF&quot;">Salvar em PDF</button></div>';
+  }
+  function ligarBotaoPdf(elemento) {
+    var b = elemento && elemento.querySelector ? elemento.querySelector('#btn-salvar-pdf') : null;
+    if (b) b.addEventListener('click', function () { if (typeof root.print === 'function') root.print(); });
+  }
+  // Título da aba: "Relatório de equipe — X" fica como está (sem "Relatório · Relatório…").
+  function tituloDaAba(titulo) {
+    var t = String(titulo || '').trim();
+    if (!t) return 'Relatório · Gestão sem Caos';
+    return /^relat[óo]rio\b/i.test(t) ? t : 'Relatório · ' + t;
+  }
+
   function faixaPreviaHtml() {
     return '<div class="doc-previa-faixa" id="doc-previa-faixa" role="note">Prévia — ainda não publicado</div>';
   }
@@ -1520,6 +1536,8 @@
       if (!relPrevia) { mostrarErro(el, MENSAGEM_PREVIA); return; }
       render(relPrevia, el);
       el.insertAdjacentHTML('afterbegin', faixaPreviaHtml());
+      el.insertAdjacentHTML('beforeend', botaoPdfHtml());
+      ligarBotaoPdf(el);
       el.setAttribute('data-estado', 'pronto');
       el.setAttribute('data-previa', 'sim');
       doc.title = 'Prévia · ' + (relPrevia.titulo || (relPrevia.processo && (relPrevia.processo.vaga || relPrevia.processo.nome)) || 'Relatório');
@@ -1534,10 +1552,12 @@
       // relatorio_publico também devolve `modelo` ao lado do snapshot.
       if (!rel.modelo && resp.modelo && resp.modelo !== 'processo') rel = Object.assign({}, rel, { modelo: resp.modelo });
       render(rel, el);
+      el.insertAdjacentHTML('beforeend', botaoPdfHtml());
+      ligarBotaoPdf(el);
       el.setAttribute('data-estado', 'pronto');
       if (rel.modelo && rel.modelo !== 'processo') {
         el.setAttribute('data-modelo', String(rel.modelo).replace(/[^a-z]/g, ''));
-        doc.title = 'Relatório · ' + (rel.titulo || 'Gestão sem Caos');
+        doc.title = tituloDaAba(rel.titulo);
         return;
       }
       var p = rel.processo || {};
@@ -1574,7 +1594,9 @@
     rotuloNivel: rotuloNivel,
     render: render,
     mostrarErro: mostrarErro,
-    iniciar: iniciar
+    iniciar: iniciar,
+    tituloDaAba: tituloDaAba,
+    botaoPdfHtml: botaoPdfHtml
   };
 
   if (typeof module !== 'undefined' && module.exports) module.exports = DISC_RELATORIO_VIEW;

@@ -145,7 +145,11 @@ for (const modelo of ['equipe', 'lideranca', 'pessoa']) {
       await expect(page.locator('.doc[data-modelo="' + modelo + '"]')).toHaveCount(1);
       for (const id of SECOES_MODELO[modelo]) await expect(page.locator('[data-secao="' + id + '"]')).toHaveCount(1);
       await expect(page.locator('[data-secao="ranking"]')).toHaveCount(0);
-      await expect(page).toHaveTitle('Relatório · ' + DADOS_MODELO[modelo].titulo);
+      // Título da aba sem "Relatório · Relatório de equipe…" (palavra repetida)
+      const tit = DADOS_MODELO[modelo].titulo;
+      await expect(page).toHaveTitle(/^Relat[óo]rio\b/i.test(tit) ? tit : 'Relatório · ' + tit);
+      // Botão "Salvar em PDF" (a mensagem ao cliente promete), escondido na impressão
+      await expect(page.locator('#btn-salvar-pdf')).toBeVisible();
       expect(chamadas.map((c) => c.corpo.acao)).toEqual(['relatorioPublico']);
       await page.evaluate(() => document.fonts.ready);
       await semRolagemLateral(page);

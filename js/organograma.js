@@ -7,14 +7,21 @@
  *   arvore(dados)               -> { raizes: [{ id, filhos: [...] }], semPosicao: [ids] }
  *   layout(arvore, opcoes?)     -> { nos: [{id,x,y,w,h,nivel,pai}], arestas: [{de,para,pontos}], largura, altura }
  *   mover(dados, id, destino)   -> { relacoes, topoIds, semPosicaoIds, erro, mudou }
- *                                  destino: {tipo:'lider', id} | {tipo:'topo'} | {tipo:'sem'}
+ *                                  destino: {tipo:'lider', id} | {tipo:'topo'} | {tipo:'sem', equipe?: 'subir'|'topo'}
+ *                                  (tirar um líder: equipe 'subir' passa os liderados para o líder de cima; 'topo',
+ *                                  o padrão, deixa os liderados no Topo, sem líder)
+ *   equipeDe(dados, id)         -> { liderados: [{id, nome}], lider: {id, nome}|null } (quem fica sem líder se id sair)
  *   paraHtml(dados, opcoes?)    -> HTML estático (cartões + SVG) para leitura/impressão A4
  *
  * Componente (navegador):
  *   montar(container, dados)    -> { atualizar(dados), ajustar(), destruir() }
  *   dados = { pessoas: [{id, nome, cargo, foto, codigo, combinacao, semTeste}], relacoes: [{de, para, tipo}],
  *             topoIds?: [ids], semPosicaoIds?: [ids], modo: 'editar'|'ler',
- *             aoMudar?(relacoesNovas, mudanca), aoAbrirPessoa?(id) }
+ *             aoMudar?(relacoesNovas, mudanca), aoAbrirPessoa?(id),
+ *             aoTirarLider?(info, continuar) }
+ *   aoTirarLider: chamado antes de tirar do organograma alguém que lidera (arrastar para "Sem posição" ou "Mover
+ *            para…"). info = { id, nome, liderados: [{id, nome}], lider: {id, nome}|null }. O painel pergunta e chama
+ *            continuar('subir' | 'topo') para mover, ou continuar(null) para desistir. Sem ele, a equipe vai para o Topo.
  *   relacoes: tipo 'lidera' (de = líder, para = liderado); 'direto'/'indireto' = colegas (linha tracejada opcional).
  *   topoIds: quem fica no topo (sem líder) mesmo sem liderados. Depois de cada mudança, mudanca.topoIds = todas as
  *            raízes atuais, na ordem do desenho (guarde junto com as relações).
@@ -290,11 +297,14 @@
     } else {
       rels = rels.filter(function (r) { return !(r.tipo === 'lidera' && (r.para === id || r.de === id)); });
     }
+    // Tirar um líder com equipe 'subir': os liderados passam para o líder de cima (sem líder de cima, vão para o Topo).
+    var acima = destino.tipo === 'sem' && destino.equipe === 'subir' && e.pai[id] != null ? e.pai[id] : null;
+    if (acima != null) e.filhos[id].forEach(function (x) { rels.push({ de: acima, para: x, tipo: 'lidera' }); });
     // Ninguém que estava no organograma sai sem querer: quem ficaria solto (ex.: o líder sem mais liderados,
     // os liderados de quem foi tirado) vai para o Topo. Só a pessoa movida para "Sem posição" sai.
     var topo = e.raizes.filter(function (x) { return !(x === id && destino.tipo !== 'topo'); });
     if (destino.tipo === 'topo') topo.push(id);
-    if (destino.tipo === 'sem') e.filhos[id].forEach(function (x) { topo.push(x); });
+    if (destino.tipo === 'sem' && acima == null) e.filhos[id].forEach(function (x) { topo.push(x); });
     var provisorio = estrutura({ pessoas: d.pessoas, relacoes: rels, topoIds: topo, semPosicaoIds: forcados });
     e.ids.forEach(function (x) {
       if (x === id && destino.tipo === 'sem') return;
@@ -304,10 +314,21 @@
     return { relacoes: rels, topoIds: final.raizes.slice(), semPosicaoIds: forcados, erro: '', mudou: true, de: atual };
   }
 
+  // Quem fica sem líder se `id` sair do organograma, e o líder de cima (para quem a equipe pode passar).
+  function equipeDe(dados, id) {
+    var e = estrutura(dados);
+    id = s(id);
+    var nome = function (x) { return { id: x, nome: e.porId[x] ? s(e.porId[x].nome) : '' }; };
+    return { liderados: (e.filhos[id] || []).map(nome), lider: e.pai[id] != null ? nome(e.pai[id]) : null };
+  }
+
   function textoMudanca(e, id, destino) {
     var n = e.porId[id] ? s(e.porId[id].nome) : '';
     if (destino.tipo === 'lider') return n + ' agora é liderado(a) por ' + (e.porId[destino.id] ? s(e.porId[destino.id].nome) : '') + '.';
     if (destino.tipo === 'topo') return n + ' está no topo, sem líder.';
+    var eq = (e.filhos[id] || []).length;
+    if (eq && destino.equipe === 'subir' && e.pai[id] != null) return n + ' saiu do organograma; a equipe passou para ' + s(e.porId[e.pai[id]].nome) + '.';
+    if (eq) return n + ' saiu do organograma; a equipe ficou no topo, sem líder.';
     return n + ' saiu do organograma.';
   }
 
@@ -449,12 +470,12 @@
           (ed ? '<div class="orgx-topo" data-org-alvo="topo"><span class="orgx-topo__seta" aria-hidden="true">' +
             '<svg viewBox="0 0 24 24" width="16" height="16"><path d="M12 19V5M5 12l7-7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></span>' +
             '<span><b class="seminegrito">Topo</b> <span class="orgx-topo__dica">solte aqui quem não tem líder</span></span></div>' : '') +
+          '<p class="orgx-aviso" role="alert" data-org-aviso hidden></p>' +
           '<div class="orgx-moldura">' +
             '<div class="orgx-quadro" data-org-quadro>' +
               '<div class="orgx-tela" data-org-tela><div class="orgx-mundo" data-org-mundo></div></div>' +
               '<p class="orgx-vazio" data-org-vazio hidden></p>' +
             '</div>' +
-            '<p class="orgx-aviso" role="alert" data-org-aviso hidden></p>' +
           '</div>' +
           '<p class="visualmente-oculto" aria-live="polite" data-org-vivo></p>' +
         '</section>';
@@ -474,6 +495,7 @@
       vazio.textContent = ed ? 'Ninguém no organograma ainda. Arraste alguém da coluna "Sem posição" para o Topo (ou para cá) e depois os liderados sobre o cartão do líder.' : 'Ninguém posicionado no organograma.';
       var quadro = q('[data-org-quadro]');
       if (ed && !st.e.raizes.length) quadro.setAttribute('data-org-alvo', 'topo'); else quadro.removeAttribute('data-org-alvo');
+      el.classList.toggle('orgx--sem-vazio', ed && !st.e.sem.length);
       if (ed) {
         q('[data-org-sem-n]').textContent = String(st.e.sem.length);
         q('[data-org-sem-lista]').innerHTML = st.e.sem.length ?
@@ -508,8 +530,13 @@
       if (!quadro) return;
       var W = quadro.clientWidth, H = quadro.clientHeight, L = st.lay.largura, A = st.lay.altura;
       if (st.ajustar && W > 0 && H > 0 && L > 0) {
-        // Ajusta pela largura (nomes legíveis): não encolhe abaixo de AJUSTE_MIN; o que passar rola dentro do quadro.
-        st.escala = Math.max(AJUSTE_MIN, Math.min(AJUSTE_MAX, (W - 2 * MARGEM) / L));
+        if (st.ajusteTodo) {
+          // Botão "Ajustar à tela": o diagrama inteiro cabe no quadro (largura e altura), sem o piso de legibilidade.
+          st.escala = Math.max(ESCALA_MIN, Math.min(AJUSTE_MAX, (W - 2 * MARGEM) / L, A > 0 ? (H - 2 * MARGEM) / A : AJUSTE_MAX));
+        } else {
+          // Ajuste automático pela largura (nomes legíveis): não encolhe abaixo de AJUSTE_MIN; o que passar rola no quadro.
+          st.escala = Math.max(AJUSTE_MIN, Math.min(AJUSTE_MAX, (W - 2 * MARGEM) / L));
+        }
       }
       var e = st.escala;
       var tw = Math.max(W, Math.ceil(L * e + 2 * MARGEM)), th = Math.max(H, Math.ceil(A * e + 2 * MARGEM));
@@ -530,6 +557,7 @@
       var antes = st.escala;
       var cx = (quadro.scrollLeft + quadro.clientWidth / 2), cy = (quadro.scrollTop + quadro.clientHeight / 2);
       st.ajustar = false;
+      st.ajusteTodo = false;
       st.escala = Math.max(ESCALA_MIN, Math.min(ESCALA_MAX, Math.round(nova * 100) / 100));
       escala();
       var k = st.escala / antes;
@@ -569,6 +597,17 @@
     }
 
     function aplicar(id, destino, focar) {
+      // Tirar quem lidera: o painel pergunta o que fazer com a equipe antes (nada some em silêncio).
+      if (destino && destino.tipo === 'sem' && !destino.equipe && st.e && (st.e.filhos[s(id)] || []).length && typeof st.dados.aoTirarLider === 'function') {
+        var info = equipeDe(st.dados, id);
+        info.id = s(id);
+        info.nome = s(st.e.porId[s(id)] && st.e.porId[s(id)].nome);
+        st.dados.aoTirarLider(info, function (escolha) {
+          if (st.destruido || (escolha !== 'subir' && escolha !== 'topo')) return;
+          aplicar(id, { tipo: 'sem', equipe: escolha }, focar);
+        });
+        return false;
+      }
       var r = mover(st.dados, id, destino);
       if (r.erro) { aviso(r.erro); anunciar(r.erro); return false; }
       if (!r.mudou) return false;
@@ -746,7 +785,7 @@
       var b = ev.target.closest ? ev.target.closest('[data-acao]') : null;
       if (!b || !el.contains(b) || b.disabled) return;
       var acao = b.getAttribute('data-acao');
-      if (acao === 'ajustar') { st.ajustar = true; escala(); var qd = q('[data-org-quadro]'); qd.scrollLeft = 0; qd.scrollTop = 0; }
+      if (acao === 'ajustar') { st.ajustar = true; st.ajusteTodo = true; escala(); var qd = q('[data-org-quadro]'); qd.scrollLeft = 0; qd.scrollTop = 0; }
       else if (acao === 'zoom-mais') zoom(st.escala + PASSO);
       else if (acao === 'zoom-menos') zoom(st.escala - PASSO);
       else if (acao === 'colegas') {
@@ -923,6 +962,7 @@
     arvore: arvore,
     layout: layout,
     mover: mover,
+    equipeDe: equipeDe,
     paraHtml: paraHtml,
     montar: montar,
     caminho: caminho,

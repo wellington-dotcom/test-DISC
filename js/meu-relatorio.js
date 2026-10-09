@@ -90,20 +90,44 @@
   function temApi() { return !!(CONFIG.API_URL && String(CONFIG.API_URL).trim() && api()); }
   function link() { return root.DISC_CHECKOUT ? root.DISC_CHECKOUT.linkRelatorio(root.location.href, token) : root.location.href; }
 
+  // Canal de suporte (CONFIG.WHATSAPP_SUPORTE ou CONFIG.EMAIL_SUPORTE): link pronto ou '' (sem canal, nada é prometido).
+  function suporteHtml(mensagem, texto) {
+    var wa = String(CONFIG.WHATSAPP_SUPORTE || '').replace(/\D/g, '');
+    if (wa.length >= 10 && wa.length <= 15) {
+      return '<a href="https://wa.me/' + esc(wa) + '?text=' + esc(encodeURIComponent(mensagem)) + '" target="_blank" rel="noopener noreferrer" data-suporte>' + esc(texto || 'Fale com a gente no WhatsApp') + '</a>';
+    }
+    var email = String(CONFIG.EMAIL_SUPORTE || '').trim();
+    if (/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) {
+      return '<a href="mailto:' + esc(email) + '?subject=' + esc(encodeURIComponent(mensagem)) + '" data-suporte>' + esc(texto ? texto.replace('no WhatsApp', 'por e-mail') : 'Escreva para ' + email) + '</a>';
+    }
+    return '';
+  }
+  function rodapeGarantia() {
+    var sup = suporteHtml('Olá! Quero falar sobre o meu Mapa de Perfil (garantia de 7 dias).', 'Fale com o suporte');
+    return '<p class="rodape-nota meu-rodape">' + esc(EMPRESA) + ' · Mapa de Perfil. O DISC descreve estilo de comportamento, não competência. ' +
+      'Garantia de 7 dias: se não gostar, peça o reembolso' + (sup ? ': ' + sup + '.' : '.') + '</p>';
+  }
+
   function focar() {
     var h = el.querySelector('h1');
     if (h) { h.setAttribute('tabindex', '-1'); try { h.focus({ preventScroll: true }); } catch (e) { h.focus(); } }
     try { root.scrollTo(0, 0); } catch (e) { /* ignora */ }
   }
 
-  function telaRecuperar(msgErro, titulo) {
+  // aguardando: o pedido do link ainda não foi pago/confirmado -> botão "Consultar de novo".
+  function telaRecuperar(msgErro, titulo, aguardando) {
     var sup = String(CONFIG.WHATSAPP_SUPORTE || '').replace(/\D/g, '');
+    var envios = 0, emailPedido = '';
     el.innerHTML = '' +
       '<div class="pilha-telas">' +
         (msgErro
           ? '<section class="caixa surgir" aria-labelledby="titulo-erro">' +
               '<h1 id="titulo-erro" class="titulo-pagina">' + esc(titulo || 'Não conseguimos abrir o relatório') + '</h1>' +
               '<div class="aviso aviso--erro alerta" role="alert">' + esc(msgErro) + '</div>' +
+              (aguardando
+                ? '<p class="subtitulo">Se você pagou agora, a confirmação pode levar alguns instantes.</p>' +
+                  '<div class="acoes acoes-coluna"><button type="button" class="botao botao--principal botao--grande" data-acao="consultar-de-novo">Consultar de novo</button></div>'
+                : '') +
             '</section>'
           : '') +
         '<section class="caixa surgir recuperar" aria-labelledby="titulo-recuperar">' +
@@ -120,9 +144,8 @@
             '<div class="acoes"><button type="submit" class="botao botao--principal botao--grande">Enviar o link</button></div>' +
           '</form>' +
           '<p class="sucesso recuperar-ok" id="recuperar-ok" role="status" aria-live="polite"></p>' +
-          (sup ? '<p class="rodape-nota recuperar-suporte">Não recebeu? <a href="https://wa.me/' + esc(sup) + '?text=' +
-            esc(encodeURIComponent('Olá! Preciso recuperar o meu Mapa de Perfil.')) + '" target="_blank" rel="noopener noreferrer">Fale com a gente no WhatsApp</a>.</p>' : '') +
-          '<p class="rodape-nota"><a href="index.html?modo=pessoal">Fazer o teste grátis</a></p>' +
+          (suporteHtml('Olá! Preciso recuperar o meu Mapa de Perfil.') ? '<p class="rodape-nota recuperar-suporte">Não recebeu? ' + suporteHtml('Olá! Preciso recuperar o meu Mapa de Perfil.') + '.</p>' : '') +
+          '<p class="rodape-nota"><a href="index.html?modo=pessoal">Voltar ao meu resumo</a> · <a href="index.html?modo=pessoal">Fazer o teste grátis</a></p>' +
         '</section>' +
       '</div>';
     var form = el.querySelector('#form-recuperar');
@@ -133,7 +156,7 @@
       var ok = el.querySelector('#recuperar-ok');
       var email = String(campo.value || '').replace(/\s+/g, '').toLowerCase();
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-        erro.textContent = 'Confira o e-mail (ex.: nome@gmail.com).';
+        erro.textContent = email ? 'Confira o e-mail (ex.: nome@gmail.com).' : 'Informe o e-mail que você usou no teste.';
         campo.setAttribute('aria-invalid', 'true');
         campo.focus();
         return;
@@ -150,8 +173,11 @@
       Promise.resolve().then(function () { return api().recuperarAcesso(email); }).then(function (r) {
         botao.disabled = false;
         var enviado = !(r && (r.enviado === false || r.ok === false));
+        if (enviado) { envios = emailPedido === email ? envios + 1 : 1; emailPedido = email; }
         ok.textContent = enviado
-          ? 'Pronto. Se houver um relatório com este e-mail, o link chega em alguns minutos. Confira também o spam.'
+          ? (envios > 1
+            ? 'Já pedimos o link ' + envios + ' vezes para este e-mail. Ele pode levar alguns minutos: confira também o spam e a aba Promoções antes de pedir de novo.'
+            : 'Pronto. Se houver um relatório com este e-mail, o link chega em alguns minutos. Confira também o spam.')
           : (r && r.erro ? r.erro + ' ' : 'O envio por e-mail ainda não está ligado. ') + (sup ? 'Ou fale com a gente pelo WhatsApp, no link abaixo.' : '');
         anunciar(ok.textContent);
       }, function (e) {
@@ -180,22 +206,27 @@
     focar();
   }
 
-  function blocoLink() {
+  // Bloco "Seu link de acesso". topo: versão curta logo depois da capa (três botões numa linha); o bloco completo
+  // continua no fim. Os dois somem na impressão (.meu-link).
+  function blocoLink(topo) {
     var ck = root.DISC_CHECKOUT;
     var url = link();
     var wa = ck ? ck.linkWhatsApp('Meu Mapa de Perfil (' + EMPRESA + '): ' + url, '') : '';
+    var sufixo = topo ? '-topo' : '';
     return '' +
-      '<section class="caixa rel-caixa meu-link surgir" aria-labelledby="titulo-link">' +
-        '<h2 id="titulo-link" class="caixa__titulo">Seu link de acesso</h2>' +
-        '<p class="rel-nota">Guarde este link: é por ele que você volta ao relatório quando quiser. Quem tiver o link consegue abrir, então compartilhe só com quem você quiser.</p>' +
-        '<input class="entrada ck-link-texto" id="meu-link" type="text" readonly value="' + esc(url) + '" aria-labelledby="titulo-link">' +
+      '<section class="caixa rel-caixa meu-link' + (topo ? ' meu-link--topo' : '') + ' surgir" aria-labelledby="titulo-link' + sufixo + '" data-bloco-link>' +
+        '<h2 id="titulo-link' + sufixo + '" class="caixa__titulo">' + (topo ? 'Guarde o seu acesso' : 'Seu link de acesso') + '</h2>' +
+        (topo
+          ? '<p class="rel-nota">O relatório abre sempre por este link. Guarde agora: copie, mande para o seu WhatsApp ou para o seu e-mail.</p>'
+          : '<p class="rel-nota">Guarde este link: é por ele que você volta ao relatório quando quiser. Quem tiver o link consegue abrir, então compartilhe só com quem você quiser.</p>' +
+            '<input class="entrada ck-link-texto" id="meu-link" type="text" readonly value="' + esc(url) + '" aria-labelledby="titulo-link">') +
         '<div class="ck-link-botoes">' +
           '<button type="button" class="botao botao--claro" data-acao="copiar-link">Copiar link</button>' +
           (wa ? '<a class="botao botao--claro" href="' + esc(wa) + '" target="_blank" rel="noopener noreferrer">Enviar no WhatsApp</a>' : '') +
-          (podeEnviarEmail() ? '<button type="button" class="botao botao--claro" id="btn-enviar-meu-email" data-acao="enviar-email">Enviar para meu e-mail</button>' : '') +
+          (podeEnviarEmail() ? '<button type="button" class="botao botao--claro"' + (topo ? '' : ' id="btn-enviar-meu-email"') + ' data-acao="enviar-email">Enviar para meu e-mail</button>' : '') +
         '</div>' +
-        '<p class="sucesso" id="copiado" role="status" aria-live="polite"></p>' +
-        '<p class="campo__erro erro" id="erro-meu-email" role="alert"></p>' +
+        '<p class="sucesso"' + (topo ? '' : ' id="copiado"') + ' data-status role="status" aria-live="polite"></p>' +
+        '<p class="campo__erro erro"' + (topo ? '' : ' id="erro-meu-email"') + ' data-erro role="alert"></p>' +
       '</section>';
   }
 
@@ -234,9 +265,11 @@
           : '') +
         A.relatorioPessoaHtml(d, '', { travas: true, plano90: plus, mapa: plus, botaoPdf: 'Imprimir ou salvar em PDF' }) +
         blocoLink() +
-        '<p class="rodape-nota meu-rodape">' + esc(EMPRESA) + ' · Mapa de Perfil. O DISC descreve estilo de comportamento, não competência. ' +
-          'Garantia de 7 dias: se não gostar, peça o reembolso pelo suporte.</p>' +
+        rodapeGarantia() +
       '</div>';
+    // "Guarde o seu acesso" logo depois do primeiro cartão (o relatório é longo; o bloco completo fica no fim).
+    var primeiro = el.querySelector('.relatorio-pessoa > .rel-caixa');
+    if (primeiro) primeiro.insertAdjacentHTML('afterend', blocoLink(true));
     document.title = (dados.primeiroNome ? dados.primeiroNome + ' · ' : '') + 'Meu Mapa de Perfil · ' + EMPRESA;
     focar();
   }
@@ -249,10 +282,9 @@
         (plus && dados.precisaParte2
           ? '<div class="aviso meu-aviso-p2">Falta a Parte 2 para ver onde você está se esticando. <a href="index.html?modo=pessoal#p2-' + esc(encodeURIComponent(token)) + '">Responder agora (3 minutos)</a></div>'
           : '') +
-        A.relatorioPessoaHtml(av, '', { avancado: true, botaoPdf: 'Imprimir ou salvar em PDF' }) +
+        A.relatorioPessoaHtml(av, '', { avancado: true, botaoPdf: 'Imprimir ou salvar em PDF', aposCapa: blocoLink(true) }) +
         blocoLink() +
-        '<p class="rodape-nota meu-rodape">' + esc(EMPRESA) + ' · Mapa de Perfil. O DISC descreve estilo de comportamento, não competência. ' +
-          'Garantia de 7 dias: se não gostar, peça o reembolso pelo suporte.</p>' +
+        rodapeGarantia() +
       '</div>';
     document.title = (dados.primeiroNome ? dados.primeiroNome + ' · ' : '') + 'Meu Mapa de Perfil · ' + EMPRESA;
     restaurarPlano();
@@ -289,8 +321,12 @@
 
   // "Enviar para meu e-mail": o link vai para o e-mail usado na compra (o servidor sabe qual; aqui só o token).
   function podeEnviarEmail() { return temApi() && typeof api().enviarLinkPorEmail === 'function' && !!token; }
+  function statusDo(btn, sel) {
+    var bloco = btn && btn.closest ? btn.closest('[data-bloco-link]') : null;
+    return (bloco && bloco.querySelector(sel)) || el.querySelector(sel === '[data-status]' ? '#copiado' : '#erro-meu-email');
+  }
   function enviarMeuEmail(btn) {
-    var st = el.querySelector('#copiado'), er = el.querySelector('#erro-meu-email');
+    var st = statusDo(btn, '[data-status]'), er = statusDo(btn, '[data-erro]');
     if (st) st.textContent = '';
     if (er) er.textContent = '';
     btn.disabled = true;
@@ -308,8 +344,8 @@
     });
   }
 
-  function copiar(texto) {
-    var st = el.querySelector('#copiado');
+  function copiar(texto, btn) {
+    var st = statusDo(btn, '[data-status]');
     function ok() { if (st) st.textContent = 'Link copiado!'; anunciar('Link copiado.'); }
     function manual() {
       var campo = el.querySelector('#meu-link');
@@ -328,7 +364,8 @@
     var acao = alvo.getAttribute('data-acao');
     if (acao === 'ir-capitulo') { ev.preventDefault(); irPara(alvo.getAttribute('data-alvo')); return; }
     if (acao === 'imprimir') { try { root.print(); } catch (e) { /* sem impressão */ } }
-    else if (acao === 'copiar-link') copiar(link());
+    else if (acao === 'copiar-link') copiar(link(), alvo);
+    else if (acao === 'consultar-de-novo') carregar();
     else if (acao === 'enviar-email') enviarMeuEmail(alvo);
     else if (acao === 'sem-parte2') { verSemParte2 = true; telaRelatorio(); }
     else if (acao === 'ja-paguei' && espera) {
@@ -344,8 +381,28 @@
 
   function pararEspera() { if (espera && espera.timer) root.clearTimeout(espera.timer); espera = null; }
 
+  // Volta do banco com o pagamento recusado (3DS): nada foi cobrado; o botão leva de volta ao pagamento do mesmo pedido
+  // (index.html?modo=pessoal restaura o checkout salvo neste aparelho).
+  function telaPagamentoNaoConcluido() {
+    var sup = suporteHtml('Olá! O banco recusou o pagamento do Mapa de Perfil e preciso de ajuda.');
+    el.innerHTML = '' +
+      '<div class="pilha-telas">' +
+        '<section class="caixa surgir pagamento-falhou" aria-labelledby="titulo">' +
+          '<p class="sobretitulo">' + esc(EMPRESA) + ' · Mapa de Perfil</p>' +
+          '<h1 id="titulo" class="titulo-pagina">Pagamento não concluído</h1>' +
+          '<div class="aviso aviso--erro alerta" role="alert">O pagamento não foi aprovado pelo banco e nada foi cobrado.</div>' +
+          '<p class="subtitulo">Você pode tentar de novo agora, com outro cartão, Apple Pay, Google Pay ou Pix. O seu resumo e o pedido continuam salvos.</p>' +
+          '<div class="acoes acoes-coluna">' +
+            '<a class="botao botao--laranja botao--grande" href="index.html?modo=pessoal" data-acao="tentar-pagar">Tentar pagar de novo</a>' +
+          '</div>' +
+          (sup ? '<p class="rodape-nota">Algum problema? ' + sup + '.</p>' : '') +
+        '</section>' +
+      '</div>';
+    focar();
+  }
+
   function telaConfirmando() {
-    var sup = String(CONFIG.WHATSAPP_SUPORTE || '').replace(/\D/g, '');
+    var sup = suporteHtml('Olá! Paguei o Mapa de Perfil e o relatório não abriu. Pedido: ' + (espera ? espera.ret.pedidoId : ''));
     el.innerHTML = '' +
       '<div class="pilha-telas">' +
         '<section class="caixa centro confirmando surgir" aria-labelledby="titulo" aria-busy="true">' +
@@ -354,7 +411,7 @@
           '<p class="subtitulo confirmando-status" id="confirmando-status" role="status" aria-live="polite">Isso costuma levar poucos segundos. Não feche esta página.</p>' +
           '<div class="acoes acoes-coluna"><button type="button" class="botao botao--claro botao--grande" data-acao="ja-paguei">Já paguei</button></div>' +
           '<p class="rodape-nota">Algum problema? ' + (sup
-            ? '<a href="https://wa.me/' + esc(sup) + '?text=' + esc(encodeURIComponent('Olá! Paguei o Mapa de Perfil e o relatório não abriu. Pedido: ' + (espera ? espera.ret.pedidoId : ''))) + '" target="_blank" rel="noopener noreferrer">Fale com a gente no WhatsApp</a>.'
+            ? sup + '.'
             : '<a href="meu-relatorio.html#recuperar">Recuperar meu relatório</a>.') + '</p>' +
         '</section>' +
       '</div>';
@@ -396,10 +453,7 @@
     try { root.history.replaceState(null, '', root.location.pathname + '#t-' + token); } catch (e) { /* ignora */ }
     pararEspera();
     // Stripe: o banco recusou (3DS não concluído etc.). Nada foi cobrado; a pessoa volta e tenta de novo.
-    if (ret.redirectStatus === 'failed') {
-      telaRecuperar('O pagamento não foi aprovado pelo banco e nada foi cobrado. Volte à página do seu resumo e tente de novo (cartão, Apple Pay, Google Pay ou Pix).', 'Pagamento não concluído');
-      return;
-    }
+    if (ret.redirectStatus === 'failed') { telaPagamentoNaoConcluido(); return; }
     espera = { ret: ret, inicio: Date.now(), timer: null };
     telaConfirmando();
     consultar(true);
@@ -422,7 +476,7 @@
     }, function (e) { throw e; }).catch(function (e) {
       var st = e && e.resposta && e.resposta.status;
       telaRecuperar((e && e.message) || 'Verifique a sua conexão e tente de novo.',
-        st === 'aguardando' ? 'Pagamento ainda não confirmado' : 'Não conseguimos abrir o relatório');
+        st === 'aguardando' ? 'Pagamento ainda não confirmado' : 'Não conseguimos abrir o relatório', st === 'aguardando');
     });
   }
 

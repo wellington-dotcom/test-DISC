@@ -137,7 +137,7 @@
     {
       id: 'IC', f: function (a, b) { return alto(a.perfil, 'I') && alto(b.perfil, 'C') && a.perfil.primario !== 'C' && b.perfil.primario !== 'I' ? Math.min(intens(a.perfil, 'I'), intens(b.perfil, 'C')) : 0; },
       ajuste: function (f) { return -(10 + 10 * f); },
-      riscos: ['{a} (Influência) e {b} (Conformidade): atrito entre entusiasmo e detalhe — {b} pode achar {a} superficial; {a} pode achar {b} lento(a) e crítico(a).'],
+      riscos: ['{a}, com Influência alta, e {b}, com Conformidade alta: atrito entre entusiasmo e detalhe — {b} pode achar {a} superficial; {a} pode achar {b} lento(a) e crítico(a).'],
       sinergias: ['Complementares quando há papéis claros: {a} abre portas e engaja; {b} garante precisão e qualidade.'],
       dicas: ['{a}: leve dados e registre por escrito o que foi combinado.',
         '{b}: aponte primeiro o que está bom, depois os ajustes — e só os que importam.',
@@ -147,7 +147,7 @@
       id: 'DS', tipos: ['direto', 'indireto'],
       f: function (a, b) { return alto(a.perfil, 'D') && alto(b.perfil, 'S') && a.perfil.primario !== 'S' && b.perfil.primario !== 'D' ? Math.min(intens(a.perfil, 'D'), intens(b.perfil, 'S')) : 0; },
       ajuste: function (f) { return -(6 + 8 * f); },
-      riscos: ['{a} (Dominância) e {b} (Estabilidade): ritmo diferente — {a} quer velocidade, {b} precisa de previsibilidade e pode se sentir pressionado(a).'],
+      riscos: ['{a}, com Dominância alta, e {b}, com Estabilidade alta: ritmo diferente — {a} quer velocidade, {b} precisa de previsibilidade e pode se sentir pressionado(a).'],
       sinergias: ['{a} puxa decisões; {b} dá constância e conclui o que começa.'],
       dicas: ['{a}: avise mudanças com antecedência e explique o porquê.', '{b}: diga com clareza o prazo que consegue cumprir, em vez de concordar e se sobrecarregar.']
     },
@@ -199,7 +199,7 @@
     {
       id: 'D>S', f: function (l, s) { return alto(l.perfil, 'D') && alto(s.perfil, 'S') && s.perfil.primario !== 'D' ? Math.min(intens(l.perfil, 'D'), intens(s.perfil, 'S')) + 0.2 : 0; },
       ajuste: function (f) { return -(6 + 8 * f); },
-      riscos: ['{a} (Dominância) liderando {b} (Estabilidade): sem previsibilidade, a cobrança rápida tende a gerar pressão e insegurança em {b}.'],
+      riscos: ['{a}, com Dominância alta, liderando {b}, com Estabilidade alta: sem previsibilidade, a cobrança rápida tende a gerar pressão e insegurança em {b}.'],
       sinergias: ['{a} dá direção e metas; {b} entrega com constância e lealdade quando sabe o que esperar.'],
       dicas: ['{a}: antecipe mudanças e explique o porquê antes do "o quê".',
         '{a}: combine prioridades da semana e prazos realistas; evite trocas de rumo de última hora.',

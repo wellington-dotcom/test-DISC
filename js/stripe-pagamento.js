@@ -11,7 +11,8 @@
  *                                   Stripe; nunca copiado para o nosso site).
  *   aparencia() -> appearance do Elements com os tokens de assets/notus.css (lidos do :root), fonte Plus Jakarta Sans.
  *   montar({el, publicavel, clientSecret, aoPronto(), aoErro(msg), aoMudar({completo, tipo})}) -> Promise<sessao>
- *   montarSimulado({el, aoPronto(), simularPago() -> Promise, pixFicticio:{qr, copiaECola}, paymentIntent?}) -> sessao (prévia/demonstração:
+ *   montarSimulado({el, aoPronto(), simularPago() -> Promise, pixFicticio:{qr, copiaECola}, paymentIntent?, aoMudar({tipo}), metodo?: 'pix'})
+ *                                   -> sessao (prévia/demonstração:
  *                                   campos de cartão FICTÍCIOS + Pix com QR de enfeite; nada vai para o Stripe)
  *   sessao: { confirmar(returnUrl) -> Promise<resultadoConfirmacao>, destruir() }
  */
@@ -211,16 +212,19 @@
             '<label class="pe-sim-campo"><span>CVC</span><input class="entrada" id="pe-sim-cvc" inputmode="numeric" autocomplete="off" placeholder="123" maxlength="4"></label>' +
           '</div>' +
         '</div>' +
-        '<div class="pe-sim-painel" data-pe-painel="pix" hidden><p class="pe-sim-nota">Ao tocar em pagar, o QR Code do Pix aparece aqui na hora.</p></div>' +
+        '<div class="pe-sim-painel" data-pe-painel="pix" hidden><p class="pe-sim-nota" data-pe-pix-dica>Toque em Gerar o Pix: o QR Code e o copia e cola aparecem logo abaixo, na hora.</p></div>' +
         '<p class="pe-sim-nota">Demonstração: campos fictícios, nada é cobrado. Cartão 4000 0000 0000 0002 simula recusa.</p>' +
       '</div>';
     function trocar(m) {
       metodo = m === 'pix' ? 'pix' : 'cartao';
       Array.prototype.forEach.call(el.querySelectorAll('[data-pe-metodo]'), function (b) { b.setAttribute('aria-selected', String(b.getAttribute('data-pe-metodo') === metodo)); });
       Array.prototype.forEach.call(el.querySelectorAll('[data-pe-painel]'), function (p) { p.hidden = p.getAttribute('data-pe-painel') !== metodo; });
+      // Mesmo formato do Payment Element de verdade (change.value.type): 'card' ou 'pix'.
+      if (op.aoMudar) op.aoMudar({ completo: false, tipo: metodo === 'pix' ? 'pix' : 'card' });
     }
     function clique(ev) { var b = ev.target.closest('[data-pe-metodo]'); if (b && el.contains(b)) trocar(b.getAttribute('data-pe-metodo')); }
     el.addEventListener('click', clique);
+    if (op.metodo === 'pix') root.setTimeout(function () { trocar('pix'); }, 0);
     var id = /^pi_[A-Za-z0-9]+$/.test(String(op.paymentIntent || '')) ? String(op.paymentIntent) : 'pi_previa' + Math.random().toString(36).slice(2, 10);
     if (op.aoPronto) root.setTimeout(op.aoPronto, 0);
     return {

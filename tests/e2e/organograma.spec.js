@@ -209,9 +209,13 @@ test('zoom: + e − e "Ajustar à tela" (o diagrama inteiro cabe no quadro)', as
   await semRolagemLateral(page);
   await page.getByRole('button', { name: 'Diminuir' }).click();
   await expect(valor).toHaveText((inicial + 10) + '%');
+  // "Ajustar à tela" cabe o diagrama inteiro (largura e altura), mesmo que fique menor que o ajuste automático.
   await ajustar.click();
-  await expect(valor).toHaveText(inicial + '%');
   await expect(ajustar).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(async () => parseInt(await valor.textContent(), 10)).toBeLessThanOrEqual(inicial);
+  const [sw2, cw2, sh2, ch2] = await quadro.evaluate((q) => [q.scrollWidth, q.clientWidth, q.scrollHeight, q.clientHeight]);
+  expect(sw2).toBeLessThanOrEqual(cw2 + 1);
+  expect(sh2).toBeLessThanOrEqual(ch2 + 1);
 
   // Sem "muitos": ajustado, todos os cartões cabem no quadro.
   await abrir(page);

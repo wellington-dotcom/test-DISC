@@ -445,6 +445,14 @@
   // ------------------------------------------------------------------
   // Utilitários
   // ------------------------------------------------------------------
+  // Nome oficial da combinação (js/disc-combinacoes.js, o mesmo do painel e dos relatórios): um nome só por perfil.
+  function nomeOficial(codigo) {
+    var cb = (root && root.DISC_COMBINACOES) || null;
+    if (!cb && typeof require === 'function') { try { cb = require('./disc-combinacoes.js'); } catch (e) { cb = null; } }
+    if (!cb || typeof cb.nome !== 'function') return '';
+    try { var n = cb.nome(String(codigo || '')); return n && n.nome ? String(n.nome) : ''; } catch (e2) { return ''; }
+  }
+
   function obterDados() {
     if (root && root.DISC_DATA) return root.DISC_DATA;
     if (typeof require === 'function') {
@@ -498,6 +506,7 @@
     var prim = r.primario, sec = r.secundario;
     var P = porPerfil[prim], S = porPerfil[sec];
     var combo = combinacoes[r.codigo] || null;
+    var nomeCombo = combo ? (nomeOficial(r.codigo) || combo.nome) : '';
 
     var valores = LETRAS.map(function (l) { return r.percentuais[l]; });
     var amplitude = Math.max.apply(null, valores) - Math.min.apply(null, valores);
@@ -572,12 +581,12 @@
         'As orientações abaixo são uma referência inicial, com tendência ' + nomePrim + '/' + nomeSec + '.';
     } else {
       resumo = P.resumo.replace(/\{nome\}/g, pn) +
-        (combo ? ' Estilo ' + combo.nome + ': ' + combo.resumo.replace(/\{nome\}/g, pn) : '') +
+        (combo ? ' Estilo ' + nomeCombo + ': ' + combo.resumo.replace(/\{nome\}/g, pn) : '') +
         ' (' + pctTxt + ')' +
         (isIntenso ? ' Atenção: o traço ' + nomePrim + ' é muito acentuado (a média de cada fator é ' + MEDIA + '%).' : '');
     }
 
-    var estilo = isEquilibrado ? 'Perfil equilibrado' : (combo ? combo.nome : P.estilo);
+    var estilo = isEquilibrado ? 'Perfil equilibrado' : (combo ? nomeCombo : P.estilo);
     return {
       titulo: 'Guia para a Liderança — ' + pn + ' (' + r.codigo + ' · ' + estilo + ')',
       nome: String(nome || '').trim(),

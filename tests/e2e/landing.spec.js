@@ -169,3 +169,56 @@ for (const pagina of ['termos.html', 'privacidade.html']) {
     expect(erros).toEqual([]);
   });
 }
+
+// Varredura de UX (área "cliente"): link com desconto, canal de suporte, um CTA fixo por vez e "Voltar" das páginas legais.
+test('[Alto] link com desconto (?cupom=): faixa "Cupom ativo" no herói e nos preços, e o cupom segue no CTA', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  const erros = coletarErros(page);
+  await page.goto('/descubra.html?pacote=completo&cupom=previa100');
+  const faixas = page.locator('[data-cupom-ativo]');
+  await expect(faixas).toHaveCount(2);
+  await expect(faixas.first()).toBeVisible();
+  await expect(faixas.first()).toContainText('Cupom PREVIA100 ativo.');
+  await expect(page.locator('a[data-cta="heroi"]')).toHaveAttribute('href', /cupom=previa100/);
+  await semRolagemLateral(page);
+  // Sem cupom, nada aparece
+  await page.goto('/descubra.html');
+  await expect(page.locator('[data-cupom-ativo]:visible')).toHaveCount(0);
+  expect(erros).toEqual([]);
+});
+
+test('[Alto] canal de suporte: com e-mail configurado, dúvidas, garantia e "Para empresas" ganham o contato', async ({ page }) => {
+  await configComExtras(page, { EMAIL_SUPORTE: 'contato@gestaosemcaos.com.br' });
+  await page.goto('/descubra.html');
+  await expect(page.locator('[data-suporte-lead] a')).toHaveAttribute('href', 'mailto:contato@gestaosemcaos.com.br');
+  await expect(page.locator('[data-suporte-garantia]')).toHaveText(' pelo e-mail contato@gestaosemcaos.com.br');
+  await expect(page.locator('[data-contato-empresas]')).toHaveAttribute('href', /^mailto:/);
+  await page.goto('/termos.html');
+  await expect(page.locator('[data-suporte] a').first()).toHaveAttribute('href', 'mailto:contato@gestaosemcaos.com.br');
+  // Sem EMPRESA_LEGAL, nada de "(razão social e CNPJ a preencher)" para quem lê
+  await expect(page.locator('body')).not.toContainText('a preencher');
+});
+
+test('celular: com a barra fixa "Começar" à vista, o botão do topo vira "Ver preços"', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto('/descubra.html');
+  const topo = page.locator('a[data-cta="topo"]');
+  await expect(topo).toHaveText('Começar grátis');
+  await page.locator('#perguntas').scrollIntoViewIfNeeded();
+  await expect(page.locator('#cta-fixo')).toHaveClass(/cta-fixo--visivel/);
+  await expect(topo).toHaveText('Ver preços');
+  await expect(topo).toHaveAttribute('href', '#pacotes');
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expect(topo).toHaveText('Começar grátis');
+});
+
+test('termos aberto em outra aba pelo teste: "Voltar" fecha a aba e volta para onde a pessoa estava', async ({ page, context }) => {
+  await page.goto('/index.html?modo=pessoal');
+  const [termos] = await Promise.all([context.waitForEvent('page'), page.locator('.consentimento a[href="termos.html"]').click()]);
+  await termos.waitForLoadState();
+  await expect(termos.locator('h1')).toHaveText('Termos de uso');
+  const fechou = termos.waitForEvent('close');
+  await termos.locator('[data-voltar]').click();
+  await fechou;
+  await expect(page.locator('h1')).toHaveText('Antes de começar');
+});

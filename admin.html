@@ -115,7 +115,7 @@
           <button type="button" class="login__link" id="btn-ir-primeiro">Primeiro acesso</button>
           <button type="button" class="login__link" id="btn-esqueci" hidden>Esqueci minha senha</button>
           <p class="login__nota" id="nota-esqueceu">Esqueceu a senha? Peça ao administrador para redefinir.</p>
-          <p class="login__nota" id="nota-primeiro-supabase" hidden>Primeiro acesso: entre com o usuário criado no Supabase. Se ainda não existe nenhum administrador, quem entrar primeiro vira o administrador. Os demais recebem um convite por e-mail.</p>
+          <p class="login__nota" id="nota-primeiro-supabase" hidden>Recebeu um convite? Use o link do e-mail para criar a sua senha. Sem convite, peça a um administrador do painel.</p>
           <p class="login__nota login__previa" id="dica-previa" hidden>Prévia: <span class="negrito">admin@previa.com</span>, senha <span class="negrito">previa123</span></p>
         </form>
 
@@ -175,7 +175,11 @@
       <!-- Supabase: banco sem as migrações mais novas (versaoBanco) -->
       <div class="faixa-banco nao-imprimir" id="faixa-banco" role="alert" hidden>
         <svg class="icone faixa-banco__icone" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9v4M12 17h.01M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>
-        <p class="faixa-banco__texto" id="faixa-banco-texto"></p>
+        <div class="faixa-banco__corpo">
+          <p class="faixa-banco__texto" id="faixa-banco-texto"></p>
+          <p class="faixa-banco__impacto" id="faixa-banco-impacto"></p>
+          <div class="faixa-banco__acoes" id="faixa-banco-acoes"></div>
+        </div>
       </div>
 
       <!-- Aviso flutuante: não empurra nada da página -->

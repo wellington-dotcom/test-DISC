@@ -58,6 +58,7 @@
  *   salvarRelatorioModelo(token, {id?, modelo, empresaId?, pessoaId?, dados, publicar?}) -> {relatorio:{id, token,
  *     status, modelo, url?}} · listarRelatoriosModelo(token, {empresaId?, pessoaId?}) -> {relatorios:[…]}
  *   excluirRelatorioModelo(token, id) -> {id}. relatorioPublico devolve também o "modelo".
+ *   abrirRelatorioModelo(token, id) -> {relatorio: {id, token, modelo, status, empresaId, pessoaId, titulo, url?, dados}}.
  *   relatorioEnviarEmail(token, relatorioToken, {para, nome?, mensagem?}) -> {para, enviadoEm, assunto} (Edge Function
  *     "admin", ação relatorio.enviarEmail; só relatório publicado; 30 envios/h por admin; sem RESEND_API_KEY ->
  *     {ok:false, erro:'O envio por e-mail ainda não está configurado (veja Conexões).', naoConfigurado:true}).
@@ -191,9 +192,10 @@
     { nome: '20261011120000_vendas', descricao: 'venda direta (pacotes, cupons, pedidos)', tabela: 'pedidos', coluna: 'id' },
     { nome: '20261012120000_infinitepay', descricao: 'InfinitePay (provedor do pagamento)', tabela: 'pedidos', coluna: 'provedor_dados' },
     { nome: '20261013120000_conexoes', descricao: 'aba Conexões (pedido de teste fora das vendas)', tabela: 'pedidos', coluna: 'teste' },
-    { nome: '20261014120000_stripe', descricao: 'Stripe (pagamento dentro do site)' }
+    { nome: '20261014120000_stripe', descricao: 'Stripe (pagamento dentro do site)' },
+    { nome: '20261015120000_minimo_cobranca', descricao: 'preço mínimo de R$ 0,50 em cupons e pacotes conferido no banco' }
   ];
-  var VERSAO_ATUAL = 20261014120000;
+  var VERSAO_ATUAL = 20261015120000;
   var MSG_PRIMEIRO_ACESSO = 'Com o Supabase não há chave de primeiro acesso: crie o seu usuário no painel do Supabase ' +
     '(Authentication > Users > Add user) e entre com esse e-mail e senha. O primeiro login vira administrador.';
   var MSG_REDEFINIR = 'Com o Supabase cada pessoa cria a própria senha nova pelo "Esqueci minha senha", na tela de entrada.';
@@ -1879,6 +1881,22 @@
           return { ok: true, id: id };
         });
       }),
+      // Reabre um relatório de modelo salvo, com os dados gravados (o painel continua o rascunho ou revê o publicado).
+      abrirRelatorioModelo: seguro(function (token, idBruto) {
+        exigirToken(token);
+        exigir(idBruto, 'Relatório não informado.');
+        var id = idValido(idBruto);
+        return exigirSessao(token).then(function () {
+          if (!id) throw recusa('Relatório não encontrado.');
+          return consulta(function (c) { return c.from('relatorios').select(COLUNAS_REL_MODELO + ', dados').eq('id', id).neq('modelo', 'processo').limit(1); });
+        }).then(function (linhas) {
+          var l = Array.isArray(linhas) ? linhas[0] : linhas;
+          if (!l) throw recusa('Relatório não encontrado.');
+          var r = relatorioModeloDaLinha(l);
+          r.dados = l.dados && typeof l.dados === 'object' ? l.dados : {};
+          return { ok: true, relatorio: r };
+        });
+      }),
 
       // --- avaliações (nome antigo dos processos) ---
       listarAvaliacoes: seguro(function (token) {
@@ -2116,7 +2134,7 @@
     'relatorioRascunho', 'relatorioSalvar', 'relatorioPublicar', 'relatorioDespublicar', 'relatoriosListar',
     'relatorioMelhorarTextos', 'relatorioPublico', 'relatorioEnviarEmail',
     'listarEquipe', 'salvarColaborador', 'moverColaborador', 'desligarColaborador', 'salvarRelacoes',
-    'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo', 'salvarMinhaFoto', 'removerFoto',
+    'salvarRelatorioModelo', 'listarRelatoriosModelo', 'excluirRelatorioModelo', 'abrirRelatorioModelo', 'salvarMinhaFoto', 'removerFoto',
     'moverResposta', 'contratarPessoa', 'versaoBanco',
     'pacotesPublicos', 'enviarPessoal', 'resumoPessoal', 'criarPedido', 'iniciarPagamento', 'statusPedido', 'relatorioPessoal',
     'salvarParte2Pessoal', 'recuperarAcesso', 'enviarLinkPorEmail', 'confirmarRetorno',

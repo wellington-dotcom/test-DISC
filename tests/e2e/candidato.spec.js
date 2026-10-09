@@ -97,7 +97,10 @@ test.describe('Candidato (celular, sem API)', () => {
     // Sem servidor não há protocolo: plano B com o código de segurança longo.
     await expect(page.locator('#protocolo')).toHaveCount(0);
     await expect(page.locator('.codigo-bloco')).toContainText('Código de segurança');
-    await expect(page.locator('.codigo-bloco')).toContainText('Não conseguimos enviar suas respostas. Envie este código ao recrutador pelo WhatsApp.');
+    // Sem o número do recrutador no config, o texto não promete WhatsApp; sem servidor não há "Tentar enviar de novo".
+    await expect(page.locator('.codigo-bloco')).toContainText('Não conseguimos enviar suas respostas. Copie este código e envie ao recrutador pelo mesmo canal em que você recebeu o link do teste.');
+    await expect(page.locator('.codigo-bloco')).not.toContainText('WhatsApp');
+    await expect(page.locator('[data-acao="reenviar"]')).toHaveCount(0);
     const codigo = await page.locator('textarea#codigo').inputValue();
     expect(codigo.startsWith('DISC1.')).toBe(true);
 
@@ -573,25 +576,31 @@ test.describe('Candidato: dicas (botão "i")', () => {
     expect(erros).toEqual([]);
   });
 
-  test('pressionar e puxar o "i" não arrasta o cartão; arrastar o cartão fecha a dica', async ({ page }) => {
+  // Antes, puxar começando no "i" não fazia nada (e é onde o polegar direito pousa). Agora: toque parado abre a dica;
+  // puxar a partir do "i" arrasta o cartão, sem abrir a dica.
+  test('puxar começando no "i" arrasta o cartão (sem abrir a dica); arrastar o cartão fecha a dica', async ({ page }) => {
     const erros = coletarErros(page);
     await irParaGrupo1(page);
     const ordem = await ordemNaTela(page);
     const info = page.locator('.cartao[data-letra="' + ordem[3] + '"] .info');
     const b = await info.boundingBox();
+    const c0 = await page.locator('.cartao[data-letra="' + ordem[3] + '"]').boundingBox();
     await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
     await page.mouse.down();
-    await page.mouse.move(b.x + b.width / 2, b.y - 200, { steps: 8 });
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2 - 3 * c0.height - 20, { steps: 10 });
     await page.mouse.up();
     await page.waitForTimeout(300);
-    expect(await ordemNaTela(page)).toEqual(ordem);
+    const nova = [ordem[3], ordem[0], ordem[1], ordem[2]];
+    await expect.poll(() => ordemNaTela(page)).toEqual(nova);
     await expect(page.locator('.cartao.arrastando')).toHaveCount(0);
-    await expect(page.locator('[data-acao="proximo"]')).toBeDisabled();
+    await expect(page.locator('#dica-janela')).toBeHidden();
+    await expect(page.locator('[data-acao="proximo"]')).toBeEnabled();
 
-    // Abre uma dica e arrasta outro cartão: a dica fecha
-    await page.locator('.cartao[data-letra="' + ordem[0] + '"] .info').click();
+    // Toque parado no "i" continua abrindo a dica
+    await page.locator('.cartao[data-letra="' + nova[0] + '"] .info').click();
     await expect(page.locator('#dica-janela')).toBeVisible();
-    const c = await page.locator('.cartao[data-letra="' + ordem[3] + '"]').boundingBox();
+    // Arrastar outro cartão fecha a dica
+    const c = await page.locator('.cartao[data-letra="' + nova[3] + '"]').boundingBox();
     const x = c.x + 40, y = c.y + c.height / 2;
     await page.mouse.move(x, y);
     await page.mouse.down();
@@ -599,7 +608,7 @@ test.describe('Candidato: dicas (botão "i")', () => {
     await expect(page.locator('#dica-janela')).toBeHidden();
     await page.mouse.move(x, y - 3 * c.height, { steps: 6 });
     await page.mouse.up();
-    await expect.poll(() => ordemNaTela(page)).toEqual([ordem[3], ordem[0], ordem[1], ordem[2]]);
+    await expect.poll(() => ordemNaTela(page)).toEqual([nova[3], nova[0], nova[1], nova[2]]);
     expect(erros).toEqual([]);
   });
 });
@@ -669,7 +678,7 @@ test.describe('Candidato: link de avaliação (API simulada)', () => {
     await expect(page.locator('#vaga')).toBeVisible();
     await expect(page.locator('label[for="funcao"]')).toContainText('Função atual ou última');
     await expect(page.locator('#empresa')).toBeVisible();
-    await expect(page.locator('.consentimento')).toContainText('apenas nesta avaliação da Clínica Exemplo, conduzida pela Gestão sem Caos');
+    await expect(page.locator('.consentimento')).toContainText('apenas nesta avaliação da empresa Clínica Exemplo, conduzida pela Gestão sem Caos');
     await preencherIdentificacao(page, { nome: 'Rita Exemplo Seleção', telefone: '11987654321', vaga: 'Recepção' });
     await page.locator('#form-identificacao button[type="submit"]').click();
     const ordem = ['D', 'I', 'S', 'C'];
@@ -729,7 +738,7 @@ test.describe('Candidato: link de avaliação (API simulada)', () => {
     await expect(rel.locator('.rel-fator .rel-fator-nome')).toHaveText(['Dominância', 'Influência', 'Estabilidade', 'Conformidade']);
     await expect(rel.locator('.rel-fator .rel-pct')).toHaveText(['20%', '40%', '30%', '10%']);
     await expect(rel).toHaveAttribute('data-codigo', 'IS');
-    await expect(rel.locator('.rel-titulo')).toHaveText('Caio, seu estilo é Influente, com traços de Estável');
+    await expect(rel.locator('.rel-titulo')).toHaveText('Caio, seu estilo é de Influência, com traços de Estabilidade');
     // Comunicação com os outros 3 perfis
     await expect(rel.locator('.rel-com')).toHaveCount(3);
     await expect(rel.locator('.rel-com[data-letra="I"]')).toHaveCount(0);
@@ -771,7 +780,7 @@ test.describe('Candidato: link de avaliação (API simulada)', () => {
     await expect(page.locator('#empresa')).toHaveCount(0);
     await expect(page.locator('label[for="funcao"]')).toContainText('Seu cargo/função');
     await expect(page.locator('.subtitulo').first()).toHaveText('Precisamos destes dados para vincular o resultado à avaliação da equipe.');
-    await expect(page.locator('.consentimento')).toContainText('na avaliação da equipe da Clínica Exemplo, conduzida pela Gestão sem Caos');
+    await expect(page.locator('.consentimento')).toContainText('na avaliação da equipe da empresa Clínica Exemplo, conduzida pela Gestão sem Caos');
     await expect(page.locator('.consentimento')).toContainText('compartilhado com a empresa');
   });
 
@@ -1027,7 +1036,7 @@ test.describe('Candidato: formulário do processo, fim sem revisão e relatório
     await expect(rel.locator('.rel-fator .rel-fator-nome')).toHaveText(['Dominância', 'Influência', 'Estabilidade', 'Conformidade']);
     await expect(rel.locator('.rel-fator .rel-pct')).toHaveText(['30%', '10%', '20%', '40%']);
     await expect(rel.locator('.rel-fator .letra-disc')).toHaveText(['D', 'I', 'S', 'C']);
-    await expect(rel.locator('.rel-titulo')).toHaveText('Bruna, seu estilo é Cauteloso, com traços de Dominante');
+    await expect(rel.locator('.rel-titulo')).toHaveText('Bruna, seu estilo é de Conformidade, com traços de Dominância');
     // As 5 seções de sempre e, depois, o aprofundamento (combinação, régua, aprendizado, decisão...). Sem Parte 2: sem "esticando".
     const titulos = await rel.locator('.rel-secao-titulo').allTextContents();
     expect(titulos.slice(0, 5)).toEqual(['Seus pontos fortes e como usá-los mais', 'Pontos de atenção',
@@ -1425,6 +1434,155 @@ test.describe('Candidato: foto', () => {
     await expect(page.locator('.campo-foto')).toHaveCount(0);
     await expect(page.locator('#foto')).toHaveCount(0);
     await expect(page.locator('.consentimento')).not.toContainText('foto');
+    expect(erros).toEqual([]);
+  });
+});
+
+// Varredura de UX (área "cliente"): correções dos itens Crítico e Alto do teste do candidato/colaborador.
+test.describe('Candidato: correções da varredura de UX', () => {
+  // Faz o teste reduzido (modo demonstração) num link da API simulada e para antes de "Enviar e finalizar".
+  async function ateOEnvio(page, link) {
+    await page.goto('/index.html#a-' + link);
+    await page.locator('[data-acao="comecar"]').click();
+    await preencherIdentificacao(page, { nome: 'Bia Teste Souza', telefone: '11987654321' });
+    await page.locator('#form-identificacao button[type="submit"]').click();
+    for (let i = 0; i < 3; i++) {
+      await responderGrupo(page, ['D', 'I', 'S', 'C']);
+      await page.locator('[data-acao="proximo"]').click();
+    }
+    if (await page.locator('[data-acao="parte2-comecar"]').count()) await responderParte2(page, ['D', 'I', 'S', 'C'], 3);
+    await responderConfirmacao(page);
+  }
+
+  test('[Crítico] falha no envio: código logo abaixo do agradecimento, "Tentar enviar de novo" envia e o progresso só some depois', async ({ page }) => {
+    const erros = coletarErros(page);
+    await configurar(page, { API_URL: API_FALSA, MOSTRAR_RESULTADO_AO_CANDIDATO: true, GRUPOS_DEMONSTRACAO: 3 });
+    let foraDoAr = true;
+    const chamadas = await simularApi(page, (corpo) => {
+      if (corpo.acao === 'enviar' && foraDoAr) return { ok: false, erro: 'Não foi possível conectar ao servidor. Verifique sua conexão com a internet.' };
+      return { ok: true, id: corpo.payload && corpo.payload.id, protocolo: '52M' };
+    });
+    await page.goto('/index.html');
+    await page.locator('[data-acao="comecar"]').click();
+    await preencherIdentificacao(page, { nome: 'Bia Teste Souza', telefone: '11987654321' });
+    await page.locator('#form-identificacao button[type="submit"]').click();
+    for (let i = 0; i < 3; i++) { await responderGrupo(page, ['D', 'I', 'S', 'C']); await page.locator('[data-acao="proximo"]').click(); }
+    await responderConfirmacao(page);
+    await page.locator('[data-acao="enviar"]').click();
+    await page.locator('[data-acao="usar-codigo"]').click();
+    await expect(page.locator('h1')).toHaveText('Obrigado, Bia!');
+    // O código vem antes do relatório (que é longo) e o texto não promete WhatsApp sem número configurado.
+    const ordem = await page.locator('.pilha-telas > *').evaluateAll((els) => els.map((e) => e.className));
+    expect(ordem.findIndex((c) => /codigo-bloco/.test(c))).toBeLessThan(ordem.findIndex((c) => /relatorio-candidato/.test(c)));
+    const y = await page.locator('#codigo').evaluate((e) => e.getBoundingClientRect().top + window.scrollY);
+    expect(y).toBeLessThan(2 * (page.viewportSize().height));
+    await expect(page.locator('#texto-codigo')).not.toContainText('WhatsApp');
+    // O progresso continua salvo até o envio dar certo (fechar a aba não perde as respostas).
+    expect(await page.evaluate(() => localStorage.getItem('disc_progresso_v1'))).not.toBeNull();
+    // A internet voltou: dá para enviar daqui mesmo, com o mesmo id.
+    foraDoAr = false;
+    await page.locator('[data-acao="reenviar"]').click();
+    await expect(page.locator('#protocolo')).toHaveText('52M');
+    await expect(page.locator('textarea#codigo')).toHaveCount(0);
+    expect(await page.evaluate(() => localStorage.getItem('disc_progresso_v1'))).toBeNull();
+    const envios = chamadas.filter((c) => c.corpo.acao === 'enviar');
+    expect(envios.length).toBeGreaterThanOrEqual(2);
+    expect(envios[envios.length - 1].corpo.payload.id).toBe(envios[0].corpo.payload.id);
+    expect(erros.filter((e) => !/Falha no envio/.test(e))).toEqual([]);
+  });
+
+  test('[Alto] "Começar do zero" pede dois toques e diz quantos grupos serão apagados', async ({ page }) => {
+    const erros = coletarErros(page);
+    await page.goto('/index.html');
+    await page.locator('[data-acao="comecar"]').click();
+    await preencherIdentificacao(page, DADOS);
+    await page.locator('#form-identificacao button[type="submit"]').click();
+    for (let i = 0; i < 4; i++) { await responderGrupo(page, ['D', 'I', 'S', 'C']); await page.locator('[data-acao="proximo"]').click(); }
+    await page.reload();
+    // Com progresso, a capa diz onde a pessoa parou, junto do botão principal (fixo na base no celular).
+    await expect(page.locator('#nota-retomada')).toHaveText('Você parou no grupo 5 de 25.');
+    const cta = await page.locator('[data-acao="continuar"]').boundingBox();
+    expect(cta.y + cta.height).toBeLessThanOrEqual(page.viewportSize().height);
+    const recomecar = page.locator('[data-acao="recomecar"]');
+    await recomecar.scrollIntoViewIfNeeded();
+    await recomecar.click();
+    await expect(recomecar).toHaveText('Toque de novo para apagar');
+    await expect(page.locator('#nota-recomecar')).toContainText('4 grupos respondidos');
+    await expect(page.locator('h1')).toHaveText('Teste de Perfil Comportamental DISC');
+    expect(await page.evaluate(() => JSON.parse(localStorage.getItem('disc_progresso_v1')).respondidos.filter(Boolean).length)).toBe(4);
+    await recomecar.click();
+    await expect(page.locator('h1')).toHaveText('Sua identificação');
+    expect(await page.evaluate(() => (JSON.parse(localStorage.getItem('disc_progresso_v1') || '{}').respondidos || []).filter(Boolean).length)).toBe(0);
+    expect(erros).toEqual([]);
+  });
+
+  test('[Alto] "Voltar" do aparelho volta um grupo (não sai do teste)', async ({ page }) => {
+    const erros = coletarErros(page);
+    await page.goto('/index.html');
+    await page.locator('[data-acao="comecar"]').click();
+    await preencherIdentificacao(page, DADOS);
+    await page.locator('#form-identificacao button[type="submit"]').click();
+    for (let i = 0; i < 3; i++) { await responderGrupo(page, ['D', 'I', 'S', 'C']); await page.locator('[data-acao="proximo"]').click(); }
+    await expect(page.locator('.progresso-topo')).toContainText('Grupo 4 de 25');
+    await page.goBack();
+    await expect(page.locator('.progresso-topo')).toContainText('Grupo 3 de 25');
+    await page.goBack();
+    await expect(page.locator('.progresso-topo')).toContainText('Grupo 2 de 25');
+    expect(page.url()).toMatch(/\/index\.html$/);
+    // Na confirmação, "Voltar" (da tela e do aparelho) leva ao último grupo
+    await page.locator('[data-acao="proximo"]').click();
+    for (let i = 2; i < 25; i++) { await responderGrupo(page, ['D', 'I', 'S', 'C']); await page.locator('[data-acao="proximo"]').click(); }
+    await expect(page.locator('.progresso-topo')).toContainText('Confirmação 1 de 2');
+    await page.goBack();
+    await expect(page.locator('.progresso-topo')).toContainText('Grupo 25 de 25');
+    await page.locator('[data-acao="proximo"]').click();
+    await expect(page.locator('.progresso-topo')).toContainText('Confirmação 1 de 2');
+    await page.locator('[data-acao="conf-voltar-grupo"]').click();
+    await expect(page.locator('.progresso-topo')).toContainText('Grupo 25 de 25');
+    expect(erros).toEqual([]);
+  });
+
+  test('[Alto] relatório: "Salvar em PDF" no topo; reabrir o link já enviado avisa em vez de recomeçar calado', async ({ page, context }) => {
+    const erros = coletarErros(page);
+    await configurar(page, { API_URL: 'simulada', GRUPOS_DEMONSTRACAO: 3 });
+    await ateOEnvio(page, 'EQP1');
+    await page.locator('[data-acao="enviar"]').click();
+    await expect(page.locator('.relatorio-candidato')).toBeVisible();
+    const aviso = page.locator('.agradecimento .guardar-relatorio');
+    await expect(aviso).toContainText('fica só nesta aba');
+    await expect(aviso.locator('[data-acao="imprimir"]')).toHaveText('Salvar em PDF');
+    const yPdf = await aviso.locator('[data-acao="imprimir"]').evaluate((e) => e.getBoundingClientRect().top + window.scrollY);
+    expect(yPdf).toBeLessThan(page.viewportSize().height);
+    const protocolo = await page.locator('#protocolo').getAttribute('data-protocolo');
+    // Só a data e o protocolo ficam no aparelho (nada de nome ou respostas)
+    const enviados = await page.evaluate(() => localStorage.getItem('disc_enviados_v1'));
+    expect(enviados).toContain(protocolo);
+    expect(enviados).not.toContain('Bia');
+    // Outra aba, mesmo link: a capa avisa que já foi enviado
+    const outra = await context.newPage();
+    await configurar(outra, { API_URL: 'simulada', GRUPOS_DEMONSTRACAO: 3 });
+    await outra.goto('/index.html#a-EQP1');
+    await expect(outra.locator('.boasvindas-ja-enviado')).toContainText('Você já enviou este teste neste aparelho');
+    await expect(outra.locator('.boasvindas-ja-enviado')).toContainText('(código ' + protocolo + ')');
+    await expect(outra.locator('[data-acao="comecar"]')).toHaveText('Responder de novo');
+    // Link de processo: sem "Área do recrutador" (o colaborador não precisa do painel)
+    await expect(outra.locator('.acesso-recrutador')).toHaveCount(0);
+    expect(erros).toEqual([]);
+  });
+
+  test('link desativado no meio do teste: tela própria, sem "Tentar novamente"', async ({ page }) => {
+    const erros = coletarErros(page);
+    await configurar(page, { API_URL: 'simulada', GRUPOS_DEMONSTRACAO: 3 });
+    await ateOEnvio(page, 'SEL1');
+    await page.evaluate(() => {
+      const avs = JSON.parse(localStorage.getItem('disc_simulada_avaliacoes'));
+      avs.forEach((a) => { if (a.codigo === 'SEL1') a.ativa = false; });
+      localStorage.setItem('disc_simulada_avaliacoes', JSON.stringify(avs));
+    });
+    await page.locator('[data-acao="enviar"]').click();
+    await expect(page.locator('h1')).toHaveText('Esta avaliação foi encerrada');
+    await expect(page.locator('[data-acao="retentar"]')).toHaveCount(0);
+    await expect(page.locator('[data-acao="usar-codigo"]')).toBeVisible();
     expect(erros).toEqual([]);
   });
 });

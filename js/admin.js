@@ -95,6 +95,14 @@
     return p(dt.getDate()) + '/' + p(dt.getMonth() + 1) + '/' + dt.getFullYear() + ' ' + p(dt.getHours()) + ':' + p(dt.getMinutes());
   }
 
+  // Com segundos: dois rascunhos gerados no mesmo minuto ficam distinguíveis.
+  function formatarDataSegundos(iso) {
+    var t = formatarData(iso);
+    if (t === '—') return t;
+    var s = new Date(iso).getSeconds();
+    return t + ':' + (s < 10 ? '0' : '') + s;
+  }
+
   function formatarDuracao(seg) {
     var n = Number(seg);
     if (!isFinite(n) || n <= 0) return '—';
@@ -136,12 +144,13 @@
 
   // Busca da lista: nome/vaga/função/empresa/avaliação (texto), telefone (3+ dígitos) ou protocolo
   // (ignora maiúsculas e espaços). A idade NÃO entra na busca.
+  // Acentos não importam: "demonstracao" acha "Demonstração", "joao" acha "João".
   function correspondeBusca(r, busca) {
     var termo = String(busca == null ? '' : busca).trim().toLowerCase();
     if (!termo) return true;
-    var alvo = [r.nome, r.vaga, r.funcao, r.empresa, r.avaliacaoNome, r.empresaNome, r.email]
-      .map(function (x) { return String(x == null ? '' : x); }).join(' ').toLowerCase();
-    if (alvo.indexOf(termo) !== -1) return true;
+    var alvo = semAcento([r.nome, r.vaga, r.funcao, r.empresa, r.avaliacaoNome, r.empresaNome, r.email]
+      .map(function (x) { return String(x == null ? '' : x); }).join(' '));
+    if (alvo.indexOf(semAcento(termo)) !== -1) return true;
     var dig = soDigitos(termo);
     if (dig.length >= 3 && soDigitos(r.telefone).indexOf(dig) !== -1) return true;
     var prot = normalizarProtocolo(r.protocolo);
@@ -256,18 +265,18 @@
 
   function empresaDe(p) { return p ? String(p.empresa || p.empresaNome || '') : ''; }
 
-  // Texto para colar no WhatsApp (convite do participante).
+  // Texto para colar no WhatsApp (convite do participante). Com a segunda parte ligada, o teste leva um pouco mais.
   function mensagemConvite(av, link) {
     var empresa = empresaDe(av);
     var nome = av && (av.vaga || av.nome) ? String(av.vaga || av.nome) : '';
+    var parte2 = !!(av && av.config && av.config.formulario && av.config.formulario.parte2 === 'ligada');
+    var tempo = '\n\nLeva cerca de ' + (parte2 ? '15' : '10') + ' minutos e não existe resposta certa ou errada. Faça com calma, num lugar tranquilo.';
     if (av && av.tipo === 'equipe') {
       return 'Olá! ' + (empresa ? 'A ' + empresa + ' está' : 'Estamos') + ' fazendo uma avaliação de perfil da equipe' +
-        (av.nome ? ' (' + av.nome + ')' : '') + '. Responda pelo link abaixo:\n' + link +
-        '\n\nLeva cerca de 10 minutos e não existe resposta certa ou errada. Faça com calma, num lugar tranquilo.';
+        (av.nome ? ' (' + av.nome + ')' : '') + '. Responda pelo link abaixo:\n' + link + tempo;
     }
     return 'Olá! Para seguir no processo seletivo' + (nome ? ' de ' + nome : '') + (empresa ? ' da ' + empresa : '') +
-      ', responda o questionário de perfil pelo link abaixo:\n' + link +
-      '\n\nLeva cerca de 10 minutos e não existe resposta certa ou errada. Faça com calma, num lugar tranquilo.';
+      ', responda o questionário de perfil pelo link abaixo:\n' + link + tempo;
   }
 
   // Mensagem pronta para o contratante receber o relatório publicado.
@@ -361,35 +370,48 @@
   }
 
   // Confere a config antes de mandar ao servidor (que confere de novo). '' se ok, senão a mensagem.
-  function validarConfig(c) {
-    if (!c || typeof c !== 'object') return 'Configuração do processo inválida.';
+  function validarConfig(c) { return problemaConfig(c).erro; }
+
+  // Igual a validarConfig, com o id do campo do formulário do processo onde está o erro (para focar e marcar):
+  // -> { erro: '' | mensagem, campo: '' | id do campo }
+  function problemaConfig(c) {
+    function p(erro, campo) { return { erro: erro, campo: campo || '' }; }
+    if (!c || typeof c !== 'object') return p('Configuração do processo inválida.');
     var perfil = String(c.perfilIdeal || '');
-    if (perfil && normalizarPerfilIdeal(perfil) !== perfil) return 'Perfil ideal inválido: use 1 ou 2 letras entre D, I, S e C.';
+    if (perfil && normalizarPerfilIdeal(perfil) !== perfil) return p('Perfil ideal inválido: use 1 ou 2 letras entre D, I, S e C.', 'proc-perfil-D');
     var etapas = Array.isArray(c.etapas) ? c.etapas : [];
     var bonus = Array.isArray(c.bonus) ? c.bonus : [];
     for (var i = 0; i < etapas.length; i++) {
       var e = etapas[i] || {};
-      if (!String(e.nome || '').trim()) return 'Dê um nome para a etapa ' + (i + 1) + '.';
-      if (!(Number(e.peso) >= 0) || e.peso === null || e.peso === '') return 'Informe o peso da etapa "' + e.nome + '".';
-      if (campoSensivel(e.campo, c)) return 'O campo "' + e.campo + '" é um dado sensível e não pode ser usado.';
+      if (!String(e.nome || '').trim()) return p('Dê um nome para a etapa ' + (i + 1) + '.', 'etapa-nome-' + i);
+      if (e.peso === null || e.peso === '' || e.peso === undefined || !isFinite(Number(e.peso))) return p('Informe o peso da etapa "' + e.nome + '".', 'etapa-peso-' + i);
+      if (Number(e.peso) < 0) return p('O peso da etapa "' + e.nome + '" não pode ser negativo (use 0 ou mais).', 'etapa-peso-' + i);
+      if (campoSensivel(e.campo, c)) return p('O campo "' + e.campo + '" é um dado sensível e não pode ser usado.', 'etapa-campo-' + i);
     }
     for (var j = 0; j < bonus.length; j++) {
       var b = bonus[j] || {};
-      if (!String(b.nome || '').trim()) return 'Dê um nome para o bônus ' + (j + 1) + '.';
-      if (!String(b.campo || '').trim()) return 'Informe o campo do ClickUp do bônus "' + b.nome + '".';
-      if (campoSensivel(b.campo, c)) return 'O campo "' + b.campo + '" é um dado sensível e não pode ser usado.';
+      if (!String(b.nome || '').trim()) return p('Dê um nome para o bônus ' + (j + 1) + '.', 'bonus-nome-' + j);
+      if (!String(b.campo || '').trim()) return p('Informe o campo do ClickUp do bônus "' + b.nome + '".', 'bonus-campo-' + j);
+      if (campoSensivel(b.campo, c)) return p('O campo "' + b.campo + '" é um dado sensível e não pode ser usado.', 'bonus-campo-' + j);
       var r = b.regra || {};
       if (r.tipo === 'mapa') {
-        if (!r.pontos || !Object.keys(r.pontos).length) return 'Informe ao menos um valor com pontos no bônus "' + b.nome + '".';
+        if (!r.pontos || !Object.keys(r.pontos).length) return p('Informe ao menos um valor com pontos no bônus "' + b.nome + '".', 'bonus-' + j + '-valor-0');
       } else if (!isFinite(Number(r.pontos)) || r.pontos === null || r.pontos === '') {
-        return 'Informe os pontos do bônus "' + b.nome + '".';
+        return p('Informe os pontos do bônus "' + b.nome + '".', 'bonus-pontos-' + j);
       }
     }
     var corte = Number(c.corte), faixa = Number(c.faixaAvaliar);
-    if (!isFinite(corte) || corte < 0 || c.corte === null || c.corte === '') return 'Informe a nota de corte.';
-    if (!isFinite(faixa) || faixa < 0 || c.faixaAvaliar === null || c.faixaAvaliar === '') return 'Informe a nota da faixa "avaliar".';
-    if (faixa > corte) return 'A faixa "avaliar" precisa ser menor ou igual à nota de corte.';
-    return validarFormulario(c.formulario);
+    if (!isFinite(corte) || corte < 0 || c.corte === null || c.corte === '') return p('Informe a nota de corte.', 'proc-corte');
+    if (!isFinite(faixa) || faixa < 0 || c.faixaAvaliar === null || c.faixaAvaliar === '') return p('Informe a nota da faixa "avaliar".', 'proc-faixa');
+    if (faixa > corte) return p('A faixa "avaliar" precisa ser menor ou igual à nota de corte.', 'proc-faixa');
+    var f = validarFormulario(c.formulario);
+    if (!f) return p('');
+    var m = /pergunta extra (\d+)/.exec(f);
+    var idx = m ? Number(m[1]) - 1 : -1;
+    if (idx < 0 && c.formulario && Array.isArray(c.formulario.perguntas)) {
+      c.formulario.perguntas.forEach(function (q, k) { if (idx < 0 && q && perguntaSensivel(q.texto)) idx = k; });
+    }
+    return p(f, idx >= 0 ? 'pergunta-texto-' + idx : '');
   }
 
   // Config vazia de um processo novo (o servidor completa com os mesmos padrões).
@@ -600,9 +622,9 @@
   function fotoValida(str) {
     return typeof str === 'string' && str.length <= FOTO_MAX && /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/.test(str);
   }
-  // Iniciais para o círculo sem foto: primeira letra do primeiro e do último nome.
+  // Iniciais para o círculo sem foto: primeira letra do primeiro e do último nome (só letras: "Você (admin)" -> "VA").
   function iniciais(nome) {
-    var p = String(nome || '').trim().split(/\s+/).filter(Boolean);
+    var p = String(nome || '').replace(/[^A-Za-zÀ-ÖØ-öø-ÿ\s]/g, ' ').trim().split(/\s+/).filter(Boolean);
     if (!p.length) return '?';
     return (p[0].charAt(0) + (p.length > 1 ? p[p.length - 1].charAt(0) : '')).toUpperCase();
   }
@@ -629,6 +651,17 @@
       lideradosDe(rels, fila.shift()).forEach(function (x) { if (!vistos[x] && x !== String(id)) { vistos[x] = true; out.push(x); fila.push(x); } });
     }
     return out;
+  }
+
+  // Antes de tirar alguém que lidera (desligar, mover de empresa): a equipe dela passa para o líder de cima
+  // ('subir'; sem líder de cima, a equipe fica no topo) ou fica sem líder ('soltar'). Devolve as relações novas
+  // (as ligações da própria pessoa somem depois, no servidor).
+  function reatribuirEquipe(rels, id, modo) {
+    id = String(id);
+    var acima = liderDe(rels, id);
+    var lista = (rels || []).map(function (r) { return { de: String(r.de), para: String(r.para), tipo: r.tipo }; });
+    if (modo !== 'subir' || !acima) return lista.filter(function (r) { return !(r.tipo === 'lidera' && r.de === id); });
+    return lista.map(function (r) { return r.tipo === 'lidera' && r.de === id ? { de: acima, para: r.para, tipo: 'lidera' } : r; });
   }
 
   /* ---------- Pessoas: várias respostas da mesma pessoa (mesmo WhatsApp) ---------- */
@@ -882,6 +915,37 @@
     var media = {};
     LETRAS.forEach(function (l) { media[l] = validos.length ? Math.round((soma[l] / validos.length) * 10) / 10 : 0; });
     return { total: validos.length, primarios: primarios, codigos: codigos, media: media };
+  }
+
+  // Comparativo dos aprovados de UM processo (codigo; '' = todos, '-' = link geral), uma linha por pessoa
+  // (a aprovação mais recente dela). -> { aprovados: [registros], resumo: resumoEquipe(...) }
+  function resumoComparativo(registros, processo) {
+    var ok = (registros || []).filter(function (r) {
+      if (!r || r.invalido || r.status !== 'aprovado' || !r.calc) return false;
+      if (processo === '-') return !r.avaliacao;
+      return !processo || r.avaliacao === processo;
+    });
+    var aprovados = agruparPessoas(ok).map(function (g) { return g.atual; });
+    return { aprovados: aprovados, resumo: resumoEquipe(aprovados) };
+  }
+
+  // "37.2" -> "37,2%"
+  function textoPct(v) { return String(v).replace('.', ',') + '%'; }
+
+  // Ordem da lista de participantes (grupos de agruparPessoas). ordem: 'recente' (padrão) | 'antiga' | 'nome' |
+  // 'perfil' | 'confiabilidade' (baixa primeiro, para revisar).
+  var ORDENS_LISTA = { recente: 'Mais recentes', antiga: 'Mais antigas', nome: 'Nome (A–Z)', perfil: 'Perfil (D, I, S, C)', confiabilidade: 'Confiabilidade (baixa primeiro)' };
+  function ordenarGrupos(grupos, ordem) {
+    var l = (grupos || []).slice();
+    var nome = function (g) { return semAcento(g.atual && g.atual.nome); };
+    var data = function (g) { return dataDe(g.atual); };
+    var conf = function (g) { var c = g.atual && g.atual.conf; return c && c.nivel !== 'indisponivel' && isFinite(Number(c.pontos)) ? Number(c.pontos) : 1000; };
+    var perfil = function (g) { var c = g.atual && g.atual.calc; return c ? 'DISC'.indexOf(c.primario) * 10 + 'DISC'.indexOf(c.secundario) : 99; };
+    if (ordem === 'antiga') return l.sort(function (a, b) { return data(a).localeCompare(data(b)); });
+    if (ordem === 'nome') return l.sort(function (a, b) { return nome(a).localeCompare(nome(b), 'pt-BR'); });
+    if (ordem === 'perfil') return l.sort(function (a, b) { return perfil(a) - perfil(b) || nome(a).localeCompare(nome(b), 'pt-BR'); });
+    if (ordem === 'confiabilidade') return l.sort(function (a, b) { return conf(a) - conf(b) || data(b).localeCompare(data(a)); });
+    return l.sort(function (a, b) { return data(b).localeCompare(data(a)); });
   }
 
   function guiaComoTexto(guia, registro) {
@@ -1218,7 +1282,8 @@
   /* ---------- Vendas (B2C: pedidos, cupons e pacotes) ---------- */
 
   var STATUS_PEDIDO = { aguardando: 'Aguardando pagamento', pago: 'Pago', cortesia: 'Cortesia', estornado: 'Reembolsado', cancelado: 'Cancelado' };
-  var CLASSE_PEDIDO = { aguardando: 'selo--laranja', pago: 'selo--verde', cortesia: 'selo--noite', estornado: 'selo--vermelho', cancelado: '' };
+  // Pago (o estado bom) em verde; aguardando neutro (laranja cheio parecia erro); reembolso em vermelho.
+  var CLASSE_PEDIDO = { aguardando: '', pago: 'selo--verde', cortesia: 'selo--noite', estornado: 'selo--vermelho', cancelado: '' };
   var PERIODOS_VENDAS = { hoje: 'Hoje', '7d': 'Últimos 7 dias', mes: 'Este mês', '30d': 'Últimos 30 dias' };
   var PACOTES_PADRAO = [
     { chave: 'gratis', nome: 'Resumo grátis', precoCentavos: 0, precoLancamentoCentavos: null, lancamentoAte: '', ativo: true, ordem: 0 },
@@ -1350,7 +1415,7 @@
     }).sort(function (a, b) { return String(b.criadoEm).localeCompare(String(a.criadoEm)); });
   }
 
-  // Resumo calculado a partir dos pedidos. Venda = pedido pago (cortesia não conta na receita).
+  // Resumo calculado a partir dos pedidos. Venda = pedido pago (cortesia não conta na receita nem na conversão).
   // gratis = quantos resumos grátis (respostas de origem 'pessoal') existem — base da conversão.
   function resumoDosPedidos(pedidos, agora, gratis) {
     var lista = pedidos || [];
@@ -1360,7 +1425,7 @@
     }
     var todos = bloco('');
     var compradores = {};
-    lista.forEach(function (p) { if (p.status === 'pago' || p.status === 'cortesia') compradores[p.respostaId || p.email || p.id] = true; });
+    lista.forEach(function (p) { if (p.status === 'pago') compradores[p.respostaId || p.email || p.id] = true; });
     var nCompra = Object.keys(compradores).length;
     var base = gratis == null ? null : Number(gratis);
     return {
@@ -1433,8 +1498,10 @@
   function validarPacote(p) {
     if (!p || !String(p.nome || '').trim()) return 'Informe o nome do pacote.';
     if (p.precoCentavos == null || p.precoCentavos < 0) return 'Informe o preço (ex.: 39,00).';
+    if (p.precoCentavos > 0 && p.precoCentavos < MINIMO_COBRANCA) return 'O Stripe só cobra a partir de R$ 0,50: use R$ 0,50 ou mais (ou 0,00 para grátis).';
     if (p.precoLancamentoCentavos != null) {
       if (p.precoLancamentoCentavos < 0) return 'Preço de lançamento inválido.';
+      if (p.precoLancamentoCentavos > 0 && p.precoLancamentoCentavos < MINIMO_COBRANCA) return 'O preço de lançamento precisa ser de pelo menos R$ 0,50 (o mínimo que o Stripe cobra).';
       if (p.precoLancamentoCentavos >= p.precoCentavos) return 'O preço de lançamento precisa ser menor que o preço normal.';
     }
     if (p.lancamentoAte && !/^\d{4}-\d{2}-\d{2}$/.test(p.lancamentoAte)) return 'Data de fim do lançamento inválida.';
@@ -1512,6 +1579,36 @@
     if (final >= p) return falha('O valor precisa ser menor que o preço atual (' + formatarReais(p) + ').', { valorFinal: final });
     if (final < MINIMO_COBRANCA) return falha('O Stripe só cobra a partir de R$ 0,50. Use R$ 0,50 ou Grátis.', { abaixoMinimo: true, valorFinal: final });
     return { ok: true, erro: '', abaixoMinimo: false, valorFinal: final, tipo: 'valor', desconto: p - final };
+  }
+
+  // Quanto o cliente paga em cada pacote pago em que o cupom vale (preço de hoje; mesma conta do criar_pedido).
+  // c: { tipo: 'percentual'|'valor', valor (% ou centavos), pacotes: [chaves] (vazio = todos os pagos) }.
+  // -> [{ chave, nome, preco, final, gratis (desconto zerou), abaixoMinimo (R$ 0,01 a R$ 0,49) }]
+  function precosComCupom(c, pacotes, agora) {
+    var lista = (pacotes && pacotes.length ? pacotes : PACOTES_PADRAO).filter(function (p) { return p && p.chave !== 'gratis'; });
+    var so = c && Array.isArray(c.pacotes) && c.pacotes.length ? c.pacotes.map(String) : null;
+    var v = Math.round(Number(c && c.valor) || 0);
+    return lista.filter(function (p) { return !so || so.indexOf(p.chave) !== -1; }).map(function (p) {
+      var preco = precoVigente(p, agora).centavos;
+      var final = c && c.tipo === 'valor' ? Math.max(0, preco - v) : Math.max(0, Math.round(preco * (100 - v) / 100));
+      return { chave: p.chave, nome: p.nome, preco: preco, final: final, gratis: final === 0, abaixoMinimo: final > 0 && final < MINIMO_COBRANCA };
+    }).filter(function (x) { return x.preco > 0; });
+  }
+  // '' quando o cupom deixa todo pacote em R$ 0,50 ou mais (ou de graça); senão a mensagem (mesma regra do "Criar link").
+  function problemaPrecoCupom(c, pacotes, agora) {
+    var ruins = precosComCupom(c, pacotes, agora).filter(function (x) { return x.abaixoMinimo; });
+    if (!ruins.length) return '';
+    return 'O Stripe só cobra a partir de R$ 0,50: com este cupom ' + ruins.map(function (x) { return 'o ' + x.nome + ' sairia por ' + formatarReais(x.final); }).join(' e ') +
+      '. Use um desconto menor (preço final de R$ 0,50 ou mais) ou 100% (grátis).';
+  }
+  // Pacotes que um desconto em R$ deixa de graça (sem ser cupom de 100%): o painel pede confirmação.
+  function pacotesZeradosPorValor(c, pacotes, agora) {
+    if (!c || c.tipo !== 'valor') return [];
+    return precosComCupom(c, pacotes, agora).filter(function (x) { return x.gratis; });
+  }
+  // "Relatório completo: R$ 19,00 · Completo + Parte 2: grátis"
+  function textoPrecosCupom(c, pacotes, agora) {
+    return precosComCupom(c, pacotes, agora).map(function (x) { return x.nome + ': ' + (x.final === 0 ? 'grátis' : formatarReais(x.final)); }).join(' · ');
   }
 
   // Código legível: PRO050-7K, CORTESIA-4QX, COMPLETO20-…; sufixo sem letras que confundem (0/O, 1/I/L).
@@ -1611,6 +1708,23 @@
     if (resp && resp.ok === true && !resp.semFuncao && (!Array.isArray(resp.faltando) || !resp.faltando.length)) return '';
     var faltam = resp && Array.isArray(resp.faltando) && resp.faltando.length ? resp.faltando.map(String).join(', ') : 'as migrações mais recentes';
     return 'O banco de dados está desatualizado: faltam ' + faltam + '. Peça para aplicar as migrações (veja docs/SUPABASE.md).';
+  }
+
+  // O que deixa de funcionar quando faltam migrações (para a faixa do topo do painel).
+  var IMPACTO_MIGRACAO = {
+    pessoas_formulario: 'histórico por pessoa e perguntas do formulário', empresas_equipes: 'empresas, organograma e relatórios da equipe',
+    parte2: 'segunda parte do teste', fotos: 'fotos', mover_versao: 'mover resposta de processo e contratar',
+    vendas: 'vendas, pedidos e cupons', infinitepay: 'pagamento pela InfinitePay', conexoes: 'testes da aba Conexões',
+    stripe: 'pagamento pelo Stripe', minimo_cobranca: 'conferência do preço mínimo dos cupons e pacotes no servidor'
+  };
+  function impactoBanco(resp) {
+    var falt = resp && Array.isArray(resp.faltando) ? resp.faltando.map(String) : [];
+    var itens = [];
+    falt.forEach(function (n) {
+      var k = n.replace(/^\d+_/, '');
+      if (IMPACTO_MIGRACAO[k] && itens.indexOf(IMPACTO_MIGRACAO[k]) === -1) itens.push(IMPACTO_MIGRACAO[k]);
+    });
+    return itens.length ? 'Pode não funcionar: ' + itens.join('; ') + '.' : 'Algumas funções novas do painel podem não funcionar.';
   }
 
   /* ---------- Conexões (aba do admin): cartões a partir do diagnóstico; nunca mostra valor de segredo ---------- */
@@ -1990,14 +2104,98 @@
     return lista;
   }
 
-  // Resumo do topo: quantos funcionam, com erro e não configurados.
+  // Resumo do topo: quantos funcionam, com erro, não configurados e os demais (não testado, conferir no GitHub,
+  // testando): a soma bate com o número de cartões.
   function resumoConexoes(cartoes) {
-    var r = { ok: 0, erro: 0, nao_configurado: 0, outros: 0 };
-    (cartoes || []).forEach(function (c) { if (r[c.status] !== undefined) r[c.status]++; else r.outros++; });
+    var r = { ok: 0, erro: 0, nao_configurado: 0, pendente: 0, manual: 0, testando: 0, outros: 0, total: 0 };
+    (cartoes || []).forEach(function (c) { r.total++; if (r[c.status] !== undefined && c.status !== 'total') r[c.status]++; else r.outros++; });
     return r;
   }
 
+  /* ---------- Endereço de cada tela (#rota): Voltar do navegador, F5 e link interno ---------- */
+
+  // Telas: '' (Participantes), participante/<id>, processos, processos/novo, processo/<id>, processo/<id>/editar,
+  // processo/<id>/relatorio/<token>, empresas, empresa/<id>[/<subaba>], relatorio/<id> (relatório de modelo salvo),
+  // relatorios[/gerados|/gerar[/<chave>]|/exemplo/<chave>], vendas[/<subaba>], vendas/pedido/<id>, usuarios,
+  // comparativo, importar, conexoes. Âncoras do Supabase Auth (#access_token=…, #error=…) não são rotas.
+  var ABAS_ROTA = ['comparativo', 'importar', 'usuarios', 'conexoes'];
+  var SUBABAS_ROTA_EMPRESA = ['colaboradores', 'organograma', 'compatibilidade', 'relatorios', 'historico'];
+  var SUBABAS_ROTA_VENDAS = ['divulgar', 'resumo', 'pedidos', 'cupons', 'pacotes'];
+  function parteRota(s) { return /^[A-Za-z0-9_.:-]{1,128}$/.test(String(s || '')) ? String(s) : ''; }
+  function lerRota(hash) {
+    var h = String(hash == null ? '' : hash).replace(/^#\/?/, '');
+    try { h = decodeURIComponent(h); } catch (e) { /* mantém */ }
+    if (!h || /[=&?]/.test(h)) return { aba: 'lista' };
+    var p = h.split('/');
+    var a = p[0];
+    if (a === 'participantes') return { aba: 'lista' };
+    if (a === 'participante' && parteRota(p[1])) return { aba: 'lista', detalhe: p[1] };
+    if (ABAS_ROTA.indexOf(a) !== -1) return { aba: a };
+    if (a === 'processos') return p[1] === 'novo' ? { aba: 'processos', tela: 'form' } : { aba: 'processos', tela: 'lista' };
+    if (a === 'processo' && parteRota(p[1])) {
+      if (p[2] === 'editar') return { aba: 'processos', tela: 'form', id: p[1] };
+      if (p[2] === 'relatorio' && parteRota(p[3])) return { aba: 'processos', tela: 'editor', id: p[1], token: p[3] };
+      return { aba: 'processos', tela: 'pagina', id: p[1] };
+    }
+    if (a === 'empresas') return { aba: 'empresas', tela: 'lista' };
+    if (a === 'empresa' && parteRota(p[1])) return { aba: 'empresas', tela: 'pagina', id: p[1], subaba: SUBABAS_ROTA_EMPRESA.indexOf(p[2]) !== -1 ? p[2] : 'colaboradores' };
+    if (a === 'relatorio' && parteRota(p[1])) return { aba: 'relatorios', tela: 'relatorio', relId: p[1] };
+    if (a === 'relatorios') {
+      if (p[1] === 'gerados') return { aba: 'relatorios', tela: 'gerados' };
+      if (p[1] === 'gerar') return { aba: 'relatorios', tela: 'assistente', chave: parteRota(p[2]) };
+      if (p[1] === 'exemplo' && parteRota(p[2])) return { aba: 'relatorios', tela: 'exemplo', chave: p[2] };
+      return { aba: 'relatorios', tela: 'modelos' };
+    }
+    if (a === 'vendas') {
+      if (p[1] === 'pedido' && parteRota(p[2])) return { aba: 'vendas', sub: 'pedidos', pedidoId: p[2] };
+      return { aba: 'vendas', sub: SUBABAS_ROTA_VENDAS.indexOf(p[1]) !== -1 ? p[1] : 'resumo' };
+    }
+    return { aba: 'lista' };
+  }
+  // Inverso de lerRota: { aba, ... } -> 'processo/<id>' (sem #). Participantes = '' (endereço limpo).
+  function formatarRota(r) {
+    r = r || {};
+    var e = function (x) { return encodeURIComponent(String(x)); };
+    if (r.aba === 'lista' || !r.aba) return r.detalhe ? 'participante/' + e(r.detalhe) : '';
+    if (ABAS_ROTA.indexOf(r.aba) !== -1) return r.aba;
+    if (r.aba === 'processos') {
+      if (r.tela === 'form') return r.id ? 'processo/' + e(r.id) + '/editar' : 'processos/novo';
+      if (r.tela === 'pagina' && r.id) return 'processo/' + e(r.id);
+      if (r.tela === 'editor' && r.id && r.token) return 'processo/' + e(r.id) + '/relatorio/' + e(r.token);
+      return 'processos';
+    }
+    if (r.aba === 'empresas') {
+      if (r.tela === 'pagina' && r.id) return 'empresa/' + e(r.id) + (r.subaba && r.subaba !== 'colaboradores' ? '/' + r.subaba : '');
+      if (r.tela === 'relatorio' && r.relId) return 'relatorio/' + e(r.relId);
+      return 'empresas';
+    }
+    if (r.aba === 'relatorios') {
+      if (r.tela === 'relatorio' && r.relId) return 'relatorio/' + e(r.relId);
+      if (r.tela === 'gerados') return 'relatorios/gerados';
+      if (r.tela === 'assistente') return 'relatorios/gerar' + (r.chave ? '/' + e(r.chave) : '');
+      if (r.tela === 'exemplo' && r.chave) return 'relatorios/exemplo/' + e(r.chave);
+      return 'relatorios';
+    }
+    if (r.aba === 'vendas') {
+      if (r.pedidoId) return 'vendas/pedido/' + e(r.pedidoId);
+      return 'vendas' + (r.sub && r.sub !== 'resumo' ? '/' + r.sub : '');
+    }
+    return '';
+  }
+
   var util = {
+    lerRota: lerRota,
+    formatarRota: formatarRota,
+    problemaConfig: problemaConfig,
+    reatribuirEquipe: reatribuirEquipe,
+    precosComCupom: precosComCupom,
+    problemaPrecoCupom: problemaPrecoCupom,
+    pacotesZeradosPorValor: pacotesZeradosPorValor,
+    textoPrecosCupom: textoPrecosCupom,
+    impactoBanco: impactoBanco,
+    textoPct: textoPct,
+    resumoComparativo: resumoComparativo,
+    ordenarGrupos: ordenarGrupos,
     STATUS_CONEXAO: STATUS_CONEXAO,
     urlPagamentoStripe: urlPagamentoStripe,
     cartoesConexoes: cartoesConexoes,
@@ -2064,6 +2262,7 @@
     formatarTelefone: formatarTelefone,
     linkWhatsApp: linkWhatsApp,
     formatarData: formatarData,
+    formatarDataSegundos: formatarDataSegundos,
     formatarDuracao: formatarDuracao,
     normalizarStatus: normalizarStatus,
     normalizarProtocolo: normalizarProtocolo,
@@ -2211,10 +2410,18 @@
   function avatar(nome, foto, opcoes) {
     var op = opcoes || {};
     var tem = fotoValida(foto);
-    var filhos = [tem ? el('img', { classe: 'avatar__img', src: foto, alt: '', width: 192, height: 192, loading: 'lazy', decoding: 'async' })
-      : el('span', { classe: 'avatar__iniciais', texto: iniciais(nome) })];
+    var img = tem ? el('img', { classe: 'avatar__img', src: foto, alt: '', width: 192, height: 192, loading: 'lazy', decoding: 'async' }) : null;
+    var filhos = [img || el('span', { classe: 'avatar__iniciais', texto: iniciais(nome) })];
     if (op.letra) filhos.push(el('span', { classe: 'avatar__letra disc-fundo-' + op.letra, 'aria-hidden': 'true', texto: op.letra }));
-    return el('span', { classe: 'avatar' + (tem ? ' avatar--foto' : '') + (op.classe ? ' ' + op.classe : ''), 'aria-hidden': 'true', 'data-foto': tem ? 'sim' : 'nao' }, filhos);
+    var caixa = el('span', { classe: 'avatar' + (tem ? ' avatar--foto' : '') + (op.letra ? ' avatar--com-letra' : '') + (op.classe ? ' ' + op.classe : ''), 'aria-hidden': 'true', 'data-foto': tem ? 'sim' : 'nao' }, filhos);
+    // Foto gravada que não abre (dado corrompido): mostra as iniciais em vez do ícone de imagem quebrada.
+    if (img) img.addEventListener('error', function () {
+      if (!img.parentNode) return;
+      img.parentNode.replaceChild(el('span', { classe: 'avatar__iniciais', texto: iniciais(nome) }), img);
+      caixa.classList.remove('avatar--foto');
+      caixa.setAttribute('data-foto', 'nao');
+    });
+    return caixa;
   }
 
   // Arquivo de imagem -> data URL JPEG 192×192 recortada ao centro (qualidade ~0,72; baixa até caber em FOTO_MAX).
@@ -2324,14 +2531,31 @@
     return null;
   }
 
+  // Aviso flutuante no canto (não cobre os botões do meio da página). Erros ficam até a pessoa fechar (×) ou outro
+  // aviso substituir; os demais somem em 6 s (ou opcoes.ms). opcoes: { acao: {texto, fn}, fixo, ms }.
   var avisoTimer;
-  function avisar(msg, tipo) {
+  function fecharAviso() {
+    clearTimeout(avisoTimer);
     var a = $('aviso-geral');
-    a.textContent = msg;
+    if (a) a.hidden = true;
+  }
+  function avisar(msg, tipo, opcoes) {
+    var op = opcoes || {};
+    var a = $('aviso-geral');
+    limpar(a);
+    a.appendChild(el('span', { classe: 'aviso-geral__texto', texto: msg }));
+    if (op.acao && typeof op.acao.fn === 'function') {
+      a.appendChild(el('button', { type: 'button', classe: 'link-botao seminegrito aviso-geral__acao', id: 'aviso-geral-acao', texto: op.acao.texto,
+        onclick: function () { fecharAviso(); op.acao.fn(); } }));
+    }
+    a.appendChild(el('button', { type: 'button', classe: 'aviso-geral__fechar', id: 'aviso-geral-fechar', 'aria-label': 'Fechar aviso', title: 'Fechar', onclick: fecharAviso },
+      icone('M18 6 6 18M6 6l12 12')));
     a.className = 'aviso aviso-geral surgir' + (tipo ? ' aviso--' + tipo : '');
+    a.setAttribute('role', tipo === 'erro' ? 'alert' : 'status');
     a.hidden = false;
     clearTimeout(avisoTimer);
-    avisoTimer = setTimeout(function () { a.hidden = true; }, 6000);
+    var fixo = op.fixo != null ? op.fixo : tipo === 'erro';
+    if (!fixo) avisoTimer = setTimeout(fecharAviso, op.ms || (op.acao ? 10000 : 6000));
   }
 
   // Erro de chamada: sessão expirada já levou ao login; o resto vira aviso.
@@ -2485,13 +2709,26 @@
 
   /* ---------- Janelas na própria página (sem prompt/confirm do navegador) ---------- */
 
-  // Confirmação. opcoes: { titulo, texto, exigir (texto que precisa ser digitado), botao, extra (nó) } -> Promise<boolean>
+  // Tab e Shift+Tab ficam dentro da caixa (janela, confirmação): o foco não escapa para o menu atrás do véu.
+  function prenderFoco(caixa, e) {
+    if (e.key !== 'Tab') return;
+    var focaveis = Array.prototype.filter.call(caixa.querySelectorAll('button, [href], input, textarea, select, [tabindex]:not([tabindex="-1"])'), function (n) {
+      return !n.disabled && n.getAttribute('tabindex') !== '-1' && n.offsetParent !== null && !n.closest('[hidden]');
+    });
+    if (!focaveis.length) return;
+    var primeiro = focaveis[0], ultimo = focaveis[focaveis.length - 1];
+    if (e.shiftKey && (document.activeElement === primeiro || !caixa.contains(document.activeElement))) { e.preventDefault(); ultimo.focus(); }
+    else if (!e.shiftKey && (document.activeElement === ultimo || !caixa.contains(document.activeElement))) { e.preventDefault(); primeiro.focus(); }
+  }
+
+  // Confirmação. opcoes: { titulo, texto, exigir (texto que precisa ser digitado), botao, classeBotao, botaoVoltar
+  // (rótulo do botão que desiste; padrão "Cancelar"), extra (nó) } -> Promise<boolean>
   function confirmar(opcoes) {
     return new Promise(function (resolver) {
       var anterior = document.activeElement;
       var entrada = opcoes.exigir ? el('input', { classe: 'entrada', id: 'confirmar-texto', autocomplete: 'off', 'aria-label': 'Digite ' + opcoes.exigir + ' para confirmar' }) : null;
       var btnOk = el('button', { type: 'button', classe: 'botao ' + (opcoes.classeBotao || 'botao--perigo'), id: 'confirmar-ok', texto: opcoes.botao || 'Excluir' });
-      var btnCancelar = el('button', { type: 'button', classe: 'botao botao--claro', id: 'confirmar-cancelar', texto: 'Cancelar' });
+      var btnCancelar = el('button', { type: 'button', classe: 'botao botao--claro', id: 'confirmar-cancelar', texto: opcoes.botaoVoltar || 'Cancelar' });
       var caixa = el('div', { classe: 'caixa caixa--ampla vidro-janela confirmar__caixa surgir', role: 'alertdialog', 'aria-modal': 'true', 'aria-labelledby': 'confirmar-titulo', 'aria-describedby': 'confirmar-desc' }, [
         el('h2', { id: 'confirmar-titulo', classe: 'confirmar__titulo', texto: opcoes.titulo }),
         el('p', { id: 'confirmar-desc', classe: 'texto-medio t-corpo', texto: opcoes.texto }),
@@ -2503,11 +2740,20 @@
       function fechar(ok) {
         document.removeEventListener('keydown', tecla);
         fundo.remove();
-        if (anterior && anterior.focus) anterior.focus();
+        if (anterior && anterior.focus && document.body.contains(anterior)) anterior.focus();
         resolver(ok);
       }
-      function tecla(e) { if (e.key === 'Escape' && !e.defaultPrevented) fechar(false); }
-      function atualizar() { if (entrada) btnOk.disabled = entrada.value.trim().toUpperCase() !== opcoes.exigir; }
+      function tecla(e) {
+        if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); fechar(false); }
+        else prenderFoco(caixa, e);
+      }
+      function atualizar() {
+        var ok = !entrada || entrada.value.trim().toUpperCase() === opcoes.exigir;
+        if (typeof opcoes.podeConfirmar === 'function') ok = ok && !!opcoes.podeConfirmar();
+        btnOk.disabled = !ok;
+        if (typeof opcoes.rotuloBotao === 'function') btnOk.textContent = opcoes.rotuloBotao();
+      }
+      caixa.addEventListener('change', atualizar);
       if (entrada) {
         entrada.addEventListener('input', atualizar);
         entrada.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !btnOk.disabled) fechar(true); });
@@ -2519,6 +2765,42 @@
       atualizar();
       document.body.appendChild(fundo);
       (entrada || btnCancelar).focus();
+    });
+  }
+
+  // Pergunta com várias saídas. opcoes: { titulo, texto, extra?, escolhas: [{ valor, texto, classe }] } (a primeira
+  // escolha é a que desiste e recebe o foco) -> Promise<valor> (Esc ou clique fora = valor da primeira).
+  // Os botões ganham id "escolha-<valor>".
+  function escolherAcao(opcoes) {
+    return new Promise(function (resolver) {
+      var anterior = document.activeElement;
+      var escolhas = (opcoes.escolhas || []).filter(Boolean);
+      var botoes = escolhas.map(function (o) {
+        return el('button', { type: 'button', classe: 'botao ' + (o.classe || 'botao--claro'), id: 'escolha-' + o.valor, 'data-valor': o.valor, texto: o.texto,
+          onclick: function () { fechar(o.valor); } });
+      });
+      var caixa = el('div', { classe: 'caixa caixa--ampla vidro-janela confirmar__caixa surgir', role: 'alertdialog', 'aria-modal': 'true', 'aria-labelledby': 'confirmar-titulo', 'aria-describedby': 'confirmar-desc' }, [
+        el('h2', { id: 'confirmar-titulo', classe: 'confirmar__titulo', texto: opcoes.titulo }),
+        el('p', { id: 'confirmar-desc', classe: 'texto-medio t-corpo', texto: opcoes.texto }),
+        opcoes.extra || null,
+        el('div', { classe: 'confirmar__acoes confirmar__acoes--varias' }, botoes)
+      ]);
+      var fundo = el('div', { classe: 'confirmar', id: 'confirmar' }, caixa);
+      var desiste = escolhas.length ? escolhas[0].valor : '';
+      function fechar(v) {
+        document.removeEventListener('keydown', tecla);
+        fundo.remove();
+        if (anterior && anterior.focus && document.body.contains(anterior)) anterior.focus();
+        resolver(v);
+      }
+      function tecla(e) {
+        if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); fechar(desiste); }
+        else prenderFoco(caixa, e);
+      }
+      fundo.addEventListener('click', function (e) { if (e.target === fundo) fechar(desiste); });
+      document.addEventListener('keydown', tecla);
+      document.body.appendChild(fundo);
+      if (botoes[0]) botoes[0].focus();
     });
   }
 
@@ -2538,31 +2820,49 @@
     ]);
     var fundo = el('div', { classe: 'confirmar janela', id: 'janela' }, form);
     var aberta = true;
+    var sujo = false;
+    var ctrl = { fechar: fechar, form: form, sujo: function () { return sujo && aberta; } };
     function fechar() {
       if (!aberta) return;
       aberta = false;
+      if (janelaAtual === ctrl) janelaAtual = null;
       document.removeEventListener('keydown', tecla);
       fundo.remove();
       if (anterior && anterior.focus && document.body.contains(anterior)) anterior.focus();
     }
-    function tecla(e) { if (e.key === 'Escape' && !e.defaultPrevented) fechar(); }
+    // Com algo digitado, Esc e o clique fora perguntam antes (o "Cancelar" fecha direto: é uma escolha clara).
+    function fecharPerguntando() {
+      if (!sujo) { fechar(); return; }
+      confirmar({ titulo: 'Fechar sem salvar?', texto: 'O que você preencheu nesta janela vai ser perdido.', botao: 'Fechar sem salvar', botaoVoltar: 'Continuar preenchendo' })
+        .then(function (ok) { if (ok) fechar(); });
+    }
+    function tecla(e) {
+      if ($('confirmar')) return; // uma confirmação aberta por cima cuida do Esc e do Tab
+      if (e.key === 'Escape' && !e.defaultPrevented) { e.preventDefault(); fecharPerguntando(); }
+      else prenderFoco(form, e);
+    }
+    form.addEventListener('input', function () { sujo = true; });
+    form.addEventListener('change', function () { sujo = true; });
     form.addEventListener('submit', function (e) {
       e.preventDefault();
       erro.textContent = '';
       btnOk.disabled = true;
       Promise.resolve().then(opcoes.aoConfirmar).then(function () { fechar(); }, function (e2) {
         if (e2 && e2.tratado) { fechar(); return; }
+        if (e2 && e2.cancelado) return; // a pessoa desistiu numa confirmação: a janela fica como estava
         erro.textContent = (e2 && e2.message) || 'Não foi possível salvar.';
       }).then(function () { btnOk.disabled = false; });
     });
     btnCancelar.addEventListener('click', fechar);
-    fundo.addEventListener('mousedown', function (e) { if (e.target === fundo) fechar(); });
+    fundo.addEventListener('mousedown', function (e) { if (e.target === fundo) fecharPerguntando(); });
     document.addEventListener('keydown', tecla);
     document.body.appendChild(fundo);
+    janelaAtual = ctrl;
     var primeiro = form.querySelector('input:not([type="checkbox"]), .escolha__botao, button');
     if (primeiro) primeiro.focus();
-    return { fechar: fechar, form: form };
+    return ctrl;
   }
+  var janelaAtual = null;
 
   function campoTexto(id, rotulo, attrs) {
     var a = { id: id, classe: 'entrada', type: 'text', autocomplete: 'off' };
@@ -2576,25 +2876,45 @@
     return el('div', { classe: 'campo' }, [el('span', { classe: 'campo__rotulo', id: rotuloId, texto: rotulo }), esc.caixa]);
   }
 
+  // Excluir respostas em massa: nada vem escolhido (a não ser o processo do filtro); o botão diz quantas vão embora.
   function excluirTodos() {
     var escAv = null;
+    var TODAS = '*';
+    function quantas(v) {
+      if (v === TODAS) return estado.registros.length;
+      return estado.registros.filter(function (r) { return r.avaliacao === v; }).length;
+    }
     if (MODO_API) {
       var comResp = estado.processos.filter(function (a) { return a.respostas || estado.registros.some(function (r) { return r.avaliacao === a.codigo; }); });
       var inicial = comResp.some(function (a) { return a.codigo === estado.filtros.processo; }) ? estado.filtros.processo : '';
       escAv = criarEscolha({
         id: 'excluir-avaliacao', rotulo: 'Quais respostas', rotuloId: 'excluir-avaliacao-rotulo', valor: inicial, classe: 'escolha--campo escolha--larga',
-        opcoes: [{ valor: '', rotulo: 'Todas as respostas' }].concat(comResp.map(function (a) { return { valor: a.codigo, rotulo: a.nome + ' (' + a.codigo + ')' }; }))
+        opcoes: [{ valor: '', rotulo: 'Escolha o processo…' }]
+          .concat(comResp.map(function (a) { var n = quantas(a.codigo); return { valor: a.codigo, rotulo: a.nome + ' (' + a.codigo + ')' + (n ? ' · ' + n + ' resposta' + (n === 1 ? '' : 's') : '') }; }))
+          .concat([{ valor: TODAS, rotulo: 'Todas as respostas, de todos os processos (' + estado.registros.length + ')' }])
       });
     }
+    var textoApi = SUPABASE || SIMULADA
+      ? 'Escolha o processo. As respostas dele são apagadas do servidor e não podem ser recuperadas.'
+      : 'Escolha o processo. As respostas dele são apagadas e não podem ser recuperadas. O histórico de versões da planilha continua guardando os dados: para eliminá-los de vez, exclua a planilha do Google Drive e esvazie a lixeira.';
     confirmar({
       titulo: MODO_API ? 'Excluir respostas?' : 'Excluir todos os participantes?',
-      texto: MODO_API
-        ? 'Escolha o processo. As respostas dele são apagadas e não podem ser recuperadas. O histórico de versões da planilha continua guardando os dados: para eliminá-los de vez, exclua a planilha do Google Drive e esvazie a lixeira.'
-        : 'Esta ação apaga todos os participantes deste navegador e não pode ser desfeita.',
+      texto: MODO_API ? textoApi : 'Esta ação apaga todos os participantes deste navegador e não pode ser desfeita.',
       extra: escAv ? campoEscolha('Quais respostas', escAv, 'excluir-avaliacao-rotulo') : null,
       exigir: 'EXCLUIR',
-      botao: 'Excluir'
-    }).then(function (ok) { if (ok) executarExclusaoTotal(escAv ? escAv.botao.value : ''); });
+      botao: 'Excluir',
+      podeConfirmar: escAv ? function () { return !!escAv.botao.value; } : null,
+      rotuloBotao: escAv ? function () {
+        var v = escAv.botao.value;
+        if (!v) return 'Excluir';
+        var n = quantas(v);
+        return v === TODAS ? 'Excluir todas as ' + n + ' respostas' : 'Excluir ' + (n === 1 ? '1 resposta' : n + ' respostas');
+      } : null
+    }).then(function (ok) {
+      if (!ok) return;
+      var v = escAv ? escAv.botao.value : '';
+      executarExclusaoTotal(v === TODAS ? '' : v);
+    });
   }
 
   function executarExclusaoTotal(avaliacao) {
@@ -2654,12 +2974,12 @@
 
   function miniBarras(p) {
     var wrap = el('div', { classe: 'mini-barras', role: 'img',
-      'aria-label': 'D ' + p.D + '%, I ' + p.I + '%, S ' + p.S + '%, C ' + p.C + '%' });
+      'aria-label': LETRAS.map(function (l) { return l + ' ' + textoPct(p[l]); }).join(', ') });
     LETRAS.forEach(function (l) {
       wrap.appendChild(el('div', { classe: 'mini-linha' }, [
         el('span', { classe: 'mini-letra', texto: l }),
         el('span', { classe: 'mini-trilho trilho' }, el('span', { classe: 'mini-barra disc-' + l, estilo: { width: Math.min(100, (p[l] / 40) * 100) + '%' } })),
-        el('span', { classe: 'mini-valor', texto: p[l] + '%' })
+        el('span', { classe: 'mini-valor', texto: textoPct(p[l]) })
       ]));
     });
     return wrap;
@@ -2711,7 +3031,7 @@
       cfg.opcoes.forEach(function (o, i) {
         var sel = o.valor === atual;
         opcoes[i].setAttribute('aria-selected', sel ? 'true' : 'false');
-        if (sel) texto.textContent = o.rotulo;
+        if (sel) { texto.textContent = o.rotulo; texto.title = o.rotulo; } // nome longo cortado: o completo no hover
       });
     }
     function abrir() {
@@ -2857,7 +3177,7 @@
     if (MODO_API) {
       defs.push({ id: 'filtro-processo', chave: 'processo', rotulo: 'Processo', prefixo: 'Processo',
         opcoes: [{ valor: '', rotulo: 'Todos' }]
-          .concat(estado.processos.map(function (a) { return { valor: a.codigo, rotulo: a.nome + (empresaDe(a) ? ' · ' + empresaDe(a) : '') }; }))
+          .concat(estado.processos.map(function (a) { return { valor: a.codigo, rotulo: a.nome + ' (' + a.codigo + ')' + (empresaDe(a) ? ' · ' + empresaDe(a) : '') }; }))
           .concat(temGeral ? [{ valor: '-', rotulo: 'Link geral' }] : []) });
     }
     defs.push({ id: 'filtro-perfil', chave: 'perfil', rotulo: 'Perfil primário', prefixo: 'Perfil',
@@ -2873,11 +3193,46 @@
       var existe = d.opcoes.some(function (o) { return o.valor === estado.filtros[d.chave]; });
       if (!existe) estado.filtros[d.chave] = '';
       var esc = criarEscolha({ id: d.id, rotulo: d.rotulo, prefixo: d.prefixo, valor: estado.filtros[d.chave], opcoes: d.opcoes });
-      esc.botao.addEventListener('change', function () { estado.filtros[d.chave] = esc.botao.value; renderizarLista(); });
+      esc.botao.addEventListener('change', function () { estado.filtros[d.chave] = esc.botao.value; guardarFiltros(); renderizarLista(); });
+      esc.botao.title = d.rotulo;
       box.appendChild(esc.caixa);
     });
-    box.setAttribute('data-qtd', String(defs.length));
+    // Ordem da lista (não é filtro: não entra no "Limpar filtros").
+    var escOrdem = criarEscolha({ id: 'filtro-ordem', rotulo: 'Ordenar por', prefixo: 'Ordem', valor: estado.ordem || 'recente',
+      opcoes: Object.keys(ORDENS_LISTA).map(function (k) { return { valor: k, rotulo: ORDENS_LISTA[k] }; }) });
+    escOrdem.botao.addEventListener('change', function () { estado.ordem = escOrdem.botao.value; guardarFiltros(); renderizarLista(); });
+    box.appendChild(escOrdem.caixa);
+    box.setAttribute('data-qtd', String(defs.length + 1));
   }
+
+  // Filtros, busca e ordem da lista ficam guardados nesta aba do navegador (F5 não apaga).
+  var CHAVE_FILTROS = 'disc_admin_filtros';
+  function guardarFiltros() {
+    var b = $('filtro-busca');
+    ss('set', CHAVE_FILTROS, JSON.stringify({ filtros: estado.filtros, busca: b ? b.value : '', ordem: estado.ordem || 'recente' }));
+  }
+  function lerFiltrosGuardados() {
+    var g = lerJsonSs(CHAVE_FILTROS);
+    if (!g) return;
+    var f = g.filtros && typeof g.filtros === 'object' ? g.filtros : {};
+    ['processo', 'perfil', 'status', 'origem'].forEach(function (k) { estado.filtros[k] = typeof f[k] === 'string' ? f[k] : ''; });
+    estado.ordem = ORDENS_LISTA[g.ordem] ? g.ordem : 'recente';
+    if ($('filtro-busca') && typeof g.busca === 'string') $('filtro-busca').value = g.busca;
+  }
+  function temFiltroAtivo() {
+    var f = estado.filtros;
+    return !!(f.processo || f.perfil || f.status || f.origem || ($('filtro-busca') && $('filtro-busca').value.trim()));
+  }
+  function limparFiltros() {
+    estado.filtros = { processo: '', perfil: '', status: '', origem: '' };
+    if ($('filtro-busca')) $('filtro-busca').value = '';
+    guardarFiltros();
+    montarFiltros();
+    renderizarLista();
+    var b = $('filtro-busca'); if (b) b.focus();
+  }
+  // Grupos (uma linha por pessoa) da lista como está na tela: filtros, busca e ordem.
+  function gruposDaLista() { return ordenarGrupos(agruparPessoas(filtrados()), estado.ordem); }
 
   function filtrados() {
     var busca = $('filtro-busca').value;
@@ -2930,7 +3285,7 @@
     estado.listaMostrada = true;
     renderizarResumo(animar);
     var itens = filtrados();
-    var grupos = agruparPessoas(itens);
+    var grupos = ordenarGrupos(agruparPessoas(itens), estado.ordem);
     var total = agruparPessoas(estado.registros).length;
     var nResp = estado.registros.length;
     var nMenu = $('aba-n-lista');
@@ -2939,6 +3294,18 @@
       ? (MODO_API ? 'Nenhuma resposta recebida ainda.' : 'Nenhum participante importado. Use a aba "Importar códigos".')
       : grupos.length + ' de ' + total + ' participante' + (total === 1 ? '' : 's') +
         (itens.length !== grupos.length || nResp !== total ? ' (' + itens.length + ' de ' + nResp + ' respostas)' : '');
+    // Exportar CSV diz quantas respostas vão (só as filtradas).
+    var btnCsv = $('btn-csv');
+    if (btnCsv) btnCsv.textContent = nResp && itens.length !== nResp ? 'Exportar CSV (' + itens.length + ' de ' + nResp + ')' : 'Exportar CSV';
+    // Filtro ou busca sem resultado: diz isso e oferece "Limpar filtros" (a lista em branco parecia erro).
+    var vazia = $('lista-vazia');
+    if (vazia) vazia.remove();
+    if (!grupos.length && nResp) {
+      ul.parentNode.insertBefore(el('div', { classe: 'caixa vazio lista-vazia', id: 'lista-vazia', role: 'status' }, [
+        el('p', { classe: 'vazio__texto', texto: 'Nenhum participante com esses filtros' + ($('filtro-busca').value.trim() ? ' e essa busca' : '') + '.' }),
+        botao('botao--claro', 'Limpar filtros', limparFiltros, { id: 'btn-limpar-filtros' })
+      ]), ul.nextSibling);
+    }
     grupos.forEach(function (g, i) {
       var r = g.atual;
       var meta = [linkTelefone(r)];
@@ -2972,7 +3339,7 @@
   /* ---------- Detalhe ---------- */
 
   function esconderVistas() {
-    ['vista-lista', 'vista-processos', 'vista-empresas', 'vista-relatorios', 'vista-vendas', 'vista-usuarios', 'vista-comparativo', 'vista-importar', 'vista-conexoes']
+    ['vista-lista', 'vista-detalhe', 'vista-processos', 'vista-empresas', 'vista-relatorios', 'vista-vendas', 'vista-usuarios', 'vista-comparativo', 'vista-importar', 'vista-conexoes']
       .forEach(function (id) { $(id).hidden = true; });
   }
 
@@ -2981,9 +3348,11 @@
     renderizarDetalhe();
     esconderVistas();
     $('vista-detalhe').hidden = false;
+    marcarMenu();
     root.scrollTo(0, 0);
     var h = $('vista-detalhe').querySelector('h2');
     if (h) { h.setAttribute('tabindex', '-1'); h.focus(); }
+    gravarRota();
   }
 
   function fecharDetalhe() {
@@ -2991,6 +3360,37 @@
     $('vista-detalhe').hidden = true;
     mostrarAba(estado.aba);
   }
+  // Anterior / Próximo no detalhe, na ordem e com os filtros da lista (só quando o detalhe veio da lista).
+  function vizinhosNaLista(id) {
+    if (estado.aba !== 'lista' || !$('filtro-busca')) return null;
+    var grupos = gruposDaLista();
+    var i = -1;
+    grupos.forEach(function (g, k) { if (i === -1 && g.respostas.some(function (x) { return x.id === id; })) i = k; });
+    if (i === -1 || grupos.length < 2) return null;
+    return { anterior: i > 0 ? grupos[i - 1].atual.id : null, proximo: i < grupos.length - 1 ? grupos[i + 1].atual.id : null, posicao: i + 1, total: grupos.length };
+  }
+
+  // Imprimir: para o cliente (só o perfil) ou interno (com contato, confiabilidade, confirmação e observações).
+  function imprimirDetalhe() {
+    escolherAcao({
+      titulo: 'Imprimir ou salvar em PDF',
+      texto: 'Para quem é o documento? A versão para o cliente ou a pessoa leva só o perfil, sem telefone, idade, situação, confiabilidade e observações.',
+      escolhas: [
+        { valor: 'cancelar', texto: 'Cancelar', classe: 'botao--claro' },
+        { valor: 'interno', texto: 'Uso interno', classe: 'botao--claro' },
+        { valor: 'cliente', texto: 'Para o cliente ou a pessoa', classe: 'botao--principal' }
+      ]
+    }).then(function (v) {
+      if (v !== 'interno' && v !== 'cliente') return;
+      document.body.classList.toggle('imprimir-interno', v === 'interno');
+      setTimeout(function () { root.print(); }, 30);
+    });
+  }
+  root.addEventListener('afterprint', function () { if (document.body) document.body.classList.remove('imprimir-interno'); });
+
+  // "← Voltar", Esc e trocar de resposta passam por aqui: com observações não salvas, pergunta antes.
+  function voltarDoDetalhe() { seguirSePuder(fecharDetalhe); }
+  function verOutraResposta(id) { seguirSePuder(function () { abrirDetalhe(id); }); }
 
   function copiarPorTextarea(txt) {
     return new Promise(function (ok, falha) {
@@ -3018,7 +3418,7 @@
     var det = c.detalhes || {};
     var fortes = det.alertasFortes || [], leves = det.alertasLeves || [];
     var disponivel = c.nivel !== 'indisponivel';
-    return el('section', { classe: 'caixa det-conf surgir', id: 'det-confiabilidade', 'data-nivel': c.nivel }, [
+    return el('section', { classe: 'caixa det-conf surgir so-interno', id: 'det-confiabilidade', 'data-nivel': c.nivel }, [
       el('h3', { classe: 'caixa__titulo', texto: 'Confiabilidade do resultado' }),
       el('div', { classe: 'conf-topo' }, [
         el('span', { classe: 'selo conf-nivel ' + (CLASSE_CONF[c.nivel] || ''), id: 'det-conf-nivel', texto: nivel }),
@@ -3041,7 +3441,7 @@
   function blocoConfirmacao(r) {
     var res = resumoValidacao(r.validacao, r.calc);
     if (!res) return null;
-    return el('section', { classe: 'caixa det-confirmacao surgir', id: 'det-confirmacao' }, [
+    return el('section', { classe: 'caixa det-confirmacao surgir so-interno', id: 'det-confirmacao' }, [
       el('h3', { classe: 'caixa__titulo', texto: 'Respostas da confirmação' }),
       el('p', { classe: 'conf-nota conf-nota--topo', texto: 'Depois dos grupos, a pessoa escolheu, em cada par, o retrato em que mais se reconhece e deu nota a quatro frases.' }),
       el('h4', { classe: 'conf-subtitulo', texto: 'Retratos escolhidos' }),
@@ -3084,7 +3484,7 @@
         el('dt', { texto: x.pergunta }), el('dd', { classe: x.resposta ? '' : 'texto-suave', texto: x.resposta || 'Sem resposta' })
       ]));
     });
-    return el('section', { classe: 'caixa det-formulario surgir', id: 'det-formulario' }, [
+    return el('section', { classe: 'caixa det-formulario surgir so-interno', id: 'det-formulario' }, [
       el('h3', { classe: 'caixa__titulo', texto: 'Respostas do formulário' }),
       el('dl', { classe: 'det-dl' }, itens)
     ]);
@@ -3113,7 +3513,7 @@
           el('p', { classe: 'hist-item__origem', texto: textoOrigem(x) || (x.vaga || '') }),
           x.calc ? miniBarras(x.calc.percentuais) : null,
           atual ? el('span', { classe: 'selo selo--noite hist-item__agora', texto: 'Vendo esta resposta' })
-            : botao('botao--claro botao--pequeno hist-item__ver', 'Ver esta resposta', function () { abrirDetalhe(x.id); },
+            : botao('botao--claro botao--pequeno hist-item__ver', 'Ver esta resposta', function () { verOutraResposta(x.id); },
               { 'data-acao': 'ver-resposta', 'aria-label': 'Ver a resposta de ' + formatarData(x.fim || x.recebidoEm) })
         ]);
       }))
@@ -3215,9 +3615,18 @@
 
     // Cabeçalho no padrão do BI: título, texto suave e ações em pílula (não impressas)
     var sub = [equipe ? '' : r.vaga, formatarData(r.fim || r.recebidoEm)].filter(function (x) { return x && x !== '—'; }).join(' · ');
+    // Vínculo ativo (achado depois): o "Adicionar à empresa" avisa que o vínculo atual vai para o histórico.
+    var vinculoDet = { v: null };
+    // Confiabilidade baixa logo no topo, com atalho para o bloco que explica (fica lá embaixo).
+    var confTopo = r.conf && r.conf.nivel === 'baixa' ? el('button', { type: 'button', classe: 'selo selo--vermelho det-conf-topo nao-imprimir', id: 'det-conf-topo',
+      title: 'Ver por que a confiabilidade é baixa', 'data-nivel': 'baixa', onclick: function () {
+        var alvo = $('det-confiabilidade');
+        if (alvo) { alvo.scrollIntoView({ behavior: 'smooth', block: 'start' }); alvo.setAttribute('tabindex', '-1'); alvo.focus({ preventScroll: true }); }
+      } }, 'Confiabilidade baixa: ver por quê') : null;
+    var vizinhos = vizinhosNaLista(r.id);
     art.appendChild(el('header', { classe: 'cabecalho det-cabecalho' }, [
       el('div', { classe: 'cabecalho__texto-area' }, [
-        el('p', { classe: 'det-relatorio so-imprimir', texto: 'Relatório DISC' + (r.empresaNome ? ' — ' + r.empresaNome : (CONFIG.EMPRESA ? ' — ' + CONFIG.EMPRESA : '')) }),
+        el('p', { classe: 'det-relatorio so-imprimir', texto: 'Perfil DISC' + (r.empresaNome ? ' — ' + r.empresaNome : (CONFIG.EMPRESA ? ' — ' + CONFIG.EMPRESA : '')) }),
         el('p', { classe: 'sobretitulo nao-imprimir', texto: r.origem === 'pessoal' ? 'Venda direta · Mapa pessoal' : (equipe ? 'Avaliação de equipe · Colaborador' : 'Processo seletivo · Candidato') }),
         el('div', { classe: 'det-titulo' }, [
           avatar(r.nome, fotoDe(r), { classe: 'avatar--grande det-avatar' }),
@@ -3227,18 +3636,24 @@
           el('span', { classe: 'det-protocolo__rotulo', texto: 'Código ' }),
           el('span', { classe: 'det-protocolo__valor t-indicador negrito tabular', texto: textoProtocolo(r.protocolo) })
         ]),
+        confTopo,
         sub ? el('p', { classe: 'cabecalho__texto', texto: sub }) : null,
-        linhaVinculoDetalhe(r)
+        linhaVinculoDetalhe(r, vinculoDet)
       ]),
       el('div', { classe: 'cabecalho__acoes nao-imprimir' }, [
-        el('button', { type: 'button', classe: 'botao botao--claro', texto: '← Voltar', onclick: fecharDetalhe }),
+        el('button', { type: 'button', classe: 'botao botao--claro', id: 'btn-voltar-detalhe', texto: '← Voltar', onclick: voltarDoDetalhe }),
+        vizinhos ? el('span', { classe: 'det-navega', role: 'group', 'aria-label': 'Navegar entre os participantes da lista' }, [
+          botao('botao--claro botao--pequeno', '‹ Anterior', function () { verOutraResposta(vizinhos.anterior); }, { id: 'btn-det-anterior', disabled: vizinhos.anterior ? null : true, title: 'Participante anterior da lista (com os filtros atuais)' }),
+          el('span', { classe: 't-nota texto-suave tabular det-navega__pos', texto: vizinhos.posicao + ' de ' + vizinhos.total }),
+          botao('botao--claro botao--pequeno', 'Próximo ›', function () { verOutraResposta(vizinhos.proximo); }, { id: 'btn-det-proximo', disabled: vizinhos.proximo ? null : true, title: 'Próximo participante da lista (com os filtros atuais)' })
+        ]) : null,
         podeMoverResposta() ? botao('botao--claro', 'Mover para outro processo', function () { janelaMoverProcesso(r); }, { id: 'btn-mover-processo' }) : null,
-        podeContratar() ? botao('botao--contorno', 'Adicionar à empresa (contratar)', function () { janelaContratar(r, null); }, { id: 'btn-contratar' }) : null,
+        podeContratar() ? botao('botao--contorno', 'Adicionar à empresa (contratar)', function () { janelaContratar(r, vinculoDet.v); }, { id: 'btn-contratar' }) : null,
         guia ? el('button', { type: 'button', classe: 'botao botao--claro', texto: 'Copiar guia', onclick: function () {
           copiarTexto(guiaComoTexto(guia, r)).then(function () { avisar('Guia copiado para a área de transferência.', 'ok'); },
             function () { avisar('Não foi possível copiar automaticamente.', 'erro'); });
         } }) : null,
-        el('button', { type: 'button', classe: 'botao botao--principal', texto: 'Imprimir / salvar PDF', onclick: function () { root.print(); } })
+        el('button', { type: 'button', classe: 'botao botao--principal', id: 'btn-imprimir-detalhe', texto: 'Imprimir / salvar PDF', onclick: imprimirDetalhe })
       ])
     ]));
 
@@ -3247,8 +3662,8 @@
     var dados = el('section', { classe: 'caixa det-dados surgir', id: 'det-ficha' }, [
       el('h3', { classe: 'caixa__titulo', texto: r.origem === 'pessoal' ? 'Ficha do cliente' : (equipe ? 'Ficha do colaborador' : 'Ficha do candidato') }),
       el('dl', { classe: 'det-dl' }, [
-        el('div', null, [el('dt', { texto: 'Telefone' }), el('dd', null, linkTelefone({ telefone: ficha.telefone || r.telefone, nome: ficha.nome || r.nome }))]),
-        el('div', null, [el('dt', { texto: 'Idade' }), el('dd', { id: 'det-idade', texto: textoIdade(ficha.idade) })]),
+        el('div', { classe: 'so-interno' }, [el('dt', { texto: 'Telefone' }), el('dd', null, linkTelefone({ telefone: ficha.telefone || r.telefone, nome: ficha.nome || r.nome }))]),
+        el('div', { classe: 'so-interno' }, [el('dt', { texto: 'Idade' }), el('dd', { id: 'det-idade', texto: textoIdade(ficha.idade) })]),
         equipe ? null : el('div', null, [el('dt', { texto: 'Vaga pretendida' }), el('dd', { texto: r.vaga || '—' })]),
         el('div', null, [el('dt', { texto: equipe ? 'Cargo/função' : 'Função atual/última' }), el('dd', { id: 'det-funcao', texto: ficha.funcao || '—' })]),
         equipe ? null : el('div', null, [el('dt', { texto: 'Empresa atual/última' }), el('dd', { id: 'det-empresa', texto: ficha.empresa || '—' })]),
@@ -3256,7 +3671,7 @@
         el('div', null, [el('dt', { texto: 'Concluído em' }), el('dd', { texto: formatarData(r.fim || r.recebidoEm) })]),
         el('div', null, [el('dt', { texto: 'Duração' }), el('dd', { texto: formatarDuracao(r.duracaoSeg) })]),
         el('div', null, [el('dt', { texto: 'Perfil' }), el('dd', { classe: 'det-perfil' }, [badgePerfil(r), r.calc ? ' ' + NOMES[r.calc.primario] + ' / ' + NOMES[r.calc.secundario] + (nomeCombinacao(r.calc.codigo) ? ' · ' + nomeCombinacao(r.calc.codigo) : '') : ''])]),
-        el('div', null, [el('dt', { texto: 'Status' }), el('dd', { id: 'det-status-selo' }, badgeStatus(r))])
+        el('div', { classe: 'so-interno' }, [el('dt', { texto: 'Status' }), el('dd', { id: 'det-status-selo' }, badgeStatus(r))])
       ])
     ]);
     var pedidoDet = blocoPedidoDetalhe(r);
@@ -3286,11 +3701,24 @@
     });
     var taObs = el('textarea', { id: 'det-obs', classe: 'entrada', rows: 3, maxlength: 2000, placeholder: 'Anotações sobre a entrevista, disponibilidade…' });
     taObs.value = r.observacoes || '';
+    // Texto que ficou guardado (sessão expirada / página recarregada antes de salvar): volta para a caixa.
+    var rascObs = lerJsonSs(CHAVE_RASCUNHO_OBS);
+    var notaObs = el('p', { classe: 't-nota texto-suave det-obs-estado', id: 'det-obs-estado', 'aria-live': 'polite' });
+    if (rascObs && rascObs.id === r.id && typeof rascObs.texto === 'string' && rascObs.texto !== taObs.value) {
+      taObs.value = rascObs.texto;
+      notaObs.textContent = 'Recuperamos as observações que você tinha digitado. Elas ainda não foram salvas.';
+    }
+    function estadoObs() {
+      var mudou = taObs.value !== (r.observacoes || '');
+      notaObs.textContent = mudou ? 'Alterações não salvas.' : '';
+      notaObs.classList.toggle('det-obs-estado--pendente', mudou);
+    }
+    taObs.addEventListener('input', estadoObs);
     var btnObs = el('button', { type: 'button', classe: 'botao botao--principal', texto: 'Salvar observações' });
     btnObs.addEventListener('click', function () {
       btnObs.disabled = true;
-      atualizarCampos(r.id, { observacoes: taObs.value }).then(function () {
-        avisar('Observações salvas.', 'ok'); obsImpressa.textContent = taObs.value;
+      salvarObservacoes(r, taObs.value).then(function () {
+        avisar('Observações salvas.', 'ok'); obsImpressa.textContent = taObs.value; estadoObs();
       }).catch(falhou).then(function () { btnObs.disabled = false; });
     });
     var btnExcluir = null, btnExcluirPessoa = null;
@@ -3303,7 +3731,8 @@
         confirmar({
           titulo: varias ? 'Excluir só esta resposta?' : 'Excluir este participante?',
           texto: varias
-            ? 'Apaga definitivamente a resposta de ' + formatarData(r.fim || r.recebidoEm) + ' (código ' + textoProtocolo(r.protocolo) + '). As outras ' + outras + ' resposta' + (outras === 1 ? '' : 's') + ' de ' + quem + ' continuam.'
+            ? 'Apaga definitivamente a resposta de ' + formatarData(r.fim || r.recebidoEm) + ' (código ' + textoProtocolo(r.protocolo) + '). ' +
+              (outras === 1 ? 'A outra resposta de ' + quem + ' continua.' : 'As outras ' + outras + ' respostas de ' + quem + ' continuam.')
             : 'A resposta e a ficha de ' + quem + ' serão apagadas definitivamente.',
           botao: varias ? 'Excluir esta resposta' : 'Excluir participante'
         }).then(function (ok) {
@@ -3337,7 +3766,7 @@
     var gestao = el('section', { classe: 'caixa nao-imprimir det-gestao surgir' }, [
       el('h3', { classe: 'caixa__titulo', texto: 'Avaliação do recrutador' }),
       el('div', { classe: 'campo' }, [el('span', { classe: 'campo__rotulo', id: 'det-status-rotulo', texto: 'Status' }), escStatus.caixa]),
-      el('div', { classe: 'campo' }, [el('label', { classe: 'campo__rotulo', for: 'det-obs', texto: 'Observações' }), taObs]),
+      el('div', { classe: 'campo' }, [el('label', { classe: 'campo__rotulo', for: 'det-obs', texto: 'Observações' }), taObs, notaObs]),
       el('div', { classe: 'det-gestao__acoes' }, [btnObs, btnExcluir, btnExcluirPessoa]),
       fotoValida(r.foto) && pode('excluir') ? el('div', { classe: 'det-gestao__acoes det-foto' }, [
         botao('botao--claro', 'Remover foto', function () {
@@ -3360,7 +3789,7 @@
 
     if (!r.calc) {
       art.appendChild(el('div', { classe: 'det-grade det-grade--simples' }, [dados, gestao]));
-      art.appendChild(el('section', { classe: 'so-imprimir det-obs-impressa' }, [el('h3', { texto: 'Observações' }), obsImpressa]));
+      art.appendChild(el('section', { classe: 'so-imprimir so-interno det-obs-impressa' }, [el('h3', { texto: 'Observações' }), obsImpressa]));
       if (extrasDet) art.appendChild(extrasDet);
       art.appendChild(el('p', { classe: 'aviso aviso--erro', texto: 'As respostas deste participante estão incompletas ou corrompidas; não é possível calcular o perfil.' }));
       return;
@@ -3382,7 +3811,7 @@
     art.appendChild(el('div', { classe: 'det-grade' }, [grafico, el('div', { classe: 'det-lado' }, [dados, gestao])]));
     var parte2 = blocoParte2(r);
     if (parte2) art.appendChild(parte2);
-    art.appendChild(el('section', { classe: 'so-imprimir det-obs-impressa' }, [el('h3', { texto: 'Observações' }), obsImpressa]));
+    art.appendChild(el('section', { classe: 'so-imprimir so-interno det-obs-impressa' }, [el('h3', { texto: 'Observações' }), obsImpressa]));
     if (extrasDet) art.appendChild(extrasDet);
     var relDet = blocoRelatoriosDetalhe(r, ficha);
     if (relDet) art.appendChild(relDet);
@@ -3424,8 +3853,9 @@
 
   /* ---------- Detalhe: mover a resposta de processo e contratar (levar para uma empresa) ---------- */
 
-  function podeMoverResposta() { return MODO_API && papel() === 'admin' && !!metodoApi('moverResposta'); }
-  function podeContratar() { return MODO_API && papel() === 'admin' && empresasOk() && !!metodoApi('contratarPessoa'); }
+  function faltaMigracao(nome) { return (estado.bancoFaltando || []).some(function (n) { return n.indexOf(nome) !== -1; }); }
+  function podeMoverResposta() { return MODO_API && papel() === 'admin' && !!metodoApi('moverResposta') && !faltaMigracao('mover_versao'); }
+  function podeContratar() { return MODO_API && papel() === 'admin' && empresasOk() && !!metodoApi('contratarPessoa') && !faltaMigracao('mover_versao'); }
 
   function janelaMoverProcesso(r) {
     var ops = opcoesMoverProcesso(estado.processos, r.avaliacao || '');
@@ -3465,12 +3895,15 @@
     var esc = criarSeletorBusca({ id: 'contratar-empresa', rotulo: 'Empresa', rotuloId: 'contratar-empresa-rotulo', vazio: 'Escolher a empresa',
       placeholder: 'Buscar ou cadastrar empresa…', criar: cadastroEmpresaRapido(), opcoes: empresas.map(function (e) { return { valor: e.id, rotulo: e.nome, sub: e.cidade || '' }; }) });
     var nome = r.nome || 'a pessoa';
+    var alertaConf = r.conf && r.conf.nivel === 'baixa' ? el('p', { classe: 'aviso aviso--erro', id: 'contratar-conf-baixa', role: 'note',
+      texto: 'Atenção: a confiabilidade deste resultado é baixa (' + (isFinite(Number(r.conf.pontos)) ? r.conf.pontos + ' de 100' : 'sem dados') + '). Confirme o perfil em entrevista antes de contratar.' }) : null;
     abrirJanela({
       id: 'janela-contratar',
       titulo: 'Adicionar ' + nome + ' à empresa',
       texto: (vinculo ? 'Hoje é colaborador(a) em ' + vinculo.empresa.nome + ': se escolher outra empresa, o vínculo atual vai para o histórico. ' : '') +
-        'A pessoa entra como colaboradora ativa, com o teste que já fez, e esta resposta fica como "Aprovado".',
+        'A pessoa entra como colaborador(a) ativo(a), com o teste que já fez, e esta resposta fica como "Aprovado".',
       corpo: [
+        alertaConf,
         campoEscolha('Empresa', esc, 'contratar-empresa-rotulo'),
         el('div', { classe: 'form-grade' }, [
           campoCom('contratar-cargo', 'Cargo', r.vaga || r.funcao || '', { maxlength: 120 }),
@@ -3493,20 +3926,20 @@
     });
   }
 
-  // Linha "Colaborador(a) em <Empresa>" no topo do detalhe (com link para a empresa).
-  function linhaVinculoDetalhe(r) {
+  // Linha "Colaborador(a) em <Empresa>" no topo do detalhe (com link para a empresa). O vínculo achado vai para
+  // guarda.v (o botão "Adicionar à empresa" lê de lá: uma janela só, com o aviso do vínculo atual).
+  function linhaVinculoDetalhe(r, guarda) {
     var p = el('p', { classe: 'det-vinculo-topo', id: 'det-empresa-vinculo', hidden: true });
     if (!empresasOk() || !r.pessoaId || papel() !== 'admin') return p;
     acharVinculo(r.pessoaId).then(function (v) {
       if (!v || !document.body.contains(p)) return;
+      if (guarda) guarda.v = v;
       limpar(p);
       p.appendChild(el('span', { classe: 'texto-suave', texto: 'Colaborador(a) em ' }));
       p.appendChild(el('button', { type: 'button', classe: 'link-botao seminegrito', id: 'det-link-empresa', texto: v.empresa.nome,
-        onclick: function () { irParaEmpresas('pagina', v.empresa.id); } }));
+        onclick: function () { seguirSePuder(function () { irParaEmpresas('pagina', v.empresa.id); }); } }));
       if (v.colaborador.cargo) p.appendChild(el('span', { classe: 'texto-suave', texto: ' · ' + v.colaborador.cargo }));
       p.hidden = false;
-      var btn = $('btn-contratar');
-      if (btn) btn.onclick = function () { janelaContratar(r, v); };
     });
     return p;
   }
@@ -3530,23 +3963,47 @@
     }));
   }
 
+  // Processo do comparativo: o escolhido; senão o filtro da lista; senão o da aprovação mais recente.
+  function processoDoComparativo() {
+    if (!MODO_API) return '';
+    if (estado.compProcesso != null) return estado.compProcesso;
+    if (estado.filtros.processo) return estado.filtros.processo;
+    var ap = estado.registros.filter(function (r) { return !r.invalido && r.status === 'aprovado'; });
+    ordenar(ap);
+    return ap.length ? (ap[0].avaliacao || '-') : '';
+  }
+
   function renderizarComparativo() {
     var box = $('vista-comparativo');
     limpar(box);
-    var aprovados = estado.registros.filter(function (r) { return !r.invalido && r.status === 'aprovado'; });
-    var res = resumoEquipe(aprovados);
+    var proc = processoDoComparativo();
+    var comp = resumoComparativo(estado.registros, proc);
+    var aprovados = comp.aprovados;
+    var res = comp.resumo;
+    var nomeProc = proc === '-' ? 'Link geral' : (proc ? ((acharProcessoPorCodigo(proc) || {}).nome || proc) : '');
     var cab = el('div', { classe: 'cabecalho__texto-area' }, [
       el('p', { classe: 'sobretitulo', texto: 'Equipe' }),
       el('h2', { classe: 'cabecalho__titulo t-pagina seminegrito', texto: 'Comparativo dos aprovados' })
     ]);
     box.appendChild(el('div', { classe: 'cabecalho' }, cab));
+    if (MODO_API && estado.processos.length) {
+      var temGeral = estado.registros.some(function (r) { return !r.avaliacao && r.status === 'aprovado'; });
+      var escProc = criarEscolha({ id: 'comp-processo', rotulo: 'Processo do comparativo', prefixo: 'Processo', valor: proc,
+        opcoes: estado.processos.map(function (a) { return { valor: a.codigo, rotulo: a.nome + ' (' + a.codigo + ')' }; })
+          .concat(temGeral ? [{ valor: '-', rotulo: 'Link geral' }] : [])
+          .concat([{ valor: '', rotulo: 'Todos os processos (misturados)' }]) });
+      escProc.botao.addEventListener('change', function () { estado.compProcesso = escProc.botao.value; renderizarComparativo(); });
+      box.appendChild(el('div', { classe: 'filtros__escolhas comp-filtro', id: 'comp-filtro' }, escProc.caixa));
+      if (!proc) box.appendChild(el('p', { classe: 'aviso proc-aviso', id: 'comp-aviso-todos', texto: 'Atenção: estão somados os aprovados de todos os processos e empresas, como se fossem uma equipe só.' }));
+    }
     if (!res.total) {
       box.appendChild(el('div', { classe: 'caixa vazio surgir' }, [
-        el('p', { classe: 'vazio__texto', texto: 'Nenhum participante aprovado ainda. Marque participantes como "Aprovado" no detalhe para ver o comparativo da equipe.' })
+        el('p', { classe: 'vazio__texto', texto: nomeProc ? 'Nenhum participante aprovado em "' + nomeProc + '" ainda. Marque participantes como "Aprovado" no detalhe para ver o comparativo.'
+          : 'Nenhum participante aprovado ainda. Marque participantes como "Aprovado" no detalhe para ver o comparativo da equipe.' })
       ]));
       return;
     }
-    cab.appendChild(el('p', { classe: 'cabecalho__texto', texto: res.total + ' aprovado' + (res.total === 1 ? '' : 's') + '.' }));
+    cab.appendChild(el('p', { classe: 'cabecalho__texto', texto: res.total + ' aprovado' + (res.total === 1 ? '' : 's') + '.' + (nomeProc ? ' Processo: ' + nomeProc + '.' : (MODO_API ? ' Todos os processos.' : '')) }));
 
     // Distribuição por perfil primário, do mais frequente ao menos frequente
     var ordem = LETRAS.slice().sort(function (a, b) { return res.primarios[b] - res.primarios[a] || LETRAS.indexOf(a) - LETRAS.indexOf(b); });
@@ -3592,11 +4049,12 @@
 
     box.appendChild(el('section', { classe: 'caixa surgir' }, [
       el('h3', { classe: 'caixa__titulo', texto: 'Aprovados' }),
-      el('ul', { classe: 'lista-simples' }, aprovados.map(function (r) {
+      el('ul', { classe: 'lista-simples', id: 'comp-aprovados' }, aprovados.map(function (r) {
         return el('li', null, [
           r.calc ? letraDisc(r.calc.primario) : null,
           el('button', { type: 'button', classe: 'link-botao', texto: r.nome || '(sem nome)', onclick: function () { abrirDetalhe(r.id); } }),
-          badgePerfil(r)
+          badgePerfil(r),
+          MODO_API ? el('span', { classe: 't-rotulo texto-suave comp-aprovado__processo', texto: textoOrigem(r) }) : null
         ]);
       }))
     ]));
@@ -3627,9 +4085,10 @@
     return el('button', a);
   }
 
-  // Muda a tela dentro da aba Processos e leva o foco ao título.
-  function irParaProcessos(tela, id) {
+  // Muda a tela dentro da aba Processos e leva o foco ao título. preset (só no formulário novo): valores iniciais.
+  function irParaProcessos(tela, id, preset) {
     estado.proc = { tela: tela || 'lista', id: id || null };
+    if (preset && tela === 'form' && !id) estado.proc.preset = preset;
     renderizarProcessos();
     mostrarAba('processos');
     root.scrollTo(0, 0);
@@ -3698,10 +4157,20 @@
     })));
   }
 
+  // Desativar pede confirmação (quem estiver no meio do teste perde o envio); ativar é direto.
   function alternarAtivo(p) {
-    api('processosSalvar', { id: p.id, nome: p.nome, tipo: p.tipo || 'selecao', ativa: !p.ativa })
-      .then(function () { avisar(p.ativa ? 'Processo desativado: o link deixa de aceitar respostas.' : 'Processo ativado.', 'ok'); return carregar(); })
-      .catch(falhou);
+    var desativar = !!p.ativa;
+    (desativar ? confirmar({ titulo: 'Desativar o processo?', botao: 'Desativar', botaoVoltar: 'Voltar',
+      texto: 'O link ' + p.codigo + ' deixa de aceitar respostas na hora, inclusive de quem está respondendo agora. Dá para ativar de novo depois.' }) : Promise.resolve(true))
+      .then(function (ok) {
+        if (!ok) return;
+        return api('processosSalvar', { id: p.id, nome: p.nome, tipo: p.tipo || 'selecao', ativa: !p.ativa })
+          .then(function () {
+            avisar(desativar ? 'Processo desativado: o link deixa de aceitar respostas.' : 'Processo ativado.', 'ok',
+              desativar ? { acao: { texto: 'Desfazer', fn: function () { alternarAtivo(Object.assign({}, p, { ativa: false })); } } } : null);
+            return carregar();
+          });
+      }).catch(falhou);
   }
 
   function excluirProcesso(p) {
@@ -3739,7 +4208,13 @@
   }
 
   function renderizarFormProcesso(box, p) {
-    var cfgBase = (p && p.config) || configPadrao();
+    // Rascunho guardado (sessão expirada ou página recarregada antes de salvar): o formulário volta como estava.
+    var rasc = lerJsonSs(CHAVE_RASCUNHO_FORM);
+    if (!rasc || String(rasc.id || '') !== String(p ? p.id : '') || !rasc.dados || typeof rasc.dados !== 'object') rasc = null;
+    var base = rasc ? Object.assign({}, p || {}, rasc.dados) : p;
+    formProcesso.sujo = !!rasc;
+    function marcar() { formProcesso.sujo = true; }
+    var cfgBase = (base && base.config) || configPadrao();
     // Cópia de trabalho da config (o formulário mexe só nela até salvar)
     var f = {
       perfil: normalizarPerfilIdeal(cfgBase.perfilIdeal),
@@ -3751,19 +4226,21 @@
           pares: r.tipo === 'mapa' ? Object.keys(r.pontos || {}).map(function (k) { return { valor: k, pontos: r.pontos[k] }; }) : [] };
       })
     };
-    var per = (p && p.periodo) || {};
+    var per = (base && base.periodo) || {};
     var preset = (!p && estado.proc.preset) || {};
 
     // Tipo do processo e empresa cadastrada (Supabase/prévia): equipe + empresa = link do teste da equipe.
     var escTipo = criarEscolha({ id: 'proc-tipo', rotulo: 'Tipo', rotuloId: 'proc-tipo-rotulo', classe: 'escolha--campo escolha--larga',
-      valor: (p && p.tipo) || preset.tipo || 'selecao',
+      valor: (base && base.tipo) || preset.tipo || 'selecao',
       opcoes: ['selecao', 'equipe'].map(function (t) { return { valor: t, rotulo: TIPOS[t] }; }) });
     var escEmpresa = null;
     if (empresasOk()) {
-      var empsForm = (estado.emp.lista || []).filter(function (e) { return e.ativo !== false || (p && e.id === p.empresaId); });
+      // A empresa já ligada (ou a do atalho da página da empresa) aparece mesmo arquivada, marcada "(arquivada)".
+      var empLigada = (base && base.empresaId) || preset.empresaId || '';
+      var empsForm = (estado.emp.lista || []).filter(function (e) { return e.ativo !== false || (empLigada && e.id === empLigada); });
       escEmpresa = criarSeletorBusca({ id: 'proc-empresa-id', rotulo: 'Empresa cadastrada', rotuloId: 'proc-empresa-id-rotulo', vazio: 'Nenhuma (só o nome em texto)',
         placeholder: 'Buscar ou cadastrar empresa…', criar: cadastroEmpresaRapido(),
-        valor: (p && p.empresaId) || preset.empresaId || '', opcoes: empsForm.map(function (e) { return { valor: e.id, rotulo: e.nome, sub: e.cidade || '' }; }) });
+        valor: empLigada, opcoes: empsForm.map(function (e) { return { valor: e.id, rotulo: e.nome + (e.ativo === false ? ' (arquivada)' : ''), sub: e.cidade || '' }; }) });
     }
     var textoEquipe = el('p', { classe: 'form-secao__texto proc-equipe-texto', id: 'proc-equipe-texto', 'aria-live': 'polite' });
     function atualizarTipo() {
@@ -3781,21 +4258,34 @@
       atualizarTipo();
     });
 
+    // Sair do formulário: volta à empresa (quando veio do atalho dela), à página do processo ou à lista.
+    function sairDoForm() {
+      seguirSePuder(function () {
+        formProcesso.sujo = false;
+        ss('del', CHAVE_RASCUNHO_FORM);
+        if (!p && preset.volta && preset.volta.empresa) { irParaEmpresas('pagina', preset.volta.empresa); return; }
+        irParaProcessos(p ? 'pagina' : 'lista', p ? p.id : null);
+      });
+    }
     box.appendChild(cabecalhoVista(p ? 'Editar processo · código ' + p.codigo : 'Novo processo', p ? p.nome : 'Novo processo',
       'Preencha os dados, ligue a lista do ClickUp e diga como o relatório deve pontuar os candidatos.',
-      [botao('botao--claro', '← Voltar', function () { irParaProcessos(p ? 'pagina' : 'lista', p ? p.id : null); })]));
+      [botao('botao--claro', '← Voltar', sairDoForm, { id: 'btn-voltar-form-processo' })]));
+    if (rasc) box.appendChild(el('p', { classe: 'aviso proc-aviso', id: 'proc-rascunho-recuperado', role: 'status',
+      texto: 'Recuperamos o que você tinha preenchido antes de sair (sessão expirada ou página recarregada). Confira e salve.' }));
 
     var form = el('form', { classe: 'form-processo', id: 'form-processo', novalidate: true });
+    form.addEventListener('input', marcar);
+    form.addEventListener('change', marcar);
 
     // 1. Dados
     form.appendChild(secaoForm('Dados do processo', null, [
       el('div', { classe: 'form-grade' }, [
-        campoCom('proc-nome', 'Nome do processo', p && p.nome, { maxlength: 80, placeholder: 'Ex.: Escrevente de atendimento 2026' }),
-        campoCom('proc-empresa', 'Empresa contratante', (p && empresaDe(p)) || preset.empresa || '', { maxlength: 80 }),
-        campoCom('proc-vaga', 'Vaga', p && p.vaga, { maxlength: 120 }),
-        campoCom('proc-cidade', 'Cidade', p && p.cidade, { maxlength: 80, placeholder: 'Ex.: Boa Vista / RR' }),
-        campoCom('proc-consultor', 'Consultor responsável', p && p.consultor, { maxlength: 80 }),
-        campoCom('proc-contratante', 'Quem recebe o relatório (nome)', p && p.contratante, { maxlength: 80 }),
+        campoCom('proc-nome', 'Nome do processo', (base && base.nome) || preset.nome || '', { maxlength: 80, placeholder: 'Ex.: Escrevente de atendimento 2026' }),
+        campoCom('proc-empresa', 'Empresa contratante', (base && empresaDe(base)) || preset.empresa || '', { maxlength: 80 }),
+        campoCom('proc-vaga', 'Vaga', base && base.vaga, { maxlength: 120 }),
+        campoCom('proc-cidade', 'Cidade', base && base.cidade, { maxlength: 80, placeholder: 'Ex.: Boa Vista / RR' }),
+        campoCom('proc-consultor', 'Consultor responsável', base && base.consultor, { maxlength: 80 }),
+        campoCom('proc-contratante', 'Quem recebe o relatório (nome)', base && base.contratante, { maxlength: 80 }),
         campoCom('proc-inicio', 'Início', per.inicio, { type: 'date' }),
         campoCom('proc-fim', 'Fim', per.fim, { type: 'date' })
       ]),
@@ -3805,8 +4295,8 @@
       ]),
       textoEquipe,
       el('div', { classe: 'form-marcas' }, [
-        campoMarcar('proc-ativa', 'Processo ativo (o link aceita respostas)', p ? p.ativa : true),
-        campoMarcar('proc-mostrar', 'Mostrar ao participante o relatório DISC completo dele no final (os 4 fatores, perfil principal e secundário e características; sem vaga, função ou aderência)', p ? p.mostrarResultado : false)
+        campoMarcar('proc-ativa', 'Processo ativo (o link aceita respostas)', base ? base.ativa !== false : true),
+        campoMarcar('proc-mostrar', 'Mostrar ao participante o relatório DISC completo dele no final (os 4 fatores, perfil principal e secundário e características; sem vaga, função ou aderência)', base ? !!base.mostrarResultado : false)
       ])
     ]));
 
@@ -3827,6 +4317,7 @@
     var listaPerguntas = el('ol', { classe: 'config-lista', id: 'proc-perguntas' });
     var btnAddPergunta = botao('botao--contorno', 'Adicionar pergunta', function () {
       if (f.perguntas.length >= MAX_PERGUNTAS) return;
+      marcar();
       f.perguntas.push({ id: '', texto: '', obrigatoria: false });
       desenharPerguntas();
       var n = $('pergunta-texto-' + (f.perguntas.length - 1)); if (n) n.focus();
@@ -3845,7 +4336,7 @@
         listaPerguntas.appendChild(el('li', { classe: 'config-item pergunta-item', 'data-indice': String(i) }, [
           el('div', { classe: 'config-item__topo' }, [
             el('span', { classe: 'config-item__num tabular', texto: 'Pergunta extra ' + (i + 1) }),
-            botao('botao--perigo botao--pequeno', 'Remover', function () { f.perguntas.splice(i, 1); desenharPerguntas(); }, { 'aria-label': 'Remover pergunta ' + (i + 1) })
+            botao('botao--perigo botao--pequeno', 'Remover', function () { marcar(); f.perguntas.splice(i, 1); desenharPerguntas(); }, { 'aria-label': 'Remover pergunta ' + (i + 1) })
           ]),
           texto, erroQ, marca
         ]));
@@ -3863,8 +4354,8 @@
     desenharPerguntas();
 
     // 1c. Segunda parte do teste (perfil exigido pelo trabalho). Ao criar, segue o tipo até a pessoa mexer; ao editar, fica o salvo.
-    f.parte2 = p ? formBase.parte2 : parte2Padrao(escTipo.botao.value);
-    var parte2Tocada = !!p;
+    f.parte2 = p || rasc ? formBase.parte2 : parte2Padrao(escTipo.botao.value);
+    var parte2Tocada = !!(p || rasc);
     var estadoParte2 = el('span', { classe: 'pilula-liga__texto', id: 'proc-parte2-estado' });
     var pilulaParte2 = el('button', { type: 'button', classe: 'pilula-liga', id: 'proc-parte2', role: 'switch', 'aria-labelledby': 'proc-parte2-rotulo' }, [
       el('span', { classe: 'pilula-liga__trilho', 'aria-hidden': 'true' }, el('span', { classe: 'pilula-liga__bola' })),
@@ -3880,6 +4371,7 @@
     }
     pilulaParte2.addEventListener('click', function () {
       parte2Tocada = true;
+      marcar();
       f.parte2 = f.parte2 === 'ligada' ? 'desligada' : 'ligada';
       desenharParte2();
     });
@@ -3897,7 +4389,7 @@
     // 2. ClickUp
     var clickupCorpo = el('div', { classe: 'clickup-corpo', id: 'proc-clickup' });
     form.appendChild(secaoForm('Lista do ClickUp', 'Os candidatos do processo vêm dessa lista: notas das etapas, status e respostas do formulário.', [clickupCorpo]));
-    var listaAtual = p ? String(p.clickupListId || '') : '';
+    var listaAtual = base ? String(base.clickupListId || '') : '';
     var lerLista = montarClickup(clickupCorpo, listaAtual);
 
     // 3. Link do teste
@@ -3917,7 +4409,7 @@
     var explicacao = el('p', { classe: 'perfil-explicacao', id: 'proc-perfil-explicacao', 'aria-live': 'polite' });
     var letras = LETRAS.map(function (l) {
       return el('button', { type: 'button', classe: 'perfil-letra', 'data-letra': l, id: 'proc-perfil-' + l, 'aria-pressed': 'false',
-        onclick: function () { f.perfil = alternarLetraPerfil(f.perfil, l); atualizarPerfil(); } }, [
+        onclick: function () { marcar(); f.perfil = alternarLetraPerfil(f.perfil, l); atualizarPerfil(); } }, [
         letraDisc(l, 'perfil-letra__sigla'),
         el('span', { classe: 'perfil-letra__nome', texto: NOMES[l] })
       ]);
@@ -3968,7 +4460,7 @@
           el('div', { classe: 'config-item__topo' }, [
             el('span', { classe: 'config-item__num tabular', texto: 'Etapa ' + (i + 1) }),
             el('span', { classe: 'config-item__peso tabular', 'data-peso-pct': '' }),
-            botao('botao--perigo botao--pequeno', 'Remover', function () { f.etapas.splice(i, 1); desenharEtapas(); }, { 'aria-label': 'Remover etapa ' + (i + 1) })
+            botao('botao--perigo botao--pequeno', 'Remover', function () { marcar(); f.etapas.splice(i, 1); desenharEtapas(); }, { 'aria-label': 'Remover etapa ' + (i + 1) })
           ]),
           el('div', { classe: 'form-grade form-grade--etapa' }, [nome, peso, campo]),
           desc
@@ -3979,6 +4471,7 @@
     form.appendChild(secaoForm('Etapas avaliadas', 'Cada etapa tem uma nota de 0 a 10 num campo numérico do ClickUp. Etapa sem nenhuma nota ainda aparece como "peso em aberto".', [
       somaEtapas, listaEtapas,
       botao('botao--contorno', 'Adicionar etapa', function () {
+        marcar();
         f.etapas.push({ nome: '', peso: 10, campo: '', descricao: '' });
         desenharEtapas();
         var n = $('etapa-nome-' + (f.etapas.length - 1)); if (n) n.focus();
@@ -4012,9 +4505,9 @@
               v.addEventListener('input', function () { par.valor = v.value; });
               pt.addEventListener('input', function () { par.pontos = pt.value; });
               return el('li', { classe: 'mapa__par' }, [v, el('span', { classe: 'mapa__seta', 'aria-hidden': 'true', texto: '→' }), pt,
-                botao('botao--claro botao--pequeno', 'Tirar', function () { b.pares.splice(k, 1); desenharBonus(); }, { 'aria-label': 'Tirar valor ' + (k + 1) })]);
+                botao('botao--claro botao--pequeno', 'Tirar', function () { marcar(); b.pares.splice(k, 1); desenharBonus(); }, { 'aria-label': 'Tirar valor ' + (k + 1) })]);
             })),
-            botao('botao--claro botao--pequeno', 'Adicionar valor', function () { b.pares.push({ valor: '', pontos: '' }); desenharBonus(); }, { id: 'bonus-' + i + '-add-valor' })
+            botao('botao--claro botao--pequeno', 'Adicionar valor', function () { marcar(); b.pares.push({ valor: '', pontos: '' }); desenharBonus(); }, { id: 'bonus-' + i + '-add-valor' })
           ]);
         } else {
           regra = campoCom('bonus-pontos-' + i, 'Pontos quando marcada', b.pontos, { type: 'number', step: 'any', inputmode: 'decimal' });
@@ -4023,7 +4516,7 @@
         listaBonus.appendChild(el('li', { classe: 'config-item bonus-item', 'data-indice': String(i) }, [
           el('div', { classe: 'config-item__topo' }, [
             el('span', { classe: 'config-item__num tabular', texto: 'Bônus ' + (i + 1) }),
-            botao('botao--perigo botao--pequeno', 'Remover', function () { f.bonus.splice(i, 1); desenharBonus(); }, { 'aria-label': 'Remover bônus ' + (i + 1) })
+            botao('botao--perigo botao--pequeno', 'Remover', function () { marcar(); f.bonus.splice(i, 1); desenharBonus(); }, { 'aria-label': 'Remover bônus ' + (i + 1) })
           ]),
           el('div', { classe: 'form-grade' }, [nome, campo]),
           campoEscolha('Como pontua', escTipo, 'bonus-tipo-' + i + '-rotulo'),
@@ -4034,6 +4527,7 @@
     form.appendChild(secaoForm('Bônus', 'Pontos extras somados por fora da nota técnica (ex.: graduação na área).', [
       listaBonus,
       botao('botao--contorno', 'Adicionar bônus', function () {
+        marcar();
         f.bonus.push({ nome: '', campo: '', tipo: 'checkbox', pontos: 5, pares: [] });
         desenharBonus();
         var n = $('bonus-nome-' + (f.bonus.length - 1)); if (n) n.focus();
@@ -4059,7 +4553,7 @@
     form.appendChild(el('div', { classe: 'form-rodape' }, [
       erro,
       el('div', { classe: 'confirmar__acoes' }, [
-        botao('botao--claro botao--grande', 'Cancelar', function () { irParaProcessos(p ? 'pagina' : 'lista', p ? p.id : null); }),
+        botao('botao--claro botao--grande', 'Cancelar', sairDoForm, { id: 'btn-cancelar-processo' }),
         btnSalvar
       ])
     ]));
@@ -4114,24 +4608,69 @@
       return dados;
     }
 
+    formProcesso.coletar = montarDados;
+
+    // Erro ao lado do campo: borda vermelha, mensagem logo abaixo, rolagem até ele e foco (e também no rodapé).
+    function limparErrosCampos() {
+      Array.prototype.forEach.call(form.querySelectorAll('[aria-invalid="true"]'), function (n) { n.removeAttribute('aria-invalid'); n.removeAttribute('aria-describedby'); });
+      Array.prototype.forEach.call(form.querySelectorAll('.campo__erro--campo'), function (n) { n.remove(); });
+    }
+    function erroNoCampo(id, msg) {
+      var alvo = id ? $(id) : null;
+      if (!alvo || !form.contains(alvo)) return false;
+      var idErro = id + '-erro-campo';
+      alvo.setAttribute('aria-invalid', 'true');
+      alvo.setAttribute('aria-describedby', idErro);
+      var junto = alvo.closest('.campo') || alvo.closest('.perfil-escolha') || alvo.parentNode;
+      junto.parentNode.insertBefore(el('p', { classe: 'campo__erro campo__erro--campo', id: idErro, role: 'alert', texto: msg }), junto.nextSibling);
+      try { alvo.scrollIntoView({ block: 'center' }); } catch (e) { alvo.scrollIntoView(); }
+      alvo.focus({ preventScroll: true });
+      return true;
+    }
+    form.addEventListener('input', function (ev) {
+      var t = ev.target;
+      if (t && t.getAttribute && t.getAttribute('aria-invalid') === 'true') {
+        t.removeAttribute('aria-invalid');
+        var e2 = $(t.id + '-erro-campo'); if (e2) e2.remove();
+      }
+    });
+
     form.addEventListener('submit', function (ev) {
       ev.preventDefault();
       erro.textContent = '';
+      limparErrosCampos();
       var dados = montarDados();
-      var problema = !dados.nome ? 'Informe o nome do processo.' : validarConfig(dados.config);
-      if (!problema && dados.periodo.inicio && dados.periodo.fim && dados.periodo.fim < dados.periodo.inicio) problema = 'O fim do período precisa ser depois do início.';
-      if (problema) { erro.textContent = problema; return; }
+      var prob = !dados.nome ? { erro: 'Informe o nome do processo.', campo: 'proc-nome' } : problemaConfig(dados.config);
+      if (!prob.erro && dados.periodo.inicio && dados.periodo.fim && dados.periodo.fim < dados.periodo.inicio) prob = { erro: 'O fim do período precisa ser depois do início.', campo: 'proc-fim' };
+      if (prob.erro) {
+        erro.textContent = prob.erro;
+        if (!erroNoCampo(prob.campo, prob.erro)) btnSalvar.focus();
+        return;
+      }
       dados.config.formulario = normalizarFormulario(dados.config.formulario);
-      btnSalvar.disabled = true;
-      api('processosSalvar', dados).then(function (resp) {
-        var novo = resp.processo || {};
-        avisar(p ? 'Processo salvo.' : 'Processo criado. Código ' + (novo.codigo || '') + ': copie o link e envie.', 'ok');
-        estado.proc = { tela: 'pagina', id: novo.id || (p && p.id) };
-        return carregar().then(function () { irParaProcessos(estado.proc.tela, estado.proc.id); });
-      }).catch(function (e) {
-        if (e && e.tratado) return;
-        erro.textContent = (e && e.message) || 'Não foi possível salvar.';
-      }).then(function () { btnSalvar.disabled = false; });
+      // Nome repetido: confirma (no filtro "Processo" e em "Mover" os dois ficariam iguais).
+      var repetido = estado.processos.filter(function (x) { return (!p || x.id !== p.id) && normalizarNome(x.nome) === normalizarNome(dados.nome); })[0];
+      (repetido ? confirmar({ titulo: 'Já existe um processo com este nome', classeBotao: 'botao--principal', botao: p ? 'Salvar assim mesmo' : 'Criar assim mesmo', botaoVoltar: 'Voltar e trocar o nome',
+        texto: '"' + repetido.nome + '" (código ' + repetido.codigo + ') já existe. Nomes iguais confundem no filtro de participantes e em "Mover para outro processo".' }) : Promise.resolve(true))
+        .then(function (ok) {
+          if (!ok) { erroNoCampo('proc-nome', 'Escolha um nome diferente (ex.: com o ano ou a unidade).'); return; }
+          btnSalvar.disabled = true;
+          return api('processosSalvar', dados).then(function (resp) {
+            var novo = resp.processo || {};
+            formProcesso.sujo = false;
+            ss('del', CHAVE_RASCUNHO_FORM);
+            avisar(p ? 'Processo salvo.' : 'Processo criado. Código ' + (novo.codigo || '') + ': copie o link e envie.', 'ok');
+            var volta = !p && preset.volta && preset.volta.empresa ? preset.volta.empresa : '';
+            estado.proc = { tela: 'pagina', id: novo.id || (p && p.id) };
+            return carregar().then(function () {
+              if (volta) { irParaEmpresas('pagina', volta, 'colaboradores'); return; }
+              irParaProcessos(estado.proc.tela, estado.proc.id);
+            });
+          }).catch(function (e) {
+            if (e && e.tratado) return;
+            erro.textContent = (e && e.message) || 'Não foi possível salvar.';
+          }).then(function () { btnSalvar.disabled = false; });
+        });
     });
     box.appendChild(form);
     atualizarTipo();
@@ -4209,7 +4748,36 @@
     mostrarAba('lista');
   }
 
+  // Gera um rascunho novo. Com textos editados e não salvos no editor deste processo, ou com um rascunho já
+  // existente, pergunta antes (gerar de novo não apaga o anterior, mas o que não foi salvo se perde).
+  // Da página do processo direto ao campo "Lista do ClickUp" do formulário.
+  function irParaListaClickup(p) {
+    irParaProcessos('form', p.id);
+    var alvo = $('proc-clickup');
+    if (!alvo) return;
+    var sec = alvo.closest('.form-secao') || alvo;
+    sec.setAttribute('tabindex', '-1');
+    try { sec.scrollIntoView({ block: 'center' }); } catch (e) { sec.scrollIntoView(); }
+    sec.focus({ preventScroll: true });
+  }
+
   function gerarRascunho(p, btn) {
+    var ed = estado.editor && estado.editor.processoId === p.id ? estado.editor : null;
+    var rascunhos = (estado.relatorios[p.id] || []).filter(function (x) { return x.status !== 'publicado'; });
+    var pergunta = null;
+    if (ed && ed.sujo) {
+      pergunta = escolherAcao({ titulo: 'Gerar um rascunho novo?', texto: 'O rascunho aberto tem textos editados que ainda não foram salvos. Gerar outro agora descarta essas edições.',
+        escolhas: [{ valor: 'nao', texto: 'Voltar ao rascunho aberto', classe: 'botao--claro' }, { valor: 'sim', texto: 'Descartar e gerar outro', classe: 'botao--perigo' }] })
+        .then(function (v) { if (v === 'nao') { irParaProcessos('editor', p.id); return false; } ed.sujo = false; return true; });
+    } else if (rascunhos.length) {
+      pergunta = escolherAcao({ titulo: 'Já existe um rascunho', texto: 'Este processo já tem ' + (rascunhos.length === 1 ? 'um rascunho' : rascunhos.length + ' rascunhos') +
+        ' (o mais recente gerado em ' + formatarData(rascunhos[0].criadoEm) + '). Abra o que já existe para continuar a revisão, ou gere um novo com os dados atuais do ClickUp.',
+        escolhas: [{ valor: 'cancelar', texto: 'Cancelar', classe: 'botao--claro' }, { valor: 'abrir', texto: 'Abrir o rascunho atual', classe: 'botao--claro' }, { valor: 'novo', texto: 'Gerar um novo', classe: 'botao--principal' }] })
+        .then(function (v) { if (v === 'abrir') abrirRelatorio(p, rascunhos[0]); return v === 'novo'; });
+    }
+    (pergunta || Promise.resolve(true)).then(function (seguir) { if (seguir) gerarRascunhoAgora(p, btn); });
+  }
+  function gerarRascunhoAgora(p, btn) {
     btn.disabled = true;
     btn.textContent = 'Gerando… (lendo o ClickUp)';
     api('relatorioRascunho', p.id).then(function (resp) {
@@ -4226,14 +4794,22 @@
   }
 
   // Abre um relatório da lista no editor. O conteúdo vem de "relatorio.salvar" sem mudanças
-  // (devolve o relatório como está, rascunho ou publicado).
-  function abrirRelatorio(p, r) {
+  // (devolve o relatório como está, rascunho ou publicado). Edição guardada (sessão expirada/F5) volta para a tela.
+  // substituir: true quando a tela vem do endereço (F5/Voltar), sem nova entrada no histórico.
+  function abrirRelatorio(p, r, substituir) {
     if (estado.editor && estado.editor.token === r.token) { irParaProcessos('editor', p.id); return; }
     api('relatorioSalvar', r.token, { textos: {} }).then(function (resp) {
       if (!resp.relatorio) throw new Error('Relatório não encontrado.');
       estado.editor = { processoId: p.id, token: r.token, relatorio: resp.relatorio, avisos: [], status: r.status,
         url: r.status === 'publicado' ? linkRelatorio(root.location.href, r.token) : '', sujo: false, modo: 'textos' };
-      irParaProcessos('editor', p.id);
+      var guardado = lerJsonSs(CHAVE_RASCUNHO_EDITOR);
+      if (guardado && guardado.token === r.token && guardado.relatorio && typeof guardado.relatorio === 'object') {
+        estado.editor.relatorio = guardado.relatorio;
+        estado.editor.sujo = true;
+        estado.editor.recuperado = true;
+      }
+      if (substituir) semEmpilhar(function () { irParaProcessos('editor', p.id); });
+      else irParaProcessos('editor', p.id);
     }).catch(falhou);
   }
 
@@ -4261,7 +4837,8 @@
       return el('li', { classe: 'rel-linha', 'data-token': r.token, 'data-status': pub ? 'publicado' : 'rascunho' }, [
         el('div', { classe: 'rel-linha__texto' }, [
           el('span', { classe: 'selo ' + (pub ? 'selo--verde' : ''), texto: pub ? 'Publicado' : 'Rascunho' }),
-          el('span', { classe: 'texto-suave t-rotulo tabular', texto: 'Gerado em ' + formatarData(r.criadoEm) + (pub && r.publicadoEm ? ' · publicado em ' + formatarData(r.publicadoEm) : '') })
+          el('span', { classe: 'texto-suave t-rotulo tabular', texto: 'Gerado em ' + formatarDataSegundos(r.criadoEm) + (pub && r.publicadoEm ? ' · publicado em ' + formatarData(r.publicadoEm) : '') +
+            (r.atualizadoEm && r.atualizadoEm !== r.criadoEm ? ' · salvo em ' + formatarDataSegundos(r.atualizadoEm) : '') })
         ]),
         el('div', { classe: 'gestao-card__acoes' }, [
           botao('botao--claro botao--pequeno', 'Abrir no editor', function () { abrirRelatorio(p, r); }, { 'data-acao': 'abrir-relatorio' }),
@@ -4278,15 +4855,20 @@
     var n = Number(p.respostas) || 0;
     var link = linkDe(p);
     var cfg = p.config || configPadrao();
-    var btnGerar = botao('botao--laranja', 'Gerar rascunho do relatório', function () { gerarRascunho(p, btnGerar); }, { id: 'btn-gerar-rascunho' });
+    var semLista = !p.clickupListId;
+    var btnGerar = botao('botao--laranja', 'Gerar rascunho do relatório', function () { gerarRascunho(p, btnGerar); }, { id: 'btn-gerar-rascunho',
+      disabled: semLista ? true : null, title: semLista ? 'Ligue a lista do ClickUp ao processo primeiro: o relatório lê os candidatos de lá.' : null });
     box.appendChild(cabecalhoVista('Processo seletivo · código ' + p.codigo, p.nome, textoLocal(p) || null, [
       botao('botao--claro', '← Processos', function () { irParaProcessos('lista'); }),
       botao('botao--claro', 'Editar', function () { irParaProcessos('form', p.id); }, { id: 'btn-editar-processo' }),
       botao('botao--claro', 'Ver participantes', function () { verParticipantes(p); }, { id: 'btn-ver-participantes' }),
       btnGerar
     ]));
-    if (!p.clickupListId) {
-      box.appendChild(el('p', { classe: 'aviso proc-aviso', texto: 'Este processo ainda não está ligado a uma lista do ClickUp. Edite o processo para escolher a lista: o relatório lê os candidatos de lá.' }));
+    if (semLista) {
+      box.appendChild(el('div', { classe: 'aviso proc-aviso proc-aviso--acao', id: 'proc-aviso-clickup' }, [
+        el('p', { texto: 'Este processo ainda não está ligado a uma lista do ClickUp. O relatório lê os candidatos de lá: ligue a lista para gerar o rascunho.' }),
+        botao('botao--claro botao--pequeno', 'Escolher a lista do ClickUp', function () { irParaListaClickup(p); }, { id: 'btn-ligar-clickup' })
+      ]));
     }
 
     var dados = el('section', { classe: 'caixa' }, [
@@ -4490,8 +5072,45 @@
     return api('relatorioSalvar', ed.token, ed.relatorio).then(function (resp) {
       if (resp.relatorio) ed.relatorio = resp.relatorio;
       ed.sujo = false;
+      ed.recuperado = false;
+      var g = lerJsonSs(CHAVE_RASCUNHO_EDITOR);
+      if (g && g.token === ed.token) ss('del', CHAVE_RASCUNHO_EDITOR);
       return resp;
     });
+  }
+
+  // "Melhorar textos com IA". Publicado: o link que o contratante já tem muda na hora, então pergunta antes.
+  // Depois, um "Desfazer" devolve os textos de antes (grava de novo a versão anterior).
+  function melhorarComIa(ed, p, btnIa) {
+    var publicado = ed.status === 'publicado';
+    (publicado ? confirmar({ titulo: 'Mudar o relatório já publicado?', classeBotao: 'botao--principal', botao: 'Melhorar e atualizar o link', botaoVoltar: 'Voltar',
+      texto: 'Este relatório já está publicado: a IA reescreve os textos e o link que o contratante recebeu passa a mostrar a versão nova na hora, antes da sua revisão. Se preferir revisar antes, despublique, melhore, revise e publique de novo.' })
+      : Promise.resolve(true)).then(function (ok) {
+      if (!ok) return;
+      var anterior = JSON.parse(JSON.stringify(ed.relatorio || {}));
+      btnIa.disabled = true; btnIa.textContent = 'Melhorando…';
+      (ed.sujo ? salvarEditor(ed) : Promise.resolve()).then(function () {
+        anterior = JSON.parse(JSON.stringify(ed.relatorio || {}));
+        return api('relatorioMelhorarTextos', ed.token);
+      }).then(function (resp) {
+        if (resp.relatorio) ed.relatorio = resp.relatorio;
+        ed.antesDaIa = anterior;
+        var n = resp.alterados != null ? resp.alterados + ' texto(s) reescrito(s) pela IA.' : 'Textos melhorados pela IA.';
+        avisar(n + (publicado ? ' O link publicado já mostra a versão nova: revise.' : ' Revise antes de publicar.'), 'ok', { acao: { texto: 'Desfazer', fn: function () { desfazerIa(ed); } } });
+        renderizarProcessos();
+      }).catch(function (e) { falhou(e); btnIa.disabled = false; btnIa.textContent = 'Melhorar textos com IA'; });
+    });
+  }
+  function desfazerIa(ed) {
+    if (!ed.antesDaIa) return;
+    var antes = ed.antesDaIa;
+    api('relatorioSalvar', ed.token, antes).then(function (resp) {
+      ed.relatorio = resp.relatorio || antes;
+      ed.antesDaIa = null;
+      ed.sujo = false;
+      avisar('Textos de antes da IA restaurados' + (ed.status === 'publicado' ? ' (também no link publicado).' : '.'), 'ok');
+      if (estado.editor === ed) renderizarProcessos();
+    }).catch(falhou);
   }
 
   function renderizarEditor(box, p) {
@@ -4499,18 +5118,10 @@
     var rel = ed.relatorio || {};
     var publicado = ed.status === 'publicado';
 
-    var acoes = [botao('botao--claro', '← Processo', function () { irParaProcessos('pagina', p.id); }, { id: 'btn-voltar-processo' })];
+    var acoes = [botao('botao--claro', '← Processo', function () { seguirSePuder(function () { irParaProcessos('pagina', p.id); }); }, { id: 'btn-voltar-processo' })];
     if (estado.clickup.iaConfigurada) {
-      var btnIa = botao('botao--contorno', 'Melhorar textos com IA', function () {
-        btnIa.disabled = true; btnIa.textContent = 'Melhorando…';
-        (ed.sujo ? salvarEditor(ed) : Promise.resolve()).then(function () {
-          return api('relatorioMelhorarTextos', ed.token);
-        }).then(function (resp) {
-          if (resp.relatorio) ed.relatorio = resp.relatorio;
-          avisar(resp.alterados != null ? resp.alterados + ' texto(s) reescrito(s) pela IA. Revise antes de publicar.' : 'Textos melhorados. Revise antes de publicar.', 'ok');
-          renderizarProcessos();
-        }).catch(function (e) { falhou(e); btnIa.disabled = false; btnIa.textContent = 'Melhorar textos com IA'; });
-      }, { id: 'btn-melhorar-ia' });
+      var btnIa = botao('botao--contorno', 'Melhorar textos com IA', function () { melhorarComIa(ed, p, btnIa); },
+        { id: 'btn-melhorar-ia', title: publicado ? 'O relatório já está publicado: a mudança aparece no link do contratante' : null });
       acoes.push(btnIa);
     }
     var btnSalvar = botao('botao--principal', publicado ? 'Salvar alterações' : 'Salvar rascunho', function () {
@@ -4549,8 +5160,18 @@
       }, { id: 'btn-despublicar' }));
     }
     acoes.splice(1, 0, botaoPreviaNovaAba(function () { return ed.relatorio; }, 'btn-editor-previa-aba'));
-    box.appendChild(cabecalhoVista('Relatório · ' + p.nome, publicado ? 'Relatório publicado' : 'Rascunho do relatório',
-      'Revise cada texto. O que você mudar fica marcado como "Editado". Números e tabelas vêm do ClickUp e do DISC.', acoes));
+    // Barra de ações fixa no topo enquanto rola (34 textos): Salvar/Publicar sempre à mão, com o estado ao lado.
+    var cab = cabecalhoVista('Relatório · ' + p.nome, publicado ? 'Relatório publicado' : 'Rascunho do relatório',
+      'Revise cada texto. O que você mudar fica marcado como "Editado". Números e tabelas vêm do ClickUp e do DISC.', acoes);
+    cab.classList.add('editor-cabecalho');
+    var estadoSalvo = el('span', { classe: 'selo editor-estado' + (ed.sujo ? ' selo--laranja' : ' selo--verde'), id: 'editor-estado', 'aria-live': 'polite',
+      texto: ed.sujo ? 'Alterações não salvas' : 'Salvo' });
+    var acoesCab = cab.querySelector('.cabecalho__acoes');
+    if (acoesCab) acoesCab.insertBefore(estadoSalvo, acoesCab.firstChild);
+    function marcarEditado() { estadoSalvo.textContent = 'Alterações não salvas'; estadoSalvo.className = 'selo editor-estado selo--laranja'; }
+    box.appendChild(cab);
+    if (ed.recuperado) box.appendChild(el('p', { classe: 'aviso proc-aviso', id: 'editor-recuperado', role: 'status',
+      texto: 'Recuperamos os textos que você tinha editado antes de sair (sessão expirada ou página recarregada). Eles ainda não foram salvos.' }));
 
     if (publicado && ed.url) {
       var msg = mensagemRelatorio(p, ed.url);
@@ -4620,6 +5241,7 @@
           ta.addEventListener('input', function () {
             if (editarTexto(rel, t.id, ta.value)) {
               ed.sujo = true;
+              marcarEditado();
               selo.textContent = ORIGENS.editado;
               selo.setAttribute('data-origem', 'editado');
             }
@@ -4651,7 +5273,9 @@
     var id = cfg.id;
     var multiplo = !!cfg.multiplo;
     var opcoes = (cfg.opcoes || []).slice();
-    if (!multiplo && cfg.vazio) opcoes.unshift({ valor: '', rotulo: cfg.vazio });
+    // "Sem líder", "Nenhuma (só o nome em texto)" são escolhas de verdade; "Escolher o processo" é só o texto do botão.
+    var vazioNaLista = cfg.vazioNaLista != null ? !!cfg.vazioNaLista : !/^Escolher\b/.test(String(cfg.vazio || ''));
+    if (!multiplo && cfg.vazio && vazioNaLista) opcoes.unshift({ valor: '', rotulo: cfg.vazio });
     var sel = multiplo ? (cfg.valores || []).map(String) : [cfg.valor == null ? '' : String(cfg.valor)];
     var ouvintes = [];
     var aberto = false;
@@ -5046,6 +5670,19 @@
   }
 
   function excluirEmpresa(e) {
+    // Com colaboradores ativos o servidor recusa: diz isso antes e oferece arquivar (sem o susto do "não dá para desfazer").
+    var n = Number(e.colaboradores) || 0;
+    if (n > 0) {
+      escolherAcao({ titulo: 'Esta empresa tem colaboradores ativos', texto: '"' + e.nome + '" tem ' + n + (n === 1 ? ' colaborador ativo' : ' colaboradores ativos') +
+        '. Para excluir, desligue ou mova ' + (n === 1 ? 'essa pessoa' : 'essas pessoas') + ' antes. Se a empresa só deixou de ser atendida, arquive: ela fica no fim da lista, com tudo guardado.',
+        escolhas: [{ valor: 'voltar', texto: 'Voltar', classe: 'botao--claro' }, { valor: 'abrir', texto: 'Ver os colaboradores', classe: 'botao--claro' },
+          e.ativo === false ? null : { valor: 'arquivar', texto: 'Arquivar a empresa', classe: 'botao--principal' }]
+      }).then(function (v) {
+        if (v === 'arquivar') arquivarEmpresa(e);
+        else if (v === 'abrir') irParaEmpresas('pagina', e.id, 'colaboradores');
+      });
+      return;
+    }
     confirmar({ titulo: 'Excluir a empresa?', texto: '"' + e.nome + '" sai do cadastro com o histórico de colaboradores, as ligações e os relatórios dela. Não dá para desfazer.', botao: 'Excluir empresa' }).then(function (ok) {
       if (!ok) return;
       api('excluirEmpresa', e.id).then(function () {
@@ -5088,6 +5725,7 @@
   function irParaSubaba(sub) {
     estado.emp.subaba = sub;
     renderizarEmpresas();
+    gravarRota(); // a subaba também fica no endereço (Voltar do navegador volta para a anterior)
     var b = $('emp-subaba-' + sub);
     if (b) b.focus();
   }
@@ -5114,7 +5752,7 @@
       botao('botao--claro', '← Empresas', function () { irParaEmpresas('lista'); }, { id: 'btn-voltar-empresas' }),
       botao('botao--claro', 'Editar', function () { janelaEmpresa(emp); }, { id: 'btn-editar-empresa' }),
       botao('botao--principal', 'Adicionar colaborador', function () { janelaColaborador(emp, eq); }, { id: 'btn-add-colaborador' }),
-      botao('botao--laranja', 'Gerar relatório da equipe', function () { janelaRelatorioEquipe(emp, eq); }, { id: 'btn-relatorio-equipe', disabled: colabs.length ? null : true })
+      botao('botao--laranja', 'Gerar relatório da equipe', function () { janelaRelatorioEquipe(emp, eq); }, { id: 'btn-relatorio-equipe', disabled: colabs.length ? null : true, title: colabs.length ? null : 'Adicione colaboradores primeiro' })
     ]));
     if (emp.ativo === false) box.appendChild(el('p', { classe: 'aviso proc-aviso', texto: 'Empresa arquivada: continua no cadastro, mas fica no fim da lista.' }));
 
@@ -5142,13 +5780,13 @@
         el('h3', { classe: 'caixa__titulo', texto: 'Gerar um relatório desta empresa' }),
         el('p', { classe: 'texto-suave t-rotulo', texto: 'Relatório da equipe (organograma, perfis e compatibilidade) aqui. Como liderar e relatório da pessoa ficam em cada colaborador, ou na aba Relatórios do painel.' }),
         el('div', { classe: 'gestao-card__acoes' }, [
-          botao('botao--principal botao--pequeno', 'Relatório da equipe', function () { janelaRelatorioEquipe(emp, eq); }, { id: 'btn-emp-rel-equipe', disabled: colabs.length ? null : true }),
+          botao('botao--principal botao--pequeno', 'Relatório da equipe', function () { janelaRelatorioEquipe(emp, eq); }, { id: 'btn-emp-rel-equipe', disabled: colabs.length ? null : true, title: colabs.length ? null : 'Adicione colaboradores primeiro' }),
           botao('botao--claro botao--pequeno', 'Ver todos os modelos', function () { irParaRelatorios('modelos'); }, { id: 'btn-emp-ver-modelos' })
         ])
       ]));
       painel.appendChild(blocoRelatoriosModelo({ empresaId: id }, 'e:' + id, { empresa: emp.nome }));
     } else if (sub === 'historico') {
-      painel.appendChild(blocoHistorico2(eq));
+      painel.appendChild(blocoHistorico2(eq, emp));
     } else {
       // Link do teste da equipe + colaboradores
       painel.appendChild(el('section', { classe: 'caixa emp-bloco', id: 'emp-link' }, proc ? [
@@ -5164,8 +5802,7 @@
         el('h3', { classe: 'caixa__titulo', texto: 'Link do teste da equipe' }),
         el('p', { classe: 'form-secao__texto emp-link__texto', texto: 'Ainda não há um processo de avaliação de equipe ligado a esta empresa. Crie um: ' + textoEquipeEmpresa(emp.nome) }),
         el('div', { classe: 'gestao-card__acoes' }, botao('botao--contorno botao--pequeno', 'Criar link do teste da equipe', function () {
-          estado.proc = { tela: 'form', id: null, preset: { tipo: 'equipe', empresaId: id, empresa: emp.nome } };
-          renderizarProcessos(); mostrarAba('processos'); root.scrollTo(0, 0);
+          irParaProcessos('form', null, { tipo: 'equipe', empresaId: id, empresa: emp.nome, nome: 'Equipe ' + emp.nome, volta: { empresa: id } });
         }, { id: 'btn-criar-link-equipe' }))
       ]));
       painel.appendChild(blocoColaboradores(emp, eq, colabs, id, proc, linkTeste));
@@ -5211,10 +5848,10 @@
           el('div', { classe: 'gestao-card__acoes' }, [
             botao('botao--claro botao--pequeno', 'Ligações', function () { janelaLigacoes(emp, eq, c); }, { 'data-acao': 'ligacoes' }),
             botao('botao--claro botao--pequeno', 'Editar', function () { janelaEditarColaborador(emp, c); }, { 'data-acao': 'editar' }),
-            botao('botao--claro botao--pequeno', 'Mover para outra empresa', function () { janelaMover(emp, c); }, { 'data-acao': 'mover' }),
+            botao('botao--claro botao--pequeno', 'Mover para outra empresa', function () { janelaMover(emp, c, eq); }, { 'data-acao': 'mover' }),
             botao('botao--claro botao--pequeno', 'Como liderar', function () { gerarLideranca(emp, eq, c); }, { 'data-acao': 'como-liderar', disabled: res ? null : true, title: res ? null : 'Precisa do teste DISC' }),
-            botao('botao--claro botao--pequeno', 'Relatório da pessoa', function () { gerarPessoa(c.pessoaId, c.nome, res, { aba: 'empresas', tela: 'pagina', id: id, subaba: 'colaboradores' }, id, c.exigido || null, c.foto); }, { 'data-acao': 'relatorio-pessoa', disabled: res ? null : true }),
-            botao('botao--perigo botao--pequeno', 'Desligar', function () { desligar(emp, c); }, { 'data-acao': 'desligar' })
+            botao('botao--claro botao--pequeno', 'Relatório da pessoa', function () { gerarPessoa(c.pessoaId, c.nome, res, { aba: 'empresas', tela: 'pagina', id: id, subaba: 'colaboradores' }, id, c.exigido || null, c.foto); }, { 'data-acao': 'relatorio-pessoa', disabled: res ? null : true, title: res ? null : 'Precisa do teste DISC' }),
+            botao('botao--perigo botao--pequeno', 'Desligar', function () { desligar(emp, c, eq); }, { 'data-acao': 'desligar' })
           ])
         ]);
       })));
@@ -5260,14 +5897,43 @@
     return sec;
   }
 
-  function blocoHistorico2(eq) {
+  // Histórico: período, se foi desligado(a) ou transferido(a) (e para onde), e as ações "Ver pessoa" e "Readmitir".
+  function blocoHistorico2(eq, emp) {
     var hist = (eq.historico || []).concat(eq.colaboradores.filter(function (c) { return c.status === 'desligado'; }));
+    var ativosAqui = {};
+    eq.colaboradores.forEach(function (c) { if (c.status !== 'desligado') ativosAqui[String(c.pessoaId)] = true; });
     return el('section', { classe: 'caixa', id: 'emp-historico' }, [
       el('h3', { classe: 'caixa__titulo', texto: 'Histórico (desligados e transferidos)' }),
       hist.length ? el('ul', { classe: 'lista-simples' }, hist.map(function (c) {
+        var selo = el('span', { classe: 'selo emp-hist__situacao', texto: 'Desligado(a)' });
+        var acoes = el('span', { classe: 'gestao-card__acoes emp-hist__acoes' });
+        var reg = estado.registros.filter(function (x) { return String(x.pessoaId || '') === String(c.pessoaId); })[0];
+        if (reg) acoes.appendChild(botao('botao--claro botao--pequeno', 'Ver pessoa', function () { seguirSePuder(function () { abrirDetalhe(reg.id); }); }, { 'data-acao': 'ver-pessoa' }));
+        var readmitir = emp && !ativosAqui[String(c.pessoaId)] ? botao('botao--claro botao--pequeno', 'Readmitir', function () {
+          confirmar({ titulo: 'Readmitir ' + c.nome + '?', classeBotao: 'botao--principal', botao: 'Readmitir', botaoVoltar: 'Voltar',
+            texto: c.nome + ' volta para ' + emp.nome + ' como colaborador(a) ativo(a)' + (c.cargo ? ', com o cargo ' + c.cargo : '') + '. As ligações do organograma precisam ser refeitas.' })
+            .then(function (ok) {
+              if (!ok) return;
+              api('salvarColaborador', { empresaId: emp.id, pessoaId: c.pessoaId, cargo: c.cargo || '', area: c.area || '' })
+                .then(function () { return depoisDeMudarEquipe(emp.id, c.nome + ' foi readmitido(a).'); }).catch(falhou);
+            });
+        }, { 'data-acao': 'readmitir' }) : null;
+        if (readmitir) acoes.appendChild(readmitir);
+        // Ativo(a) em outra empresa = transferido(a): mostra para onde e não oferece readmitir.
+        acharVinculo(c.pessoaId).then(function (v) {
+          if (!v || !document.body.contains(selo)) return;
+          if (String(v.empresa.id) === String(emp && emp.id)) { selo.textContent = 'Ativo(a) de novo'; if (readmitir) readmitir.remove(); return; }
+          selo.textContent = 'Transferido(a) para ' + v.empresa.nome;
+          selo.classList.add('selo--noite');
+          if (readmitir) readmitir.remove();
+        });
         return el('li', { classe: 'emp-hist', 'data-pessoa': c.pessoaId }, [
-          el('span', { classe: 'proc-etapas-resumo__nome', texto: c.nome + (c.cargo ? ' · ' + c.cargo : '') }),
-          el('span', { classe: 'texto-suave t-rotulo tabular', texto: textoPeriodoVinculo(c) || 'Desligado' })
+          el('span', { classe: 'emp-hist__texto' }, [
+            el('span', { classe: 'proc-etapas-resumo__nome', texto: c.nome + (c.cargo ? ' · ' + c.cargo : '') }),
+            el('span', { classe: 'texto-suave t-rotulo tabular', texto: ' ' + (textoPeriodoVinculo(c) || '') }),
+            ' ', selo
+          ]),
+          acoes
         ]);
       })) : el('p', { classe: 'texto-suave t-rotulo', texto: 'Ninguém saiu desta empresa até agora.' })
     ]);
@@ -5297,6 +5963,13 @@
   function blocoOrganograma(emp, eq, colabs) {
     var status = el('span', { classe: 't-rotulo texto-suave org-status', id: 'emp-org-status', 'aria-live': 'polite' });
     var aviso = el('p', { classe: 'aviso aviso--erro org-aviso', id: 'emp-org-aviso', role: 'alert', hidden: true });
+    var falha = el('div', { classe: 'aviso aviso--erro org-falha', id: 'emp-org-falha', role: 'alert', hidden: true }, [
+      el('p', { classe: 'org-falha__texto' }),
+      el('div', { classe: 'gestao-card__acoes' }, [
+        botao('botao--principal botao--pequeno', 'Tentar de novo', tentarOrganogramaDeNovo, { id: 'btn-org-tentar' }),
+        botao('botao--claro botao--pequeno', 'Desfazer (voltar ao gravado)', descartarOrganogramaNaoSalvo, { id: 'btn-org-descartar' })
+      ])
+    ]);
     var quadro = el('div', { classe: 'org-quadro', id: 'emp-org-quadro' });
     var sec = el('section', { classe: 'caixa caixa--ampla emp-bloco emp-org', id: 'emp-organograma' }, [
       el('div', { classe: 'org-cabeca' }, [
@@ -5307,6 +5980,7 @@
         status
       ]),
       aviso,
+      falha,
       quadro
     ]);
     var O = root.DISC_ORGANOGRAMA;
@@ -5329,6 +6003,7 @@
           semPosicaoIds: (eq.semPosicaoIds || []).slice(),
           modo: 'editar',
           aoMudar: function (relacoes, mudanca) { mudouOrganograma(emp, eq, relacoes, mudanca); },
+          aoTirarLider: function (info, continuar) { perguntarEquipe(info, 'tirar').then(continuar); },
           aoAbrirPessoa: function (id) {
             var c = colabs.filter(function (x) { return String(x.pessoaId) === String(id); })[0];
             if (c) janelaLigacoes(emp, eq, c);
@@ -5346,6 +6021,26 @@
     return sec;
   }
 
+  // Quem lidera vai sair (do organograma, desligado ou para outra empresa): o que fazer com a equipe dele?
+  // info = { nome, liderados: [{nome}], lider: {nome}|null }; acao: 'tirar' | 'desligar' | 'mover'.
+  // -> Promise<'subir' | 'topo' | null (desistiu)>
+  function perguntarEquipe(info, acao) {
+    var nomes = (info.liderados || []).map(function (x) { return x.nome; }).filter(Boolean);
+    var lista = nomes.length <= 1 ? (nomes[0] || '') : nomes.slice(0, -1).join(', ') + ' e ' + nomes[nomes.length - 1];
+    var ficam = nomes.length === 1 ? 'fica sem líder' : 'ficam sem líder';
+    var oQue = acao === 'desligar' ? 'Desligar ' + info.nome : (acao === 'mover' ? 'Mover ' + info.nome + ' para outra empresa' : 'Tirar ' + info.nome + ' do organograma');
+    return escolherAcao({
+      titulo: oQue + '?',
+      texto: info.nome + ' lidera ' + lista + '. Se sair, ' + (nomes.length === 1 ? 'essa pessoa ' : 'essas pessoas ') + ficam + ' no organograma, a não ser que a equipe passe para ' +
+        (info.lider ? info.lider.nome + ' (o líder de cima).' : 'outra pessoa.') + ' O que fazer com a equipe?',
+      escolhas: [
+        { valor: 'cancelar', texto: 'Cancelar', classe: 'botao--claro' },
+        { valor: 'topo', texto: 'Deixar a equipe sem líder', classe: 'botao--claro' },
+        info.lider ? { valor: 'subir', texto: 'Passar a equipe para ' + primeiroNome(info.lider.nome), classe: 'botao--principal' } : null
+      ]
+    }).then(function (v) { return v === 'subir' || v === 'topo' ? v : null; });
+  }
+
   function mudouOrganograma(emp, eq, relacoes, mudanca) {
     var aviso = $('emp-org-aviso');
     if (mudanca && mudanca.erro) {
@@ -5353,6 +6048,8 @@
       return;
     }
     if (aviso) aviso.hidden = true;
+    // Guarda como estava antes desta mudança: o "Desfazer" do aviso volta e grava de novo.
+    var antes = { relacoes: (eq.relacoes || []).slice(), topoIds: (eq.topoIds || []).slice(), semPosicaoIds: (eq.semPosicaoIds || []).slice() };
     eq.relacoes = (relacoes || []).map(function (r) { return { de: String(r.de), para: String(r.para), tipo: r.tipo }; });
     if (mudanca && Array.isArray(mudanca.topoIds)) eq.topoIds = mudanca.topoIds.map(String);
     if (mudanca && Array.isArray(mudanca.semPosicaoIds)) eq.semPosicaoIds = mudanca.semPosicaoIds.map(String);
@@ -5362,22 +6059,67 @@
     org.pendente = { emp: emp, eq: eq };
     clearTimeout(org.timer);
     org.timer = setTimeout(salvarOrganograma, 500);
+    if (mudanca && mudanca.texto) {
+      avisar(mudanca.texto, 'ok', { acao: { texto: 'Desfazer', fn: function () { desfazerOrganograma(emp, eq, antes); } } });
+    }
   }
 
-  function salvarOrganograma() {
+  // Volta o organograma para como estava e grava de novo.
+  function desfazerOrganograma(emp, eq, antes) {
+    eq.relacoes = antes.relacoes.slice();
+    eq.topoIds = antes.topoIds.slice();
+    eq.semPosicaoIds = antes.semPosicaoIds.slice();
+    estado.emp.indice = null;
+    if (org.inst && typeof org.inst.atualizar === 'function') org.inst.atualizar({ relacoes: eq.relacoes.slice(), topoIds: eq.topoIds.slice(), semPosicaoIds: eq.semPosicaoIds.slice() });
+    var st = $('emp-org-status');
+    if (st) st.textContent = 'Salvando…';
+    org.pendente = { emp: emp, eq: eq };
+    clearTimeout(org.timer);
+    salvarOrganograma(function () { avisar('Mudança desfeita.', 'ok'); });
+  }
+
+  function salvarOrganograma(depois) {
+    clearTimeout(org.timer);
     var p = org.pendente;
     org.pendente = null;
     if (!p) return;
     var rels = p.eq.relacoes.slice();
+    var faixa = $('emp-org-falha');
     api('salvarRelacoes', p.emp.id, rels, { topoIds: (p.eq.topoIds || []).slice() }).then(function () {
+      if (faixa) faixa.hidden = true;
       if (org.pendente) return; // mudou de novo enquanto salvava: o próximo salvamento atualiza o status
       var st = $('emp-org-status');
       if (st) st.textContent = 'Salvo';
+      if (typeof depois === 'function') depois();
     }).catch(function (e) {
       var st = $('emp-org-status');
       if (st) st.textContent = 'Não salvou';
-      falhou(e);
+      if (e && e.tratado) return;
+      // Faixa fixa até resolver: tentar de novo ou voltar ao que está gravado no servidor.
+      var f = $('emp-org-falha');
+      if (f) {
+        f.querySelector('.org-falha__texto').textContent = 'Não foi possível salvar o organograma (' + ((e && e.message) || 'erro') + '). A tela mostra uma mudança que ainda não está gravada.';
+        f.hidden = false;
+        f.dataset.empresa = p.emp.id;
+        org.falhou = p;
+      } else falhou(e);
     });
+  }
+  function tentarOrganogramaDeNovo() {
+    if (!org.falhou) return;
+    org.pendente = org.falhou;
+    org.falhou = null;
+    var st = $('emp-org-status');
+    if (st) st.textContent = 'Salvando…';
+    salvarOrganograma(function () { avisar('Organograma salvo.', 'ok'); });
+  }
+  function descartarOrganogramaNaoSalvo() {
+    var p = org.falhou;
+    org.falhou = null;
+    if (!p) return;
+    delete estado.emp.equipes[p.emp.id];
+    estado.emp.indice = null;
+    carregarEquipe(p.emp.id).then(function () { renderizarEmpresas(); avisar('Organograma de volta ao que está gravado.', 'ok'); }).catch(falhou);
   }
 
   var NIVEIS_PAR = { fluido: 'Fluido', atencao: 'Atenção', tensao: 'Tensão', indefinido: 'Sem teste' };
@@ -5447,8 +6189,17 @@
     var ativos = {};
     eq.colaboradores.forEach(function (c) { if (c.status !== 'desligado') ativos[String(c.pessoaId)] = true; });
     var pessoas = pessoasDasRespostas(estado.registros).filter(function (p) { return !ativos[p.pessoaId]; });
+    // Quem já é ativo em outra empresa aparece marcado ("ativo(a) em …"); escolher essa pessoa leva ao "Mover".
+    var emOutra = {};
+    var idx = estado.emp.indice;
+    var marcarOutra = function () {
+      if (!idx) return Promise.resolve();
+      return idx.then(function (mapa) { pessoas.forEach(function (p) { var v = mapa[String(p.pessoaId)]; if (v && v.empresa.id !== emp.id) emOutra[p.pessoaId] = v; }); });
+    };
     var escPessoa = criarSeletorBusca({ id: 'colab-pessoa', rotulo: 'Pessoa que já respondeu', rotuloId: 'colab-pessoa-rotulo', vazio: 'Pessoa nova (preencher nome e WhatsApp)',
-      opcoes: pessoas.map(function (p) { return { valor: p.pessoaId, rotulo: p.nome, sub: [formatarTelefone(p.telefone), p.resultado ? p.resultado.codigo : 'sem teste'].filter(Boolean).join(' · '), busca: soDigitos(p.telefone) }; }) });
+      opcoes: pessoas.map(function (p) { return { valor: p.pessoaId, rotulo: p.nome, sub: [formatarTelefone(p.telefone), p.resultado ? p.resultado.codigo : 'sem teste', vinculoTexto(p.pessoaId)].filter(Boolean).join(' · '), busca: soDigitos(p.telefone) }; }) });
+    function vinculoTexto(pid) { var v = vinculoConhecido(pid); return v && v.empresa.id !== emp.id ? 'ativo(a) em ' + v.empresa.nome : ''; }
+    marcarOutra();
     var novos = el('div', { classe: 'form-grade', id: 'colab-novos' }, [
       campoTexto('colab-nome', 'Nome completo', { maxlength: 120 }),
       campoTexto('colab-telefone', 'WhatsApp com DDD', { maxlength: 20, inputmode: 'tel', placeholder: '(11) 99999-8888' })
@@ -5469,6 +6220,18 @@
       botao: 'Adicionar',
       aoConfirmar: function () {
         var d = { empresaId: emp.id, cargo: $('colab-cargo').value.trim(), area: $('colab-area').value.trim() };
+        var outra = escPessoa.valor() ? (emOutra[escPessoa.valor()] || vinculoConhecido(escPessoa.valor())) : null;
+        if (outra && outra.empresa.id !== emp.id) {
+          // Já é colaborador(a) ativo(a) em outra empresa: oferece mover para cá (o vínculo de lá vai para o histórico).
+          var nomeP = (pessoas.filter(function (p) { return p.pessoaId === escPessoa.valor(); })[0] || {}).nome || 'Esta pessoa';
+          return confirmar({ titulo: 'Mover ' + nomeP + ' para ' + emp.nome + '?', classeBotao: 'botao--principal', botao: 'Mover para cá', botaoVoltar: 'Voltar',
+            texto: nomeP + ' é colaborador(a) ativo(a) em ' + outra.empresa.nome + '. Ao mover, o vínculo de lá vai para o histórico e as ligações de lá são apagadas.' })
+            .then(function (ok) {
+              if (!ok) { var x = new Error('cancelado'); x.cancelado = true; throw x; }
+              return api('moverColaborador', { pessoaId: escPessoa.valor(), empresaId: emp.id, cargo: d.cargo || outra.colaborador.cargo || '', area: d.area || outra.colaborador.area || '' })
+                .then(function () { return depoisDeMudarEquipe(emp.id, nomeP + ' agora está em ' + emp.nome + '.'); });
+            });
+        }
         if (escPessoa.valor()) d.pessoaId = escPessoa.valor();
         else {
           d.nome = $('colab-nome').value.trim();
@@ -5476,7 +6239,19 @@
           if (!d.nome) throw new Error('Informe o nome do colaborador.');
           if (d.telefone.length < 10) throw new Error('Informe o WhatsApp com DDD.');
         }
-        return api('salvarColaborador', d).then(function () { return depoisDeMudarEquipe(emp.id, 'Colaborador adicionado.'); });
+        return api('salvarColaborador', d).then(function () { return depoisDeMudarEquipe(emp.id, 'Colaborador adicionado.'); }, function (e) {
+          // O servidor diz que a pessoa é ativa em outra empresa: em vez de só o erro, oferece mover para cá.
+          var m = e && /já é colaboradora ativa de outra empresa \(([^)]*)\)/.exec(e.message || '');
+          if (!m || !d.pessoaId) throw e;
+          var nomeP = (pessoas.filter(function (p) { return p.pessoaId === d.pessoaId; })[0] || {}).nome || 'Esta pessoa';
+          return confirmar({ titulo: 'Mover ' + nomeP + ' para ' + emp.nome + '?', classeBotao: 'botao--principal', botao: 'Mover para cá', botaoVoltar: 'Voltar',
+            texto: nomeP + ' é colaborador(a) ativo(a) em ' + m[1] + '. Ao mover, o vínculo de lá vai para o histórico e as ligações de lá são apagadas.' })
+            .then(function (ok) {
+              if (!ok) { var x = new Error('cancelado'); x.cancelado = true; throw x; }
+              return api('moverColaborador', { pessoaId: d.pessoaId, empresaId: emp.id, cargo: d.cargo, area: d.area })
+                .then(function () { return depoisDeMudarEquipe(emp.id, nomeP + ' agora está em ' + emp.nome + '.'); });
+            });
+        });
       }
     });
   }
@@ -5496,7 +6271,29 @@
     });
   }
 
-  function janelaMover(emp, c) {
+  // Antes de tirar alguém que lidera (desligar ou mover de empresa): pergunta o que fazer com a equipe e, se for
+  // passar para o líder de cima, grava as ligações novas antes. -> Promise<boolean> (false = desistiu)
+  function cuidarDaEquipe(emp, eq, c, acao) {
+    var id = String(c.pessoaId);
+    var rels = (eq && eq.relacoes) || [];
+    var lid = lideradosDe(rels, id);
+    if (!lid.length) return Promise.resolve(true);
+    var nomes = nomePorId(eq.colaboradores);
+    var acima = liderDe(rels, id);
+    var info = { nome: c.nome, liderados: lid.map(function (x) { return { id: x, nome: nomes[x] || '' }; }), lider: acima ? { id: acima, nome: nomes[acima] || '' } : null };
+    return perguntarEquipe(info, acao).then(function (escolha) {
+      if (!escolha) return false;
+      var subir = escolha === 'subir' && !!acima;
+      // 'subir': a equipe passa para o líder de cima. 'topo': a equipe fica no Topo do organograma, sem líder
+      // (e não some para "Sem posição").
+      var novas = reatribuirEquipe(rels, id, subir ? 'subir' : 'soltar');
+      var topo = (eq.topoIds || []).map(String).filter(function (x) { return x !== id; });
+      if (!subir) lid.forEach(function (x) { if (topo.indexOf(x) === -1) topo.push(x); });
+      return api('salvarRelacoes', emp.id, novas, { topoIds: topo }).then(function () { eq.relacoes = novas; eq.topoIds = topo; return true; });
+    });
+  }
+
+  function janelaMover(emp, c, eq) {
     var outras = (estado.emp.lista || []).filter(function (e) { return e.id !== emp.id && e.ativo !== false; });
     var escDestino = criarSeletorBusca({ id: 'mover-destino', rotulo: 'Empresa de destino', rotuloId: 'mover-destino-rotulo', vazio: 'Escolher a empresa',
       placeholder: 'Buscar ou cadastrar empresa…', criar: cadastroEmpresaRapido(),
@@ -5504,7 +6301,7 @@
     abrirJanela({
       id: 'janela-mover',
       titulo: 'Mover ' + c.nome,
-      texto: 'O vínculo atual com ' + emp.nome + ' vira histórico (desligado hoje) e as ligações dela aqui são apagadas. Na empresa nova ela entra como colaboradora ativa.',
+      texto: 'O vínculo atual com ' + emp.nome + ' vira histórico (desligado hoje) e as ligações desta pessoa aqui são apagadas. Na empresa nova, entra como colaborador(a) ativo(a).',
       corpo: [
         campoEscolha('Empresa de destino', escDestino, 'mover-destino-rotulo'),
         el('div', { classe: 'form-grade' }, [
@@ -5516,17 +6313,25 @@
       aoConfirmar: function () {
         var destino = escDestino.valor();
         if (!destino) throw new Error('Escolha a empresa de destino.');
-        return api('moverColaborador', { pessoaId: c.pessoaId, empresaId: destino, cargo: $('mover-cargo').value.trim(), area: $('mover-area').value.trim() })
-          .then(function () { return depoisDeMudarEquipe(emp.id, c.nome + ' agora está em ' + nomeEmpresa(destino) + '.'); });
+        var dados = { pessoaId: c.pessoaId, empresaId: destino, cargo: $('mover-cargo').value.trim(), area: $('mover-area').value.trim() };
+        return cuidarDaEquipe(emp, eq, c, 'mover').then(function (ok) {
+          if (!ok) { var x = new Error('cancelado'); x.cancelado = true; throw x; }
+          return api('moverColaborador', dados)
+            .then(function () { return depoisDeMudarEquipe(emp.id, c.nome + ' agora está em ' + nomeEmpresa(destino) + '.'); });
+        });
       }
     });
   }
 
-  function desligar(emp, c) {
-    confirmar({ titulo: 'Desligar ' + c.nome + '?', texto: 'O vínculo com ' + emp.nome + ' vai para o histórico e as ligações dela no organograma são apagadas. As respostas do teste continuam.', botao: 'Desligar' }).then(function (ok) {
-      if (!ok) return;
-      api('desligarColaborador', c.vinculoId).then(function () { return depoisDeMudarEquipe(emp.id, c.nome + ' foi desligado(a).'); }).catch(falhou);
-    });
+  // Desligar: quem lidera pergunta antes o que fazer com a equipe (passar para o líder de cima ou deixar sem líder).
+  function desligar(emp, c, eq) {
+    var lidera = eq && lideradosDe(eq.relacoes, c.pessoaId).length;
+    (lidera ? cuidarDaEquipe(emp, eq, c, 'desligar') : confirmar({ titulo: 'Desligar ' + c.nome + '?', botao: 'Desligar',
+      texto: 'O vínculo com ' + emp.nome + ' vai para o histórico e as ligações desta pessoa no organograma são apagadas. As respostas do teste continuam. Dá para readmitir pelo Histórico.' }))
+      .then(function (ok) {
+        if (!ok) return;
+        return api('desligarColaborador', c.vinculoId).then(function () { return depoisDeMudarEquipe(emp.id, c.nome + ' foi desligado(a).'); });
+      }).catch(falhou);
   }
 
   function janelaLigacoes(emp, eq, c) {
@@ -5535,7 +6340,10 @@
     var outros = eq.colaboradores.filter(function (x) { return x.status !== 'desligado' && String(x.pessoaId) !== id; }).map(function (x) {
       return { valor: String(x.pessoaId), rotulo: x.nome, sub: [x.cargo, x.resultado ? x.resultado.codigo : 'sem teste'].filter(Boolean).join(' · ') };
     });
-    var escLider = criarSeletorBusca({ id: 'lig-lider', rotulo: 'Líder', rotuloId: 'lig-lider-rotulo', vazio: 'Sem líder', opcoes: outros, valor: lig.lider });
+    // Quem está abaixo da pessoa (liderados, liderados deles…) não pode ser o líder dela: viraria um ciclo.
+    var abaixo = descendentes(eq.relacoes, id);
+    var opLider = outros.filter(function (o) { return abaixo.indexOf(o.valor) === -1; });
+    var escLider = criarSeletorBusca({ id: 'lig-lider', rotulo: 'Líder', rotuloId: 'lig-lider-rotulo', vazio: 'Sem líder', opcoes: opLider, valor: lig.lider });
     var escDiretos = criarSeletorBusca({ id: 'lig-diretos', rotulo: 'Trabalha diretamente com', rotuloId: 'lig-diretos-rotulo', multiplo: true, opcoes: outros, valores: lig.diretos, textoBotao: 'Adicionar pessoa' });
     var escIndiretos = criarSeletorBusca({ id: 'lig-indiretos', rotulo: 'Trabalha indiretamente com', rotuloId: 'lig-indiretos-rotulo', multiplo: true, opcoes: outros, valores: lig.indiretos, textoBotao: 'Adicionar pessoa' });
     abrirJanela({
@@ -5549,7 +6357,12 @@
       ],
       botao: 'Salvar ligações',
       aoConfirmar: function () {
-        var novo = aplicarLigacoes(eq.relacoes, id, { lider: escLider.valor(), diretos: escDiretos.valores(), indiretos: escIndiretos.valores() });
+        var lider = escLider.valor();
+        if (lider && descendentes(eq.relacoes, id).indexOf(lider) !== -1) {
+          var nomes = nomePorId(eq.colaboradores);
+          throw new Error('Não dá para colocar ' + (nomes[lider] || 'essa pessoa') + ' como líder de ' + c.nome + ': ' + (nomes[lider] || 'essa pessoa') + ' faz parte da equipe liderada por ' + c.nome + '.');
+        }
+        var novo = aplicarLigacoes(eq.relacoes, id, { lider: lider, diretos: escDiretos.valores(), indiretos: escIndiretos.valores() });
         return api('salvarRelacoes', emp.id, novo).then(function () { return depoisDeMudarEquipe(emp.id, 'Ligações de ' + c.nome + ' salvas.'); });
       }
     });
@@ -5564,8 +6377,11 @@
   }
 
   // O relatório aberto mora na aba de onde veio: Relatórios (assistente) ou Empresas (página da empresa / detalhe).
-  function abrirRelatorioModelo(rel) {
-    rel.id = null; rel.token = ''; rel.status = 'novo'; rel.url = '';
+  // salvo: { id, token, status, url } de um relatório já gravado ("Continuar" um rascunho); sem ele, é uma prévia nova.
+  function abrirRelatorioModelo(rel, salvo) {
+    rel.id = salvo ? salvo.id : null; rel.token = salvo ? salvo.token || '' : ''; rel.status = salvo ? salvo.status || 'rascunho' : 'novo';
+    rel.url = salvo && salvo.status === 'publicado' ? (salvo.url ? urlAbsoluta(salvo.url, root.location.href) : linkRelatorioModelo(root.location.href, salvo.token)) : '';
+    rel.alterado = false;
     if (rel.volta && rel.volta.aba === 'relatorios') {
       estado.rl.rel = rel;
       irParaRelatorios('relatorio');
@@ -5575,16 +6391,50 @@
     irParaEmpresas('relatorio', null);
   }
   function relAtual() { return estado.aba === 'relatorios' ? estado.rl.rel : estado.emp.rel; }
-  function redesenharRel() { if (estado.aba === 'relatorios') renderizarRelatorios(); else renderizarEmpresas(); }
+  function redesenharRel() { if (estado.aba === 'relatorios') renderizarRelatorios(); else renderizarEmpresas(); gravarRota(true); }
+
+  // Reabre um relatório de modelo salvo (rascunho ou publicado) com os dados gravados: prévia, salvar e publicar.
+  // Servidor sem "abrirRelatorioModelo": avisa e fica na lista. volta: para onde o "← Voltar" leva.
+  function continuarRelatorioModelo(item, volta) {
+    if (!metodoApi('abrirRelatorioModelo')) { avisar('Este servidor ainda não reabre relatórios salvos: gere de novo para editar.', 'erro'); return Promise.resolve(false); }
+    return api('abrirRelatorioModelo', item.relId || item.id).then(function (resp) {
+      var r = resp.relatorio || {};
+      if (!r.dados || typeof r.dados !== 'object') throw new Error('Relatório não encontrado (pode ter sido excluído).');
+      var ctx = {};
+      if (r.empresaId) ctx.empresa = nomeEmpresa(r.empresaId) || (r.dados.empresa && r.dados.empresa.nome) || '';
+      if (r.pessoaId) ctx.pessoa = emailDaPessoa(r.pessoaId).nome || (r.dados.pessoa && r.dados.pessoa.nome) || '';
+      var rel = { modelo: r.modelo, empresaId: r.empresaId || null, pessoaId: r.pessoaId || null, dados: r.dados, ctx: ctx,
+        volta: volta || { aba: 'relatorios', tela: 'gerados' } };
+      if (r.modelo === 'pessoa') {
+        var reg = estado.registros.filter(function (x) { return r.pessoaId && String(x.pessoaId) === String(r.pessoaId) && x.calc; })[0];
+        rel.variante = r.dados.variante === 'simples' || r.dados.simples === true || /simples/i.test(String(r.dados.titulo || '')) ? 'simples' : 'completo';
+        if (reg) {
+          var nome = ctx.pessoa || reg.nome, res = resultadoDoRegistro(reg), exi = exigidoDoRegistro(reg), foto = fotoDe(reg);
+          rel.gerar = function (v) { return dadosPessoa(v, nome, res, exi, foto); };
+        }
+      }
+      abrirRelatorioModelo(rel, { id: r.id, token: r.token, status: r.status, url: r.url });
+      return true;
+    }).catch(function (e) { falhou(e); return false; });
+  }
+  function abrirRelatorioSalvoPorId(id) {
+    if (!id || id === 'novo') { irParaRelatorios('gerados'); avisar('A prévia que não tinha sido salva se perdeu ao recarregar a página.', 'erro'); return; }
+    irParaRelatorios('gerados');
+    continuarRelatorioModelo({ relId: id }, { aba: 'relatorios', tela: 'gerados' }).then(function (ok) { if (ok) gravarRota(true); });
+  }
 
   function janelaRelatorioEquipe(emp, eq) {
     var colabs = eq.colaboradores.filter(function (c) { return c.status !== 'desligado'; });
     var opColabs = colabs.map(function (c) { return { valor: String(c.pessoaId), rotulo: c.nome, sub: [c.cargo, c.resultado ? c.resultado.codigo : 'sem teste'].filter(Boolean).join(' · ') }; });
     var ids = {};
     colabs.forEach(function (c) { ids[String(c.pessoaId)] = true; });
-    var candidatos = estado.registros.filter(function (r) { return r.calc && !(r.pessoaId && ids[String(r.pessoaId)]); });
+    // Só respostas de processos (quem comprou o Mapa pessoal no site não é candidato de nenhuma empresa: LGPD).
+    // Os processos desta empresa vêm primeiro.
+    var daEmpresa = function (r) { var pr = r.avaliacao ? acharProcessoPorCodigo(r.avaliacao) : null; return !!(pr && String(pr.empresaId || '') === String(emp.id)); };
+    var candidatos = estado.registros.filter(function (r) { return r.calc && r.origem !== 'pessoal' && !(r.pessoaId && ids[String(r.pessoaId)]); })
+      .sort(function (a, b) { return (daEmpresa(b) ? 1 : 0) - (daEmpresa(a) ? 1 : 0); });
     var escCand = criarSeletorBusca({ id: 'rel-cand', rotulo: 'Candidato', rotuloId: 'rel-cand-rotulo', vazio: 'Escolher uma resposta',
-      opcoes: candidatos.map(function (r) { return { valor: r.id, rotulo: r.nome || '(sem nome)', sub: [r.avaliacaoNome || r.vaga, r.calc.codigo, formatarData(r.fim || r.recebidoEm)].filter(Boolean).join(' · '), busca: r.protocolo }; }) });
+      opcoes: candidatos.map(function (r) { return { valor: r.id, rotulo: r.nome || '(sem nome)', sub: [textoOrigem(r), r.calc.codigo, formatarData(r.fim || r.recebidoEm)].filter(Boolean).join(' · '), busca: r.protocolo }; }) });
     var escLider = criarSeletorBusca({ id: 'rel-cand-lider', rotulo: 'Líder do candidato', rotuloId: 'rel-cand-lider-rotulo', vazio: 'Sem líder definido', opcoes: opColabs });
     var escColegas = criarSeletorBusca({ id: 'rel-cand-colegas', rotulo: 'Colegas diretos do candidato', rotuloId: 'rel-cand-colegas-rotulo', multiplo: true, opcoes: opColabs, textoBotao: 'Adicionar colega' });
     var marcar = campoMarcar('rel-incluir-candidato', 'Incluir o encaixe de um candidato nesta equipe', false);
@@ -5650,13 +6500,15 @@
     } catch (e) { falhou(e); }
   }
 
-  function voltarDoRelatorio(rel) {
+  function voltarDoRelatorio(rel) { seguirSePuder(function () { voltarDoRelatorioJa(rel); }); }
+  function voltarDoRelatorioJa(rel) {
     var v = rel.volta || {};
     estado.emp.rel = null;
     estado.rl.rel = null;
     if (v.aba === 'relatorios') estado.rl.gerados = null;
     if (v.detalhe && acharRegistro(v.detalhe)) { estado.emp.tela = 'lista'; renderizarEmpresas(); mostrarAba('lista'); abrirDetalhe(v.detalhe); return; }
-    if (v.aba === 'relatorios') { irParaRelatorios(v.tela || 'gerados'); return; }
+    // Do assistente: prévia não salva volta ao passo 2 (com o que estava escolhido); salva/publicada vai para "Gerados".
+    if (v.aba === 'relatorios') { irParaRelatorios(v.tela === 'assistente' && rel.status !== 'novo' ? 'gerados' : (v.tela || 'gerados'), undefined, true); return; }
     irParaEmpresas(v.tela || 'lista', v.id || null, v.subaba);
   }
 
@@ -5671,7 +6523,9 @@
       rel.token = r.token || rel.token;
       rel.status = r.status || (publicar ? 'publicado' : 'rascunho');
       rel.url = rel.status === 'publicado' ? (r.url ? urlAbsoluta(r.url, root.location.href) : linkRelatorioModelo(root.location.href, rel.token)) : '';
+      rel.alterado = false;
       estado.emp.relatorios = {};
+      estado.rl.gerados = null;
       return resp;
     });
   }
@@ -5686,12 +6540,27 @@
     var publicado = rel.status === 'publicado';
     var titulo = (rel.dados && rel.dados.titulo) || MODELOS_REL[rel.modelo];
     var acoes = [botao('botao--claro', '← Voltar', function () { voltarDoRelatorio(rel); }, { id: 'btn-voltar-relatorio' })];
-    var btnRasc = botao(publicado ? 'botao--claro' : 'botao--principal', publicado ? 'Voltar para rascunho' : 'Salvar rascunho', function () {
-      btnRasc.disabled = true;
-      salvarRelModelo(rel, false).then(function () {
-        avisar(publicado ? 'O relatório voltou a ser rascunho: o link não abre mais.' : 'Rascunho salvo.', 'ok');
-        redesenharRel();
-      }).catch(function (e) { falhou(e); btnRasc.disabled = false; });
+    // Publicado: "Salvar alterações" (troca de versão) e "Despublicar" (com confirmação: o link enviado para de abrir).
+    if (publicado && rel.alterado) {
+      var btnSalvarPub = botao('botao--principal', 'Salvar alterações', function () {
+        btnSalvarPub.disabled = true;
+        salvarRelModelo(rel, true).then(function () { avisar('Alterações salvas: o link publicado já mostra a versão nova.', 'ok'); redesenharRel(); })
+          .catch(function (e) { falhou(e); btnSalvarPub.disabled = false; });
+      }, { id: 'btn-rel-salvar-publicado' });
+      acoes.push(btnSalvarPub);
+    }
+    var btnRasc = botao(publicado ? 'botao--perigo-contorno' : 'botao--principal', publicado ? 'Despublicar (voltar para rascunho)' : 'Salvar rascunho', function () {
+      (publicado ? confirmar({ titulo: 'Despublicar o relatório?', botao: 'Despublicar', botaoVoltar: 'Manter publicado',
+        texto: 'O link que você já enviou para de abrir na hora: quem abrir vai ver "Relatório não encontrado". Dá para publicar de novo depois, com o mesmo link.' })
+        : Promise.resolve(true)).then(function (ok) {
+        if (!ok) return;
+        btnRasc.disabled = true;
+        salvarRelModelo(rel, false).then(function () {
+          avisar(publicado ? 'O relatório voltou a ser rascunho: o link não abre mais.' : 'Rascunho salvo.', 'ok',
+            publicado ? { acao: { texto: 'Publicar de novo', fn: function () { salvarRelModelo(rel, true).then(function () { avisar('Relatório publicado de novo: o mesmo link volta a abrir.', 'ok'); redesenharRel(); }).catch(falhou); } } } : null);
+          redesenharRel();
+        }).catch(function (e) { falhou(e); btnRasc.disabled = false; });
+      });
     }, { id: 'btn-rel-rascunho' });
     acoes.push(btnRasc);
     if (!publicado) {
@@ -5705,15 +6574,19 @@
       acoes.push(btnPub);
     }
     acoes.splice(1, 0, botaoPreviaNovaAba(function () { return rel.dados; }, 'btn-rel-previa-aba'));
-    var sub = [MODELOS_REL[rel.modelo], rel.ctx && rel.ctx.empresa, publicado ? 'publicado' : (rel.status === 'rascunho' ? 'rascunho salvo' : 'ainda não salvo')].filter(Boolean).join(' · ');
-    box.appendChild(cabecalhoVista(sub, titulo, 'Prévia do documento como quem recebe vai ver. Salve como rascunho ou publique para gerar o link.', acoes));
+    var situacao = rel.alterado ? 'alterações não salvas' : (publicado ? 'publicado' : (rel.status === 'rascunho' ? 'rascunho salvo' : 'ainda não salvo'));
+    var sub = [MODELOS_REL[rel.modelo], rel.ctx && rel.ctx.empresa, situacao].filter(Boolean).join(' · ');
+    var explica = publicado ? (rel.alterado ? 'A versão que você escolheu ainda não está no link: clique em "Salvar alterações".' : 'Publicado: o link abaixo já mostra este documento. Copie a mensagem ou envie por e-mail.')
+      : (rel.status === 'rascunho' ? (rel.alterado ? 'A versão que você escolheu ainda não foi salva: salve o rascunho ou publique.' : 'Rascunho salvo. Publique para gerar o link e enviar.')
+        : 'Prévia do documento como quem recebe vai ver. Salve como rascunho ou publique para gerar o link.');
+    box.appendChild(cabecalhoVista(sub, titulo, explica, acoes));
 
     // Relatório da pessoa: completo / simples (troca os dados da prévia; salvar grava a variante escolhida)
     if (rel.modelo === 'pessoa' && typeof rel.gerar === 'function') {
       var variante = rel.variante === 'simples' ? 'simples' : 'completo';
       var trocar = function (v) {
         if (v === variante) return;
-        try { rel.dados = rel.gerar(v); rel.variante = v; redesenharRel(); } catch (e) { falhou(e); }
+        try { rel.dados = rel.gerar(v); rel.variante = v; if (rel.status !== 'novo') rel.alterado = true; redesenharRel(); } catch (e) { falhou(e); }
       };
       box.appendChild(el('div', { classe: 'rel-variante', id: 'rel-variante' }, [
         el('span', { classe: 'campo__rotulo', id: 'rel-variante-rotulo', texto: 'Relatório da pessoa:' }),
@@ -5782,9 +6655,12 @@
           el('span', { classe: 'texto-suave t-rotulo tabular', texto: formatarData(r.atualizadoEm || r.criadoEm) })
         ]),
         el('div', { classe: 'gestao-card__acoes' }, [
+          atualAberto(r) ? null : botao(pub ? 'botao--claro botao--pequeno' : 'botao--principal botao--pequeno', pub ? 'Abrir no painel' : 'Continuar', function () {
+            seguirSePuder(function () { continuarRelatorioModelo(r, voltaDaTela()); });
+          }, { 'data-acao': 'continuar', title: pub ? 'Ver a prévia, trocar a versão ou despublicar' : 'Reabrir o rascunho para conferir e publicar' }),
           pub ? botao('botao--claro botao--pequeno', 'Copiar link', function () { copiar(url, 'Link do relatório copiado.'); }, { 'data-acao': 'copiar-link' }) : null,
           pub ? botao('botao--claro botao--pequeno', 'Copiar mensagem', function () {
-            copiar(mensagemRelatorioModelo(r.modelo, { empresa: ctx.empresa, pessoa: ctx.pessoa, consultor: consultorAtual() }, url), 'Mensagem copiada. Cole no WhatsApp.');
+            copiar(mensagemRelatorioModelo(r.modelo, { empresa: ctx.empresa, pessoa: ctx.pessoa || nomeDaPessoa(r.pessoaId), consultor: consultorAtual() }, url), 'Mensagem copiada. Cole no WhatsApp.');
           }, { 'data-acao': 'copiar-mensagem' }) : null,
           pub ? el('a', { classe: 'botao botao--claro botao--pequeno', href: url, target: '_blank', rel: 'noopener', texto: 'Abrir' }) : null,
           botao('botao--perigo botao--pequeno', 'Excluir', function () {
@@ -5804,6 +6680,16 @@
       ]);
     })));
     return sec;
+  }
+
+  // Vínculo ativo já conhecido (equipes carregadas), sem buscar nada: { empresa, colaborador } ou null.
+  function vinculoConhecido(pessoaId) {
+    var eqs = (estado.emp && estado.emp.equipes) || {};
+    for (var k in eqs) {
+      var c = (eqs[k].colaboradores || []).filter(function (x) { return String(x.pessoaId) === String(pessoaId) && x.status !== 'desligado'; })[0];
+      if (c) return { empresa: acharEmpresa(k) || eqs[k].empresa || { id: k, nome: '' }, colaborador: c };
+    }
+    return null;
   }
 
   // Vínculo ativo de uma pessoa (procura nas equipes das empresas; cache até a próxima mudança).
@@ -5857,8 +6743,9 @@
     return { tela: 'modelos', chave: '', exemplo: null, rel: null, gerados: null, erro: '', filtro: { modelo: '', empresa: '', status: '' }, alvo: {} };
   }
 
-  function irParaRelatorios(tela, chave) {
-    if (tela === 'assistente') estado.rl.alvo = {};
+  // manterAlvo: volta ao assistente com o que já estava escolhido (ex.: "← Voltar" da prévia).
+  function irParaRelatorios(tela, chave, manterAlvo) {
+    if (tela === 'assistente' && !manterAlvo) estado.rl.alvo = {};
     estado.rl.tela = tela || 'modelos';
     if (chave !== undefined) estado.rl.chave = chave;
     renderizarRelatorios();
@@ -5915,12 +6802,16 @@
     }));
   }
 
+  // Passos do assistente; os já feitos são clicáveis (voltam com o que estava escolhido; da prévia, perguntam antes).
   function passosAssistente(n) {
     var nomes = ['Modelo', 'Para quem', 'Prévia e envio'];
     return el('ol', { classe: 'passos-assist', id: 'assist-passos', 'aria-label': 'Passos' }, nomes.map(function (t, i) {
-      return el('li', { classe: 'passos-assist__item' + (i + 1 < n ? ' passos-assist__item--feito' : ''), 'aria-current': i + 1 === n ? 'step' : null }, [
-        el('span', { classe: 'passos-assist__num tabular', texto: String(i + 1) }), el('span', { texto: t })
-      ]);
+      var conteudo = [el('span', { classe: 'passos-assist__num tabular', texto: String(i + 1) }), el('span', { texto: t })];
+      var feito = i + 1 < n;
+      return el('li', { classe: 'passos-assist__item' + (feito ? ' passos-assist__item--feito' : ''), 'aria-current': i + 1 === n ? 'step' : null },
+        feito && estado.rl.chave ? el('button', { type: 'button', classe: 'passos-assist__link', id: 'assist-passo-' + (i + 1), onclick: function () {
+          seguirSePuder(function () { estado.rl.rel = null; irParaRelatorios('assistente', estado.rl.chave, true); });
+        } }, conteudo) : conteudo);
     }));
   }
 
@@ -6001,7 +6892,17 @@
         var ok = modeloDisponivel(x);
         return el('button', { type: 'button', classe: 'assist-modelo', id: 'assist-modelo-' + x.chave, 'data-chave': x.chave,
           'aria-pressed': x.chave === chave ? 'true' : 'false', disabled: ok ? null : true, title: ok ? null : 'Disponível com o servidor Supabase',
-          onclick: function () { estado.rl.chave = x.chave; estado.rl.alvo = {}; renderizarRelatorios(); var b = $('assist-modelo-' + x.chave); if (b) b.focus(); } }, [
+          onclick: function () {
+            // Trocar de modelo mantém a empresa já escolhida quando os dois modelos usam empresa (equipe, como liderar).
+            var antes = modeloDoCatalogo(estado.rl.chave);
+            var usaEmpresa = function (mm) { return mm && (mm.alvo === 'empresa' || mm.alvo === 'colaborador'); };
+            var emp = usaEmpresa(antes) && usaEmpresa(x) ? estado.rl.alvo.empresaId : '';
+            estado.rl.chave = x.chave;
+            estado.rl.alvo = emp ? { empresaId: emp } : {};
+            renderizarRelatorios();
+            gravarRota(true);
+            var b = $('assist-modelo-' + x.chave); if (b) b.focus();
+          } }, [
           el('span', { classe: 'seminegrito', texto: x.titulo }),
           el('span', { classe: 't-nota texto-suave', texto: x.paraQuem })
         ]);
@@ -6028,11 +6929,15 @@
 
   // Desenha a escolha do passo 2 e devolve a função que gera (ou leva ao editor, no processo seletivo).
   function montarAlvoAssistente(m, sec) {
-    var volta = { aba: 'relatorios', tela: 'gerados' };
+    // "← Voltar" da prévia volta para este passo, com o que estava escolhido.
+    var volta = { aba: 'relatorios', tela: 'assistente' };
+    var alvoP = estado.rl.alvo;
     if (m.alvo === 'pessoa') {
       var pessoas = pessoasDasRespostas(estado.registros).filter(function (p) { return p.resultado; });
-      var escP = criarSeletorBusca({ id: 'assist-pessoa', rotulo: 'Pessoa', rotuloId: 'assist-pessoa-rotulo', vazio: 'Escolher a pessoa',
-        opcoes: pessoas.map(function (p) { return { valor: p.pessoaId, rotulo: p.nome || '(sem nome)', sub: [p.resultado.codigo, formatarTelefone(p.telefone)].filter(Boolean).join(' · ') }; }) });
+      var origemDe = function (p) { var r = acharRegistro(p.registroId); return r && r.origem === 'pessoal' ? 'venda direta' : ''; };
+      var escP = criarSeletorBusca({ id: 'assist-pessoa', rotulo: 'Pessoa', rotuloId: 'assist-pessoa-rotulo', vazio: 'Escolher a pessoa', valor: alvoP.pessoaId || '',
+        opcoes: pessoas.map(function (p) { return { valor: p.pessoaId, rotulo: p.nome || '(sem nome)', sub: [p.resultado.codigo, formatarTelefone(p.telefone), origemDe(p)].filter(Boolean).join(' · ') }; }) });
+      escP.aoMudar(function () { alvoP.pessoaId = escP.valor(); });
       sec.appendChild(campoEscolha('Pessoa que fez o teste', escP, 'assist-pessoa-rotulo'));
       if (!pessoas.length) sec.appendChild(el('p', { classe: 'texto-suave t-rotulo', texto: 'Ninguém com o teste respondido ainda.' }));
       return function () {
@@ -6047,13 +6952,23 @@
     }
     if (m.alvo === 'processo') {
       var procs = estado.processos.filter(function (p) { return p.tipo !== 'equipe'; });
-      var escProc = criarSeletorBusca({ id: 'assist-processo', rotulo: 'Processo seletivo', rotuloId: 'assist-processo-rotulo', vazio: 'Escolher o processo',
-        opcoes: procs.map(function (p) { return { valor: p.id, rotulo: p.nome, sub: [empresaDe(p), p.codigo].filter(Boolean).join(' · ') }; }) });
+      var escProc = criarSeletorBusca({ id: 'assist-processo', rotulo: 'Processo seletivo', rotuloId: 'assist-processo-rotulo', vazio: 'Escolher o processo', valor: alvoP.processoId || '',
+        opcoes: procs.map(function (p) { return { valor: p.id, rotulo: p.nome, sub: [empresaDe(p), p.codigo, p.clickupListId ? '' : 'sem lista do ClickUp'].filter(Boolean).join(' · ') }; }) });
       sec.appendChild(campoEscolha('Processo seletivo', escProc, 'assist-processo-rotulo'));
       sec.appendChild(el('p', { classe: 'texto-suave t-rotulo', texto: 'O relatório do processo lê os candidatos do ClickUp e abre no editor do processo, onde você revisa os textos e publica.' }));
+      // Processo sem lista do ClickUp: avisa aqui mesmo (não num aviso que some), com o atalho para ligar a lista.
+      var semLista = el('div', { classe: 'aviso proc-aviso proc-aviso--acao', id: 'assist-sem-lista', hidden: true }, [
+        el('p', { texto: 'Este processo ainda não está ligado a uma lista do ClickUp: o relatório lê os candidatos de lá.' }),
+        botao('botao--claro botao--pequeno', 'Ligar a lista no processo', function () { var p = acharProcesso(escProc.valor()); if (p) irParaListaClickup(p); }, { id: 'btn-assist-ligar-lista' })
+      ]);
+      sec.appendChild(semLista);
+      var conferir = function () { var p = acharProcesso(escProc.valor()); semLista.hidden = !p || !!p.clickupListId; };
+      escProc.aoMudar(function () { alvoP.processoId = escProc.valor(); conferir(); });
+      conferir();
       return function (btn) {
         var p = acharProcesso(escProc.valor());
         if (!p) throw new Error('Escolha o processo seletivo.');
+        if (!p.clickupListId) { semLista.hidden = false; throw new Error('Este processo ainda não está ligado a uma lista do ClickUp.'); }
         gerarRascunho(p, btn);
       };
     }
@@ -6084,12 +6999,13 @@
         return;
       }
       var colabs = eq.colaboradores.filter(function (c) { return c.status !== 'desligado' && c.resultado && c.resultado.percentuais; });
-      escColab = criarSeletorBusca({ id: 'assist-colab', rotulo: 'Colaborador', rotuloId: 'assist-colab-rotulo', vazio: 'Escolher o colaborador',
+      escColab = criarSeletorBusca({ id: 'assist-colab', rotulo: 'Colaborador', rotuloId: 'assist-colab-rotulo', vazio: 'Escolher o colaborador', valor: alvo.colabId || '',
         opcoes: colabs.map(function (c) { return { valor: String(c.pessoaId), rotulo: c.nome, sub: [c.cargo, c.resultado.codigo].filter(Boolean).join(' · ') }; }) });
+      escColab.aoMudar(function () { alvo.colabId = escColab.valor(); });
       areaColab.appendChild(campoEscolha('Colaborador (com o teste feito)', escColab, 'assist-colab-rotulo'));
       if (!colabs.length) areaColab.appendChild(el('p', { classe: 'texto-suave t-rotulo', texto: 'Nenhum colaborador desta empresa fez o teste ainda.' }));
     }
-    escEmp.aoMudar(function () { alvo.empresaId = escEmp.valor(); desenharColabs(); });
+    escEmp.aoMudar(function () { alvo.empresaId = escEmp.valor(); alvo.colabId = ''; desenharColabs(); });
     desenharColabs();
     return function () {
       var emp = acharEmpresa(escEmp.valor());
@@ -6179,7 +7095,7 @@
     var pub = r.status === 'publicado';
     var msg = function () {
       if (r.tipo === 'processo') { var p = acharProcesso(r.processoId); return mensagemRelatorio(p || {}, r.url); }
-      return mensagemRelatorioModelo(r.modelo, { empresa: r.empresa, consultor: consultorAtual() }, r.url);
+      return mensagemRelatorioModelo(r.modelo, { empresa: r.empresa, pessoa: nomeDaPessoa(r.pessoaId), consultor: consultorAtual() }, r.url);
     };
     return el('li', { classe: 'caixa gestao-card gerado', 'data-id': r.id, 'data-tipo': r.tipo, 'data-modelo': r.modelo, 'data-status': r.status, 'data-empresa': r.empresa }, [
       el('div', { classe: 'gerado__texto' }, [
@@ -6190,7 +7106,9 @@
         textoEnvios(r.token) ? el('span', { classe: 'texto-suave t-rotulo gerado__envio', texto: textoEnvios(r.token) }) : null
       ]),
       el('div', { classe: 'gestao-card__acoes' }, [
-        botao('botao--claro botao--pequeno', 'Abrir', function () { abrirGerado(r); }, { 'data-acao': 'abrir' }),
+        botao(!pub && r.tipo === 'modelo' ? 'botao--principal botao--pequeno' : 'botao--claro botao--pequeno', !pub && r.tipo === 'modelo' ? 'Continuar' : 'Abrir', function () { abrirGerado(r); },
+          { 'data-acao': 'abrir', title: !pub ? 'Reabrir o rascunho para conferir e publicar' : null }),
+        pub && r.tipo === 'modelo' ? botao('botao--claro botao--pequeno', 'Abrir no painel', function () { continuarRelatorioModelo(r, { aba: 'relatorios', tela: 'gerados' }); }, { 'data-acao': 'continuar' }) : null,
         pub ? botao('botao--claro botao--pequeno', 'Copiar link', function () { copiar(r.url, 'Link do relatório copiado.'); }, { 'data-acao': 'copiar-link' }) : null,
         pub ? botao('botao--claro botao--pequeno', 'Copiar mensagem', function () { copiar(msg(), 'Mensagem copiada. Cole no WhatsApp.'); }, { 'data-acao': 'copiar-mensagem' }) : null,
         pub ? botaoEnviarEmail(alvoEmailGerado(r), function () { if (estado.rl.tela === 'gerados') renderizarRelatorios(); }, null, { 'data-acao': 'enviar-email' }) : null,
@@ -6205,17 +7123,42 @@
     return { token: r.token, modelo: r.modelo, titulo: r.titulo || '', para: p.email, nome: p.email ? p.nome : (proc && proc.contratante) || '' };
   }
 
-  // Abrir: publicado abre o link; rascunho do processo vai para o editor; rascunho de modelo vai para onde ele nasceu.
+  // Abrir: publicado abre o link; rascunho do processo vai para o editor; rascunho de modelo reabre a prévia salva
+  // ("Continuar": conferir, trocar a versão e publicar).
   function abrirGerado(r) {
     if (r.tipo === 'processo') {
       var p = acharProcesso(r.processoId);
       if (p) { abrirRelatorio(p, { token: r.token, status: r.status }); return; }
     }
     if (r.status === 'publicado' && r.url) { root.open(r.url, '_blank', 'noopener'); return; }
+    if (r.tipo === 'modelo' && metodoApi('abrirRelatorioModelo')) { continuarRelatorioModelo(r, { aba: 'relatorios', tela: 'gerados' }); return; }
     if (r.empresaId) { irParaEmpresas('pagina', r.empresaId, 'relatorios'); return; }
     var reg = estado.registros.filter(function (x) { return r.pessoaId && String(x.pessoaId) === String(r.pessoaId); })[0];
     if (reg) { mostrarAba('lista'); abrirDetalhe(reg.id); return; }
     avisar('Rascunho sem link: gere de novo e publique para abrir.', 'erro');
+  }
+
+  // Nome da pessoa de um relatório (para a mensagem do WhatsApp): pelas respostas ou pelos colaboradores carregados.
+  function nomeDaPessoa(pessoaId) {
+    if (!pessoaId) return '';
+    var n = emailDaPessoa(pessoaId).nome;
+    if (n) return n;
+    var eqs = (estado.emp && estado.emp.equipes) || {};
+    for (var k in eqs) {
+      var c = (eqs[k].colaboradores || []).filter(function (x) { return String(x.pessoaId) === String(pessoaId); })[0];
+      if (c) return c.nome;
+    }
+    return '';
+  }
+  // O relatório desta linha é o que já está aberto na tela?
+  function atualAberto(r) { var a = relNaTela(); return !!(a && a.id && a.id === r.id); }
+  // Para onde volta um relatório reaberto a partir da lista da tela atual.
+  function voltaDaTela() {
+    var a = relNaTela();
+    if (a && a.volta) return a.volta;
+    if (estado.aba === 'empresas' && estado.emp.tela === 'pagina') return { aba: 'empresas', tela: 'pagina', id: estado.emp.id, subaba: estado.emp.subaba };
+    if (estado.abertoId) return { detalhe: estado.abertoId };
+    return { aba: 'relatorios', tela: 'gerados' };
   }
 
   function excluirGerado(r) {
@@ -6289,6 +7232,7 @@
           ])
         ]),
         el('div', { classe: 'gestao-card__acoes' }, [
+          u.convitePendente ? botao('botao--claro botao--pequeno', 'Reenviar convite', function () { reenviarConvite(u); }, { 'data-acao': 'reenviar' }) : null,
           euMesmo ? null : botao('botao--perigo botao--pequeno', 'Remover', function () { excluirUsuario(u); }, { 'data-acao': 'excluir' })
         ])
       ]);
@@ -6305,9 +7249,12 @@
       botao: 'Enviar convite',
       corpo: [nome, email],
       aoConfirmar: function () {
-        var dados = { nome: $('us-nome').value.trim(), email: $('us-email').value.trim() };
+        var dados = { nome: $('us-nome').value.trim(), email: $('us-email').value.replace(/\s+/g, '').toLowerCase() };
         if (!dados.nome) throw new Error('Informe o nome.');
         if (!dados.email) throw new Error('Informe o e-mail.');
+        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(dados.email)) throw new Error('Informe um e-mail válido (ex.: nome@empresa.com.br).');
+        var ja = (estado.usuarios || []).filter(function (x) { return String(x.email || '').toLowerCase() === dados.email; })[0];
+        if (ja) throw new Error(ja.convitePendente ? 'Este e-mail já tem um convite pendente. Use "Reenviar convite" na lista.' : 'Este e-mail já tem acesso ao painel.');
         var chamada = metodoApi(['convidarUsuario', 'usuariosConvidar'])
           ? api(['convidarUsuario', 'usuariosConvidar'], dados)
           : api('salvarUsuario', { nome: dados.nome, email: dados.email, papel: 'admin', empresaId: '', ativo: true });
@@ -6319,6 +7266,28 @@
         });
       }
     });
+  }
+
+  // Convite perdido ou vencido: manda de novo para o mesmo e-mail (mesma chamada do convite).
+  function reenviarConvite(u) {
+    var chamada = metodoApi(['convidarUsuario', 'usuariosConvidar']);
+    if (!chamada) { avisar('Este servidor não reenvia convites: remova e convide de novo.', 'erro'); return; }
+    api(['convidarUsuario', 'usuariosConvidar'], { nome: u.nome || '', email: u.email }).then(function () {
+      avisar('Convite reenviado para ' + u.email + '.', 'ok');
+      return carregar();
+    }).catch(falhou);
+  }
+
+  // Senha temporária: numa janela com "Copiar" (no aviso flutuante ela sumia antes de dar para anotar).
+  function mostrarSenhaTemporaria(titulo, pessoa, senha) {
+    var campo = el('input', { id: 'senha-mostrada', classe: 'entrada senha-temporaria tabular', type: 'text', readonly: true, value: senha, 'aria-label': 'Senha temporária' });
+    abrirJanela({
+      id: 'janela-senha-temporaria', titulo: titulo, botao: 'Já anotei',
+      texto: 'Passe esta senha para ' + pessoa + '. Ela não aparece de novo depois que você fechar esta janela; a pessoa pode trocá-la em "Trocar senha".',
+      corpo: [el('div', { classe: 'campo-linha' }, [campo, botao('botao--contorno', 'Copiar senha', function () { copiar(senha, 'Senha copiada.'); }, { id: 'btn-copiar-senha' })])],
+      aoConfirmar: function () {}
+    });
+    campo.select();
   }
 
   function excluirUsuario(u) {
@@ -6366,8 +7335,11 @@
         if (!u && senha.length < 8) throw new Error('A senha temporária precisa ter pelo menos 8 caracteres.');
         if (u) dados.id = u.id;
         return api('salvarUsuario', dados, senha || undefined).then(function () {
-          avisar(u ? 'Usuário salvo.' : 'Acesso criado. Senha temporária: ' + senha, 'ok');
+          if (u) avisar('Usuário salvo.', 'ok');
           return carregar();
+        }).then(function () {
+          // Depois que esta janela fechar, a senha aparece numa janela própria, com "Copiar".
+          if (!u) setTimeout(function () { mostrarSenhaTemporaria('Acesso criado', dados.nome, senha); }, 0);
         });
       }
     });
@@ -6384,8 +7356,9 @@
         var senha = $('rd-senha').value.trim();
         if (senha.length < 8) throw new Error('A senha temporária precisa ter pelo menos 8 caracteres.');
         return api('redefinirSenha', u.id, senha).then(function () {
-          avisar('Senha redefinida. Nova senha temporária: ' + senha, 'ok');
           return carregar();
+        }).then(function () {
+          setTimeout(function () { mostrarSenhaTemporaria('Senha redefinida', u.nome, senha); }, 0);
         });
       }
     });
@@ -6422,11 +7395,12 @@
     var btn = $('btn-importar');
     limpar(out);
     if (!codigos.length) { out.appendChild(el('p', { classe: 'aviso aviso--erro', texto: 'Cole pelo menos um código.' })); return; }
+    if (!/DISC1\./.test(texto)) { out.appendChild(el('p', { classe: 'aviso aviso--erro', texto: 'Nenhum código DISC1 encontrado no texto. O código que o participante envia começa com "DISC1.".' })); return; }
     var novos = 0, duplicados = 0, erros = [];
     var validos = [];
     codigos.forEach(function (c, i) {
       var p;
-      try { p = root.DISC_CODEC.decode(c); } catch (e) { erros.push('Código ' + (i + 1) + ': formato inválido.'); return; }
+      try { p = root.DISC_CODEC.decode(c); } catch (e) { erros.push('Código ' + (i + 1) + ': formato inválido (o código parece cortado ou alterado; peça para o participante copiar de novo).'); return; }
       var problema = validarImportado(p);
       if (problema) { erros.push('Código ' + (i + 1) + ': ' + problema); return; }
       validos.push({ i: i, p: p });
@@ -6441,6 +7415,7 @@
 
     if (MODO_API) {
       btn.disabled = true;
+      btn.textContent = 'Importando…';
       var cadeia = Promise.resolve();
       validos.forEach(function (v) {
         cadeia = cadeia.then(function () {
@@ -6455,6 +7430,7 @@
       });
       cadeia.then(function () { return novos ? carregar() : null; }).then(function () {
         btn.disabled = false;
+        btn.textContent = 'Importar';
         concluir();
       });
       return;
@@ -6484,17 +7460,21 @@
 
   /* ---------- CSV ---------- */
 
+  // Exporta o que está na tela (filtros e busca): o nome do arquivo e o aviso dizem quando é só uma parte.
   function exportarCsv() {
     var lista = filtrados();
     if (!lista.length) { avisar('Não há participantes para exportar.', 'erro'); return; }
+    var parte = lista.length !== estado.registros.length;
     var blob = new Blob([gerarCsv(lista)], { type: 'text/csv;charset=utf-8' });
     var url = URL.createObjectURL(blob);
     var hoje = new Date().toISOString().slice(0, 10);
-    var a = el('a', { href: url, download: 'participantes-disc-' + hoje + '.csv' });
+    var proc = estado.filtros.processo && estado.filtros.processo !== '-' ? '-' + estado.filtros.processo.toLowerCase() : '';
+    var a = el('a', { href: url, download: 'participantes-disc' + (parte ? proc + '-filtrado' : '') + '-' + hoje + '.csv' });
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+    avisar('CSV baixado: ' + lista.length + (lista.length === 1 ? ' resposta' : ' respostas') + (parte ? ' (só as do filtro, de ' + estado.registros.length + ')' : '') + '.', 'ok');
   }
 
   /* ---------- Vendas (aba do admin; só quando o servidor tem a API de vendas) ---------- */
@@ -6574,7 +7554,8 @@
       vd.pedidoId = null;
     }
     var t = TITULOS_VENDAS[vd.sub] || TITULOS_VENDAS.resumo;
-    var acoes = [botao('botao--claro', 'Atualizar', function () { vd.carregado = false; renderizarVendas(); }, { id: 'btn-vendas-atualizar' })];
+    // Atualizar traz também as respostas (o pedido novo acha o teste dele em Participantes).
+    var acoes = [botao('botao--claro', 'Atualizar', function () { vd.carregado = false; carregar().then(function () { renderizarVendas(); }); }, { id: 'btn-vendas-atualizar' })];
     if (vd.sub === 'cupons') acoes.push(botao('botao--laranja', 'Novo cupom', function () { janelaCupom(null); }, { id: 'btn-novo-cupom' }));
     box.appendChild(cabecalhoVista('Venda direta', t[0], t[1], acoes));
     box.appendChild(el('nav', { classe: 'subabas', id: 'vd-subabas', 'aria-label': 'Seções de vendas' }, SUBABAS_VENDAS.map(function (s) {
@@ -6650,7 +7631,11 @@
           el('span', { classe: 'seminegrito vd-linha__nome', texto: p.nome || '(sem nome)' }),
           el('span', { classe: 'texto-suave t-rotulo vd-linha__email', texto: p.email || '—' })
         ]),
-        el('span', { classe: 't-rotulo vd-linha__pacote', texto: nomePacote(p.pacote, pacotes) + (p.cupom ? ' · cupom ' + p.cupom : '') }),
+        // Cupom numa linha própria (antes, "cupom LAN…" era cortado ao lado do nome do pacote).
+        el('span', { classe: 't-rotulo vd-linha__pacote', title: nomePacote(p.pacote, pacotes) + (p.cupom ? ' · cupom ' + p.cupom : '') }, [
+          el('span', { texto: nomePacote(p.pacote, pacotes) }),
+          p.cupom ? el('span', { classe: 'texto-suave vd-linha__cupom', texto: 'cupom ' + p.cupom }) : null
+        ]),
         el('span', { classe: 't-rotulo texto-suave tabular vd-linha__data', texto: formatarData(p.criadoEm) }),
         el('span', { classe: 'seminegrito tabular vd-linha__valor', texto: formatarReais(p.valorCentavos) }),
         seloPedido(p)
@@ -6661,7 +7646,7 @@
   function renderizarPedidos(box) {
     var vd = estado.vd;
     var f = vd.filtro;
-    var busca = el('input', { id: 'vd-busca', classe: 'entrada', type: 'search', placeholder: 'Nome, e-mail, cupom ou nº do pedido…', value: f.busca });
+    var busca = el('input', { id: 'vd-busca', classe: 'entrada', type: 'search', placeholder: 'Nome, e-mail, cupom ou pedido…', title: 'Busca por nome, e-mail, cupom ou número do pedido', value: f.busca });
     var escStatus = criarEscolha({ id: 'vd-filtro-status', rotulo: 'Situação', prefixo: 'Situação', valor: f.status,
       opcoes: [{ valor: '', rotulo: 'Todas' }].concat(Object.keys(STATUS_PEDIDO).map(function (s) { return { valor: s, rotulo: STATUS_PEDIDO[s] }; })) });
     var escPacote = criarEscolha({ id: 'vd-filtro-pacote', rotulo: 'Pacote', prefixo: 'Pacote', valor: f.pacote,
@@ -6716,26 +7701,46 @@
   }
 
   function liberarCortesia(p) {
-    confirmar({ titulo: 'Liberar como cortesia?', botao: 'Liberar relatório', classeBotao: 'botao--principal',
-      texto: 'O relatório de ' + (p.nome || p.email || 'cliente') + ' fica liberado sem pagamento. Use para parceiros, testes ou quando o pagamento foi feito por fora.' })
-      .then(function (ok) { if (ok) trocarStatusPedido(p, 'cortesia', 'Pedido liberado como cortesia. Envie o link ao cliente.'); });
+    confirmar({ titulo: 'Liberar como cortesia?', botao: 'Liberar relatório', classeBotao: 'botao--principal', botaoVoltar: 'Voltar',
+      texto: 'O relatório de ' + (p.nome || p.email || 'cliente') + ' fica liberado sem pagamento. Use para parceiros, testes ou quando o pagamento foi feito por fora. Depois, avise o cliente: o painel manda o link de acesso por e-mail ou você copia a orientação para o WhatsApp.' })
+      .then(function (ok) {
+        if (ok) trocarStatusPedido(p, 'cortesia', 'Pedido liberado como cortesia. Avise o cliente: envie o acesso por e-mail ou a mensagem de orientação.');
+      });
+  }
+
+  // Manda ao cliente o e-mail "Recuperar meu relatório" (o mesmo da página pública), com o link de acesso.
+  function enviarAcessoPorEmail(p, btn) {
+    if (!p.email) { avisar('Este pedido não tem e-mail.', 'erro'); return; }
+    if (btn) { btn.disabled = true; btn.textContent = 'Enviando…'; }
+    apiPublica('recuperarAcesso', p.email).then(function () {
+      avisar('E-mail com o link de acesso enviado para ' + p.email + '.', 'ok');
+    }).catch(falhou).then(function () { if (btn) { btn.disabled = false; btn.textContent = 'Enviar o acesso por e-mail'; } });
   }
 
   function cancelarPedido(p) {
-    confirmar({ titulo: 'Cancelar este pedido?', botao: 'Cancelar pedido', texto: 'Use quando a pessoa desistiu ou o Pix venceu. Nada é cobrado; dá para liberar como cortesia depois.' })
+    confirmar({ titulo: 'Cancelar este pedido?', botao: 'Cancelar pedido', botaoVoltar: 'Voltar', texto: 'Use quando a pessoa desistiu ou o Pix venceu. Nada é cobrado; dá para liberar como cortesia depois.' })
       .then(function (ok) { if (ok) trocarStatusPedido(p, 'cancelado', 'Pedido cancelado.'); });
   }
 
+  // Onde se devolve o dinheiro, pelo meio de pagamento do pedido (Stripe é o padrão; InfinitePay; Asaas).
+  function ondeReembolsar(p) {
+    if (p.provedor === 'infinitepay') return { nome: 'InfinitePay', passo: 'no app da InfinitePay (Vendas → a venda → Estornar)', link: '', id: 'vd-link-infinitepay' };
+    if (p.provedor === 'asaas' || (!p.provedor && p.asaasCobrancaId)) {
+      return { nome: 'Asaas', passo: 'no painel do Asaas' + (p.asaasCobrancaId ? ' (cobrança ' + p.asaasCobrancaId + ')' : ''), link: ASAAS_PAINEL, id: 'vd-link-asaas' };
+    }
+    var url = urlPagamentoStripe(p.provedorRef);
+    return { nome: 'Stripe', passo: 'no painel do Stripe (Payments → o pagamento → Refund)', link: url || 'https://dashboard.stripe.com/payments', id: 'vd-link-stripe-reembolso' };
+  }
   function marcarReembolsado(p) {
-    var extra = el('div', { classe: 'aviso vd-lembrete', id: 'vd-lembrete-asaas' }, [
-      el('p', { classe: 'seminegrito', texto: 'Lembrete: devolva o dinheiro no Asaas.' }),
-      el('p', { texto: 'Marcar aqui só bloqueia o relatório e registra o reembolso. O estorno do valor (' + formatarReais(p.valorCentavos) + ') é feito no painel do Asaas' +
-        (p.asaasCobrancaId ? ', cobrança ' + p.asaasCobrancaId : '') + '.' }),
-      el('a', { href: ASAAS_PAINEL, target: '_blank', rel: 'noopener noreferrer', classe: 'vd-link', id: 'vd-link-asaas', texto: 'Abrir o Asaas' })
+    var onde = ondeReembolsar(p);
+    var extra = el('div', { classe: 'aviso vd-lembrete', id: 'vd-lembrete-' + onde.nome.toLowerCase(), 'data-provedor': onde.nome }, [
+      el('p', { classe: 'seminegrito', texto: 'Lembrete: devolva o dinheiro no ' + onde.nome + '.' }),
+      el('p', { texto: 'Marcar aqui só bloqueia o relatório e registra o reembolso. O estorno do valor (' + formatarReais(p.valorCentavos) + ') é feito ' + onde.passo + '.' }),
+      onde.link ? el('a', { href: onde.link, target: '_blank', rel: 'noopener noreferrer', classe: 'vd-link', id: onde.id, texto: 'Abrir o ' + onde.nome }) : null
     ]);
-    confirmar({ titulo: 'Marcar este pedido como reembolsado?', botao: 'Marcar reembolsado', extra: extra,
+    confirmar({ titulo: 'Marcar este pedido como reembolsado?', botao: 'Marcar reembolsado', botaoVoltar: 'Voltar', extra: extra,
       texto: (p.nome || p.email || 'O cliente') + ' perde o acesso ao relatório completo. Garantia de 7 dias: devolva o valor integral.' })
-      .then(function (ok) { if (ok) trocarStatusPedido(p, 'estornado', 'Pedido marcado como reembolsado. Confira o estorno no Asaas.'); });
+      .then(function (ok) { if (ok) trocarStatusPedido(p, 'estornado', 'Pedido marcado como reembolsado. Confira o estorno no ' + onde.nome + '.'); });
   }
 
   function renderizarPedido(box, p) {
@@ -6750,13 +7755,14 @@
     ]));
     var dl = el('dl', { classe: 'det-dl', id: 'vd-pedido-dados' }, [
       el('div', null, [el('dt', { texto: 'Situação' }), el('dd', null, seloPedido(p))]),
-      el('div', null, [el('dt', { texto: 'Valor' }), el('dd', { classe: 'seminegrito', id: 'vd-pedido-valor', texto: formatarReais(p.valorCentavos) })]),
+      el('div', null, [el('dt', { texto: 'Valor' }), el('dd', { classe: 'seminegrito', id: 'vd-pedido-valor',
+        texto: p.status === 'cortesia' && p.valorCentavos > 0 ? 'R$ 0,00 (cortesia; o pedido era de ' + formatarReais(p.valorCentavos) + ')' : formatarReais(p.valorCentavos) })]),
       el('div', null, [el('dt', { texto: 'Pacote' }), el('dd', { texto: nomePacote(p.pacote, estado.vd.pacotes) })]),
       el('div', null, [el('dt', { texto: 'Cupom' }), el('dd', { texto: p.cupom || '—' })]),
       el('div', null, [el('dt', { texto: 'E-mail' }), el('dd', { texto: p.email || '—' })]),
       el('div', null, [el('dt', { texto: 'WhatsApp' }), el('dd', null, p.telefone ? linkTelefone({ telefone: p.telefone, nome: p.nome }) : '—')]),
       el('div', null, [el('dt', { texto: 'Forma de pagamento' }), el('dd', { texto: ({ pix: 'Pix', cartao: 'Cartão', boleto: 'Boleto', cupom: 'Cupom (100%)', manual: 'Liberado no painel' })[p.metodo] || p.metodo || '—' })]),
-      el('div', null, [el('dt', { texto: 'Pago em' }), el('dd', { texto: formatarData(p.pagoEm) })]),
+      el('div', null, [el('dt', { texto: p.status === 'cortesia' ? 'Liberado em' : 'Pago em' }), el('dd', { texto: formatarData(p.pagoEm) })]),
       p.reembolsadoEm ? el('div', null, [el('dt', { texto: 'Reembolsado em' }), el('dd', { texto: formatarData(p.reembolsadoEm) })]) : null,
       p.ultimaRecusa && p.status === 'aguardando' ? el('div', { id: 'vd-pedido-recusa' }, [el('dt', { texto: 'Última recusa' }), el('dd', { texto: textoRecusa(p.ultimaRecusa) })]) : null,
       p.provedor === 'stripe' && /^pi_[A-Za-z0-9]+$/.test(p.provedorRef) ? el('div', null, [el('dt', { texto: 'Pagamento no Stripe' }), el('dd', { classe: 'tabular' }, [
@@ -6787,7 +7793,10 @@
       acesso.appendChild(el('p', { classe: 'texto-medio t-corpo', id: 'vd-pedido-orientacao', texto: 'Se o cliente perdeu o link, ele pede de novo em "Recuperar meu relatório" com o e-mail da compra (' + (p.email || 'o e-mail do pedido') + ').' }));
       acesso.appendChild(el('p', { classe: 'av-link', id: 'vd-pedido-recuperar', texto: urlRec }));
       var wa2 = p.telefone ? linkWhatsApp(p.telefone) : '';
+      var btnEmail = p.email && metodoApi('recuperarAcesso') ? botao('botao--contorno botao--pequeno', 'Enviar o acesso por e-mail', function () { enviarAcessoPorEmail(p, btnEmail); },
+        { id: 'btn-vd-enviar-acesso', title: 'Manda para ' + p.email + ' o e-mail com o link do relatório (o mesmo de "Recuperar meu relatório")' }) : null;
       acesso.appendChild(el('div', { classe: 'gestao-card__acoes' }, [
+        btnEmail,
         botao('botao--claro botao--pequeno', 'Copiar mensagem de orientação', function () { copiar(mensagemOrientacao(p, urlRec), 'Mensagem copiada. Cole no WhatsApp ou no e-mail.'); }, { id: 'btn-vd-copiar-orientacao' }),
         wa2 ? el('a', { classe: 'botao botao--principal botao--pequeno', id: 'btn-vd-whatsapp', target: '_blank', rel: 'noopener noreferrer',
           href: wa2 + '?text=' + encodeURIComponent(mensagemOrientacao(p, urlRec)), texto: 'Enviar no WhatsApp' }) : null
@@ -6855,15 +7864,18 @@
     box.appendChild(ul);
   }
 
-  function salvarCupomApi(dados, msgOk) {
+  function salvarCupomApi(dados, msgOk, opcoesAviso) {
     return api('salvarCupom', dados).then(function (resp) {
       var c = normalizarCupom(resp && resp.cupom ? resp.cupom : dados);
       var achou = false;
       estado.vd.cupons = estado.vd.cupons.map(function (x) { if (x.codigo === c.codigo) { achou = true; if (!c.criadoEm) c.criadoEm = x.criadoEm; return c; } return x; });
       if (!c.criadoEm) c.criadoEm = new Date().toISOString();
       if (!achou) estado.vd.cupons.push(c);
+      // O quadro "Link pronto" do mesmo cupom acompanha (desativado: sem "Enviar por WhatsApp" de um cupom morto).
+      var dv = estado.vd.dv;
+      if (dv && dv.criado && dv.criado.codigo === c.codigo) dv.criado.desativado = !c.ativo;
       renderizarVendas();
-      avisar(msgOk, 'ok');
+      avisar(msgOk, 'ok', opcoesAviso);
       return c;
     });
   }
@@ -6872,10 +7884,15 @@
     return { codigo: c.codigo, tipo: c.tipo, valor: c.valor, usosMax: c.usosMax, validoAte: c.validoAte || null, pacotes: c.pacotes.slice(), ativo: c.ativo };
   }
 
+  // Desativar é reversível: o aviso traz "Reativar" (desfazer) por alguns segundos.
   function alternarCupom(c) {
     var d = dadosCupom(c);
     d.ativo = !c.ativo;
-    salvarCupomApi(d, d.ativo ? 'Cupom ' + c.codigo + ' reativado.' : 'Cupom ' + c.codigo + ' desativado.').catch(falhou);
+    salvarCupomApi(d, d.ativo ? 'Cupom ' + c.codigo + ' reativado.' : 'Cupom ' + c.codigo + ' desativado: o link dele deixa de dar desconto.',
+      d.ativo ? null : { acao: { texto: 'Reativar', fn: function () {
+        var atual = estado.vd.cupons.filter(function (x) { return x.codigo === c.codigo; })[0];
+        if (atual && !atual.ativo) alternarCupom(atual);
+      } } }).catch(falhou);
   }
 
   function excluirCupom(c) {
@@ -6902,9 +7919,34 @@
     escTipo.botao.addEventListener('change', rotular);
     rotular();
     var pacotesPagos = estado.vd.pacotes.filter(function (p) { return p.chave !== 'gratis'; });
-    abrirJanela({
+    // Quanto o cliente paga em cada pacote, ao vivo (mesma regra do "Criar link com desconto": R$ 0,50 ou mais, ou grátis).
+    var precos = el('p', { classe: 'dv-resumo t-corpo cup-precos', id: 'cup-precos', 'aria-live': 'polite' });
+    function lerCupom() {
+      var tipo = escTipo.botao.value;
+      var bruto = $('cup-valor') ? $('cup-valor').value.trim() : '';
+      var valor = tipo === 'valor' ? centavosDeTexto(bruto) : (bruto === '' ? null : Number(bruto.replace(',', '.')));
+      var usos = $('cup-usos') ? $('cup-usos').value.trim() : '';
+      return {
+        codigo: String(($('cup-codigo') && $('cup-codigo').value) || '').trim().toUpperCase(),
+        tipo: tipo, valor: valor,
+        usosMax: usos === '' ? null : Number(usos),
+        validoAte: ($('cup-validade') && $('cup-validade').value) || null,
+        pacotes: pacotesPagos.filter(function (p) { var m = $('cup-pac-' + p.chave); return m && m.checked; }).map(function (p) { return p.chave; }),
+        ativo: atual.ativo !== false
+      };
+    }
+    function mostrarPrecos() {
+      var d = lerCupom();
+      var ok = d.valor != null && isFinite(Number(d.valor)) && Number(d.valor) > 0;
+      var problema = ok ? problemaPrecoCupom(d, estado.vd.pacotes) : '';
+      precos.classList.toggle('dv-resumo--pendente', !ok);
+      precos.classList.toggle('cup-precos--erro', !!problema);
+      precos.textContent = !ok ? 'Informe o desconto para ver quanto o cliente paga em cada pacote.'
+        : (problema || 'O cliente paga hoje: ' + textoPrecosCupom(d, estado.vd.pacotes) + '.');
+    }
+    var janela = abrirJanela({
       id: 'form-cupom', titulo: novo ? 'Novo cupom' : 'Editar cupom ' + atual.codigo, botao: novo ? 'Criar cupom' : 'Salvar',
-      texto: 'Um cupom de 100% libera o relatório sem pagamento.',
+      texto: 'Um cupom de 100% libera o relatório sem pagamento. O Stripe só cobra a partir de R$ 0,50.',
       corpo: [
         campoTexto('cup-codigo', 'Código (o cliente digita no checkout)', { value: atual.codigo, placeholder: 'LANCAMENTO', disabled: novo ? null : true, autocapitalize: 'characters', maxlength: '30' }),
         el('div', { classe: 'form-grade vd-form-2' }, [campoEscolha('Tipo do desconto', escTipo, 'cup-tipo-rotulo'), campoValor]),
@@ -6914,27 +7956,31 @@
         ]),
         el('fieldset', { classe: 'campo vd-pacotes-campo' }, [
           el('legend', { classe: 'campo__rotulo', texto: 'Vale para (nenhum marcado = todos os pacotes pagos)' })
-        ].concat(pacotesPagos.map(function (p) { return campoMarcar('cup-pac-' + p.chave, p.nome, atual.pacotes.indexOf(p.chave) !== -1); })))
+        ].concat(pacotesPagos.map(function (p) { return campoMarcar('cup-pac-' + p.chave, p.nome, atual.pacotes.indexOf(p.chave) !== -1); }))),
+        precos
       ],
       aoConfirmar: function () {
-        var tipo = escTipo.botao.value;
-        var bruto = $('cup-valor').value.trim();
-        var valor = tipo === 'valor' ? centavosDeTexto(bruto) : (bruto === '' ? null : Number(bruto.replace(',', '.')));
-        var usos = $('cup-usos').value.trim();
-        var d = {
-          codigo: String($('cup-codigo').value || '').trim().toUpperCase(),
-          tipo: tipo, valor: valor,
-          usosMax: usos === '' ? null : Number(usos),
-          validoAte: $('cup-validade').value || null,
-          pacotes: pacotesPagos.filter(function (p) { return $('cup-pac-' + p.chave).checked; }).map(function (p) { return p.chave; }),
-          ativo: atual.ativo !== false
-        };
+        var d = lerCupom();
         var erro = validarCupom(d);
         if (erro) throw new Error(erro);
+        // O motivo (e o preço de cada pacote) já está no quadro acima: aqui só o que fazer.
+        if (problemaPrecoCupom(d, estado.vd.pacotes)) throw new Error('Ajuste o desconto: o preço final precisa ficar em R$ 0,50 ou mais (ou 100%, grátis).');
         if (novo && estado.vd.cupons.some(function (x) { return x.codigo === d.codigo; })) throw new Error('Já existe um cupom com este código.');
-        return salvarCupomApi(d, novo ? 'Cupom ' + d.codigo + ' criado.' : 'Cupom ' + d.codigo + ' salvo.');
+        // Desconto em R$ que zera algum pacote (sem ser cupom de 100%): confirma antes.
+        var zerados = pacotesZeradosPorValor(d, estado.vd.pacotes);
+        var pergunta = zerados.length ? confirmar({ titulo: 'Este cupom deixa ' + (zerados.length === 1 ? 'um pacote' : 'pacotes') + ' de graça', classeBotao: 'botao--principal',
+          botao: 'Sim, pode sair de graça', botaoVoltar: 'Voltar e ajustar',
+          texto: 'Com ' + formatarReais(d.valor) + ' de desconto, ' + zerados.map(function (x) { return 'o ' + x.nome + ' (' + formatarReais(x.preco) + ')'; }).join(' e ') +
+            ' sai de graça e o pedido vira cortesia. Se a ideia era só um desconto, diminua o valor ou marque só os pacotes certos em "Vale para".' }) : Promise.resolve(true);
+        return pergunta.then(function (ok) {
+          if (!ok) { var x = new Error('cancelado'); x.cancelado = true; throw x; }
+          return salvarCupomApi(d, novo ? 'Cupom ' + d.codigo + ' criado.' : 'Cupom ' + d.codigo + ' salvo.');
+        });
       }
     });
+    janela.form.addEventListener('input', mostrarPrecos);
+    janela.form.addEventListener('change', mostrarPrecos);
+    mostrarPrecos();
   }
 
   /* Divulgar: a página de venda e os links com desconto (subaba "Divulgar" e item "Página de venda" do menu) */
@@ -7069,7 +8115,7 @@
 
     // Código, pessoas e validade
     var campoCodigo = el('input', { id: 'dv-codigo', classe: 'entrada dv-codigo', type: 'text', autocomplete: 'off', autocapitalize: 'characters', spellcheck: 'false', maxlength: '30', value: f.codigo });
-    var campoUsos = el('input', { id: 'dv-usos-outro', classe: 'entrada dv-usos-outro', type: 'number', min: '1', step: '1', inputmode: 'numeric', value: f.usosTxt, 'aria-label': 'Número de pessoas', placeholder: 'nº' });
+    var campoUsos = el('input', { id: 'dv-usos-n', classe: 'entrada dv-usos-outro', type: 'number', min: '1', step: '1', inputmode: 'numeric', value: f.usosTxt, 'aria-label': 'Número de pessoas', placeholder: 'nº' });
     var campoValidade = el('input', { id: 'dv-validade', classe: 'entrada', type: 'date', min: hojeIso(), value: f.validade });
     caixa.appendChild(el('div', { classe: 'dv-linha-campos' }, [
       el('label', { classe: 'campo dv-campo-codigo', for: 'dv-codigo' }, [
@@ -7113,9 +8159,11 @@
       resumo.hidden = mostrarAviso;
       aviso.querySelector('.dv-aviso__texto').textContent = mostrarAviso ? c.plano.erro : '';
       if (!mostrarAviso) {
-        resumo.classList.toggle('dv-resumo--pendente', !c.plano.ok);
+        // Número de pessoas inválido ("Outro" com 0, -3, 2.5): o resumo não mostra um número impossível.
+        var usosRuins = c.usosMax !== null && (!isFinite(c.usosMax) || c.usosMax < 1 || Math.round(c.usosMax) !== c.usosMax);
+        resumo.classList.toggle('dv-resumo--pendente', !c.plano.ok || usosRuins);
         resumo.textContent = c.plano.ok && c.pac
-          ? resumoLinkDesconto({ pacoteNome: c.pac.nome, preco: c.preco, valorFinal: c.plano.valorFinal, usosMax: isFinite(c.usosMax) ? c.usosMax : null, validoAte: f.validade })
+          ? (usosRuins ? 'Diga quantas pessoas podem usar (1 ou mais).' : resumoLinkDesconto({ pacoteNome: c.pac.nome, preco: c.preco, valorFinal: c.plano.valorFinal, usosMax: c.usosMax, validoAte: f.validade }))
           : c.plano.erro;
       }
       btCriar.disabled = !!c.erro || f.salvando;
@@ -7194,14 +8242,17 @@
   function caixaLinkCriado(f) {
     var cr = f.criado;
     var msg = mensagemDivulgar('cupom', { url: cr.url, pacoteNome: cr.pacoteNome, valorFinal: cr.valorFinal, codigo: cr.codigo });
-    return el('section', { classe: 'caixa caixa--destaque dv-criar dv-criado', id: 'dv-criado', 'data-codigo': cr.codigo }, [
+    var morto = !!cr.desativado;
+    return el('section', { classe: 'caixa caixa--destaque dv-criar dv-criado' + (morto ? ' dv-criado--desativado' : ''), id: 'dv-criado', 'data-codigo': cr.codigo }, [
       el('div', { classe: 'gestao-linha' }, [
-        el('h3', { classe: 'caixa__titulo', texto: 'Link pronto' }),
-        el('span', { classe: 'selo selo--verde', texto: 'Cupom ' + cr.codigo + ' criado' })
+        el('h3', { classe: 'caixa__titulo', texto: morto ? 'Link desativado' : 'Link pronto' }),
+        el('span', { classe: 'selo ' + (morto ? '' : 'selo--verde'), texto: 'Cupom ' + cr.codigo + (morto ? ' desativado' : ' criado') })
       ]),
-      el('p', { classe: 't-corpo dv-resumo', id: 'dv-criado-resumo', texto: cr.resumo }),
+      el('p', { classe: 't-corpo dv-resumo', id: 'dv-criado-resumo', texto: morto ? 'Este cupom foi desativado: o link não dá mais o desconto. Reative em "Ver todos os cupons" ou crie outro.' : cr.resumo }),
       el('p', { classe: 'av-link dv-criado__url', id: 'dv-link-criado', texto: cr.url }),
-      el('div', { classe: 'gestao-card__acoes' }, [
+      el('div', { classe: 'gestao-card__acoes' }, morto ? [
+        botao('botao--principal', 'Criar outro', function () { estado.vd.dv = novoFormDivulgar(); renderizarVendas(); var c = $('dv-codigo'); if (c) c.focus(); }, { id: 'btn-dv-outro' })
+      ] : [
         el('a', { classe: 'botao botao--principal', id: 'btn-dv-whatsapp', href: linkWhatsAppTexto(msg), target: '_blank', rel: 'noopener noreferrer', texto: 'Enviar por WhatsApp' }),
         botao('botao--claro', 'Copiar link', function () { copiar(cr.url, 'Link copiado. Cole no WhatsApp ou onde quiser.'); }, { id: 'btn-dv-copiar' }),
         el('a', { classe: 'botao botao--claro', id: 'btn-dv-abrir', href: cr.url, target: '_blank', rel: 'noopener noreferrer', texto: 'Abrir' }),
@@ -7313,6 +8364,18 @@
         if (!gratis && lanc !== '' && d.precoLancamentoCentavos == null) throw new Error('Preço de lançamento inválido (ex.: 29,00).');
         var erro = validarPacote(d);
         if (erro) throw new Error(erro);
+        // Com o preço novo, algum cupom ativo deixaria este pacote entre R$ 0,01 e R$ 0,49? Recusa e diz qual.
+        // (Só quando o preço muda: editar o nome não esbarra num cupom antigo.)
+        var mudouPreco = !gratis && (d.precoCentavos !== p.precoCentavos || d.precoLancamentoCentavos !== p.precoLancamentoCentavos || (d.lancamentoAte || '') !== (p.lancamentoAte || ''));
+        var comNovo = estado.vd.pacotes.map(function (x) { return x.chave === d.chave ? Object.assign({}, x, d) : x; });
+        var ruins = !mudouPreco ? [] : estado.vd.cupons.filter(function (c) {
+          return c.ativo && precosComCupom(c, comNovo).some(function (x) { return x.chave === d.chave && x.abaixoMinimo; });
+        });
+        if (ruins.length) {
+          var ex = precosComCupom(ruins[0], comNovo).filter(function (x) { return x.chave === d.chave; })[0];
+          throw new Error('Com esse preço, o cupom ' + ruins.map(function (c) { return c.codigo; }).join(', ') + ' deixaria o ' + d.nome + ' por ' + formatarReais(ex.final) +
+            ' (o Stripe só cobra a partir de R$ 0,50). Ajuste ou desative o cupom antes.');
+        }
         return api('salvarPacote', d).then(function (resp) {
           var novo = normalizarPacote(resp && resp.pacote ? resp.pacote : d);
           estado.vd.pacotes = estado.vd.pacotes.map(function (x) { return x.chave === novo.chave ? novo : x; }).sort(function (a, b) { return a.ordem - b.ordem; });
@@ -7424,8 +8487,18 @@
   }
   function testarCartao(id) {
     var alvo = ALVO_DO_CARTAO[id];
-    if (alvo) return comTestando([id], rodarTeste(alvo));
-    return comTestando([id], carregarDiagnostico());
+    var p = alvo ? comTestando([id], rodarTeste(alvo)) : comTestando([id], carregarDiagnostico());
+    return p.then(function () { avisoDoCartao(id); });
+  }
+  // Depois de testar um cartão: aviso com o resultado e o foco de volta ao botão (o cartão foi redesenhado).
+  function avisoDoCartao(id, acao) {
+    var c = cartoesConexoes(estado.cx.diag, estado.cx.testes, {}).filter(function (x) { return x.id === id; })[0];
+    if (c) {
+      var st = STATUS_CONEXAO[c.status] || STATUS_CONEXAO.pendente;
+      avisar(c.nome + ': ' + st.texto.toLowerCase() + (c.erro ? '. ' + c.erro : '.'), c.status === 'erro' ? 'erro' : 'ok');
+    }
+    var b = document.querySelector('#cx-' + id + ' [data-acao="' + (acao || 'testar') + '"]');
+    if (b) b.focus();
   }
   function acaoCartao(id, acao) {
     var cx = estado.cx;
@@ -7526,7 +8599,7 @@
       ]));
     }
     if (c.passos.length) {
-      art.appendChild(el('details', { classe: 'cx-resolver', open: c.status === 'erro' ? true : null }, [
+      art.appendChild(el('details', { classe: 'cx-resolver', open: c.status === 'erro' || (estado.cx.abertos && estado.cx.abertos[c.id]) ? true : null }, [
         el('summary', { classe: 'cx-resolver__titulo seminegrito', texto: 'Como resolver' }),
         el('ol', { classe: 'cx-resolver__passos' }, c.passos.map(function (p) { return el('li', { texto: p }); }))
       ]));
@@ -7543,6 +8616,12 @@
   function renderizarConexoes() {
     var box = $('vista-conexoes');
     if (!box || !estado.cx) return;
+    // "Como resolver" que a pessoa abriu continua aberto depois de redesenhar (ex.: ao testar um cartão).
+    var abertos = {};
+    Array.prototype.forEach.call(box.querySelectorAll('details.cx-resolver[open]'), function (d) {
+      var c = d.closest('[data-conexao]'); if (c) abertos[c.getAttribute('data-conexao')] = true;
+    });
+    estado.cx.abertos = abertos;
     limpar(box);
     if (!temConexoes() || papel() !== 'admin') return;
     var cx = estado.cx;
@@ -7558,14 +8637,226 @@
     if (cx.erro) box.appendChild(el('p', { classe: 'aviso aviso--erro proc-aviso', id: 'cx-erro', role: 'alert', texto: cx.erro }));
     var cartoes = cartoesConexoes(cx.diag, cx.testes, cx.testando);
     var r = resumoConexoes(cartoes);
+    // O resumo soma todos os cartões (não testado e "conferir no GitHub" também aparecem); "0 com erro" fica neutro.
+    var outros = r.pendente + r.manual + r.testando + r.outros;
     box.appendChild(el('p', { classe: 'cx-resumo', id: 'cx-resumo', 'aria-live': 'polite' }, [
       el('span', { classe: 'selo selo--verde', texto: r.ok + ' funcionando' }), ' ',
-      el('span', { classe: 'selo selo--vermelho', texto: r.erro + ' com erro' }), ' ',
+      el('span', { classe: 'selo' + (r.erro ? ' selo--vermelho' : ''), texto: r.erro + ' com erro' }), ' ',
       el('span', { classe: 'selo', texto: r.nao_configurado + ' não configurada' + (r.nao_configurado === 1 ? '' : 's') }),
+      outros ? ' ' : null,
+      outros ? el('span', { classe: 'selo', texto: outros + (outros === 1 ? ' a conferir' : ' a conferir'), title: 'Não testadas, em teste ou para conferir fora do painel (ex.: GitHub)' }) : null,
+      el('span', { classe: 'cx-resumo__total texto-suave', texto: ' · ' + r.total + ' conexões' }),
       cx.diag && cx.diag.em ? el('span', { classe: 'cx-resumo__quando', texto: ' Última verificação: ' + formatarData(cx.diag.em) }) : null
     ]));
     box.appendChild(el('div', { classe: 'cx-grade', id: 'cx-grade' }, cartoes.map(cartaoConexao)));
   }
+
+  /* ---------- Alterações não salvas: nada do que foi digitado se perde sem perguntar ---------- */
+
+  var formProcesso = { sujo: false, coletar: null };   // formulário do processo aberto (coletar() -> rascunho)
+  function obsPendente() {
+    var ta = $('det-obs');
+    if (!ta || !estado.abertoId || $('vista-detalhe').hidden || !document.body.contains(ta)) return null;
+    var r = acharRegistro(estado.abertoId);
+    if (!r || ta.value === (r.observacoes || '')) return null;
+    return { r: r, texto: ta.value };
+  }
+  function relNaTela() {
+    if (estado.aba === 'empresas' && estado.emp && estado.emp.tela === 'relatorio') return estado.emp.rel;
+    if (estado.aba === 'relatorios' && estado.rl && estado.rl.tela === 'relatorio') return estado.rl.rel;
+    return null;
+  }
+  // O que ainda não foi salvo: [{ id, texto, salvar?() -> Promise, descartar() }]
+  function pendencias() {
+    var out = [];
+    var o = obsPendente();
+    if (o) out.push({ id: 'observacoes', texto: 'As observações de ' + (o.r.nome || 'participante') + ' ainda não foram salvas.',
+      salvar: function () { return salvarObservacoes(o.r, o.texto); }, descartar: function () { esquecerRascunhoObs(o.r.id); var ta = $('det-obs'); if (ta) ta.value = o.r.observacoes || ''; } });
+    if (estado.proc && estado.proc.tela === 'form' && formProcesso.sujo && estado.aba === 'processos') {
+      out.push({ id: 'processo', texto: 'O formulário do processo tem alterações que ainda não foram salvas.',
+        descartar: function () { formProcesso.sujo = false; ss('del', CHAVE_RASCUNHO_FORM); } });
+    }
+    if (estado.editor && estado.editor.sujo) {
+      var ed = estado.editor;
+      out.push({ id: 'editor', texto: 'O rascunho do relatório tem textos editados que ainda não foram salvos.',
+        salvar: function () { return salvarEditor(ed); }, descartar: function () { if (estado.editor === ed) estado.editor = null; ss('del', CHAVE_RASCUNHO_EDITOR); } });
+    }
+    var rel = relNaTela();
+    if (rel && (rel.status === 'novo' || rel.alterado)) {
+      out.push({ id: 'relatorio', texto: rel.status === 'novo' ? 'A prévia do relatório ainda não foi salva (nem como rascunho).' : 'A versão do relatório que você escolheu ainda não foi salva.',
+        salvar: function () { return salvarRelModelo(rel, rel.status === 'publicado'); }, descartar: function () { rel.alterado = false; } });
+    }
+    if (janelaAtual && janelaAtual.sujo()) {
+      var j = janelaAtual;
+      out.push({ id: 'janela', texto: 'Há dados preenchidos numa janela aberta.', descartar: function () { j.fechar(); } });
+    }
+    return out;
+  }
+  // Antes de sair da tela: com algo não salvo, pergunta. -> Promise<boolean> (true = pode sair)
+  function confirmarSaida() {
+    var p = pendencias();
+    if (!p.length) return Promise.resolve(true);
+    var salvaveis = p.every(function (x) { return typeof x.salvar === 'function'; });
+    return escolherAcao({
+      titulo: 'Sair sem salvar?',
+      texto: p.map(function (x) { return x.texto; }).join(' ') + (salvaveis ? ' Quer salvar antes de sair?' : ' Se sair agora, o que foi preenchido se perde.'),
+      escolhas: [
+        { valor: 'ficar', texto: 'Continuar editando', classe: 'botao--claro' },
+        { valor: 'descartar', texto: 'Sair sem salvar', classe: 'botao--perigo' },
+        salvaveis ? { valor: 'salvar', texto: 'Salvar e sair', classe: 'botao--principal' } : null
+      ]
+    }).then(function (v) {
+      if (v === 'descartar') { p.forEach(function (x) { if (x.descartar) x.descartar(); }); return true; }
+      if (v === 'salvar') {
+        var cadeia = Promise.resolve();
+        p.forEach(function (x) { cadeia = cadeia.then(function () { return x.salvar(); }); });
+        return cadeia.then(function () { avisar('Salvo.', 'ok'); return true; }, function (e) { falhou(e); return false; });
+      }
+      return false;
+    });
+  }
+  // Atalho: só segue para fn() se puder sair da tela atual.
+  function seguirSePuder(fn) { return confirmarSaida().then(function (ok) { if (ok) fn(); return ok; }); }
+
+  function salvarObservacoes(r, texto) {
+    return atualizarCampos(r.id, { observacoes: texto }).then(function () {
+      esquecerRascunhoObs(r.id);
+      var imp = document.querySelector('#vista-detalhe .obs-impressa');
+      if (imp && estado.abertoId === r.id) imp.textContent = texto;
+    });
+  }
+
+  // Rascunhos no sessionStorage (sessão expirada ou F5 no meio da edição): devolvidos ao voltar à mesma tela.
+  var CHAVE_RASCUNHO_FORM = 'disc_admin_rascunho_processo';
+  var CHAVE_RASCUNHO_EDITOR = 'disc_admin_rascunho_editor';
+  var CHAVE_RASCUNHO_OBS = 'disc_admin_rascunho_obs';
+  function lerJsonSs(chave) { try { var v = JSON.parse(ss('get', chave) || 'null'); return v && typeof v === 'object' ? v : null; } catch (e) { return null; } }
+  function guardarRascunhos() {
+    try {
+      if (estado.proc && estado.proc.tela === 'form' && formProcesso.sujo && typeof formProcesso.coletar === 'function') {
+        ss('set', CHAVE_RASCUNHO_FORM, JSON.stringify({ id: estado.proc.id || '', dados: formProcesso.coletar() }));
+      }
+      if (estado.editor && estado.editor.sujo) {
+        ss('set', CHAVE_RASCUNHO_EDITOR, JSON.stringify({ token: estado.editor.token, processoId: estado.editor.processoId, relatorio: estado.editor.relatorio }));
+      }
+      var o = obsPendente();
+      if (o) ss('set', CHAVE_RASCUNHO_OBS, JSON.stringify({ id: o.r.id, texto: o.texto }));
+    } catch (e) { /* sem armazenamento: segue */ }
+  }
+  function esquecerRascunhoObs(id) { var o = lerJsonSs(CHAVE_RASCUNHO_OBS); if (o && (!id || o.id === id)) ss('del', CHAVE_RASCUNHO_OBS); }
+  function esquecerRascunhos() { [CHAVE_RASCUNHO_FORM, CHAVE_RASCUNHO_EDITOR, CHAVE_RASCUNHO_OBS].forEach(function (k) { ss('del', k); }); }
+
+  // Recarregar ou fechar a aba com algo não salvo: o navegador pergunta (e o rascunho fica guardado).
+  root.addEventListener('beforeunload', function (e) {
+    if (!estado.token && MODO_API) return;
+    if (!pendencias().length) return;
+    guardarRascunhos();
+    e.preventDefault();
+    e.returnValue = '';
+    return '';
+  });
+
+  /* ---------- Endereço de cada tela (#rota) ---------- */
+
+  var rotaPendente = null;      // rota lida do endereço ao entrar; aplicada depois de carregar os dados
+  var aplicandoRota = 0;        // > 0 enquanto a tela é montada a partir do endereço (não empilha no histórico)
+  var rotaMostrada = '';
+  function hashDaPagina() { return String((root.location && root.location.hash) || '').replace(/^#/, ''); }
+  function rotaDoEstado() {
+    if (estado.abertoId && !$('vista-detalhe').hidden) return formatarRota({ aba: 'lista', detalhe: estado.abertoId });
+    var a = estado.aba;
+    if (a === 'processos') {
+      var t = estado.proc.tela;
+      return formatarRota({ aba: a, tela: t, id: estado.proc.id, token: t === 'editor' && estado.editor ? estado.editor.token : '' });
+    }
+    if (a === 'empresas') {
+      if (estado.emp.tela === 'relatorio') return estado.emp.rel && estado.emp.rel.id ? formatarRota({ aba: 'relatorios', tela: 'relatorio', relId: estado.emp.rel.id }) : 'relatorio/novo';
+      return formatarRota({ aba: a, tela: estado.emp.tela, id: estado.emp.id, subaba: estado.emp.subaba });
+    }
+    if (a === 'relatorios') {
+      if (estado.rl.tela === 'relatorio') return estado.rl.rel && estado.rl.rel.id ? formatarRota({ aba: a, tela: 'relatorio', relId: estado.rl.rel.id }) : 'relatorio/novo';
+      return formatarRota({ aba: a, tela: estado.rl.tela, chave: estado.rl.chave });
+    }
+    if (a === 'vendas') return formatarRota({ aba: a, sub: estado.vd.sub, pedidoId: estado.vd.pedidoId });
+    return formatarRota({ aba: a });
+  }
+  function urlDaRota(rota) { return root.location.pathname + root.location.search + (rota ? '#' + rota : ''); }
+  // Grava a tela atual no endereço: nova entrada no histórico (Voltar do navegador volta para a anterior) ou troca.
+  function gravarRota(substituir) {
+    if (rotaPendente !== null || aplicandoRota > 0 || !root.history || !root.history.pushState) return;
+    if (!$('tela-painel') || $('tela-painel').hidden) return;
+    var nova = rotaDoEstado();
+    rotaMostrada = nova;
+    var atual = hashDaPagina();
+    if (nova === atual || (!nova && /[=&]/.test(atual))) return;
+    try {
+      if (substituir) root.history.replaceState({ painel: nova }, '', urlDaRota(nova));
+      else root.history.pushState({ painel: nova }, '', urlDaRota(nova));
+    } catch (e) { /* navegador sem histórico: segue */ }
+  }
+  function semEmpilhar(fn) {
+    aplicandoRota++;
+    try { fn(); } finally { aplicandoRota--; }
+    gravarRota(true);
+  }
+  // Monta a tela de uma rota (os dados já carregados). Telas que precisam buscar algo terminam sozinhas.
+  function irParaRota(r) {
+    r = r || { aba: 'lista' };
+    semEmpilhar(function () {
+      if (janelaAtual) janelaAtual.fechar();
+      if (r.aba === 'lista') {
+        mostrarAba('lista');
+        if (r.detalhe && acharRegistro(r.detalhe)) abrirDetalhe(r.detalhe);
+        else if (r.detalhe) avisar('Participante não encontrado (pode ter sido excluído).', 'erro');
+        return;
+      }
+      if (abasPermitidas().indexOf(r.aba) === -1) { mostrarAba('lista'); return; }
+      if (r.aba === 'processos') return irParaRotaProcesso(r);
+      if (r.aba === 'empresas') {
+        if (r.tela === 'pagina' && r.id) { irParaEmpresas('pagina', r.id, r.subaba); return; }
+        irParaEmpresas('lista'); return;
+      }
+      if (r.aba === 'relatorios') {
+        if (r.tela === 'relatorio') { abrirRelatorioSalvoPorId(r.relId); return; }
+        if (r.tela === 'assistente') { irParaRelatorios('assistente', r.chave || ''); return; }
+        if (r.tela === 'exemplo' && modeloDoCatalogo(r.chave)) { verExemplo(r.chave); return; }
+        irParaRelatorios(r.tela === 'gerados' ? 'gerados' : 'modelos'); return;
+      }
+      if (r.aba === 'vendas') { irParaVendas(r.sub, r.pedidoId || null); return; }
+      mostrarAba(r.aba);
+    });
+  }
+  function irParaRotaProcesso(r) {
+    var p = r.id ? acharProcesso(r.id) : null;
+    if (r.tela === 'form') { estado.proc.preset = null; irParaProcessos('form', p ? p.id : null); return; }
+    if (!p) { if (r.id) avisar('Processo não encontrado.', 'erro'); irParaProcessos('lista'); return; }
+    if (r.tela === 'editor' && r.token) {
+      if (estado.editor && estado.editor.token === r.token && estado.editor.processoId === p.id) { irParaProcessos('editor', p.id); return; }
+      irParaProcessos('pagina', p.id);
+      api('relatoriosListar', p.id).then(function (resp) {
+        var rel = (resp.relatorios || []).filter(function (x) { return x.token === r.token; })[0];
+        if (!rel) { avisar('Relatório não encontrado (pode ter sido excluído).', 'erro'); return; }
+        if (estado.aba === 'processos' && estado.proc.id === p.id) abrirRelatorio(p, rel, true);
+      }).catch(falhou);
+      return;
+    }
+    irParaProcessos('pagina', p.id);
+  }
+
+  // Voltar/Avançar do navegador (ou endereço editado): pergunta se houver algo não salvo e monta a tela.
+  root.addEventListener('popstate', function () {
+    if (!$('tela-painel') || $('tela-painel').hidden) return;
+    var destino = hashDaPagina();
+    if (/[=&]/.test(destino)) return;
+    var antes = rotaMostrada;
+    confirmarSaida().then(function (ok) {
+      if (!ok) {
+        try { root.history.pushState({ painel: antes }, '', urlDaRota(antes)); } catch (e) { /* ignora */ }
+        return;
+      }
+      irParaRota(lerRota(destino));
+    });
+  });
 
   /* ---------- Navegação ---------- */
 
@@ -7580,12 +8871,21 @@
     if (estado.abertoId) { estado.abertoId = null; $('vista-detalhe').hidden = true; }
     esconderVistas();
     $('vista-' + aba).hidden = false;
+    marcarMenu();
+    if (aba === 'conexoes') renderizarConexoes();
+    gravarRota();
+  }
+  // Item do menu em destaque. O relatório da pessoa aberto a partir do detalhe continua em "Participantes".
+  function marcarMenu() {
+    var aba = estado.aba;
     var marcada = aba === 'vendas' && estado.vd && estado.vd.sub === 'divulgar' ? 'divulgar' : aba;
+    var rel = aba === 'empresas' && estado.emp && estado.emp.tela === 'relatorio' ? estado.emp.rel : null;
+    if (rel && rel.volta && rel.volta.detalhe) marcada = 'lista';
+    if (estado.abertoId && !$('vista-detalhe').hidden && estado.aba === 'lista') marcada = 'lista';
     Array.prototype.forEach.call(document.querySelectorAll('.aba'), function (b) {
       if (b.getAttribute('data-aba') === marcada) b.setAttribute('aria-current', 'page');
       else b.removeAttribute('aria-current');
     });
-    if (aba === 'conexoes') renderizarConexoes();
   }
 
   function renderizarTudo() {
@@ -7658,12 +8958,16 @@
   }
 
   function entrarPainel() {
+    // A tela do endereço (#processo/…; F5 ou volta depois de a sessão expirar) é aberta depois de carregar os dados.
+    var rota = lerRota(hashDaPagina());
+    rotaPendente = rota.aba === 'lista' && !rota.detalhe ? null : rota;
     $('tela-login').hidden = true;
     $('tela-painel').hidden = false;
     mostrarMenu(true);
     estado.listaMostrada = false;
+    lerFiltrosGuardados();
     aplicarPapel();
-    mostrarAba(MODO_API ? 'lista' : (lerLocais().length ? 'lista' : 'importar'));
+    mostrarAba(MODO_API ? 'lista' : (lerLocais().length || rotaPendente ? 'lista' : 'importar'));
     verificarBanco();
     // Volta do pagamento de teste (InfinitePay ou 3DS do Stripe): abre Conexões e confere o pagamento.
     if (RETORNO_CONEXOES && temConexoes() && papel() === 'admin') {
@@ -7674,7 +8978,12 @@
         else acaoCartao('infinitepay', 'verificar');
       });
     }
-    return carregar();
+    return carregar().then(function () {
+      var r = rotaPendente;
+      rotaPendente = null;
+      if ($('tela-painel').hidden) return;
+      if (r) irParaRota(r); else gravarRota(true);
+    });
   }
 
   // Supabase: confere se todas as migrações foram aplicadas (versaoBanco). Faltando algo (ou sem a função no
@@ -7689,9 +8998,20 @@
       .then(null, function (e) { return { ok: false, erro: (e && e.message) || '' }; })
       .then(function (resp) {
         var msg = mensagemBanco(resp);
+        estado.bancoFaltando = resp && Array.isArray(resp.faltando) ? resp.faltando.map(String) : [];
         if (!msg || !estado.token) return;
         $('faixa-banco-texto').textContent = msg;
+        // O que deixa de funcionar e o que fazer (copiar a lista para quem aplica / ver em Conexões).
+        $('faixa-banco-impacto').textContent = impactoBanco(resp);
+        var acoes = $('faixa-banco-acoes');
+        limpar(acoes);
+        if (estado.bancoFaltando.length) acoes.appendChild(botao('botao--claro botao--pequeno', 'Copiar a lista', function () {
+          copiar('Migrações que faltam no Supabase (aplicar na ordem):\n' + estado.bancoFaltando.map(function (n) { return 'supabase/migrations/' + n + '.sql'; }).join('\n'), 'Lista copiada.');
+        }, { id: 'btn-faixa-copiar' }));
+        if (temConexoes()) acoes.appendChild(botao('botao--claro botao--pequeno', 'Ver em Conexões', function () { seguirSePuder(function () { mostrarAba('conexoes'); }); }, { id: 'btn-faixa-conexoes' }));
         faixa.hidden = false;
+        // Telas que dependem das migrações que faltam escondem as ações que dariam erro.
+        if (estado.abertoId) renderizarDetalhe();
       });
   }
 
@@ -7703,7 +9023,10 @@
     estado.registros = []; estado.processos = []; estado.usuarios = [];
     estado.clickup = { configurado: false, iaConfigurada: false, carregado: false };
     estado.abertoId = null;
-    estado.filtros = { processo: '', perfil: '', status: '' };
+    estado.filtros = { processo: '', perfil: '', status: '', origem: '' };
+    estado.ordem = 'recente';
+    estado.compProcesso = null;
+    estado.bancoFaltando = [];
     estado.proc = { tela: 'lista', id: null };
     estado.relatorios = {};
     estado.editor = null;
@@ -7716,8 +9039,19 @@
     $('aviso-geral').hidden = true;
     if ($('faixa-banco')) $('faixa-banco').hidden = true;
     destruirOrganograma();
+    formProcesso.sujo = false;
+    formProcesso.coletar = null;
+    rotaPendente = null;
+    if (janelaAtual) janelaAtual.fechar();
     var j = $('janela'); if (j) j.remove();
     var c = $('confirmar'); if (c) c.remove();
+    // O detalhe aberto e as outras telas não podem ficar à vista do próximo login (computador compartilhado).
+    esconderVistas();
+    limpar($('vista-detalhe'));
+    ['vista-processos', 'vista-empresas', 'vista-relatorios', 'vista-vendas', 'vista-usuarios', 'vista-conexoes', 'vista-comparativo'].forEach(function (id) { limpar($(id)); });
+    limpar($('lista-candidatos'));
+    if ($('filtro-busca')) $('filtro-busca').value = '';
+    estado.aba = 'lista';
   }
 
   // Mostra só um dos formulários da tela de entrada.
@@ -7783,17 +9117,24 @@
     }).catch(function () { /* sem e-mail: segue sem o campo visível */ });
   }
 
+  // Sair: o próximo a entrar começa na lista limpa (sem a tela nem os rascunhos de quem saiu).
   function sair() {
     var token = estado.token;
     if (token && root.DISC_API && root.DISC_API.sair) {
       Promise.resolve().then(function () { return root.DISC_API.sair(token); }).catch(function () { /* sessão já pode ter expirado */ });
     }
     limparSessao();
+    esquecerRascunhos();
+    ss('del', CHAVE_FILTROS);
+    try { if (hashDaPagina() && !/[=&]/.test(hashDaPagina())) root.history.replaceState(null, '', urlDaRota('')); } catch (e) { /* ignora */ }
     mostrarLogin(false);
   }
 
+  // Sessão expirada: guarda o que estava sendo digitado e mantém o endereço da tela; depois de entrar de novo,
+  // a pessoa volta para a mesma tela com o rascunho.
   function sessaoExpirou() {
     if (!estado.token && !$('tela-login').hidden) return;
+    guardarRascunhos();
     limparSessao();
     mostrarLogin(true);
   }
@@ -7827,6 +9168,27 @@
     if (!m) return;
     m.hidden = true;
     $('btn-usuario').setAttribute('aria-expanded', 'false');
+  }
+
+  // Item do menu: cada aba abre na tela inicial dela (a lista).
+  function clicarAba(aba) {
+    if (aba === 'processos' && estado.proc.tela !== 'lista') { estado.proc = { tela: 'lista', id: null }; renderizarProcessos(); }
+    if (aba === 'empresas' && estado.emp.tela !== 'lista') { estado.emp.tela = 'lista'; estado.emp.id = null; estado.emp.rel = null; renderizarEmpresas(); }
+    if (aba === 'relatorios' && estado.rl.tela !== 'modelos' && estado.rl.tela !== 'gerados') { estado.rl.tela = 'modelos'; estado.rl.rel = null; renderizarRelatorios(); }
+    if (aba === 'divulgar') { irParaVendas('divulgar'); return; }
+    if (aba === 'vendas' && (estado.vd.pedidoId || estado.vd.sub === 'divulgar')) {
+      estado.vd.pedidoId = null;
+      if (estado.vd.sub === 'divulgar') estado.vd.sub = 'resumo';
+      renderizarVendas();
+    }
+    mostrarAba(aba);
+    focarTitulo('vista-' + (aba === 'divulgar' ? 'vendas' : aba));
+  }
+  // Depois de trocar de tela pelo menu, o foco vai para o título (o leitor de tela anuncia a tela nova).
+  function focarTitulo(idVista) {
+    var v = $(idVista);
+    var h = v && !v.hidden ? v.querySelector('h2') : null;
+    if (h) { h.setAttribute('tabindex', '-1'); h.focus({ preventScroll: true }); }
   }
 
   /* ---------- Início ---------- */
@@ -7864,24 +9226,14 @@
 
     Array.prototype.forEach.call(document.querySelectorAll('.aba'), function (b) {
       b.addEventListener('click', function () {
-        var aba = b.getAttribute('data-aba');
-        // A aba Processos sempre volta para a lista (o rascunho aberto continua guardado na memória).
-        if (aba === 'processos' && estado.proc.tela !== 'lista') { estado.proc = { tela: 'lista', id: null }; renderizarProcessos(); }
-        if (aba === 'empresas' && estado.emp.tela !== 'lista') { estado.emp.tela = 'lista'; estado.emp.id = null; renderizarEmpresas(); }
-        if (aba === 'relatorios' && estado.rl.tela !== 'modelos' && estado.rl.tela !== 'gerados') { estado.rl.tela = 'modelos'; estado.rl.rel = null; renderizarRelatorios(); }
-        if (aba === 'divulgar') { irParaVendas('divulgar'); fecharGaveta(); return; }
-        if (aba === 'vendas' && (estado.vd.pedidoId || estado.vd.sub === 'divulgar')) {
-          estado.vd.pedidoId = null;
-          if (estado.vd.sub === 'divulgar') estado.vd.sub = 'resumo';
-          renderizarVendas();
-        }
-        mostrarAba(aba);
         fecharGaveta();
+        // Com algo não salvo (observações, formulário do processo, editor, prévia), pergunta antes de trocar de tela.
+        seguirSePuder(function () { clicarAba(b.getAttribute('data-aba')); });
       });
     });
     // Busca: só 'input'. Um 'change' na busca dispara no blur (ao tocar em "Ver detalhes") e recriaria
     // a lista no meio do clique, que então se perde no botão já removido.
-    $('filtro-busca').addEventListener('input', renderizarLista);
+    $('filtro-busca').addEventListener('input', function () { guardarFiltros(); renderizarLista(); });
     $('btn-atualizar').addEventListener('click', function () { carregar().then(function () { if (!$('tela-painel').hidden) avisar('Lista atualizada.', 'ok'); }); });
     $('btn-csv').addEventListener('click', exportarCsv);
     $('btn-excluir-todos').addEventListener('click', excluirTodos);
@@ -7890,7 +9242,11 @@
       if (e.key !== 'Escape' || e.defaultPrevented) return;
       if (!$('menu-usuario').hidden) { fecharMenuUsuario(); $('btn-usuario').focus(); return; }
       if (gavetaAberta()) { fecharGaveta(); $('btn-menu').focus(); return; }
-      if (estado.abertoId && !$('janela') && !$('confirmar')) fecharDetalhe();
+      if ($('janela') || $('confirmar')) return;
+      // Esc dentro de um campo de texto não fecha a tela (e não apaga o que está sendo digitado).
+      var t = e.target;
+      if (t && (t.tagName === 'TEXTAREA' || t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.isContentEditable)) return;
+      if (estado.abertoId && !$('vista-detalhe').hidden) voltarDoDetalhe();
     });
 
     // Menu do usuário
@@ -7900,7 +9256,7 @@
     document.addEventListener('mousedown', function (e) {
       if (!$('usuario-area').contains(e.target)) fecharMenuUsuario();
     });
-    $('btn-sair').addEventListener('click', sair);
+    $('btn-sair').addEventListener('click', function () { fecharMenuUsuario(); seguirSePuder(sair); });
     $('btn-trocar-senha').addEventListener('click', function () { fecharMenuUsuario(); fecharGaveta(); janelaTrocarSenha(); });
     $('btn-minha-foto').addEventListener('click', function () { fecharMenuUsuario(); fecharGaveta(); janelaMinhaFoto(); });
 

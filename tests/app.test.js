@@ -229,7 +229,7 @@ test('textosAvaliacao: sem link, seleção e equipe', () => {
   assert.equal(geral.comLink, false);
   assert.equal(geral.contexto, 'Processo seletivo');
   assert.equal(geral.empresa, 'Loja X');
-  assert.equal(geral.escopo, 'apenas neste processo seletivo da Loja X');
+  assert.equal(geral.escopo, 'apenas neste processo seletivo da empresa Loja X');
   assert.equal(geral.mostrarVaga, true);
   assert.equal(A.textosAvaliacao(null, '').escopo, 'apenas neste processo seletivo');
 
@@ -239,7 +239,7 @@ test('textosAvaliacao: sem link, seleção e equipe', () => {
   assert.equal(sel.mostrarVaga, true);
   assert.equal(sel.mostrarEmpresaAtual, true);
   assert.equal(sel.rotuloFuncao, 'Função atual ou última');
-  assert.equal(sel.escopo, 'apenas nesta avaliação da Clínica Exemplo, conduzida pela Gestão sem Caos');
+  assert.equal(sel.escopo, 'apenas nesta avaliação da empresa Clínica Exemplo, conduzida pela Gestão sem Caos');
 
   const eq = A.textosAvaliacao({ codigo: 'EQP1', tipo: 'equipe', empresaNome: 'Clínica Exemplo' });
   assert.equal(eq.tipo, 'equipe');
@@ -736,4 +736,105 @@ test('Stripe: normalizarPagamento guarda clientSecret/publicável válidos; volt
   assert.deepEqual([pix.pix.qr, pix.pix.copiaECola], ['https://qr.stripe.com/x.png', '00020126PIX']);
   assert.equal(ST.pixDoIntent({ next_action: { pix_display_qr_code: { image_url_png: 'javascript:1' } } }), null);
   assert.equal(ST.resultadoConfirmacao({ error: { type: 'card_error', code: 'incorrect_cvc' } }).status, 'erro');
+});
+
+/* ---------------- Varredura de UX (cliente): correções ---------------- */
+
+test('mensagemErroEnvio: na venda direta não fala de recrutador nem de código de segurança', () => {
+  const m = A.mensagemErroEnvio('Resposta inesperada do servidor.', true);
+  assert.doesNotMatch(m, /recrutador|código de segurança/i);
+  assert.match(m, /tente de novo/);
+  assert.match(A.mensagemErroEnvio('Não foi possível conectar ao servidor. Verifique sua conexão', true), /conexão/);
+  assert.match(A.mensagemErroEnvio('Resposta inesperada do servidor.'), /Gerar código de segurança/, 'processo seletivo continua igual');
+});
+
+test('avaliacaoEncerrada: reconhece o link desativado no meio do teste', () => {
+  assert.equal(A.avaliacaoEncerrada('Este link de avaliação não está mais ativo.'), true);
+  assert.equal(A.avaliacaoEncerrada('Link inválido ou avaliação encerrada. Fale com quem enviou o link.'), true);
+  assert.equal(A.avaliacaoEncerrada('Não foi possível conectar ao servidor.'), false);
+  assert.equal(A.avaliacaoEncerrada(''), false);
+});
+
+test('sugestaoEmail: domínio digitado errado ganha sugestão; certo ou próprio não', () => {
+  assert.equal(A.sugestaoEmail('ana@gmial.com'), 'ana@gmail.com');
+  assert.equal(A.sugestaoEmail('ana@gmail.con'), 'ana@gmail.com');
+  assert.equal(A.sugestaoEmail('ana@hotmial.com'), 'ana@hotmail.com');
+  assert.equal(A.sugestaoEmail('ana@outlok.com'), 'ana@outlook.com');
+  assert.equal(A.sugestaoEmail('ana@gmail.com.br'), 'ana@gmail.com');
+  assert.equal(A.sugestaoEmail('ana@gmail.com'), '');
+  assert.equal(A.sugestaoEmail('ana@uol.com.br'), '');
+  assert.equal(A.sugestaoEmail('ana@exemplo.com'), '');
+  assert.equal(A.sugestaoEmail('ana@minhaempresa.com.br'), '');
+  assert.equal(A.sugestaoEmail('sem-arroba'), '');
+});
+
+test('resumoRetomada: quantos grupos se perdem e onde a pessoa parou', () => {
+  const ordens = [], respondidos = [];
+  for (let i = 0; i < 25; i++) { ordens.push(i < 6 ? ['D', 'I', 'S', 'C'] : null); respondidos.push(i < 6); }
+  const r = A.resumoRetomada({ etapa: 'teste', grupo: 6, ordens, respondidos, permutacoes: A.gerarPermutacoes(prng(1)) }, 25, true, 0);
+  assert.equal(r.grupos, 6);
+  assert.equal(r.etapa, 'teste');
+  assert.equal(r.texto, 'Você parou no grupo 7 de 25.');
+  const id = A.resumoRetomada({ etapa: 'identificacao', nome: 'Ana Lima', ordens: [], respondidos: [] }, 25, true, 0);
+  assert.equal(id.grupos, 0);
+  assert.match(id.texto, /preencher os seus dados/);
+});
+
+test('registrarEnviado / lerEnviados: só data e protocolo, por link, no máximo 20', () => {
+  const agora = new Date('2026-10-09T12:00:00Z');
+  let m = A.registrarEnviado(null, 'crt1', '47k', agora);
+  assert.deepEqual(Object.keys(m), ['a:CRT1']);
+  assert.deepEqual(m['a:CRT1'], { em: agora.toISOString(), protocolo: '47K' });
+  const lido = A.lerEnviados(m, 'CRT1');
+  assert.equal(lido.protocolo, '47K');
+  assert.equal(lido.em.toISOString(), agora.toISOString());
+  assert.equal(A.lerEnviados(m, 'EQP1'), null);
+  assert.equal(A.lerEnviados(m, ''), null);
+  m = A.registrarEnviado(m, '', '', agora);
+  assert.equal(A.lerEnviados(m, '').protocolo, '');
+  for (let k = 0; k < 30; k++) m = A.registrarEnviado(m, 'L' + k, '', new Date(agora.getTime() + k * 1000));
+  assert.equal(Object.keys(m).length, 20);
+  assert.ok(A.lerEnviados(m, 'L29'));
+  // Nada além de data e protocolo (nem nome, nem telefone)
+  assert.doesNotMatch(JSON.stringify(m), /nome|telefone|respostas/);
+});
+
+test('hrefVoltarLanding: o "Voltar" da identificação leva cupom, pacote e utm de volta para a landing', () => {
+  assert.equal(A.hrefVoltarLanding('?modo=pessoal&pacote=completo_plus&cupom=PREVIA100&utm_source=ig&x=1'), 'descubra.html?pacote=completo_plus&cupom=PREVIA100&utm_source=ig');
+  assert.equal(A.hrefVoltarLanding('?modo=pessoal'), 'descubra.html');
+  assert.equal(A.hrefVoltarLanding(''), 'descubra.html');
+});
+
+test('relatório: título com os nomes dos fatores (sem adjetivo no masculino) e cabeçalho só da impressão', () => {
+  const d = RP.montar({ percentuais: { D: 30, I: 10, S: 20, C: 40 }, codigo: 'CD' }, 'Bia', DD);
+  assert.equal(A.tituloEstilo(d), 'Bia, seu estilo é de Conformidade, com traços de Dominância');
+  const h = A.relatorioPessoaHtml(d, '', { emitidoEm: '2026-10-09T12:00:00Z' });
+  assert.match(h, /class="rel-impressao"[^>]*>.*Relatório DISC de Bia · 9 de outubro de 2026/);
+  assert.doesNotMatch(h, /Cauteloso, com|traços de Cauteloso/);
+  // "Com pessoas de perfil …": o texto fica num span que ocupa o resto da linha (a letra não fica sozinha)
+  assert.match(h, /<span class="rel-com-texto">Com pessoas de perfil/);
+  const s = RP.montarSimples({ percentuais: { D: 30, I: 10, S: 20, C: 40 }, codigo: 'CD' }, 'Bia', DD);
+  assert.match(A.resumoGratisHtml(s, '<p id="x">atalho</p>'), /<p class="rel-intro rel-frase">[^<]*<\/p><p id="x">atalho<\/p>/);
+});
+
+test('oferta: sem pacote escolhido, o destaque é o mesmo da landing (Relatório completo, "Recomendado")', () => {
+  const pac = A.pacotesHtml(CK.normalizarPacotes(null), '');
+  assert.match(pac, /data-pacote="completo"[^>]*>\s*<span class="selo selo--laranja pacote-selo">Recomendado/);
+  assert.equal((pac.match(/pacote--destaque/g) || []).length, 1);
+  assert.doesNotMatch(pac, /Mais completo/);
+});
+
+test('relatório avançado: "Guarde o seu acesso" logo depois da capa (opção aposCapa) e cabeçalho fora da capa', () => {
+  const P = require('../js/disc-profundo.js');
+  const dados = require('../js/disc-profundo-dados.js');
+  const cod = Object.keys(dados)[0];
+  if (!cod) return;
+  const p = { D: 20, I: 20, S: 20, C: 20 };
+  if (cod.length === 1) p[cod] = 40; else { p[cod[0]] = 30; p[cod[1]] = 28; }
+  const av = P.montar({ percentuais: p, codigo: cod.length === 1 ? cod + (cod === 'D' ? 'I' : 'D') : cod }, 'Ana', { data: DD });
+  if (!av) return;
+  const h = A.relatorioPessoaHtml(av, '', { avancado: true, aposCapa: '<section id="guardar"></section>' });
+  assert.ok(h.indexOf('<section id="guardar"></section>') > h.indexOf('data-secao="capa"'));
+  assert.ok(h.indexOf('<section id="guardar"></section>') < h.indexOf('id="av-sumario"'));
+  assert.match(h, /@page capa \{ @top-left \{ content: none; \} \}/);
 });

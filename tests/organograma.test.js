@@ -215,3 +215,30 @@ test('identidade: organograma.css e organograma.js só com tokens Notus, escala 
     assert.ok(!/(^|[^.\w])(confirm|prompt|alert)\s*\(/.test(txt), arq + ': sem confirm/prompt/alert');
   }
 });
+
+test('equipeDe e mover com equipe: tirar um líder pergunta antes; a equipe sobe para o líder de cima ou vai para o Topo', () => {
+  const d = exemplo();
+  // b lidera d e e; o líder de b é a
+  assert.deepEqual(ORG.equipeDe(d, 'b'), { liderados: [{ id: 'd', nome: 'Pessoa d' }, { id: 'e', nome: 'Pessoa e' }], lider: { id: 'a', nome: 'Pessoa a' } });
+  assert.deepEqual(ORG.equipeDe(d, 'a').lider, null);
+  assert.deepEqual(ORG.equipeDe(d, 'd').liderados, []);
+
+  // 'subir': d e e passam a ser liderados por a; b sai do organograma
+  let r = ORG.mover(d, 'b', { tipo: 'sem', equipe: 'subir' });
+  let e = ORG.estrutura(Object.assign({}, d, r));
+  assert.deepEqual(e.sem, ['b', 'h', 'i']);
+  assert.deepEqual(e.filhos.a.slice().sort(), ['c', 'd', 'e']);
+  assert.equal(e.pai.d, 'a');
+
+  // 'topo' (ou sem escolha): a equipe fica no Topo, sem líder
+  r = ORG.mover(d, 'b', { tipo: 'sem', equipe: 'topo' });
+  e = ORG.estrutura(Object.assign({}, d, r));
+  assert.deepEqual(e.raizes, ['a', 'd', 'e']);
+  assert.deepEqual(ORG.mover(d, 'b', { tipo: 'sem' }).topoIds, r.topoIds);
+
+  // 'subir' sem líder de cima: a equipe vai para o Topo
+  r = ORG.mover(d, 'a', { tipo: 'sem', equipe: 'subir' });
+  e = ORG.estrutura(Object.assign({}, d, r));
+  assert.deepEqual(e.raizes, ['b', 'c']);
+  assert.ok(e.sem.includes('a'));
+});

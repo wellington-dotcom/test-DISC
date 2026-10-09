@@ -931,8 +931,8 @@ test('resumoDosPedidos: vendas e receita (só pagos), ticket médio, aguardando,
   assert.equal(r.ticketMedioCentavos, Math.round(10700 / 3));
   assert.equal(r.aguardando, 1);
   assert.equal(r.cortesias, 1);
-  assert.equal(r.compras, 4, 'pago + cortesia, por resposta');
-  assert.equal(r.conversao, 20, '4 de 20 resumos grátis');
+  assert.equal(r.compras, 3, 'só pago (cortesia não é compra), por resposta');
+  assert.equal(r.conversao, 15, '3 de 20 resumos grátis');
   assert.equal(r.ultimos[0].id, 'd4', 'mais recente primeiro');
   assert.equal(r.ultimos.length, 6);
   const muitos = Array.from({ length: 14 }, (_, i) => AD.normalizarPedido({ id: 'x' + i, criadoEm: iso(1 + i) }));
@@ -1166,7 +1166,8 @@ test('Conexões: 11 cartões com estados; opcionais não contam como erro; teste
   assert.equal(t.email.erro, 'O Resend recusou a chave.');
   assert.deepEqual(t.infinitepay.link, { url: 'https://checkout.infinitepay.io/x/1', pedidoId: 'p1' });
   assert.equal(t.ia.status, 'testando');
-  assert.deepEqual(AD.resumoConexoes(Object.values(t)), { ok: 6, erro: 1, nao_configurado: 2, outros: 2 });
+  // A soma bate com os 11 cartões: "Não testado", "Conferir no GitHub" e "Testando…" também contam.
+  assert.deepEqual(AD.resumoConexoes(Object.values(t)), { ok: 6, erro: 1, nao_configurado: 2, pendente: 0, manual: 1, testando: 1, outros: 0, total: 11 });
 });
 
 test('Conexões: cartão "Pagamento — Stripe" (modo pelo prefixo, sem a chave; domínio do Apple Pay; teste de R$ 1,00)', () => {
@@ -1260,4 +1261,116 @@ test('seletores de empresa do painel oferecem "+ Cadastrar" (cadastro rápido co
     assert.ok(m, id);
   }
   assert.match(js, /function cadastroEmpresaRapido\(\)[\s\S]*?api\('salvarEmpresa'/);
+});
+
+// ---------------------------------------------------------------------------
+// Varredura de UX (painel): rotas, rascunho, preço mínimo, equipe do líder, lista e comparativo
+// ---------------------------------------------------------------------------
+
+test('lerRota/formatarRota: cada tela tem endereço; ida e volta iguais; âncoras do Supabase Auth não são rotas', () => {
+  const casos = [
+    [{ aba: 'lista' }, ''],
+    [{ aba: 'lista', detalhe: 'api-item-001' }, 'participante/api-item-001'],
+    [{ aba: 'processos', tela: 'lista' }, 'processos'],
+    [{ aba: 'processos', tela: 'form' }, 'processos/novo'],
+    [{ aba: 'processos', tela: 'form', id: 'p1' }, 'processo/p1/editar'],
+    [{ aba: 'processos', tela: 'pagina', id: 'p1' }, 'processo/p1'],
+    [{ aba: 'processos', tela: 'editor', id: 'p1', token: 'abc123' }, 'processo/p1/relatorio/abc123'],
+    [{ aba: 'empresas', tela: 'lista' }, 'empresas'],
+    [{ aba: 'empresas', tela: 'pagina', id: 'emp_1', subaba: 'organograma' }, 'empresa/emp_1/organograma'],
+    [{ aba: 'relatorios', tela: 'relatorio', relId: 'rel_9' }, 'relatorio/rel_9'],
+    [{ aba: 'relatorios', tela: 'gerados' }, 'relatorios/gerados'],
+    [{ aba: 'relatorios', tela: 'assistente', chave: 'equipe' }, 'relatorios/gerar/equipe'],
+    [{ aba: 'relatorios', tela: 'exemplo', chave: 'lideranca' }, 'relatorios/exemplo/lideranca'],
+    [{ aba: 'vendas', sub: 'cupons' }, 'vendas/cupons'],
+    [{ aba: 'vendas', sub: 'pedidos', pedidoId: 'ped-1' }, 'vendas/pedido/ped-1'],
+    [{ aba: 'conexoes' }, 'conexoes']
+  ];
+  for (const [r, h] of casos) {
+    assert.equal(AD.formatarRota(r), h, JSON.stringify(r));
+    const volta = AD.lerRota('#' + h);
+    for (const k of Object.keys(r)) assert.equal(volta[k], r[k], h + ' ' + k);
+  }
+  assert.deepEqual(AD.lerRota('#empresa/emp_1'), { aba: 'empresas', tela: 'pagina', id: 'emp_1', subaba: 'colaboradores' });
+  assert.deepEqual(AD.lerRota('#access_token=abc&type=recovery'), { aba: 'lista' });
+  assert.deepEqual(AD.lerRota('#error=access_denied'), { aba: 'lista' });
+  assert.deepEqual(AD.lerRota('#qualquer/coisa'), { aba: 'lista' });
+  assert.deepEqual(AD.lerRota('#participante/<script>'), { aba: 'lista' }, 'id com caractere estranho não vira rota');
+});
+
+test('problemaConfig: devolve o campo do erro (foco e borda no formulário); peso negativo tem mensagem própria', () => {
+  const base = AD.configPadrao();
+  assert.deepEqual(AD.problemaConfig(base), { erro: '', campo: '' });
+  const etapa = (peso) => Object.assign({}, base, { etapas: [{ nome: 'Prova', peso, campo: 'Nota' }] });
+  assert.deepEqual(AD.problemaConfig(etapa(-3)), { erro: 'O peso da etapa "Prova" não pode ser negativo (use 0 ou mais).', campo: 'etapa-peso-0' });
+  assert.deepEqual(AD.problemaConfig(etapa(null)), { erro: 'Informe o peso da etapa "Prova".', campo: 'etapa-peso-0' });
+  assert.equal(AD.problemaConfig(Object.assign({}, base, { etapas: [{ nome: '', peso: 1 }] })).campo, 'etapa-nome-0');
+  assert.equal(AD.problemaConfig(Object.assign({}, base, { corte: null })).campo, 'proc-corte');
+  const perg = Object.assign({}, base, { formulario: { campos: base.formulario.campos, perguntas: [{ texto: 'Qual sua pretensão?' }, { texto: 'Você tem filhos?' }] } });
+  assert.deepEqual(AD.problemaConfig(perg), { erro: 'A pergunta "Você tem filhos?" pede um dado sensível e não pode ser usada.', campo: 'pergunta-texto-1' });
+  assert.equal(AD.validarConfig(etapa(-3)), 'O peso da etapa "Prova" não pode ser negativo (use 0 ou mais).', 'validarConfig continua devolvendo só o texto');
+});
+
+test('reatribuirEquipe: tirar um líder passa a equipe para o líder de cima (ou deixa sem líder)', () => {
+  const rels = [{ de: 'marta', para: 'paulo', tipo: 'lidera' }, { de: 'paulo', para: 'renata', tipo: 'lidera' }, { de: 'paulo', para: 'tiago', tipo: 'lidera' },
+    { de: 'renata', para: 'tiago', tipo: 'direto' }];
+  assert.deepEqual(AD.reatribuirEquipe(rels, 'paulo', 'subir'), [{ de: 'marta', para: 'paulo', tipo: 'lidera' }, { de: 'marta', para: 'renata', tipo: 'lidera' },
+    { de: 'marta', para: 'tiago', tipo: 'lidera' }, { de: 'renata', para: 'tiago', tipo: 'direto' }]);
+  assert.deepEqual(AD.reatribuirEquipe(rels, 'paulo', 'soltar'), [{ de: 'marta', para: 'paulo', tipo: 'lidera' }, { de: 'renata', para: 'tiago', tipo: 'direto' }]);
+  // Sem líder de cima, "subir" deixa a equipe sem líder.
+  assert.deepEqual(AD.reatribuirEquipe(rels, 'marta', 'subir').filter((r) => r.de === 'marta'), []);
+});
+
+test('preço mínimo (R$ 0,50) no cupom e no pacote: mesma regra do "Criar link com desconto"', () => {
+  const pac = AD.PACOTES_PADRAO.map((p) => Object.assign({}, p, { lancamentoAte: '2099-12-31' })); // Completo R$ 29,00; Pro R$ 49,00
+  assert.equal(AD.textoPrecosCupom({ tipo: 'percentual', valor: 20, pacotes: [] }, pac), 'Relatório completo: R$ 23,20 · Completo + Parte 2: R$ 39,20');
+  assert.match(AD.problemaPrecoCupom({ tipo: 'percentual', valor: 99, pacotes: [] }, pac), /o Relatório completo sairia por R\$ 0,29 e o Completo \+ Parte 2 sairia por R\$ 0,49/);
+  assert.match(AD.problemaPrecoCupom({ tipo: 'valor', valor: 2880, pacotes: ['completo'] }, pac), /sairia por R\$ 0,20/);
+  assert.equal(AD.problemaPrecoCupom({ tipo: 'valor', valor: 2850, pacotes: ['completo'] }, pac), '', 'R$ 0,50 pode');
+  assert.equal(AD.problemaPrecoCupom({ tipo: 'percentual', valor: 100, pacotes: [] }, pac), '', 'grátis pode');
+  // Desconto em R$ que zera um pacote: o painel pede confirmação (não é erro).
+  assert.deepEqual(AD.pacotesZeradosPorValor({ tipo: 'valor', valor: 10000, pacotes: [] }, pac).map((x) => x.chave), ['completo', 'completo_plus']);
+  assert.deepEqual(AD.pacotesZeradosPorValor({ tipo: 'percentual', valor: 100, pacotes: [] }, pac), []);
+  assert.deepEqual(AD.pacotesZeradosPorValor({ tipo: 'valor', valor: 3000, pacotes: [] }, pac).map((x) => x.chave), ['completo']);
+  const pacote = (preco, lanc) => ({ nome: 'Completo', precoCentavos: preco, precoLancamentoCentavos: lanc, lancamentoAte: '', ordem: 1 });
+  assert.match(AD.validarPacote(pacote(30, null)), /a partir de R\$ 0,50/);
+  assert.match(AD.validarPacote(pacote(3900, 49)), /lançamento precisa ser de pelo menos R\$ 0,50/);
+  assert.equal(AD.validarPacote(pacote(0, null)), '', 'grátis pode');
+  assert.equal(AD.validarPacote(pacote(50, null)), '');
+});
+
+test('busca sem acento, iniciais só com letras, percentual com vírgula e mensagem do convite com a Parte 2', () => {
+  const r = { nome: 'Carla Modelo Demonstração', vaga: 'Recepção', telefone: '', protocolo: '' };
+  assert.equal(AD.correspondeBusca(r, 'demonstracao'), true);
+  assert.equal(AD.correspondeBusca({ nome: 'João Silva' }, 'joao'), true);
+  assert.equal(AD.correspondeBusca({ nome: 'Joana Silva' }, 'joão'), false);
+  assert.equal(AD.iniciais('Você (admin)'), 'VA');
+  assert.equal(AD.textoPct(37.2), '37,2%');
+  const link = 'https://x/index.html?a=AB12';
+  assert.match(AD.mensagemConvite({ nome: 'Equipe', tipo: 'equipe', config: { formulario: { parte2: 'ligada' } } }, link), /cerca de 15 minutos/);
+  assert.match(AD.mensagemConvite({ nome: 'Vaga', tipo: 'selecao' }, link), /cerca de 10 minutos/);
+});
+
+test('ordenarGrupos e resumoComparativo: ordem da lista e aprovados de um processo, uma linha por pessoa', () => {
+  const reg = (id, nome, data, conf, cod, extra) => AD.recalcular(Object.assign(payloadValido({ id, nome, fim: data, telefone: '119' + id.padEnd(8, '0').slice(0, 8) }), extra || {}));
+  const a = reg('11111111', 'Bruno Lima', '2026-10-01T10:00:00Z', null, null, { status: 'aprovado', avaliacao: 'SEL1' });
+  const b = reg('22222222', 'Álvaro Reis', '2026-10-03T10:00:00Z', null, null, { status: 'aprovado', avaliacao: 'EQP1' });
+  const c = reg('33333333', 'Carla Dias', '2026-10-02T10:00:00Z', null, null, { status: 'em_analise', avaliacao: 'SEL1' });
+  const grupos = AD.agruparPessoas([a, b, c]);
+  assert.deepEqual(AD.ordenarGrupos(grupos, 'recente').map((g) => g.atual.nome), ['Álvaro Reis', 'Carla Dias', 'Bruno Lima']);
+  assert.deepEqual(AD.ordenarGrupos(grupos, 'antiga').map((g) => g.atual.nome), ['Bruno Lima', 'Carla Dias', 'Álvaro Reis']);
+  assert.deepEqual(AD.ordenarGrupos(grupos, 'nome').map((g) => g.atual.nome), ['Álvaro Reis', 'Bruno Lima', 'Carla Dias']);
+  const sel = AD.resumoComparativo([a, b, c], 'SEL1');
+  assert.deepEqual(sel.aprovados.map((r) => r.nome), ['Bruno Lima']);
+  assert.equal(sel.resumo.total, 1);
+  assert.equal(AD.resumoComparativo([a, b, c], '').resumo.total, 2, 'todos os processos');
+  // A mesma pessoa aprovada em dois processos conta uma vez em "todos".
+  const a2 = AD.recalcular(Object.assign({}, a, { id: 'a2', fim: '2026-10-05T10:00:00Z', avaliacao: 'EQP1' }));
+  assert.equal(AD.resumoComparativo([a, a2, b], '').resumo.total, 2);
+});
+
+test('faixa do banco: diz o que deixa de funcionar com as migrações que faltam', () => {
+  assert.equal(AD.impactoBanco({ ok: true, faltando: ['20261009120000_fotos', '20261010120000_mover_versao'] }),
+    'Pode não funcionar: fotos; mover resposta de processo e contratar.');
+  assert.match(AD.impactoBanco({ ok: true, faltando: [], semFuncao: true }), /Algumas funções/);
 });

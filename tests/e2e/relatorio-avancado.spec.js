@@ -6,6 +6,7 @@
 const { test, expect } = require('@playwright/test');
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFileSync } = require('node:child_process');
 const { coletarErros, configurar } = require('./util.js');
 
 const PRINTS = process.env.PRINTS_DIR || '';
@@ -125,5 +126,48 @@ test.describe('Relatório Completo Avançado', () => {
       fs.writeFileSync(path.join(PRINTS, 'avancado-a4.pdf'), pdf);
     }
     expect(erros).toEqual([]);
+  });
+});
+
+// Varredura de UX (área "cliente"): o PDF cortava a lateral direita das páginas depois da capa, e o link de acesso
+// ficava no fim de ~50 telas.
+test.describe('Relatório Completo Avançado: correções da varredura de UX', () => {
+  test.skip(!CODIGO, 'sem conteúdo em js/disc-profundo-dados.js');
+
+  test('[Alto] "Guarde o seu acesso" logo depois da capa (e some na impressão)', async ({ page }) => {
+    await page.setViewportSize({ width: 375, height: 740 });
+    const erros = coletarErros(page);
+    await abrir(page, 'completo');
+    const topo = page.locator('.meu-link--topo');
+    await expect(topo).toBeVisible();
+    await expect(topo.locator('[data-acao="copiar-link"]')).toBeVisible();
+    const y = await topo.evaluate((e) => e.getBoundingClientRect().top + window.scrollY);
+    expect(y).toBeLessThan(2 * 740);
+    const ordem = await page.locator('.relatorio-avancado > *').evaluateAll((els) => els.map((e) => e.getAttribute('data-secao') || e.className));
+    expect(ordem.indexOf('capa')).toBe(ordem.findIndex((c) => /meu-link--topo/.test(c)) - 1);
+    await page.emulateMedia({ media: 'print' });
+    await expect(topo).toBeHidden();
+    expect(erros).toEqual([]);
+  });
+
+  test('[Crítico] PDF: nenhuma página corta a lateral direita (mesma margem na capa e no resto)', async ({ page }) => {
+    let temPdftotext = true;
+    try { execFileSync('pdftotext', ['-v'], { stdio: 'ignore' }); } catch (e) { temPdftotext = false; }
+    test.skip(!temPdftotext, 'precisa do pdftotext (poppler) para medir o PDF');
+    await abrir(page, 'completo');
+    await page.emulateMedia({ media: 'print' });
+    const arq = path.join(require('node:os').tmpdir(), 'disc-pdf-' + Date.now() + '.pdf');
+    fs.writeFileSync(arq, await page.pdf({ format: 'A4', printBackground: true, preferCSSPageSize: true }));
+    const bbox = execFileSync('pdftotext', ['-bbox', arq, '-']).toString();
+    fs.unlinkSync(arq);
+    const paginas = bbox.split('<page ').slice(1);
+    expect(paginas.length).toBeGreaterThan(10);
+    // A4 = 595 pt; margem de 14 mm ≈ 39,7 pt: o texto termina antes de ~555,5 pt (folga de 1,5 pt).
+    const fora = [];
+    paginas.forEach((pg, i) => { for (const m of pg.matchAll(/xMax="([0-9.]+)"[^>]*>([^<]*)</g)) if (Number(m[1]) > 557) fora.push((i + 1) + ': ' + m[2]); });
+    expect(fora).toEqual([]);
+    // A capa não leva o cabeçalho "Gestão sem Caos · Mapa DISC de …"; as outras páginas, sim.
+    expect(paginas[0]).not.toMatch(/Mapa DISC de Ana<\/word>[^]*yMin="1[0-9]\./);
+    expect(paginas[1]).toContain('>Caos</word>');
   });
 });
