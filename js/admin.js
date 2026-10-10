@@ -9238,6 +9238,8 @@
     $('btn-csv').addEventListener('click', exportarCsv);
     $('btn-excluir-todos').addEventListener('click', excluirTodos);
     $('btn-importar').addEventListener('click', importar);
+    // Busca da lista: Enter não envia o formulário (antes era onsubmit="return false", barrado pela CSP do painel).
+    $('form-filtros').addEventListener('submit', function (e) { e.preventDefault(); });
     document.addEventListener('keydown', function (e) {
       if (e.key !== 'Escape' || e.defaultPrevented) return;
       if (!$('menu-usuario').hidden) { fecharMenuUsuario(); $('btn-usuario').focus(); return; }

@@ -2,6 +2,10 @@
 <html lang="pt-BR">
 <head>
   <meta charset="utf-8">
+  <!-- Política de segurança do painel: nenhum script inline (nem atributos on*), só arquivos do próprio site e o Stripe.js
+       (pagamento de teste da aba Conexões). Dados: Supabase (REST, Auth, Functions) ou Apps Script. Fotos são data: e
+       blob:; a prévia do relatório (iframe srcdoc) herda esta política. tests/csp.test.js confere. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://js.stripe.com https://*.js.stripe.com; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob: https://*.stripe.com; connect-src 'self' https://*.supabase.co https://script.google.com https://script.googleusercontent.com https://api.stripe.com https://*.stripe.com; frame-src https://js.stripe.com https://*.js.stripe.com https://hooks.stripe.com; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'self'">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex, nofollow">
   <meta name="color-scheme" content="light">
@@ -202,7 +206,7 @@
 
         <div class="resumo" id="resumo-lista" aria-label="Resumo dos candidatos"></div>
 
-        <form class="filtros" id="form-filtros" role="search" onsubmit="return false">
+        <form class="filtros" id="form-filtros" role="search">
           <label class="filtros__busca">
             <span class="visualmente-oculto">Buscar</span>
             <svg class="filtros__lupa" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>

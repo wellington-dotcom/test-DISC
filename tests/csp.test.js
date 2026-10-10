@@ -39,8 +39,55 @@ for (const nome of PAGINAS) {
 
 test('CSP: a URL de cada backend em js/config.js está liberada no connect-src', () => {
   const cfg = fs.readFileSync(path.join(__dirname, '..', 'js', 'config.js'), 'utf8');
-  const csp = politica(fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8'));
-  const sup = /SUPABASE_URL: '(https:\/\/[a-z0-9]+)\.supabase\.co'/.exec(cfg);
-  assert.ok(sup && csp['connect-src'].includes('https://*.supabase.co'));
-  if (/API_URL: 'https:\/\/script\.google\.com/.test(cfg)) assert.ok(csp['connect-src'].includes('https://script.google.com'));
+  for (const nome of ['index.html', 'admin.html']) {
+    const csp = politica(fs.readFileSync(path.join(__dirname, '..', nome), 'utf8'));
+    const sup = /SUPABASE_URL: '(https:\/\/[a-z0-9]+)\.supabase\.co'/.exec(cfg);
+    assert.ok(sup && csp['connect-src'].includes('https://*.supabase.co'), nome);
+    if (/API_URL: 'https:\/\/script\.google\.com/.test(cfg)) assert.ok(csp['connect-src'].includes('https://script.google.com'), nome);
+  }
+});
+
+// Painel (admin.html): a política mais fechada do site. Nenhum script inline (nem atributos on*, que hash nenhum
+// libera): só o próprio site + Stripe.js (pagamento de teste da aba Conexões) + Supabase/Apps Script. Fotos são data:/blob:
+// e a prévia do relatório é um iframe srcdoc (herda esta política: estilos inline, fontes e CSS do próprio site).
+test('CSP do painel (admin.html): sem script inline nem on*, Stripe e Supabase liberados, o resto fechado', () => {
+  const html = fs.readFileSync(path.join(__dirname, '..', 'admin.html'), 'utf8');
+  const csp = politica(html);
+  assert.ok(csp, 'falta a meta Content-Security-Policy no admin.html');
+  assert.ok(html.indexOf('Content-Security-Policy') < html.indexOf('<script'), 'a política vem antes de qualquer script');
+  assert.deepEqual(csp['default-src'], ["'self'"]);
+  assert.deepEqual(csp['script-src'], ["'self'", 'https://js.stripe.com', 'https://*.js.stripe.com'], 'script-src só com o site e o Stripe.js');
+  assert.equal([...html.matchAll(/<script(?![^>]*\ssrc=)[^>]*>/g)].length, 0, 'o painel não tem <script> inline');
+  for (const m of html.matchAll(/<script[^>]*\ssrc="([^"]+)"/g)) assert.ok(!/^(https?:)?\/\//.test(m[1]), 'script externo: ' + m[1]);
+  const semComentarios = html.replace(/<!--[\s\S]*?-->/g, '');
+  assert.ok(!/<[^>]+\son[a-z]+\s*=/i.test(semComentarios), 'atributo on* (onsubmit, onclick…) no admin.html: a CSP bloqueia');
+  assert.ok(!/javascript:/i.test(semComentarios), 'link javascript: no admin.html');
+  for (const [d, v] of [['frame-src', 'https://js.stripe.com'], ['frame-src', 'https://hooks.stripe.com'], ['connect-src', 'https://api.stripe.com'],
+    ['connect-src', 'https://*.supabase.co'], ['connect-src', 'https://script.google.com'], ['connect-src', 'https://script.googleusercontent.com'],
+    ['img-src', 'data:'], ['img-src', 'blob:'], ['img-src', 'https://*.stripe.com']]) {
+    assert.ok((csp[d] || []).includes(v), d + ' sem ' + v);
+  }
+  assert.deepEqual(csp['object-src'], ["'none'"]);
+  assert.deepEqual(csp['worker-src'], ["'none'"]);
+  assert.deepEqual(csp['base-uri'], ["'none'"]);
+  assert.deepEqual(csp['form-action'], ["'self'"]);
+  assert.deepEqual(csp['font-src'], ["'self'"]);
+  // O painel não usa o Realtime do Supabase (websocket).
+  assert.ok(!(csp['connect-src'] || []).some((v) => v.startsWith('wss:')), 'connect-src com websocket sem uso');
+  // Diretivas que o navegador ignora (com erro no console) quando vêm numa <meta>.
+  for (const d of ['frame-ancestors', 'report-uri', 'report-to', 'sandbox']) assert.ok(!csp[d], d + ' não vale em <meta>');
+  // Nada de fonte larga demais (qualquer host, qualquer https, data: em script).
+  for (const [d, v] of Object.entries(csp)) {
+    for (const x of ['*', 'https:', 'http:', "'unsafe-eval'"]) assert.ok(!v.includes(x), d + ' com ' + x);
+  }
+  assert.ok(!csp['script-src'].includes("'unsafe-inline'") && !csp['script-src'].includes('data:') && !csp['script-src'].includes('blob:'));
+});
+
+test('CSP do painel: o JS do painel não usa eval nem atributos on* em texto (a CSP barraria)', () => {
+  for (const arq of ['admin.js', 'organograma.js', 'relatorio-view.js', 'stripe-pagamento.js']) {
+    const js = fs.readFileSync(path.join(__dirname, '..', 'js', arq), 'utf8');
+    assert.ok(!/\beval\s*\(|new Function\s*\(|set(Timeout|Interval)\(\s*['"]/.test(js), 'eval/new Function/setTimeout com texto em ' + arq);
+    assert.ok(!/setAttribute\(\s*['"]on/i.test(js), 'setAttribute("on…") em ' + arq);
+    assert.ok(!/<[a-z][^>]*\son[a-z]+=\\?["']/i.test(js), 'atributo on* em HTML montado em ' + arq);
+  }
 });
