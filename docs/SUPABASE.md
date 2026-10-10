@@ -76,6 +76,13 @@ Para conferir: menu **Table Editor** → devem existir as tabelas `admins`, `pro
 
 > **Migrações novas são automáticas.** Com a integração do GitHub do Supabase ligada, cada arquivo novo em `supabase/migrations/` é aplicado sozinho no push para a branch de produção (foi assim com `20261006120000_pessoas_formulario.sql`: ela cria `pessoas`, liga as respostas que já existem à pessoa do mesmo WhatsApp e não apaga nada). Se a integração estiver desligada ou falhar, rode à mão: abra o arquivo, **Copy raw file**, cole no **SQL Editor** e **Run** (como nos passos acima).
 
+> **Onde fica a integração e o que ela usa.** Supabase → **Project Settings → Integrations → GitHub**: repositório
+> `Notus-Agencia/test-DISC`, **Working directory** `.` (a pasta `supabase/` fica na raiz), **Deploy to production** ligado e
+> **Production branch name** = a branch que publica o site (hoje `claude/disc-test-selection-system-61ot0f`).
+> **Mudou o repositório de dono ou de nome, ou renomeou a branch?** A integração para de receber os pushes sem avisar
+> (aconteceu em 10/2026, na mudança de `wellington-dotcom` para `Notus-Agencia`): abra essa tela, escolha o repositório de
+> novo, confira a branch e clique em **Enable integration**. O sinal de que parou é a faixa "banco desatualizado" no painel.
+
 ### 3a. Conferir se o banco está atualizado
 
 O painel faz isso sozinho: ao entrar, se faltar alguma migração, aparece no topo a faixa **"O banco de dados está desatualizado: faltam …"** com o nome dos arquivos que faltam. Para conferir à mão:
