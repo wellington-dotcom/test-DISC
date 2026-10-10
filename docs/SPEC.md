@@ -265,7 +265,7 @@ Depois do último grupo e antes da revisão ("Confirmação 1 de 2" e "2 de 2"; 
 - **Sessão:** token de 64 hex (2 UUIDs) no `CacheService` (`sessao_<token>` → `{usuarioId, marca da senha}`), 6 h de validade renovadas a cada uso. Usuário desativado, senha trocada/redefinida ou "sair" derrubam a sessão. Resposta: `{ok:false, erro:'Sessão expirada. Entre de novo.', sessaoExpirada:true}`. O painel guarda o token em `sessionStorage` (`disc_admin_token`).
 - **Primeiro acesso / recuperação:** a `ADMIN_KEY` (Script Properties, criada por `setup()`) cria um admin; se o e-mail já for de um admin, redefine a senha dele.
 - **Empresas** e **avaliações** são criadas pelo admin. Cada avaliação tem código único de 4 caracteres (`ABCDEFGHJKLMNPQRSTUVWXYZ23456789`), tipo `selecao` ou `equipe`, `mostrarResultado` e `ativa`. Link: `index.html?a=CODIGO` (ou `#a-CODIGO`).
-- **Personalização no participante:** `selecao` → "Processo seletivo · <empresa>", "candidato", campo "Vaga pretendida"; `equipe` → "Avaliação de equipe · <empresa>", "colaborador", sem vaga nem empresa anterior, "Seu cargo/função". Consentimento: "…apenas nesta avaliação da <empresa>, conduzida pela Notus…". Código inválido/inativo → "Link inválido ou avaliação encerrada. Fale com quem enviou o link.". Com `mostrarResultado`, a tela final mostra o resumo do perfil (retrato + pontos fortes; nunca o Guia nem a confiabilidade). Sem código vale o fluxo geral e `CONFIG.MOSTRAR_RESULTADO_AO_CANDIDATO`. A conclusão guardada na aba é ligada ao código do link: abrir outro link começa do zero.
+- **Personalização no participante:** `selecao` → "Processo seletivo · <empresa>", "candidato", campo "Vaga pretendida"; `equipe` → "Avaliação de equipe · <empresa>", "colaborador", sem vaga nem empresa anterior, "Seu cargo/função". Consentimento: "…apenas nesta avaliação da <empresa>, conduzida pela Gestão sem Caos…". Código inválido/inativo → "Link inválido ou avaliação encerrada. Fale com quem enviou o link.". Com `mostrarResultado`, a tela final mostra o resumo do perfil (retrato + pontos fortes; nunca o Guia nem a confiabilidade). Sem código vale o fluxo geral e `CONFIG.MOSTRAR_RESULTADO_AO_CANDIDATO`. A conclusão guardada na aba é ligada ao código do link: abrir outro link começa do zero.
 
 ## Processos, ClickUp e relatório
 
@@ -332,7 +332,7 @@ Prévia: com `API_URL: 'simulada'` a mesma API roda em `js/api-simulada.js` (log
 
 ## Visual
 
-pt-BR, mobile-first (375px), acessível (labels, foco visível, contraste AA). **Identidade visual Notus (out/2026)**: seguir `docs/IDENTIDADE-VISUAL.md` e usar `assets/notus.css` + `assets/icone.svg` (tema claro, como o BI). Cores DISC: D `#13283f`, I `#ff9f40`, S `#8a97ab`, C `#324e73` (classes `.disc-D/I/S/C`). Sem dependências externas (sem CDN) — a fonte Plus Jakarta Sans fica em `assets/fonts`.
+pt-BR, mobile-first (375px), acessível (labels, foco visível, contraste AA). **Identidade visual Notus (out/2026)**: seguir `docs/IDENTIDADE-VISUAL.md` e usar `assets/notus.css` e o logo da Gestão sem Caos em `assets/marca/` (tema claro, como o BI; a estrela `assets/icone.svg` é da Notus e não vai em tela pública). Cores DISC: D `#13283f`, I `#ff9f40`, S `#8a97ab`, C `#324e73` (classes `.disc-D/I/S/C`). Sem dependências externas (sem CDN) — a fonte Plus Jakarta Sans fica em `assets/fonts`.
 
 ## Supabase (migração do servidor)
 
