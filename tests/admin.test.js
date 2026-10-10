@@ -1203,6 +1203,29 @@ test('Conexões: cartão "Pagamento — Stripe" (modo pelo prefixo, sem a chave;
   assert.equal(AD.urlPagamentoStripe('javascript:x'), '');
 });
 
+test('Abrir no Stripe: pagamento de teste abre /test/payments, o real abre /payments', () => {
+  assert.equal(AD.urlPagamentoStripe('pi_3Abc123', true), 'https://dashboard.stripe.com/test/payments/pi_3Abc123');
+  assert.equal(AD.urlPagamentoStripe('pi_3Abc123', false), 'https://dashboard.stripe.com/payments/pi_3Abc123');
+  assert.equal(AD.urlPagamentoStripe('pi_3Abc/../x', true), '');
+  assert.equal(AD.urlPagamentosStripe(true), 'https://dashboard.stripe.com/test/payments');
+  assert.equal(AD.urlPagamentosStripe(false), 'https://dashboard.stripe.com/payments');
+  // Modo do PaymentIntent (livemode gravado pelo servidor) manda; sem ele, o campo "teste" do pedido.
+  const pedido = (x) => AD.normalizarPedido(Object.assign({ id: 'p1', provedor: 'stripe', provedor_ref: 'pi_9Z' }, x));
+  const url = (p) => AD.urlPagamentoStripe(p.provedorRef, AD.pedidoStripeEmTeste(p));
+  assert.equal(url(pedido({ provedor_dados: { intent: { id: 'pi_9Z', livemode: false } } })), 'https://dashboard.stripe.com/test/payments/pi_9Z');
+  assert.equal(url(pedido({ provedor_dados: { intent: { id: 'pi_9Z', livemode: true } } })), 'https://dashboard.stripe.com/payments/pi_9Z');
+  assert.equal(url(pedido({ modoStripe: 'teste' })), 'https://dashboard.stripe.com/test/payments/pi_9Z');
+  assert.equal(url(pedido({ modoStripe: 'producao', teste: true })), 'https://dashboard.stripe.com/payments/pi_9Z', 'pedido de teste pago em produção (R$ 1,00 real)');
+  assert.equal(url(pedido({ teste: true })), 'https://dashboard.stripe.com/test/payments/pi_9Z');
+  assert.equal(url(pedido({ livemode: false })), 'https://dashboard.stripe.com/test/payments/pi_9Z');
+  assert.equal(url(pedido({})), 'https://dashboard.stripe.com/payments/pi_9Z', 'sem informação: produção (o padrão de antes)');
+  assert.equal(pedido({ teste: 'sim' }).teste, false, 'só true vale');
+  assert.equal(pedido({ modoStripe: 'outro' }).modoStripe, '');
+  // A última recusa do cartão chega até a tela do pedido.
+  assert.deepEqual(pedido({ ultimaRecusa: { codigo: 'card_declined' } }).ultimaRecusa, { codigo: 'card_declined' });
+  assert.equal(pedido({ ultimaRecusa: 'x' }).ultimaRecusa, null);
+});
+
 test('Conexões: migração faltando, SITE_URL diferente, cadastro aberto, função ausente e admin desatualizada', () => {
   const d = diagConexoes({ siteAtual: 'https://outro.com/' });
   d.banco.faltando = [{ nome: '20261013120000_conexoes', descricao: 'aba Conexões (pedido de teste fora das vendas)' }];

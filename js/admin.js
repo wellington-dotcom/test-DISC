@@ -1324,11 +1324,33 @@
     return formatarReais(c).replace(/^R\$ /, '');
   }
 
-  // Aceita o pedido em camelCase ou com os nomes das colunas (snake_case).
-  // Pagamento no painel do Stripe (o mesmo endereço abre o de teste quando a conta está em modo de teste).
-  function urlPagamentoStripe(pi) {
-    return /^pi_[A-Za-z0-9]+$/.test(String(pi || '')) ? 'https://dashboard.stripe.com/payments/' + pi : '';
+  // Pagamento no painel do Stripe: em modo de teste o endereço tem "/test/" (o de produção não acha um pagamento de
+  // teste, e vice-versa). teste = pedidoStripeEmTeste(pedido) ou true/false direto. Sem pi_ válido -> ''.
+  function urlPagamentoStripe(pi, teste) {
+    if (!/^pi_[A-Za-z0-9]+$/.test(String(pi || ''))) return '';
+    return 'https://dashboard.stripe.com/' + (teste ? 'test/' : '') + 'payments/' + pi;
   }
+  // Lista de pagamentos (sem o pagamento): para o reembolso quando o pedido não tem o pi_.
+  function urlPagamentosStripe(teste) { return 'https://dashboard.stripe.com/' + (teste ? 'test/' : '') + 'payments'; }
+  // O pagamento do pedido foi no modo de teste do Stripe? Manda o modo do PaymentIntent (livemode, guardado pelo
+  // servidor em modoStripe 'teste'|'producao'); sem ele, o pedido de teste da aba Conexões (campo teste) conta como teste.
+  function pedidoStripeEmTeste(p) {
+    p = p || {};
+    if (p.modoStripe === 'teste') return true;
+    if (p.modoStripe === 'producao') return false;
+    return p.teste === true;
+  }
+  // 'teste' | 'producao' | '' a partir do pedido (camelCase, colunas do banco ou provedor_dados.intent.livemode).
+  function modoStripeDoPedido(p) {
+    var m = campo(p, ['modoStripe', 'modo_stripe']);
+    if (m === 'teste' || m === 'producao') return m;
+    var lm = campo(p, ['livemode']);
+    var dados = campo(p, ['provedorDados', 'provedor_dados']);
+    if (lm == null && dados && typeof dados === 'object' && dados.intent && typeof dados.intent === 'object') lm = dados.intent.livemode;
+    return lm === true ? 'producao' : (lm === false ? 'teste' : '');
+  }
+
+  // Aceita o pedido em camelCase ou com os nomes das colunas (snake_case).
 
   function normalizarPedido(p) {
     p = p || {};
@@ -1351,7 +1373,11 @@
       asaasCobrancaId: String(campo(p, ['asaasCobrancaId', 'asaas_cobranca_id']) || ''),
       provedor: String(campo(p, ['provedor']) || ''),
       provedorRef: String(campo(p, ['provedorRef', 'provedor_ref']) || ''),
-      faturaUrl: /^https:\/\//.test(String(campo(p, ['faturaUrl']) || '')) ? String(p.faturaUrl) : ''
+      faturaUrl: /^https:\/\//.test(String(campo(p, ['faturaUrl']) || '')) ? String(p.faturaUrl) : '',
+      teste: campo(p, ['teste']) === true,
+      modoStripe: modoStripeDoPedido(p),
+      // Última recusa do cartão (stripe-webhook): {em, codigo, motivo, mensagem}; antes se perdia aqui e a linha não aparecia.
+      ultimaRecusa: campo(p, ['ultimaRecusa']) && typeof p.ultimaRecusa === 'object' ? p.ultimaRecusa : null
     };
   }
   function normalizarCupom(c) {
@@ -2198,6 +2224,9 @@
     ordenarGrupos: ordenarGrupos,
     STATUS_CONEXAO: STATUS_CONEXAO,
     urlPagamentoStripe: urlPagamentoStripe,
+    urlPagamentosStripe: urlPagamentosStripe,
+    pedidoStripeEmTeste: pedidoStripeEmTeste,
+    modoStripeDoPedido: modoStripeDoPedido,
     cartoesConexoes: cartoesConexoes,
     resumoConexoes: resumoConexoes,
     STATUS_PEDIDO: STATUS_PEDIDO,
@@ -7688,7 +7717,12 @@
       var novo = resp && resp.pedido ? normalizarPedido(resp.pedido) : null;
       estado.vd.pedidos = estado.vd.pedidos.map(function (x) {
         if (x.id !== p.id) return x;
-        if (novo && novo.id) return novo;
+        if (novo && novo.id) {
+          // A RPC atualizar_pedido não devolve o modo do Stripe nem o "teste": fica o que a lista já sabia.
+          if (!novo.modoStripe) novo.modoStripe = x.modoStripe || '';
+          if (!novo.teste) novo.teste = x.teste === true;
+          return novo;
+        }
         var c = {}; for (var k in x) c[k] = x[k];
         c.status = status;
         if (status === 'estornado') c.reembolsadoEm = new Date().toISOString();
@@ -7728,8 +7762,9 @@
     if (p.provedor === 'asaas' || (!p.provedor && p.asaasCobrancaId)) {
       return { nome: 'Asaas', passo: 'no painel do Asaas' + (p.asaasCobrancaId ? ' (cobrança ' + p.asaasCobrancaId + ')' : ''), link: ASAAS_PAINEL, id: 'vd-link-asaas' };
     }
-    var url = urlPagamentoStripe(p.provedorRef);
-    return { nome: 'Stripe', passo: 'no painel do Stripe (Payments → o pagamento → Refund)', link: url || 'https://dashboard.stripe.com/payments', id: 'vd-link-stripe-reembolso' };
+    var teste = pedidoStripeEmTeste(p);
+    var url = urlPagamentoStripe(p.provedorRef, teste);
+    return { nome: 'Stripe', passo: 'no painel do Stripe' + (teste ? ', em modo de teste,' : '') + ' (Payments → o pagamento → Refund)', link: url || urlPagamentosStripe(teste), id: 'vd-link-stripe-reembolso' };
   }
   function marcarReembolsado(p) {
     var onde = ondeReembolsar(p);
@@ -7767,7 +7802,8 @@
       p.ultimaRecusa && p.status === 'aguardando' ? el('div', { id: 'vd-pedido-recusa' }, [el('dt', { texto: 'Última recusa' }), el('dd', { texto: textoRecusa(p.ultimaRecusa) })]) : null,
       p.provedor === 'stripe' && /^pi_[A-Za-z0-9]+$/.test(p.provedorRef) ? el('div', null, [el('dt', { texto: 'Pagamento no Stripe' }), el('dd', { classe: 'tabular' }, [
         p.provedorRef, ' · ',
-        el('a', { classe: 'vd-link vd-link--stripe', id: 'vd-link-stripe', href: urlPagamentoStripe(p.provedorRef), target: '_blank', rel: 'noopener noreferrer', texto: 'Abrir no Stripe' })
+        el('a', { classe: 'vd-link vd-link--stripe', id: 'vd-link-stripe', href: urlPagamentoStripe(p.provedorRef, pedidoStripeEmTeste(p)), target: '_blank', rel: 'noopener noreferrer',
+          'data-modo': pedidoStripeEmTeste(p) ? 'teste' : 'producao', texto: pedidoStripeEmTeste(p) ? 'Abrir no Stripe (modo de teste)' : 'Abrir no Stripe' })
       ])]) : null,
       p.provedor !== 'stripe' && (p.asaasCobrancaId || p.faturaUrl) ? el('div', null, [el('dt', { texto: p.provedor === 'infinitepay' ? 'Pagamento na InfinitePay' : 'Cobrança no Asaas' }), el('dd', { classe: 'tabular' }, [
         p.asaasCobrancaId || '',

@@ -1203,7 +1203,10 @@ test('vendas no painel: pedidos, cupons, pacotes e resumo (tabelas com RLS e RPC
     pedidos: [
       { id: PED, resposta_id: 'r1', pacote: 'completo', valor_centavos: 2900, valor_original_centavos: 2900, cupom: null, status: 'pago', metodo: 'pix',
         asaas_cobranca_id: 'pay_1', pagamento: { cartaoUrl: 'https://asaas/i/1' }, email: 'bia@x.com', nome: 'Bia Souza', token_acesso: TA,
-        criado_em: '2026-10-05T12:00:00+00:00', pago_em: '2026-10-05T12:01:00+00:00', reembolsado_em: null }
+        criado_em: '2026-10-05T12:00:00+00:00', pago_em: '2026-10-05T12:01:00+00:00', reembolsado_em: null },
+      { id: 'ped-stripe-teste', resposta_id: 'r2', pacote: 'completo', valor_centavos: 2900, status: 'pago', metodo: 'cartao', provedor: 'stripe',
+        provedor_ref: 'pi_3Teste', provedor_dados: { intent: { id: 'pi_3Teste', livemode: false } }, email: 'caio@x.com', nome: 'Caio Lima',
+        criado_em: '2026-10-04T12:00:00+00:00', pago_em: '2026-10-04T12:01:00+00:00' }
     ],
     pacotes: [{ chave: 'completo', nome: 'Relatório completo', preco_centavos: 3900, preco_lancamento_centavos: 2900, lancamento_ate: null, ativo: true, ordem: 2,
       descricao: { subtitulo: 'S', itens: ['a'] }, atualizado_em: '2026-10-05T12:00:00+00:00' }],
@@ -1218,9 +1221,12 @@ test('vendas no painel: pedidos, cupons, pacotes e resumo (tabelas com RLS e RPC
   assert.equal(l.pedidos.length, 1);
   assert.deepEqual([l.pedidos[0].faturaUrl, l.pedidos[0].valorCentavos, l.pedidos[0].cupom, l.pedidos[0].provedor, l.pedidos[0].provedorRef],
     ['https://asaas/i/1', 2900, '', 'asaas', '']);
+  assert.deepEqual([l.pedidos[0].teste, l.pedidos[0].modoStripe], [false, ''], 'sem PaymentIntent: modo desconhecido');
   assert.ok(!('token_acesso' in l.pedidos[0]) && !('tokenAcesso' in l.pedidos[0]), 'o painel não recebe o token do cliente');
   assert.deepEqual(e.chamadas.filter((c) => c.tabela === 'pedidos').pop().eqs, [['status', 'pago'], ['criado_em', '>=2026-10-01T03:00:00Z']]);
   assert.equal((await api.listarPedidos(T, { busca: 'ninguem' })).pedidos.length, 0);
+  const st = (await api.listarPedidos(T, { busca: 'caio' })).pedidos[0];
+  assert.deepEqual([st.provedor, st.provedorRef, st.modoStripe, st.teste], ['stripe', 'pi_3Teste', 'teste', false], 'livemode false = modo de teste do Stripe');
   assert.equal((await api.atualizarPedido(T, PED, { status: 'estornado' })).pedido.status, 'estornado');
   await assert.rejects(api.atualizarPedido(T, PED, { status: 'qualquer' }), /Situação inválida/);
 

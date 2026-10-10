@@ -133,7 +133,8 @@
  *   listarPedidos(token, {status?, pacote?, de?:'AAAA-MM-DD', ate?, busca?, limite?:500}) -> {ok, pedidos:[{id, respostaId,
  *     pacote, valorCentavos, valorOriginalCentavos, cupom, status, metodo:''|'pix'|'cartao'|'boleto'|'cupom'|'manual',
  *     provedor:''|'asaas'|'infinitepay'|'stripe', provedorRef (InfinitePay: transaction_nsu; Stripe: pi_… do PaymentIntent), asaasCobrancaId, faturaUrl (link de
- *     pagamento: checkout da InfinitePay ou fatura do Asaas), email, nome, criadoEm, pagoEm, reembolsadoEm}]} (mais novos primeiro)
+ *     pagamento: checkout da InfinitePay ou fatura do Asaas), email, nome, criadoEm, pagoEm, reembolsadoEm, ultimaRecusa|null,
+ *     teste (pedido de teste da aba Conexões), modoStripe:'teste'|'producao'|'' (livemode do PaymentIntent)}]} (mais novos primeiro)
  *   atualizarPedido(token, id, {status}) -> {ok, pedido} — 'estornado' (de pago/cortesia; o dinheiro é devolvido no
  *     painel do Asaas), 'cortesia' ("Liberar como cortesia"), 'pago' (confirmação manual), 'cancelado' (de aguardando).
  *   listarCupons(token) -> {ok, cupons:[{codigo, tipo:'percentual'|'valor', valor (1–100 ou centavos), usosMax|null, usos,
@@ -819,7 +820,14 @@
       asaasCobrancaId: l.asaas_cobranca_id || '',
       faturaUrl: l.checkout_url ? String(l.checkout_url) : (typeof pag.cartaoUrl === 'string' ? pag.cartaoUrl : ''),
       email: l.email || '', nome: l.nome || '', criadoEm: iso(l.criado_em), pagoEm: iso(l.pago_em), reembolsadoEm: iso(l.reembolsado_em),
-      ultimaRecusa: recusaDaLinha(l) };
+      ultimaRecusa: recusaDaLinha(l), teste: l.teste === true, modoStripe: modoStripeDaLinha(l) };
+  }
+  /** Modo do PaymentIntent do Stripe gravado pelo servidor (provedor_dados.intent.livemode): 'teste' | 'producao' | ''. */
+  function modoStripeDaLinha(l) {
+    var d = l.provedor_dados && typeof l.provedor_dados === 'object' ? l.provedor_dados : {};
+    var i = d.intent && typeof d.intent === 'object' ? d.intent : null;
+    if (!i || typeof i.livemode !== 'boolean') return '';
+    return i.livemode ? 'producao' : 'teste';
   }
   /** Pedido do painel vindo da RPC (pedido_json) -> mesmo formato de pedidoDaLinha. */
   function pedidoDaRpc(p) {

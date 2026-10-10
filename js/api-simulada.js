@@ -2453,7 +2453,8 @@
         valorOriginalCentavos: p.valorOriginalCentavos || 0, cupom: p.cupom || '', status: p.status, metodo: p.metodo || '',
         provedor: p.provedor || '', provedorRef: p.provedorRef || '',
         asaasCobrancaId: p.asaasCobrancaId || '', faturaUrl: p.checkoutUrl || '', email: p.email || '', nome: p.nome || '',
-        criadoEm: p.criadoEm || '', pagoEm: p.pagoEm || '', reembolsadoEm: p.reembolsadoEm || '' };
+        criadoEm: p.criadoEm || '', pagoEm: p.pagoEm || '', reembolsadoEm: p.reembolsadoEm || '',
+        teste: p.teste === true, modoStripe: p.modoStripe === 'teste' || p.modoStripe === 'producao' ? p.modoStripe : '' };
     }
     function cupomSaida(c) {
       return { codigo: c.codigo, tipo: c.tipo, valor: Number(c.valor) || 0, usosMax: c.usosMax == null ? null : Number(c.usosMax),
@@ -2612,6 +2613,7 @@
         if (!/^pi_previa[0-9a-f]+$/.test(String(alvo.provedorRef || '')) || alvo.provedor !== 'stripe') {
           alvo.provedor = 'stripe';
           alvo.provedorRef = 'pi_previa' + hexAleatorio(8);
+          alvo.modoStripe = 'teste';   // a prévia é sempre o modo de teste do Stripe (pk_test_previa)
           gravarChave(CHAVES.pedidos, lista);
         }
         return { ok: true, simulado: true, provedor: 'stripe', clientSecret: alvo.provedorRef + '_secret_previa' + hexAleatorio(6),
